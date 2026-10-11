@@ -604,10 +604,10 @@ pub fn top_level_max_steps(regimen: &Regimen) -> Option<u32> {
 /// exists in docs/program.md §2, and this run cannot describe where it sat.
 pub const UNDECLARED: &str = "undeclared";
 /// The phase graph a served session moves on (#563), as the start row names
-/// it beside `seam_trigger`: `none`, or its phases and allowed moves; a graph
+/// it beside `meditation_trigger`: `none`, or its phases and allowed moves; a graph
 /// serve would refuse is undeclared.
 fn phase_graph_lever(regimen: &Regimen) -> String {
-    match crate::seam::policy::phase_graph(regimen) {
+    match crate::meditation::policy::phase_graph(regimen) {
         Ok(graph) if graph.is_empty() => "none".to_owned(),
         Ok(graph) => format!(
             "phases:{};transitions:{}",
@@ -633,12 +633,12 @@ fn phase_graph_lever(regimen: &Regimen) -> String {
 /// refuses it at start, so no recorded session carries one.
 ///
 /// Some states are the build's, not the regimen's -- the operator may always
-/// declare a seam, a fork sees the whole warm trunk and asks at its tail, a
+/// declare a meditation, a fork sees the whole warm trunk and asks at its tail, a
 /// failed turn's commands stay on the trunk -- and are written as the build
 /// has them.
 #[must_use]
 pub fn serve_levers(regimen: &Regimen, output_cap: (u32, &str)) -> BTreeMap<String, String> {
-    use crate::seam::policy::SEAM_TAIL_TOKENS;
+    use crate::meditation::policy::MEDITATION_TAIL_TOKENS;
     let word = |key: &str| match regimen.get(key) {
         Some(regimen::Value::String(word)) => word.clone(),
         Some(regimen::Value::Integer(n)) => n.to_string(),
@@ -657,12 +657,12 @@ pub fn serve_levers(regimen: &Regimen, output_cap: (u32, &str)) -> BTreeMap<Stri
         ),
         Err(_) => undeclared(),
     };
-    let depth = match regimen.get(SEAM_TAIL_TOKENS) {
+    let depth = match regimen.get(MEDITATION_TAIL_TOKENS) {
         None | Some(regimen::Value::Integer(0)) => "total".to_owned(),
         Some(regimen::Value::Integer(n)) => format!("tail:{n}"),
         Some(_) => undeclared(),
     };
-    let triggers = seam_triggers(regimen);
+    let triggers = meditation_triggers(regimen);
     let [disposition, approval, surface, limits] = command_levers(regimen, output_cap);
     let reasoning = reasoning_lever(regimen);
     let delivery = crate::drive::session::fork_delivery(regimen)
@@ -677,12 +677,16 @@ pub fn serve_levers(regimen: &Regimen, output_cap: (u32, &str)) -> BTreeMap<Stri
     let pruning = crate::drive::prune::lever(regimen);
     BTreeMap::from([
         ("compaction_depth".to_owned(), depth),
-        ("seam_trigger".to_owned(), triggers),
-        ("seam_audit".to_owned(), seam_audit_lever(regimen)),
+        ("meditation_trigger".to_owned(), triggers),
         (
-            "seam_warm".to_owned(),
-            seam_work_lever(regimen, crate::seam::policy::SEAM_WARM),
+            "meditation_audit".to_owned(),
+            meditation_audit_lever(regimen),
         ),
+        (
+            "meditation_warm".to_owned(),
+            meditation_work_lever(regimen, crate::meditation::policy::MEDITATION_WARM),
+        ),
+        ("reconcile_gate".to_owned(), reconcile_gate_lever(regimen)),
         ("phase_graph".to_owned(), phase_graph_lever(regimen)),
         (
             "archive_recall".to_owned(),
@@ -766,12 +770,12 @@ fn cache_lifetime_lever(regimen: &Regimen, word: impl Fn(&str) -> String) -> Str
 
 /// The render budget lever's word (#565): `none`, or `<tokens>:<tier|elide>`.
 fn render_budget_lever(regimen: &Regimen) -> String {
-    crate::seam::policy::render_budget(regimen).map_or_else(
+    crate::meditation::policy::render_budget(regimen).map_or_else(
         || "none".to_owned(),
         |budget| {
             let over = match budget.over {
-                crate::seam::render::OverBudget::Tier => "tier",
-                crate::seam::render::OverBudget::Elide => "elide",
+                crate::meditation::render::OverBudget::Tier => "tier",
+                crate::meditation::render::OverBudget::Elide => "elide",
             };
             format!("{}:{over}", budget.tokens)
         },
@@ -873,31 +877,35 @@ fn instruction_files_lever(regimen: &Regimen) -> String {
     .to_owned()
 }
 
-/// The seam triggers a regimen leaves armed, in [`serve_levers`]' words:
+/// The meditation triggers a regimen leaves armed, in [`serve_levers`]' words:
 /// the operator's always, then the cadence and budget it declares, and the
-/// automatic seam unless it turns it off (#617).
-fn seam_triggers(regimen: &Regimen) -> String {
-    use crate::seam::policy::{SEAM_AT_WORKING_SET_BYTES, SEAM_EVERY_TURNS};
+/// automatic meditation unless it turns it off (#617).
+fn meditation_triggers(regimen: &Regimen) -> String {
+    use crate::meditation::policy::{MEDITATION_AT_WORKING_SET_BYTES, MEDITATION_EVERY_TURNS};
     let mut triggers = vec!["operator-declared"];
-    if regimen.get(SEAM_EVERY_TURNS).is_some() {
+    if regimen.get(MEDITATION_EVERY_TURNS).is_some() {
         triggers.push("cadence");
     }
-    if [SEAM_AT_WORKING_SET_BYTES, "seam_at_context_fraction"]
-        .iter()
-        .any(|key| regimen.get(key).is_some())
+    if [
+        MEDITATION_AT_WORKING_SET_BYTES,
+        "meditation_at_context_fraction",
+    ]
+    .iter()
+    .any(|key| regimen.get(key).is_some())
     {
         triggers.push("budget");
     }
-    // The automatic seam (#617): on unless the regimen turns it off; it
+    // The automatic meditation (#617): on unless the regimen turns it off; it
     // fires only where serve knows the window and keeps working memory.
-    if crate::seam::policy::Served::from_regimen(regimen, None)
+    if crate::meditation::policy::Served::from_regimen(regimen, None)
         .map_or(true, |served| !served.window_off)
     {
         triggers.push("window");
     }
     // #124: the model proposes a move through self-capture's tool, ruled by
     // the graph, and the operator ratifies it.
-    let phased = crate::seam::policy::phase_graph(regimen).is_ok_and(|graph| !graph.is_empty());
+    let phased =
+        crate::meditation::policy::phase_graph(regimen).is_ok_and(|graph| !graph.is_empty());
     if phased && crate::drive::session::self_capture(regimen).is_some() {
         triggers.push("model-proposed");
     }
@@ -919,11 +927,11 @@ fn reasoning_lever(regimen: &Regimen) -> String {
     }
 }
 
-/// The seam audit lever's word: `off`, `on`, or, where forks answer
+/// The meditation audit lever's word: `off`, `on`, or, where forks answer
 /// through the record tools (#610), `on:<set>:<digest>`, the tools-route
 /// audit set it asks in.
-fn seam_audit_lever(regimen: &Regimen) -> String {
-    let on = seam_work_lever(regimen, crate::seam::policy::SEAM_AUDIT);
+fn meditation_audit_lever(regimen: &Regimen) -> String {
+    let on = meditation_work_lever(regimen, crate::meditation::policy::MEDITATION_AUDIT);
     if on == "on"
         && crate::drive::session::capture_modality(regimen)
             == Ok(crate::dogma::asks::Modality::Tools)
@@ -935,14 +943,34 @@ fn seam_audit_lever(regimen: &Regimen) -> String {
     }
 }
 
-/// A seam's audit or pre-warm lever's word (#504): `on` or `off`.
-fn seam_work_lever(regimen: &Regimen, key: &str) -> String {
+/// A meditation's audit or pre-warm lever's word (#504): `on` or `off`.
+fn meditation_work_lever(regimen: &Regimen, key: &str) -> String {
     let on = match regimen.get(key) {
         Some(regimen::Value::Boolean(on)) => *on,
         Some(regimen::Value::String(word)) => word == "on",
         _ => false,
     };
     if on { "on" } else { "off" }.to_owned()
+}
+
+/// The reconcile gate lever's word (#150): `carry` or `refuse`, as the
+/// served policy reads it; [`UNDECLARED`] for a value serve refuses.
+fn reconcile_gate_lever(regimen: &Regimen) -> String {
+    match crate::meditation::policy::Served::from_regimen(regimen, Some(u64::MAX)) {
+        Ok(served) if served.reconcile_gate == crate::meditation::policy::ReconcileGate::Refuse => {
+            "refuse".to_owned()
+        }
+        Ok(_) => "carry".to_owned(),
+        Err(
+            crate::meditation::policy::PolicyError::NotAGate
+            | crate::meditation::policy::PolicyError::GateWithoutAudit,
+        ) => UNDECLARED.to_owned(),
+        // Another key's fault, which serve refuses on its own account.
+        Err(_) => match regimen.get(crate::meditation::policy::RECONCILE_GATE) {
+            Some(regimen::Value::String(word)) if word == "refuse" => "refuse".to_owned(),
+            _ => "carry".to_owned(),
+        },
+    }
 }
 
 /// The fork memory share lever's word (#406): the tail a fork's call is
@@ -972,15 +1000,15 @@ fn command_levers(regimen: &Regimen, (cap, cap_from): (u32, &str)) -> [String; 4
     use crate::drive::tool_loop::{self, ToolSurface};
     let commands = tool_loop::declared(regimen).ok().flatten();
     let undeclared = || UNDECLARED.to_owned();
-    // The cap on arrival (#554), then what a seam carries of the outputs it
+    // The cap on arrival (#554), then what a meditation carries of the outputs it
     // compacts away (#553).
-    let seam = crate::seam::policy::seam_tool_outputs(regimen).tag();
+    let meditation = crate::meditation::policy::meditation_tool_outputs(regimen).tag();
     let disposition = match commands.as_ref().map(|declared| declared.output_cap) {
-        Some(OutputCap::Keep) => format!("keep+seam:{seam}"),
+        Some(OutputCap::Keep) => format!("keep+meditation:{meditation}"),
         Some(OutputCap::Capped {
             max_lines,
             max_bytes,
-        }) => format!("cap-on-arrival:{max_lines}-lines:{max_bytes}-bytes+seam:{seam}"),
+        }) => format!("cap-on-arrival:{max_lines}-lines:{max_bytes}-bytes+meditation:{meditation}"),
         None => undeclared(),
     };
     let approval = match &commands {
@@ -1010,6 +1038,25 @@ fn command_levers(regimen: &Regimen, (cap, cap_from): (u32, &str)) -> [String; 4
 #[cfg(test)]
 mod tests {
     use super::{UNDECLARED, regime_of, serve_levers};
+
+    /// #150's gate on the start row: `carry`, `refuse`, or undeclared for
+    /// a value serve refuses.
+    #[test]
+    fn the_start_row_names_the_reconcile_gate() {
+        use crate::formats::regimen;
+        let lever = |text: &str| {
+            serve_levers(&regimen::parse(text).expect("a regimen"), (8192, "default"))
+                ["reconcile_gate"]
+                .clone()
+        };
+        assert_eq!(lever(""), "carry");
+        assert_eq!(
+            lever("meditation_audit = \"on\"\nreconcile_gate = \"refuse\"\n"),
+            "refuse"
+        );
+        assert_eq!(lever("reconcile_gate = \"refuse\"\n"), UNDECLARED);
+        assert_eq!(lever("reconcile_gate = \"hold\"\n"), UNDECLARED);
+    }
 
     /// #569: a serve call's deadline is the silence it sits through, 300 s
     /// undeclared (Pi and `OpenCode` 2), the regimen's in milliseconds, `0`
@@ -1067,18 +1114,18 @@ mod tests {
         );
     }
 
-    /// #610: the seam audit lever names the tools-route audit set where
+    /// #610: the meditation audit lever names the tools-route audit set where
     /// forks answer through the record tools, and is `on` otherwise.
     #[test]
-    fn the_seam_audit_lever_names_the_tools_route_set() {
+    fn the_meditation_audit_lever_names_the_tools_route_set() {
         let lever = |text: &str| {
-            serve_levers(&regimen::parse(text).expect("a regimen"), (64, "default"))["seam_audit"]
+            serve_levers(&regimen::parse(text).expect("a regimen"), (64, "default"))["meditation_audit"]
                 .clone()
         };
         assert_eq!(lever(""), "off");
-        assert_eq!(lever("seam_audit = \"on\"\n"), "on");
+        assert_eq!(lever("meditation_audit = \"on\"\n"), "on");
         assert_eq!(
-            lever("seam_audit = \"on\"\ncapture_modality = \"tools\"\n"),
+            lever("meditation_audit = \"on\"\ncapture_modality = \"tools\"\n"),
             format!("on:t1:{}", crate::dogma::audits::T1.digest())
         );
         assert_eq!(lever("capture_modality = \"tools\"\n"), "off");
@@ -1087,9 +1134,9 @@ mod tests {
     /// #124: a regimen that declares phases and turns self-capture on arms
     /// the model's proposal, ratified by the operator; either alone does not.
     #[test]
-    fn the_seam_trigger_names_a_model_proposed_move_where_both_are_on() {
+    fn the_meditation_trigger_names_a_model_proposed_move_where_both_are_on() {
         let levers = |text: &str| {
-            serve_levers(&regimen::parse(text).expect("a regimen"), (64, "default"))["seam_trigger"]
+            serve_levers(&regimen::parse(text).expect("a regimen"), (64, "default"))["meditation_trigger"]
                 .clone()
         };
         let phased = "phases = [\"plan\", \"build\"]\n[phase_transitions]\nplan = [\"build\"]\n";
@@ -1158,10 +1205,10 @@ mod tests {
     }
 
     /// The tool-output disposition names the cap on arrival and, beside
-    /// it, what a seam carries of the outputs it compacts away (#553):
+    /// it, what a meditation carries of the outputs it compacts away (#553):
     /// `evict` unless the regimen declares a state, an unknown word unset.
     #[test]
-    fn the_disposition_names_the_seams_tool_output_state_beside_the_cap() {
+    fn the_disposition_names_the_meditations_tool_output_state_beside_the_cap() {
         let disposition = |extra: &str| {
             let regimen =
                 regimen::parse(&format!("approval = \"none\"\n{extra}")).expect("a regimen");
@@ -1172,20 +1219,20 @@ mod tests {
         };
         assert_eq!(
             disposition(""),
-            "cap-on-arrival:2000-lines:51200-bytes+seam:evict"
+            "cap-on-arrival:2000-lines:51200-bytes+meditation:evict"
         );
         assert_eq!(
-            disposition("seam_tool_outputs = \"reference\"\n"),
-            "cap-on-arrival:2000-lines:51200-bytes+seam:reference"
+            disposition("meditation_tool_outputs = \"reference\"\n"),
+            "cap-on-arrival:2000-lines:51200-bytes+meditation:reference"
         );
         assert_eq!(
-            disposition("seam_tool_outputs = \"most of them\"\n"),
-            "cap-on-arrival:2000-lines:51200-bytes+seam:evict",
+            disposition("meditation_tool_outputs = \"most of them\"\n"),
+            "cap-on-arrival:2000-lines:51200-bytes+meditation:evict",
             "read leniently: an unknown word is unset"
         );
         assert_eq!(
-            disposition("seam_tool_outputs = \"keep\"\n[tool_output]\ncap = false\n"),
-            "keep+seam:keep"
+            disposition("meditation_tool_outputs = \"keep\"\n[tool_output]\ncap = false\n"),
+            "keep+meditation:keep"
         );
     }
 
@@ -1274,11 +1321,12 @@ mod tests {
         );
         assert_eq!(at(&budgeted, "render_budget"), "2000:elide");
         let paced = serve_levers(
-            &regimen::parse("seam_every_turns = 3\nseam_tail_tokens = 8000\n").expect("a regimen"),
+            &regimen::parse("meditation_every_turns = 3\nmeditation_tail_tokens = 8000\n")
+                .expect("a regimen"),
             (8192, "default"),
         );
         assert_eq!(
-            at(&paced, "seam_trigger"),
+            at(&paced, "meditation_trigger"),
             "operator-declared+cadence+window"
         );
         assert_eq!(at(&paced, "compaction_depth"), "tail:8000");

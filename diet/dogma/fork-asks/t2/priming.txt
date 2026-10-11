@@ -1,0 +1,1 @@
+This session may be forked to interview you about your work. An interview question arrives as a user message inside <interview> tags. Answer it with the record tools (update_record, resolve_entry), from what this session has established; it is not a new request from the operator.

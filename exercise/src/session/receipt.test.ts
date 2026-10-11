@@ -26,14 +26,14 @@ describe('the receipt: six numbers a session is measured on (#31)', () => {
     expect(r).toMatchObject({ asks: 2, sideCalls: 2, patches: 1, mimicry: 1 });
   });
 
-  it('measures the trunk idle before each refill: from its last node to the seam', () => {
+  it('measures the trunk idle before each refill: from its last node to the meditation', () => {
     const r = receiptOf(
       log([
         { kind: 'ask', t: 0, turn: 1, text: 'a' },
         { kind: 'request', t: 1, id: 'q', lane: 'trunk', slot: 0, turn: 1 },
         { kind: 'response', t: 100, id: 'q#r', to_request: 'q', text: '', stop: 'stop', timings: {} },
         { kind: 'turn.settled', t: 101, turn: 1, reason: 'final' },
-        { kind: 'seam', t: 400, id: 's', at_turn: 1, render: { version: 1, text: '' } },
+        { kind: 'meditation', t: 400, id: 's', at_turn: 1, render: { version: 1, text: '' } },
       ]),
     );
     expect(r.idleBeforeRefill).toEqual([300]);

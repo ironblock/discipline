@@ -106,7 +106,7 @@ export interface CannedOptions {
 }
 
 /** Which command ends a gap with which `ended_by`. An answer to a prompt ends none: a turn is in flight. */
-const ENDS = { ask: 'ask', seam: 'seam', cancel: 'cancel', end: 'end', approve: undefined, 'open-tangent': undefined, 'close-tangent': undefined, background: undefined, 'ratify-phase': undefined, 'edit-entry': undefined, 'flag-entry': undefined } as const satisfies Record<Command['kind'], IdleGapBody['ended_by'] | undefined>;
+const ENDS = { ask: 'ask', meditation: 'meditation', cancel: 'cancel', end: 'end', approve: undefined, 'open-tangent': undefined, 'close-tangent': undefined, background: undefined, 'ratify-phase': undefined, 'edit-entry': undefined, 'flag-entry': undefined, 'refill-anyway': undefined } as const satisfies Record<Command['kind'], IdleGapBody['ended_by'] | undefined>;
 
 /** An event the script will play, and what follows it: what a timer holds, and what a prompt holds back. */
 interface Scheduled {
@@ -196,12 +196,12 @@ export class CannedTransport implements DriveTransport {
     // The canned script plays no tangent (#608): the served drive's to take.
     if (command.kind === 'open-tangent' || command.kind === 'close-tangent') return Promise.resolve({ ok: false, refused: 'off-script' });
     // The canned script runs no command long enough to move (#614): the served drive's to take.
-    if (command.kind === 'background' || command.kind === 'ratify-phase' || command.kind === 'edit-entry' || command.kind === 'flag-entry') return Promise.resolve({ ok: false, refused: 'off-script' });
+    if (command.kind === 'background' || command.kind === 'ratify-phase' || command.kind === 'edit-entry' || command.kind === 'flag-entry' || command.kind === 'refill-anyway') return Promise.resolve({ ok: false, refused: 'off-script' });
     const gap = extras?.idle_gap;
     const opened = this.#openGap;
     this.#gap = gap && gap.ended_by === ENDS[command.kind] && gap.opened_by === opened ? gap : undefined;
     const ack =
-      command.kind === 'ask' ? this.#ask(command) : command.kind === 'seam' ? this.#seam(command.to) : command.kind === 'end' ? this.#end() : this.#cancel();
+      command.kind === 'ask' ? this.#ask(command) : command.kind === 'meditation' ? this.#meditation(command.to) : command.kind === 'end' ? this.#end() : this.#cancel();
     // Refused, it is dropped. Admitted, the gap that was open closes, carried or not -- unless the command settled a
     // turn and opened the next one itself, as a cancel does (`diet` closes it at admission, before the command runs).
     this.#gap = undefined;
@@ -220,11 +220,11 @@ export class CannedTransport implements DriveTransport {
     return this.#fire('send', command.text, command.scoping, files);
   }
 
-  #seam(to: string | undefined): Ack {
-    if (!this.#log.some((e) => e.kind === 'turn.settled')) return { ok: false, refused: 'nothing-to-seam' };
-    const scripted = this.#beats[this.#next]?.events.find((e) => e.kind === 'seam');
-    if (scripted?.kind === 'seam' && scripted.phase && scripted.phase.to !== to) return { ok: false, refused: 'off-script' };
-    return this.#fire('seam');
+  #meditation(to: string | undefined): Ack {
+    if (!this.#log.some((e) => e.kind === 'turn.settled')) return { ok: false, refused: 'nothing-to-meditate' };
+    const scripted = this.#beats[this.#next]?.events.find((e) => e.kind === 'meditation');
+    if (scripted?.kind === 'meditation' && scripted.phase && scripted.phase.to !== to) return { ok: false, refused: 'off-script' };
+    return this.#fire('meditation');
   }
 
   /** As `diet`'s `Session::end`: taken only while awaiting -- refused while work is in flight, or once ended. */

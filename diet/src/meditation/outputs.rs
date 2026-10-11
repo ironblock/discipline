@@ -1,6 +1,6 @@
-//! What a seam's refill carries of the tool outputs it compacts away (#553):
+//! What a meditation's refill carries of the tool outputs it compacts away (#553):
 //! the outputs in the turns before the kept tail (#552), under the
-//! regimen's [`SeamToolOutputs`] state.
+//! regimen's [`MeditationToolOutputs`] state.
 //!
 //! The section follows the render, in the refill's system message, as Pi
 //! appends its file lists to its summary and `OpenCode` 2's summary carries
@@ -11,12 +11,12 @@
 //! call. A result is labelled `[Tool result]:`, the label Pi's and
 //! `OpenCode` 2's compaction both serialize one with.
 //!
-//! The section is logged on the seam line as sent, as the render is, so
+//! The section is logged on the meditation line as sent, as the render is, so
 //! the projection rebuilds the refill from the log whatever the state.
 
-use crate::formats::log::SeamToolOutputs;
+use crate::formats::log::MeditationToolOutputs;
 
-/// One output a seam compacts away, as the session gathered it.
+/// One output a meditation compacts away, as the session gathered it.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Output {
     /// The turn its call was made in.
@@ -53,16 +53,16 @@ pub struct Saved {
 /// outputs it carried; `None` when it carries none -- always under `evict`,
 /// and under `salient` when no fork quoted any of them.
 #[must_use]
-pub fn section(state: SeamToolOutputs, outputs: &[Output]) -> Option<(String, u64)> {
+pub fn section(state: MeditationToolOutputs, outputs: &[Output]) -> Option<(String, u64)> {
     // A pruned output is its reference line whatever the state (#612).
     let entries: Vec<String> = outputs
         .iter()
         .filter_map(|output| match (&output.pruned, state) {
             (Some(line), _) => Some(line.clone()),
-            (None, SeamToolOutputs::Evict) => None,
-            (None, SeamToolOutputs::Keep) => Some(kept(output)),
-            (None, SeamToolOutputs::Reference) => Some(reference_line(output)),
-            (None, SeamToolOutputs::Salient) => salient(output),
+            (None, MeditationToolOutputs::Evict) => None,
+            (None, MeditationToolOutputs::Keep) => Some(kept(output)),
+            (None, MeditationToolOutputs::Reference) => Some(reference_line(output)),
+            (None, MeditationToolOutputs::Salient) => salient(output),
         })
         .collect();
     if entries.is_empty() {
@@ -70,14 +70,14 @@ pub fn section(state: SeamToolOutputs, outputs: &[Output]) -> Option<(String, u6
     }
     // Every entry a reference line -- the state's, or a prune's under
     // `evict` -- is introduced as reference.
-    let referenced_only = state == SeamToolOutputs::Reference
-        || (state == SeamToolOutputs::Evict && outputs.iter().any(|o| o.pruned.is_some()));
+    let referenced_only = state == MeditationToolOutputs::Reference
+        || (state == MeditationToolOutputs::Evict && outputs.iter().any(|o| o.pruned.is_some()));
     let sentence = match state {
         _ if referenced_only => {
             "The following tool results were produced before context was compacted. They are \
              listed as reference only: each was saved whole, and can be read at its path."
         }
-        SeamToolOutputs::Salient => {
+        MeditationToolOutputs::Salient => {
             "The following excerpts were quoted from tool results produced before context was \
              compacted, in call order:"
         }
@@ -187,11 +187,11 @@ mod tests {
             ..output(1, "a\nb\n")
         };
         let outputs = [pruned, output(2, "c")];
-        let (evicted, count) = section(SeamToolOutputs::Evict, &outputs).expect("the prune");
+        let (evicted, count) = section(MeditationToolOutputs::Evict, &outputs).expect("the prune");
         assert_eq!(count, 1);
         assert!(evicted.contains("listed as reference only"), "{evicted}");
         assert!(evicted.ends_with(line), "{evicted}");
-        let (kept, count) = section(SeamToolOutputs::Keep, &outputs).expect("both");
+        let (kept, count) = section(MeditationToolOutputs::Keep, &outputs).expect("both");
         assert_eq!(count, 2);
         assert!(
             kept.contains(line) && !kept.contains("[Tool result]: a\nb"),
@@ -203,9 +203,9 @@ mod tests {
     #[test]
     fn evict_carries_nothing_and_keep_carries_each_result_in_call_order() {
         let outputs = [output(1, "a\nb\n"), output(2, "c")];
-        assert_eq!(section(SeamToolOutputs::Evict, &outputs), None);
+        assert_eq!(section(MeditationToolOutputs::Evict, &outputs), None);
         assert_eq!(
-            section(SeamToolOutputs::Keep, &outputs),
+            section(MeditationToolOutputs::Keep, &outputs),
             Some((
                 "\n# tool outputs\nThe following tool results were produced before context was \
                  compacted, in call order:\n\n- turn 1: bash args={\"command\":\"ls\"}\n\
@@ -215,7 +215,7 @@ mod tests {
                 2
             ))
         );
-        assert_eq!(section(SeamToolOutputs::Keep, &[]), None);
+        assert_eq!(section(MeditationToolOutputs::Keep, &[]), None);
     }
 
     #[test]
@@ -226,7 +226,7 @@ mod tests {
             sha256: "ab".to_owned(),
             path: Some("/r/files/ab".to_owned()),
         });
-        let (text, n) = section(SeamToolOutputs::Reference, &[saved]).expect("carried");
+        let (text, n) = section(MeditationToolOutputs::Reference, &[saved]).expect("carried");
         assert!(
             text.ends_with(
                 "- turn 3: bash args={\"command\":\"ls\"}: 5 bytes, sha256 ab, saved at /r/files/ab\n"
@@ -237,7 +237,7 @@ mod tests {
         let mut quoted = output(4, "x\ny\n");
         quoted.excerpts = vec!["y".to_owned()];
         let (text, n) =
-            section(SeamToolOutputs::Salient, &[output(3, "z"), quoted]).expect("carried");
+            section(MeditationToolOutputs::Salient, &[output(3, "z"), quoted]).expect("carried");
         assert!(
             text.ends_with(
                 "in call order:\n\n- turn 4: bash args={\"command\":\"ls\"}\n\
@@ -246,6 +246,9 @@ mod tests {
             "{text}"
         );
         assert_eq!(n, 1);
-        assert_eq!(section(SeamToolOutputs::Salient, &[output(3, "z")]), None);
+        assert_eq!(
+            section(MeditationToolOutputs::Salient, &[output(3, "z")]),
+            None
+        );
     }
 }

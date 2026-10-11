@@ -44,7 +44,7 @@
   --warn: color-mix(in oklab, var(--lamp-attention) 60%, black);
   --bad: color-mix(in oklab, var(--lamp-fault) 72%, black);
   --fresh: color-mix(in oklab, var(--lamp-diet-asks) 60%, black);
-  --seam: color-mix(in oklab, var(--lamp-diet-decides) 55%, black);
+  --meditation: color-mix(in oklab, var(--lamp-diet-decides) 55%, black);
   --gap: #b8620f;
 
   --foot-tone: 70%;

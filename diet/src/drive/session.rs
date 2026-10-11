@@ -4,7 +4,7 @@
 //! [`super::run`] is the scripted gym -- three turns from a TOML file, the
 //! trunk rebuilt from the rendered object on every one. This is the other
 //! thing #117 names: an ask that comes from a person, whenever they send it,
-//! answered on a trunk that is APPENDED until a seam and never rebuilt. The
+//! answered on a trunk that is APPENDED until a meditation and never rebuilt. The
 //! dogma's `Site::Fork` is "a disposable, single-turn fork off the warm tail
 //! of the canonical session"; a warm tail only exists if the trunk's prefix
 //! is the same bytes from one turn to the next, and that is the property
@@ -44,8 +44,8 @@
 //! is logged in the same critical section, so the log never says less than
 //! the state.
 //!
-//! **A seam** (#493): [`Session::declare_seam`] refills the trunk from
-//! working memory and appends from there; the seam's audit and pre-warm are
+//! **A meditation** (#493): [`Session::declare_meditation`] refills the trunk from
+//! working memory and appends from there; the meditation's audit and pre-warm are
 //! not built yet, and its docs say so. The log is in memory. It is a format,
 //! `diet/formats/log` (ruled on #117), and what each event carries is what
 //! R2c's plan (`diet/drive/plans/r2c-proposal.md`, D4) drafts for it: a
@@ -98,8 +98,8 @@ vocabulary! {
         Ask => "ask",
         /// Stop the call in flight.
         Cancel => "cancel",
-        /// Declare a seam (R6).
-        DeclareSeam => "declare-seam",
+        /// Declare a meditation (R6).
+        DeclareMeditation => "declare-meditation",
         /// End the session.
         End => "end",
         /// Open a tangent (#22).
@@ -114,6 +114,8 @@ vocabulary! {
         EditEntry => "edit-entry",
         /// Flag a working-memory entry (#150).
         FlagEntry => "flag-entry",
+        /// Refill a held meditation anyway (#150's gate).
+        RefillAnyway => "refill-anyway",
     }
 }
 
@@ -126,23 +128,23 @@ vocabulary! {
         Ended => "ended",
         /// There is no call in flight to stop.
         NothingInFlight => "nothing-in-flight",
-        /// A seam has nothing to refill from: no turn has settled, or working
+        /// A meditation has nothing to refill from: no turn has settled, or working
         /// memory holds no entry (#493).
-        NothingToSeam => "nothing-to-seam",
-        /// A seam named a phase to move to, and the session has no phase
+        NothingToMeditate => "nothing-to-meditate",
+        /// A meditation named a phase to move to, and the session has no phase
         /// graph (#563).
         NoPhaseGraph => "no-phase-graph",
-        /// A seam named a phase the graph does not declare.
+        /// A meditation named a phase the graph does not declare.
         NotAPhase => "not-a-phase",
-        /// A seam named the phase the session is already in.
+        /// A meditation named the phase the session is already in.
         AlreadyInPhase => "already-in-phase",
-        /// A seam named a move the graph does not allow from here.
+        /// A meditation named a move the graph does not allow from here.
         NoPhaseEdge => "no-phase-edge",
         /// A cancel named a turn older than the latest one: it arrived after
         /// that turn settled and must not stop the next (the admission
         /// counter ruled on #117).
         Stale => "stale",
-        /// A seam, or a second tangent, while a tangent is open (#22).
+        /// A meditation, or a second tangent, while a tangent is open (#22).
         TangentOpen => "tangent-open",
         /// A close with no tangent open (#22).
         NoTangent => "no-tangent",
@@ -163,6 +165,11 @@ vocabulary! {
         NotLive => "not-live",
         /// An edit with no content, or a flag with no note (#150).
         Empty => "empty",
+        /// An ask while a meditation is held for the operator (#150's gate): the
+        /// trunk was not refilled, and an ask would answer on it.
+        MeditationHeld => "meditation-held",
+        /// A refill-anyway with no meditation held (#150's gate).
+        NothingHeld => "nothing-held",
     }
 }
 
@@ -188,8 +195,8 @@ vocabulary! {
     GapEnd {
         /// An ask.
         Ask => "ask",
-        /// A seam.
-        Seam => "seam",
+        /// A meditation.
+        Meditation => "meditation",
         /// A stop.
         Cancel => "cancel",
         /// The end of the session.
@@ -207,7 +214,7 @@ pub struct IdleGap {
     pub opened_by: u64,
     /// From the settling to the first sign the person was present.
     pub notice: u64,
-    /// From the end of `notice` to the first keystroke or seam click.
+    /// From the end of `notice` to the first keystroke or meditation click.
     pub read: u64,
     /// From the first keystroke to the accepted send or declare.
     pub compose: u64,
@@ -248,7 +255,7 @@ vocabulary! {
         /// A fork's single call off the trunk's warm tail, never appended to
         /// it (#374).
         Interview => "interview",
-        /// A seam's audit (#504): a fork's call, before the refill.
+        /// A meditation's audit (#504): a fork's call, before the refill.
         Audit => "audit",
     }
 }
@@ -552,7 +559,7 @@ pub enum Event {
         /// prefix there (#406).
         displaces: bool,
     },
-    /// A seam's audit (#504): a fork off the warm trunk on the `audit` lane,
+    /// A meditation's audit (#504): a fork off the warm trunk on the `audit` lane,
     /// the dogma's pinned ask after it, before the refill.
     Audited {
         /// The settled turn it follows.
@@ -563,6 +570,10 @@ pub enum Event {
         template: crate::dogma::Template,
         /// The ask, filled.
         question: String,
+        /// The meditation whose refilled trunk it is cut from, by `seq`: a meditation
+        /// declared again with no turn since the last, as the operator does
+        /// to reconcile changes made after that refill.
+        after_meditation: Option<u64>,
     },
     /// How the fork ended: once per fork, after its call's last event.
     ForkSettled {
@@ -577,15 +588,18 @@ pub enum Event {
         wall_ms: Option<u64>,
         /// Why a fork settled `refused` was never sent (#406): `pool`.
         refused: Option<String>,
+        /// What its answer wrote after its last field, past a blank line:
+        /// recorded as no entry (levers run A).
+        trailer: Option<String>,
     },
-    /// A seam fired, and the trunk was refilled from working memory (#493):
+    /// A meditation fired, and the trunk was refilled from working memory (#493):
     /// the head with the working object rendered after it, and no turn of
     /// the old trunk.
-    Seamed {
+    Meditated {
         /// The latest turn, settled, which it follows.
         at_turn: u32,
         /// What fired it: the operator, or the regimen's budget or cadence.
-        reason: crate::seam::Reason,
+        reason: crate::meditation::Reason,
         /// The `head_sha256` a trunk request on the trunk before would carry.
         prefix_hash_before: String,
         /// The same, after.
@@ -594,7 +608,7 @@ pub enum Event {
         render: String,
         /// How many entries the render carried.
         carried_entries: u64,
-        /// The compaction depth the seam ran at (#552): estimated tokens of
+        /// The compaction depth the meditation ran at (#552): estimated tokens of
         /// recent whole turns it could keep; 0, the total refill.
         tail_tokens: u64,
         /// How many whole turns of the old trunk it kept.
@@ -605,7 +619,7 @@ pub enum Event {
         /// move the graph allowed.
         phase: Option<log::PhaseMove>,
         /// What it carried of the tool outputs it compacted away (#553).
-        tool_outputs: log::SeamToolOutputs,
+        tool_outputs: log::MeditationToolOutputs,
         /// The section after the render carrying them, when it carried any,
         /// and how many it carried.
         outputs: Option<(String, u64)>,
@@ -614,14 +628,20 @@ pub enum Event {
         background: Option<String>,
         /// The render's budget and what it did (#565), when declared.
         render_budget: Option<log::RenderBudget>,
-        /// The prompt that fired it and the window, on a `window` seam (#617).
-        fired: Option<log::SeamFired>,
+        /// The prompt that fired it and the window, on a `window` meditation (#617).
+        fired: Option<log::MeditationFired>,
         /// The calls whose pruned results it replaced (#612), when any.
         pruned: Option<Vec<String>>,
         /// The operator's edits and flags it carried (#150), when any.
         operator_changes: Option<Vec<log::OperatorChange>>,
         /// Of those, the entries no answer addressed (#150): carried on.
         unaddressed: Option<Vec<String>>,
+        /// The newest turn's estimated tokens when the tail was asked for
+        /// and kept no turn (#693).
+        newest_turn_tokens: Option<u64>,
+        /// The operator refilled it over the changes it was held for
+        /// (#150's gate): `Some(true)`, or `None`.
+        refilled_anyway: Option<bool>,
         /// The pre-warm's timings (#504), when the refilled trunk was sent
         /// once and the call finished.
         warm: Option<Timings>,
@@ -629,7 +649,7 @@ pub enum Event {
     /// Forks' patches delivered at the tail of a trunk request, after its
     /// ask (the fork delivery lever): the note stays on the trunk.
     /// A tool result the model pruned (#612): logged when `prune_output`
-    /// answered; a later seam carries `text` in its place.
+    /// answered; a later meditation carries `text` in its place.
     Pruned {
         /// The turn the prune was called in.
         turn: u32,
@@ -643,7 +663,18 @@ pub enum Event {
         text: String,
     },
     /// The operator flagged an entry (#150): a note on it, the entry
-    /// unchanged, kept until a seam addresses it.
+    /// unchanged, kept until a meditation addresses it.
+    /// A meditation held for the operator (#150's gate): an operator change no
+    /// answer addressed under `reconcile_gate = "refuse"`, after the
+    /// reconciling audit and its one re-ask; the trunk is not refilled.
+    MeditationHeld {
+        /// The latest turn, settled, which the meditation follows.
+        at_turn: u32,
+        /// What fired it.
+        reason: crate::meditation::Reason,
+        /// The entries whose changes stay unaddressed.
+        unaddressed: Vec<String>,
+    },
     Flagged {
         /// The latest turn.
         turn: u32,
@@ -915,7 +946,7 @@ pub const INTERVIEW_WARRANT: &str = "interview_warrant";
 /// The regimen key for the fork delivery lever.
 pub const FORK_DELIVERY: &str = "fork_delivery";
 
-/// The fork delivery lever's state the regimen declares: `seam` (the
+/// The fork delivery lever's state the regimen declares: `meditation` (the
 /// default, today's behaviour), `advisory` or `imperative`.
 ///
 /// # Errors
@@ -923,11 +954,11 @@ pub const FORK_DELIVERY: &str = "fork_delivery";
 /// A value that is none of the three.
 pub fn fork_delivery(regimen: &Regimen) -> Result<log::ForkDelivery, String> {
     match regimen.get(FORK_DELIVERY) {
-        None => Ok(log::ForkDelivery::Seam),
+        None => Ok(log::ForkDelivery::Meditation),
         Some(crate::formats::regimen::Value::String(state)) => log::ForkDelivery::from_tag(state)
             .ok_or_else(|| {
                 format!(
-                    "`{FORK_DELIVERY}` is \"{state}\": it takes \"seam\", \"advisory\" or \
+                    "`{FORK_DELIVERY}` is \"{state}\": it takes \"meditation\", \"advisory\" or \
                      \"imperative\""
                 )
             }),
@@ -952,14 +983,14 @@ pub fn interview_warrant(regimen: &Regimen) -> Result<Vec<log::Warrant>, String>
         .iter()
         .map(|item| match item {
             regimen::Value::String(word) => log::Warrant::from_tag(word)
-                // A seam's audit is the seam's, never an interview's (#504).
-                .filter(|rule| *rule != log::Warrant::Seam)
+                // A meditation's audit is the meditation's, never an interview's (#504).
+                .filter(|rule| *rule != log::Warrant::Meditation)
                 .ok_or_else(|| {
                     format!(
                         "`{INTERVIEW_WARRANT}` names `{word}`, which is not a rule: {}",
                         log::Warrant::ALL
                             .iter()
-                            .filter(|rule| **rule != log::Warrant::Seam)
+                            .filter(|rule| **rule != log::Warrant::Meditation)
                             .map(|rule| rule.tag())
                             .collect::<Vec<_>>()
                             .join(", ")
@@ -1013,14 +1044,14 @@ pub struct Interview {
     pub rules: Vec<log::Warrant>,
     /// The session's working object.
     pub object: WorkingObject,
-    /// When derived seams fire: the regimen's cadence and budget.
-    pub seams: crate::seam::policy::Served,
-    /// How a fork's patches reach the trunk: at the seam (`seam`, the
+    /// When derived meditations fire: the regimen's cadence and budget.
+    pub meditations: crate::meditation::policy::Served,
+    /// How a fork's patches reach the trunk: at the meditation (`meditation`, the
     /// default), or as a note at the tail of the next trunk request.
     pub delivery: log::ForkDelivery,
     /// The regimen's phase graph (#563), read as the scripted drive reads
     /// it; empty when it declares none.
-    pub phases: crate::seam::phase::PhaseGraph,
+    pub phases: crate::meditation::phase::PhaseGraph,
     /// The role a fork's interview question is asked in (#599): `user`, the
     /// default, or `system` or `developer` where the served template
     /// renders it (serve checks at start).
@@ -1056,7 +1087,7 @@ pub struct Interview {
     pub fork_tail: Option<u32>,
     /// Whether the model is offered `prune_output`, and when its prunes
     /// are applied (#612); `None`, the default, offers nothing.
-    pub prune: Option<super::prune::PruneSeam>,
+    pub prune: Option<super::prune::PruneMeditation>,
 }
 
 /// The interview cadence (#564): when the capture gap's forks fire, and on
@@ -1208,23 +1239,23 @@ pub fn self_capture(regimen: &Regimen) -> Option<crate::capture::tools::Cadence>
     )
 }
 
-/// A tool result the model pruned (#612), until a seam replaces it and
-/// after, so a later seam still carries its line.
+/// A tool result the model pruned (#612), until a meditation replaces it and
+/// after, so a later meditation still carries its line.
 #[derive(Debug, Clone)]
 struct Prune {
     /// The call whose result it is.
     call: String,
     /// What the trunk carried as that result.
     shown: String,
-    /// Its reference line, which a seam carries in its place.
+    /// Its reference line, which a meditation carries in its place.
     text: String,
-    /// Whether a seam has replaced it yet.
+    /// Whether a meditation has replaced it yet.
     applied: bool,
 }
 
 impl Prune {
     /// Whether `message` is the result it prunes, as the trunk carried it
-    /// or as a seam already replaced it.
+    /// or as a meditation already replaced it.
     fn is(&self, message: &Message) -> bool {
         message.role == Role::Tool
             && message.tool_call_id.as_deref() == Some(self.call.as_str())
@@ -1283,7 +1314,7 @@ fn viewed(trunk: &[Message], head: usize, view: ForkView) -> Vec<Message> {
         return trunk.to_vec();
     };
     let head = head.min(trunk.len());
-    let turns = crate::seam::render::last_turns(&trunk[head..], n as usize);
+    let turns = crate::meditation::render::last_turns(&trunk[head..], n as usize);
     trunk[..head].iter().chain(turns).cloned().collect()
 }
 
@@ -1300,6 +1331,26 @@ pub fn interview_role(regimen: &Regimen) -> Role {
             Role::Developer
         }
         _ => Role::User,
+    }
+}
+
+/// The priming paragraph a session under `regimen` opens with (#598): its
+/// fork ask set's, when the regimen warrants forks and the set carries one.
+/// It joins the system prompt once, at the session's start, and is never
+/// changed after.
+#[must_use]
+pub fn priming(regimen: &Regimen) -> Option<&'static str> {
+    let forks = interview_warrant(regimen).is_ok_and(|rules| !rules.is_empty());
+    forks.then(|| fork_asks(regimen).priming()).flatten()
+}
+
+/// `head`, the system prompt, with `priming` after it and a blank line
+/// (#598); `head` as it is with none.
+#[must_use]
+pub fn primed(head: &str, priming: Option<&str>) -> String {
+    match priming {
+        Some(priming) => format!("{}\n\n{}", head.trim_end(), priming.trim()),
+        None => head.to_owned(),
     }
 }
 
@@ -1385,7 +1436,7 @@ fn firings(interview: &Interview, log: &[Logged], turn: u32, answer: &str) -> Ve
     let rules = &interview.rules;
     let intent = router::stated_intent(answer);
     // The working record, for an ask in a set that shows it (#595).
-    let record = crate::seam::render::entries(&interview.object);
+    let record = crate::meditation::render::entries(&interview.object);
     let ask = |kind: AskKind, last_command: Option<String>| {
         let text = router::Ask {
             kind,
@@ -1735,7 +1786,7 @@ struct State {
     /// event pushed, under the same lock.
     pending_gap: Option<IdleGap>,
     /// The phase the session is in, under a phase graph (#563): the graph's
-    /// first at open, then where each seam's move took it.
+    /// first at open, then where each meditation's move took it.
     phase: Option<String>,
     /// The open tangent (#22), and the trunk at its fork point, which its
     /// close restores.
@@ -1752,7 +1803,7 @@ struct State {
     /// Patches waiting to be delivered at the next trunk request, under a
     /// mid-turn fork delivery: each op and the entry text its line names.
     undelivered: Vec<(log::PatchOp, String, String)>,
-    /// What seams dropped from the trunk, for a recall to find (#566).
+    /// What meditations dropped from the trunk, for a recall to find (#566).
     archive: super::archive::Archive,
     /// The text each recovered call came from, by its id, until its line is
     /// logged (#560).
@@ -1780,10 +1831,10 @@ struct State {
     /// The gap's forks not yet fired (#564), in order: each fires once the
     /// one before it settles; the turn and the trunk request they fork at.
     queued: std::collections::VecDeque<(u32, u64, Firing)>,
-    /// `turns` at the latest seam, or 0: what a cadence counts from.
-    turns_at_seam: u32,
+    /// `turns` at the latest meditation, or 0: what a cadence counts from.
+    turns_at_meditation: u32,
     /// The trunk's tokens as the latest trunk call measured them, cleared
-    /// by a seam: what a budget reads.
+    /// by a meditation: what a budget reads.
     trunk_tokens: Option<u64>,
     /// The estimated tokens of the latest request's messages, as it was
     /// sized (#588).
@@ -1791,12 +1842,15 @@ struct State {
     /// The latest request's prompt as sized, its output cap, and the window
     /// it was sized against (#616): what tells an overflow from its size.
     last_sized: Option<(u64, u32, Option<u64>)>,
-    /// The turn that last seamed and went again after an overflow (#617):
+    /// The turn that last meditated and went again after an overflow (#617):
     /// once per turn.
     overflow_retried: Option<u32>,
-    /// A seam queued for its audit or pre-warm (#504), until [`seam_work`]
+    /// A meditation queued for its audit or pre-warm (#504), until [`meditation_work`]
     /// takes it.
-    seam_pending: Option<PendingSeam>,
+    meditation_pending: Option<PendingMeditation>,
+    /// A meditation held for the operator (#150's gate): `reconcile_gate =
+    /// "refuse"` and an operator change no answer addressed.
+    held: Option<PendingMeditation>,
     /// The pre-warm in flight (#504), which an ask cancels.
     warming: Option<Cancel>,
     /// The model's phase proposal awaiting the operator's ruling (#124).
@@ -1813,7 +1867,7 @@ struct State {
     /// A turn that fails after a step keeps it on the trunk, as `max_steps`
     /// does, rather than losing the commands it ran.
     ran: Vec<Message>,
-    /// The recording directory, when the session keeps one: where a seam's
+    /// The recording directory, when the session keeps one: where a meditation's
     /// `reference` saves an output's whole (#553).
     recording: Option<std::path::PathBuf>,
     /// The session's background jobs (#614), by id.
@@ -1825,13 +1879,13 @@ struct State {
     promotable: Option<Arc<Mutex<Option<super::background::Job>>>>,
     /// The results the model pruned (#612), in the order it pruned them.
     pruned: Vec<Prune>,
-    /// The operator's edits and flags since a seam last addressed them
+    /// The operator's edits and flags since a meditation last addressed them
     /// (#150), in order.
     operator_pending: Vec<Pending>,
-    /// The pending changes this seam's audit addressed (#150): its answer
-    /// parsed, so each marked note had its line. Cleared as the seam ends.
+    /// The pending changes this meditation's audit addressed (#150): its answer
+    /// parsed, so each marked note had its line. Cleared as the meditation ends.
     operator_addressed: Vec<String>,
-    /// Whether the trunk carries a seam's refill message after the head
+    /// Whether the trunk carries a meditation's refill message after the head
     /// (#597): the turns start after it.
     refilled: bool,
 }
@@ -1850,12 +1904,13 @@ impl State {
             log: Vec::new(),
             flight: None,
             turns: 0,
-            turns_at_seam: 0,
+            turns_at_meditation: 0,
             trunk_tokens: None,
             sent_estimate: None,
             last_sized: None,
             overflow_retried: None,
-            seam_pending: None,
+            meditation_pending: None,
+            held: None,
             warming: None,
             proposal: None,
             measured_prompt: None,
@@ -1924,7 +1979,7 @@ impl State {
     /// Size `shape`'s output cap to the room its prompt leaves in the
     /// context window (#588), from `ceiling`, the session's cap, and return
     /// it. The prompt is the latest measured one plus the estimate of what
-    /// was added since; with none to go on, or a prompt that shrank (a seam),
+    /// was added since; with none to go on, or a prompt that shrank (a meditation),
     /// the whole estimate plus [`ESTIMATE_PAD`].
     fn sized(&mut self, shape: &mut RequestShape, ceiling: u32) -> u32 {
         let prompt = self.prompt_of(shape);
@@ -1996,7 +2051,7 @@ impl State {
     /// The prompt a request on `shape` would send, as [`State::sized`]
     /// sizes it (#588): the latest measured prompt plus the estimate of what
     /// was added since; with none to go on, or a prompt that shrank (a
-    /// seam), the whole estimate plus [`ESTIMATE_PAD`].
+    /// meditation), the whole estimate plus [`ESTIMATE_PAD`].
     fn prompt_of(&self, shape: &RequestShape) -> u64 {
         let estimate = estimate_of(shape);
         match self.measured_prompt {
@@ -2057,7 +2112,7 @@ impl State {
         self.carried = gap.map(|gap| (gap, command));
     }
 
-    /// The note recalling what earlier seams archived that `asked` names
+    /// The note recalling what earlier meditations archived that `asked` names
     /// (#566), logged as turn `turn`'s `recalled` line, or `None`: under
     /// `literal`, the archive's best items by the ask's anchors, in Qwen
     /// Code's reminder shape. Under `off`, nothing.
@@ -2108,7 +2163,7 @@ impl State {
     fn deliver(&mut self, turn: u32) -> Option<Message> {
         let delivery = self.interview.as_ref()?.delivery;
         let (framing, template) = match delivery {
-            log::ForkDelivery::Seam => return None,
+            log::ForkDelivery::Meditation => return None,
             log::ForkDelivery::Advisory => (
                 log::Framing::Advisory,
                 crate::dogma::Template::ForkNoteAdvisory,
@@ -2162,14 +2217,15 @@ impl State {
             let ends = match command {
                 CommandKind::Ask => GapEnd::Ask,
                 CommandKind::Cancel => GapEnd::Cancel,
-                CommandKind::DeclareSeam => GapEnd::Seam,
+                CommandKind::DeclareMeditation => GapEnd::Meditation,
                 CommandKind::End => GapEnd::End,
                 CommandKind::OpenTangent
                 | CommandKind::CloseTangent
                 | CommandKind::Background
                 | CommandKind::RatifyPhase
                 | CommandKind::EditEntry
-                | CommandKind::FlagEntry => {
+                | CommandKind::FlagEntry
+                | CommandKind::RefillAnyway => {
                     unreachable!("a tangent, background or phase ruling carries no idle gap")
                 }
             };
@@ -2613,8 +2669,8 @@ impl<S: Streaming + 'static> Session<S> {
         let super::attach::Attached { message, files } = attached;
         let mut state = self.shared.lock();
         state.carry(gap, CommandKind::Ask);
-        // A seam's pre-warm in flight is cancelled by an ask (#504): the
-        // ask's own request warms the same prefix. The seam stands, logged
+        // A meditation's pre-warm in flight is cancelled by an ask (#504): the
+        // ask's own request warms the same prefix. The meditation stands, logged
         // without the warm's timings, and the ask goes on once it is.
         while let Some(warm) = state.warming.as_ref() {
             warm.ask();
@@ -2625,6 +2681,12 @@ impl<S: Streaming + 'static> Session<S> {
                 .unwrap_or_else(PoisonError::into_inner);
         }
         match state.settlement {
+            // The trunk a held meditation did not refill (#150's gate).
+            Settlement::Awaiting if state.held.is_some() => {
+                let refused = state.refuse(CommandKind::Ask, Refusal::MeditationHeld);
+                self.shared.changed.notify_all();
+                return Err(Rejected::Refused(refused));
+            }
             Settlement::Awaiting => {}
             Settlement::Turn | Settlement::Capture => {
                 let refused = state.refuse(CommandKind::Ask, Refusal::InFlight);
@@ -2655,7 +2717,7 @@ impl<S: Streaming + 'static> Session<S> {
         // was) -- Qwen Code's order, its system reminders ahead of the user's
         // prompt in one user turn. In the order they are logged: the fork
         // delivery lever's patches; archive recall (#566), what earlier
-        // seams dropped that this ask names; background commands that ended
+        // meditations dropped that this ask names; background commands that ended
         // since (#614), Qwen Code's `<task-notification>`s; and the
         // self-capture reminder (#609), when its cadence came round, never
         // in the system prompt.
@@ -2682,8 +2744,8 @@ impl<S: Streaming + 'static> Session<S> {
         // turn's thread: a thread that cannot start still settles with a
         // `request.failed` that cites a request that exists (#117, R2c
         // finding 21).
-        // The automatic seam (#617), before the request is sized.
-        window_seam(&self.shared.template, &mut state, &mut shape, false);
+        // The automatic meditation (#617), before the request is sized.
+        window_meditation(&self.shared.template, &mut state, &mut shape, false);
         let max_tokens = state.sized(&mut shape, self.shared.template.limits.max_output_tokens);
         let request = state.push(Event::Requested {
             turn,
@@ -2711,9 +2773,9 @@ impl<S: Streaming + 'static> Session<S> {
                 // every ask (#120's first review).
                 let outcome = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
                     call(&shared, &shape, &cancel, opening, turn, request);
-                    // A seam the turn's end made due, queued for its audit
+                    // A meditation the turn's end made due, queued for its audit
                     // or pre-warm (#504).
-                    seam_work(&shared);
+                    meditation_work(&shared);
                 }));
                 if let Err(payload) = outcome {
                     crashed(&shared, panic_message(payload.as_ref()));
@@ -2777,10 +2839,10 @@ impl<S: Streaming + 'static> Session<S> {
         Err(Rejected::Refused(refused))
     }
 
-    /// Declare a seam (#493): the trunk is refilled from working memory --
+    /// Declare a meditation (#493): the trunk is refilled from working memory --
     /// the head, with the working object rendered after it
-    /// ([`crate::seam::render::refill`]) -- and the next ask is sent on it.
-    /// No turn of the old trunk is carried. Its [`Event::Seamed`] records the
+    /// ([`crate::meditation::render::refill`]) -- and the next ask is sent on it.
+    /// No turn of the old trunk is carried. Its [`Event::Meditated`] records the
     /// head's digest either side, the render, and what was carried.
     ///
     /// Not yet: the audit (the dogma's operator ask, whose answer grammar is
@@ -2790,37 +2852,41 @@ impl<S: Streaming + 'static> Session<S> {
     /// # Errors
     ///
     /// [`Refusal::InFlight`] while a turn or a capture is in flight, and
-    /// [`Refusal::NothingToSeam`] before any turn has settled, or when working
+    /// [`Refusal::NothingToMeditate`] before any turn has settled, or when working
     /// memory holds no entry (or the session keeps none): both logged. [`Refusal::Ended`] once the
     /// session has ended, not logged (#291). A refused command's `gap` is
     /// neither logged nor closed. [`Rejected::BadGap`] when `gap` cannot be
     /// logged, and then nothing is.
-    pub fn declare_seam(&self, gap: Option<IdleGap>) -> Result<(), Rejected> {
-        self.declare_seam_to(gap, None)
+    pub fn declare_meditation(&self, gap: Option<IdleGap>) -> Result<(), Rejected> {
+        self.declare_meditation_to(gap, None)
     }
 
-    /// [`Self::declare_seam`], moving to phase `to` when one is named
+    /// [`Self::declare_meditation`], moving to phase `to` when one is named
     /// (#563): the regimen's phase graph rules on the move, as it rules on
-    /// the scripted drive's (`seam::phase::PhaseGraph::decide`), and a move
+    /// the scripted drive's (`meditation::phase::PhaseGraph::decide`), and a move
     /// it does not allow is refused with its reason, logged, as
-    /// `nothing-to-seam` is. With no phase named, the session stays in its
+    /// `nothing-to-meditate` is. With no phase named, the session stays in its
     /// phase.
     ///
     /// # Errors
     ///
-    /// As [`Self::declare_seam`], and [`Refusal::NoPhaseGraph`],
+    /// As [`Self::declare_meditation`], and [`Refusal::NoPhaseGraph`],
     /// [`Refusal::NotAPhase`], [`Refusal::AlreadyInPhase`] or
     /// [`Refusal::NoPhaseEdge`] for a move the graph refuses.
-    pub fn declare_seam_to(&self, gap: Option<IdleGap>, to: Option<&str>) -> Result<(), Rejected> {
+    pub fn declare_meditation_to(
+        &self,
+        gap: Option<IdleGap>,
+        to: Option<&str>,
+    ) -> Result<(), Rejected> {
         let mut state = self.shared.lock();
-        state.carry(gap, CommandKind::DeclareSeam);
+        state.carry(gap, CommandKind::DeclareMeditation);
         let because = match state.settlement {
             Settlement::Ended => Some(Refusal::Ended),
             Settlement::Turn | Settlement::Capture => Some(Refusal::InFlight),
             // Nothing to refill from: no turn yet, no working object, or an
             // empty one -- a refill from an empty object would drop every
             // turn and carry nothing in their place.
-            // A seam while a tangent is open would replace the trunk its
+            // A meditation while a tangent is open would replace the trunk its
             // close restores (#22).
             Settlement::Awaiting if state.tangent.is_some() => Some(Refusal::TangentOpen),
             Settlement::Awaiting
@@ -2830,21 +2896,21 @@ impl<S: Streaming + 'static> Session<S> {
                         .as_ref()
                         .is_none_or(|interview| interview.object.live().next().is_none()) =>
             {
-                Some(Refusal::NothingToSeam)
+                Some(Refusal::NothingToMeditate)
             }
             Settlement::Awaiting => to.and_then(|to| graph_refusal(&state, to)),
         };
         if let Some(because) = because {
-            let refused = state.refuse(CommandKind::DeclareSeam, because);
+            let refused = state.refuse(CommandKind::DeclareMeditation, because);
             drop(state);
             self.shared.changed.notify_all();
             return Err(Rejected::Refused(refused));
         }
         state.admit()?;
-        let queued = seam(
+        let queued = meditation(
             &self.shared.template,
             &mut state,
-            crate::seam::Reason::Operator,
+            crate::meditation::Reason::Operator,
             to.map(str::to_owned),
         );
         drop(state);
@@ -2853,29 +2919,29 @@ impl<S: Streaming + 'static> Session<S> {
             // Its audit and pre-warm (#504), on a thread of their own.
             let shared = Arc::clone(&self.shared);
             let spawned = std::thread::Builder::new()
-                .name("diet-seam".to_owned())
-                .spawn(move || seam_work(&shared));
+                .name("diet-meditation".to_owned())
+                .spawn(move || meditation_work(&shared));
             if spawned.is_err() {
-                seam_work(&self.shared);
+                meditation_work(&self.shared);
             }
         }
         Ok(())
     }
 
     /// Rule on the model's pending phase proposal (#124), the one its call
-    /// `call` made: `seam` declares the seam that moves to the proposed
-    /// phase, as [`Session::declare_seam_to`] does (and, with the regimen's
+    /// `call` made: `meditation` declares the meditation that moves to the proposed
+    /// phase, as [`Session::declare_meditation_to`] does (and, with the regimen's
     /// audit or pre-warm, queues them); `continue` moves the phase and keeps
-    /// the trunk, so the next seam's render names it; `stay` declines. A
+    /// the trunk, so the next meditation's render names it; `stay` declines. A
     /// `phase.ruled` line records the ruling, and the proposal is spent.
     ///
     /// # Errors
     ///
     /// Refused, and logged: [`Refusal::Ended`], [`Refusal::InFlight`];
     /// [`Refusal::NoProposal`] when none is pending or `call` names another;
-    /// for `seam` and `continue`, the graph's refusal of the move from the
-    /// phase the session is in now, and for `seam`
-    /// [`Refusal::NothingToSeam`] as a declared seam would be.
+    /// for `meditation` and `continue`, the graph's refusal of the move from the
+    /// phase the session is in now, and for `meditation`
+    /// [`Refusal::NothingToMeditate`] as a declared meditation would be.
     pub fn ratify_phase(&self, call: &str, choice: PhaseChoice) -> Result<(), Rejected> {
         let mut state = self.shared.lock();
         let pending = state
@@ -2889,13 +2955,13 @@ impl<S: Streaming + 'static> Session<S> {
             (Settlement::Awaiting, None) => Some(Refusal::NoProposal),
             (Settlement::Awaiting, Some(_)) if choice == PhaseChoice::Stay => None,
             (Settlement::Awaiting, Some(to)) => graph_refusal(&state, to).or_else(|| {
-                (choice == PhaseChoice::Seam
+                (choice == PhaseChoice::Meditation
                     && (state.turns == 0
                         || state
                             .interview
                             .as_ref()
                             .is_none_or(|interview| interview.object.live().next().is_none())))
-                .then_some(Refusal::NothingToSeam)
+                .then_some(Refusal::NothingToMeditate)
             }),
         };
         if let Some(because) = because {
@@ -2915,10 +2981,10 @@ impl<S: Streaming + 'static> Session<S> {
             to: to.clone(),
         });
         let queued = match choice {
-            PhaseChoice::Seam => seam(
+            PhaseChoice::Meditation => meditation(
                 &self.shared.template,
                 &mut state,
-                crate::seam::Reason::Phase,
+                crate::meditation::Reason::Phase,
                 Some(to),
             ),
             PhaseChoice::Continue => {
@@ -2932,10 +2998,10 @@ impl<S: Streaming + 'static> Session<S> {
         if queued {
             let shared = Arc::clone(&self.shared);
             let spawned = std::thread::Builder::new()
-                .name("diet-seam".to_owned())
-                .spawn(move || seam_work(&shared));
+                .name("diet-meditation".to_owned())
+                .spawn(move || meditation_work(&shared));
             if spawned.is_err() {
-                seam_work(&self.shared);
+                meditation_work(&self.shared);
             }
         }
         Ok(())
@@ -3078,7 +3144,7 @@ impl<S: Streaming + 'static> Session<S> {
     /// Correct working-memory entry `id` with `content` (#150): the
     /// operator's edit, written as the object writes every correction -- a
     /// new entry superseding `id`, on the operator's lane -- and logged as
-    /// its `patch` line. It is carried to the next seam as a change for the
+    /// its `patch` line. It is carried to the next meditation as a change for the
     /// model to address.
     ///
     /// # Errors
@@ -3141,7 +3207,7 @@ impl<S: Streaming + 'static> Session<S> {
 
     /// Flag working-memory entry `id` with the operator's `note` (#150): an
     /// annotation, the entry unchanged, logged as a `flag` line and carried
-    /// to the next seam for the model to address.
+    /// to the next meditation for the model to address.
     ///
     /// # Errors
     ///
@@ -3168,6 +3234,51 @@ impl<S: Streaming + 'static> Session<S> {
         });
         drop(state);
         self.shared.changed.notify_all();
+        Ok(())
+    }
+
+    /// Refill the meditation held for the operator anyway (#150's gate): the
+    /// refill the meditation would have made, with no audit and no gate, its pre-
+    /// warm when the regimen asks for one, and its meditation line marked
+    /// `refilled_anyway` beside the changes it carried unaddressed.
+    ///
+    /// # Errors
+    ///
+    /// Refused, and logged: [`Refusal::Ended`], [`Refusal::InFlight`], and
+    /// [`Refusal::NothingHeld`] when no meditation is held.
+    pub fn refill_anyway(&self) -> Result<(), Rejected> {
+        let mut state = self.shared.lock();
+        let because = match state.settlement {
+            Settlement::Ended => Some(Refusal::Ended),
+            Settlement::Turn | Settlement::Capture => Some(Refusal::InFlight),
+            Settlement::Awaiting if state.held.is_none() => Some(Refusal::NothingHeld),
+            Settlement::Awaiting => None,
+        };
+        if let Some(because) = because {
+            let refused = state.refuse(CommandKind::RefillAnyway, because);
+            drop(state);
+            self.shared.changed.notify_all();
+            return Err(Rejected::Refused(refused));
+        }
+        state.admit()?;
+        let Some(PendingMeditation { reason, to, .. }) = state.held.take() else {
+            unreachable!("a held meditation was checked above");
+        };
+        state.meditation_pending = Some(PendingMeditation {
+            reason,
+            to,
+            anyway: true,
+        });
+        state.move_to(Settlement::Capture);
+        drop(state);
+        self.shared.changed.notify_all();
+        let shared = Arc::clone(&self.shared);
+        let spawned = std::thread::Builder::new()
+            .name("diet-meditation".to_owned())
+            .spawn(move || meditation_work(&shared));
+        if spawned.is_err() {
+            meditation_work(&self.shared);
+        }
         Ok(())
     }
 
@@ -3842,6 +3953,7 @@ pub fn line_of(logged: &Logged) -> log::Line {
             ask,
             displaces,
         } => log::Event::Fork {
+            after_meditation: None,
             lane: log::Lane::Interview,
             of_turn: *of_turn,
             at: *at,
@@ -3862,11 +3974,13 @@ pub fn line_of(logged: &Logged) -> log::Line {
             at,
             template,
             question,
+            after_meditation,
         } => log::Event::Fork {
+            after_meditation: *after_meditation,
             lane: log::Lane::Audit,
             of_turn: *of_turn,
             at: *at,
-            why: log::Warrant::Seam,
+            why: log::Warrant::Meditation,
             question: question.clone(),
             view: None,
             trigger: None,
@@ -3882,12 +3996,14 @@ pub fn line_of(logged: &Logged) -> log::Line {
             prompt_tokens,
             wall_ms,
             refused,
+            trailer,
         } => log::Event::ForkSettled {
             fork: *fork,
             outcome: *outcome,
             prompt_tokens: *prompt_tokens,
             wall_ms: *wall_ms,
             refused: refused.clone(),
+            trailer: trailer.clone(),
         },
         Event::Recalled {
             turn,
@@ -4001,7 +4117,7 @@ pub fn line_of(logged: &Logged) -> log::Line {
             prefix_intact: *prefix_intact,
             rolled_back: *rolled_back,
         },
-        Event::Seamed {
+        Event::Meditated {
             at_turn,
             reason,
             prefix_hash_before,
@@ -4020,27 +4136,22 @@ pub fn line_of(logged: &Logged) -> log::Line {
             pruned,
             operator_changes,
             unaddressed,
+            newest_turn_tokens,
+            refilled_anyway,
             warm,
-        } => log::Event::Seam {
+        } => log::Event::Meditation {
             fired: *fired,
             warm: warm.as_ref().map(timings_line),
             phase: phase.clone(),
             at_turn: *at_turn,
-            reason: match reason {
-                crate::seam::Reason::Operator => log::SeamReason::Operator,
-                crate::seam::Reason::Phase => log::SeamReason::Phase,
-                crate::seam::Reason::Budget => log::SeamReason::Budget,
-                crate::seam::Reason::Cadence => log::SeamReason::Cadence,
-                crate::seam::Reason::Window => log::SeamReason::Window,
-                crate::seam::Reason::Prune => log::SeamReason::Prune,
-            },
+            reason: meditation_reason_of(*reason),
             prefix_hash_before: prefix_hash_before.clone(),
             prefix_hash_after: prefix_hash_after.clone(),
-            frame: crate::seam::render::FRAME_VERSION.to_owned(),
+            frame: crate::meditation::render::FRAME_VERSION.to_owned(),
             render: render.clone(),
             carried_entries: *carried_entries,
             carried_turns: *carried_turns,
-            // The depth, and what it kept, on a seam that could keep a tail
+            // The depth, and what it kept, on a meditation that could keep a tail
             // (#552); a total compaction writes neither.
             tail_tokens: (*tail_tokens > 0).then_some(*tail_tokens),
             carried_tokens: (*tail_tokens > 0).then_some(*carried_tokens),
@@ -4056,6 +4167,17 @@ pub fn line_of(logged: &Logged) -> log::Line {
             render_budget: render_budget.clone(),
             pruned: pruned.clone(),
             operator_changes: operator_changes.clone(),
+            unaddressed: unaddressed.clone(),
+            newest_turn_tokens: *newest_turn_tokens,
+            refilled_anyway: *refilled_anyway,
+        },
+        Event::MeditationHeld {
+            at_turn,
+            reason,
+            unaddressed,
+        } => log::Event::MeditationHeld {
+            at_turn: *at_turn,
+            reason: meditation_reason_of(*reason),
             unaddressed: unaddressed.clone(),
         },
         Event::Flagged { turn, entry, note } => log::Event::Flag {
@@ -4159,7 +4281,7 @@ fn gap_line(gap: &IdleGap) -> log::Event {
         blocked: gap.blocked,
         ended_by: match gap.ended_by {
             GapEnd::Ask => log::GapEnd::Ask,
-            GapEnd::Seam => log::GapEnd::Seam,
+            GapEnd::Meditation => log::GapEnd::Meditation,
             GapEnd::Cancel => log::GapEnd::Cancel,
             GapEnd::End => log::GapEnd::End,
         },
@@ -4181,11 +4303,23 @@ fn role_of(role: Role) -> log::Role {
     }
 }
 
+/// A meditation's reason in the log's words.
+fn meditation_reason_of(reason: crate::meditation::Reason) -> log::MeditationReason {
+    match reason {
+        crate::meditation::Reason::Operator => log::MeditationReason::Operator,
+        crate::meditation::Reason::Phase => log::MeditationReason::Phase,
+        crate::meditation::Reason::Budget => log::MeditationReason::Budget,
+        crate::meditation::Reason::Cadence => log::MeditationReason::Cadence,
+        crate::meditation::Reason::Window => log::MeditationReason::Window,
+        crate::meditation::Reason::Prune => log::MeditationReason::Prune,
+    }
+}
+
 fn command_of(command: CommandKind) -> log::Command {
     match command {
         CommandKind::Ask => log::Command::Ask,
         CommandKind::Cancel => log::Command::Cancel,
-        CommandKind::DeclareSeam => log::Command::DeclareSeam,
+        CommandKind::DeclareMeditation => log::Command::DeclareMeditation,
         CommandKind::End => log::Command::End,
         CommandKind::OpenTangent => log::Command::OpenTangent,
         CommandKind::CloseTangent => log::Command::CloseTangent,
@@ -4193,6 +4327,7 @@ fn command_of(command: CommandKind) -> log::Command {
         CommandKind::RatifyPhase => log::Command::RatifyPhase,
         CommandKind::EditEntry => log::Command::EditEntry,
         CommandKind::FlagEntry => log::Command::FlagEntry,
+        CommandKind::RefillAnyway => log::Command::RefillAnyway,
     }
 }
 
@@ -4201,7 +4336,7 @@ fn refusal_of(refusal: Refusal) -> log::Refusal {
         Refusal::InFlight => log::Refusal::InFlight,
         Refusal::Ended => log::Refusal::Ended,
         Refusal::NothingInFlight => log::Refusal::NothingInFlight,
-        Refusal::NothingToSeam => log::Refusal::NothingToSeam,
+        Refusal::NothingToMeditate => log::Refusal::NothingToMeditate,
         Refusal::NoPhaseGraph => log::Refusal::NoPhaseGraph,
         Refusal::NotAPhase => log::Refusal::NotAPhase,
         Refusal::AlreadyInPhase => log::Refusal::AlreadyInPhase,
@@ -4216,6 +4351,8 @@ fn refusal_of(refusal: Refusal) -> log::Refusal {
         Refusal::UnknownEntry => log::Refusal::UnknownEntry,
         Refusal::NotLive => log::Refusal::NotLive,
         Refusal::Empty => log::Refusal::Empty,
+        Refusal::MeditationHeld => log::Refusal::MeditationHeld,
+        Refusal::NothingHeld => log::Refusal::NothingHeld,
     }
 }
 
@@ -4477,7 +4614,7 @@ fn step<S: Streaming>(
                 class,
                 partial,
             });
-            // #617: an overflow seams once and goes again.
+            // #617: an overflow meditates once and goes again.
             if overflow.is_some()
                 && let Some(next) = retried(&shared.template, &mut state, shape, turn)
             {
@@ -4501,7 +4638,7 @@ fn step<S: Streaming>(
                 failure,
                 partial,
             });
-            // #617: an overflow seams once and goes again.
+            // #617: an overflow meditates once and goes again.
             if overflow.is_some()
                 && let Some(next) = retried(&shared.template, &mut state, shape, turn)
             {
@@ -4636,8 +4773,8 @@ fn run_calls<S: Streaming>(
     state.ran.clone_from(exchange);
     shape.messages.push(said);
     shape.messages.extend(results);
-    // The automatic seam (#617), between the turn's steps too.
-    window_seam(&shared.template, &mut state, shape, false);
+    // The automatic meditation (#617), between the turn's steps too.
+    window_meditation(&shared.template, &mut state, shape, false);
     let max_tokens = state.sized(shape, shared.template.limits.max_output_tokens);
     let next = state.push(Event::Requested {
         turn,
@@ -4814,15 +4951,27 @@ fn capture_call<S>(
     let (outcome, entries, why) = match capture_patches(&mut state, (turn, request), call) {
         Err(why) => ("refused", Vec::new(), Some(why)),
         Ok(patches) => {
-            let refused = state.interview.as_mut().map_or_else(
-                || Some("the session keeps no working memory".to_owned()),
+            let (refused, written) = state.interview.as_mut().map_or_else(
+                || {
+                    (
+                        Some("the session keeps no working memory".to_owned()),
+                        Vec::new(),
+                    )
+                },
                 |interview| {
                     // An entry the operator wrote is theirs (#150).
                     let (kept, refusals) = guarded(&patches, &interview.object, None);
                     let refused = kept
                         .iter()
                         .find_map(|patch| interview.object.apply(patch).err())
-                        .map(|why| why.to_string());
+                        .map(|why| why.to_string())
+                        // Nothing of it kept: refused over the operator's
+                        // entry, and it says whose (#689).
+                        .or_else(|| {
+                            kept.is_empty()
+                                .then(|| operator_refused(&refusals))
+                                .flatten()
+                        });
                     if refused.is_none() {
                         lines = refusals
                             .into_iter()
@@ -4831,11 +4980,13 @@ fn capture_call<S>(
                                     .map(|patch| patched(None, patch, &interview.object)),
                             )
                             .collect();
+                    } else {
+                        lines = refusals;
                     }
-                    refused
+                    (refused, entries_of(&kept))
                 },
             );
-            capture_outcome(&call.name, refused, entries_of(&patches))
+            capture_outcome(&call.name, refused, written)
         }
     };
     if call.name == CaptureTool::UpdateRecord.tag() && outcome == "recorded" {
@@ -5069,9 +5220,9 @@ fn standard_call(
 
 /// `prune_output` (#612): the most recent earlier call whose string
 /// argument is the one named, pruned -- its whole saved by digest, its
-/// reference line kept for the seam that replaces it -- and the answer
+/// reference line kept for the meditation that replaces it -- and the answer
 /// saying when. A name no call matches, a result already pruned, or one a
-/// seam already compacted away is answered with what is wrong, as a
+/// meditation already compacted away is answered with what is wrong, as a
 /// standard tool answers an error.
 fn prune_call<S>(
     shared: &Shared<S>,
@@ -5107,7 +5258,7 @@ fn prune_call<S>(
     {
         return (line, Some(super::prune::ALREADY_PRUNED.to_owned()));
     }
-    // On the trunk: a step of this turn's, or a result a seam has not
+    // On the trunk: a step of this turn's, or a result a meditation has not
     // compacted away.
     let on_trunk = target.request == request
         || state.trunk.iter().chain(&state.ran).any(|message| {
@@ -5123,7 +5274,7 @@ fn prune_call<S>(
         target.files.first().cloned(),
         state.recording.as_deref(),
     );
-    let text = crate::seam::outputs::reference_line(&crate::seam::outputs::Output {
+    let text = crate::meditation::outputs::reference_line(&crate::meditation::outputs::Output {
         turn: target.turn,
         name: target.name.clone(),
         arguments: target.arguments.clone(),
@@ -5146,14 +5297,14 @@ fn prune_call<S>(
         text,
         applied: false,
     });
-    let seam = state
+    let meditation = state
         .interview
         .as_ref()
         .and_then(|interview| interview.prune)
         .unwrap_or_default();
     drop(state);
     shared.changed.notify_all();
-    (line, Some(seam.answer().to_owned()))
+    (line, Some(meditation.answer().to_owned()))
 }
 
 /// One call, to its line and what the model is shown of it (`None` when
@@ -5811,7 +5962,7 @@ fn ended<S>(shared: &Shared<S>, id: &str, code: Option<i32>) {
     shared.changed.notify_all();
 }
 
-/// Refill the trunk from working memory for a seam `reason` fired (#493):
+/// Refill the trunk from working memory for a meditation `reason` fired (#493):
 /// the head with the working object rendered after it, and no turn of the
 /// old trunk. The caller has checked the session is awaiting and working
 /// memory holds an entry. A cadence then counts from here, and a budget
@@ -5819,11 +5970,11 @@ fn ended<S>(shared: &Shared<S>, id: &str, code: Option<i32>) {
 fn refill_trunk(
     template: &RequestShape,
     state: &mut State,
-    seam: (crate::seam::Reason, Option<log::SeamFired>),
+    meditation: (crate::meditation::Reason, Option<log::MeditationFired>),
     to: Option<String>,
 ) {
-    let seamed = refilled(template, state, seam, to);
-    state.push(seamed);
+    let meditated = refilled(template, state, meditation, to);
+    state.push(meditated);
 }
 
 /// [`refill_trunk`]'s refill, its line returned rather than logged, so a
@@ -5831,7 +5982,7 @@ fn refill_trunk(
 fn refilled(
     template: &RequestShape,
     state: &mut State,
-    (reason, fired): (crate::seam::Reason, Option<log::SeamFired>),
+    (reason, fired): (crate::meditation::Reason, Option<log::MeditationFired>),
     to: Option<String>,
 ) -> Event {
     // The move the graph allowed, made before the render, so the refill
@@ -5844,20 +5995,21 @@ fn refilled(
         state.phase = Some(moved.to.clone());
     }
     let Some(interview) = state.interview.as_ref() else {
-        unreachable!("a seam is refused or not due when the session keeps no working memory");
+        unreachable!("a meditation is refused or not due when the session keeps no working memory");
     };
     // The render, under the regimen's budget when it declares one (#565).
-    let budget = interview.seams.render_budget;
+    let budget = interview.meditations.render_budget;
     let rendered = marked_render(state, interview, budget);
     let render_budget = budget.map(|budget| log::RenderBudget {
         tokens: budget.tokens,
         over: match budget.over {
-            crate::seam::render::OverBudget::Tier => "tier",
-            crate::seam::render::OverBudget::Elide => "elide",
+            crate::meditation::render::OverBudget::Tier => "tier",
+            crate::meditation::render::OverBudget::Elide => "elide",
         }
         .to_owned(),
         rendered: rendered.tokens,
         reduced: rendered.reduced,
+        fits: Some(rendered.fits),
     });
     let render = rendered.text;
     let carried_entries = interview.object.live().count() as u64;
@@ -5872,30 +6024,27 @@ fn refilled(
     let prefix_hash_before = digest(&state.trunk);
     // The compaction depth (#552): the most recent whole turns, within the
     // regimen's budget, kept after the refill as they sat on the trunk.
-    let tail_tokens = interview.seams.tail_tokens;
+    let tail_tokens = interview.meditations.tail_tokens;
     let turns = state
         .trunk
         .get(template.messages.len() + usize::from(state.refilled)..)
         .unwrap_or_default();
-    let kept = crate::seam::render::tail(turns, tail_tokens).to_vec();
-    let carried_turns = kept
-        .iter()
-        .filter(|message| message.role == Role::User)
-        .count() as u64;
+    let kept = crate::meditation::render::tail(turns, tail_tokens).to_vec();
+    let (carried_turns, newest_turn_tokens) = tail_kept(&kept, turns, tail_tokens);
     let carried_tokens = kept
         .iter()
-        .map(crate::seam::render::estimated_tokens)
+        .map(crate::meditation::render::estimated_tokens)
         .sum::<u64>();
     // What the refill carries of the outputs it compacts away (#553): those
     // before the kept tail, which stays as it sat.
-    let tool_outputs = interview.seams.outputs;
+    let tool_outputs = interview.meditations.outputs;
     let compacted = &turns[..turns.len() - kept.len()];
     let mut kept = kept;
     replaced_in_tail(&mut kept, &state.pruned);
-    // The archive (#566): what this seam drops from the trunk, and every
+    // The archive (#566): what this meditation drops from the trunk, and every
     // working-memory entry no longer live, for a recall to find later.
-    let archived = archived_at_seam(compacted, &interview.object, state.turns);
-    let outputs = crate::seam::outputs::section(
+    let archived = archived_at_meditation(compacted, &interview.object, state.turns);
+    let outputs = crate::meditation::outputs::section(
         tool_outputs,
         &compacted_outputs(
             &state.log,
@@ -5910,9 +6059,9 @@ fn refilled(
     // Each background command still running (#614), after the summary in
     // the refill's message, as Qwen Code places its list: the refill
     // compacts away the call that started it.
-    let background = super::background::running_at_seam(state.jobs.values_mut());
+    let background = super::background::running_at_meditation(state.jobs.values_mut());
     let mut refilled =
-        crate::seam::render::refill_with(&template.messages, &sent, background.as_deref());
+        crate::meditation::render::refill_with(&template.messages, &sent, background.as_deref());
     state.refilled = true;
     refilled.extend(kept);
     let prefix_hash_after = digest(&refilled);
@@ -5920,12 +6069,12 @@ fn refilled(
     for item in archived {
         state.archive.push(item);
     }
-    state.turns_at_seam = state.turns;
+    state.turns_at_meditation = state.turns;
     state.trunk_tokens = None;
     let pruned = prunes_applied(state);
     let (operator_changes, unaddressed) = operator_carried(state);
     let at_turn = state.turns;
-    Event::Seamed {
+    Event::Meditated {
         at_turn,
         reason,
         prefix_hash_before,
@@ -5944,7 +6093,39 @@ fn refilled(
         pruned,
         operator_changes,
         unaddressed,
+        newest_turn_tokens,
+        refilled_anyway: None,
         warm: None,
+    }
+}
+
+/// How many whole turns the tail `kept` of `turns` holds; and, when a tail
+/// was asked for (`tail_tokens` above 0) and kept none (#693), the newest
+/// turn's estimated tokens, for the operator's warning -- "you got what you
+/// asked for".
+fn tail_kept(kept: &[Message], turns: &[Message], tail_tokens: u64) -> (u64, Option<u64>) {
+    let carried_turns = kept
+        .iter()
+        .filter(|message| message.role == Role::User)
+        .count() as u64;
+    let unkept = (tail_tokens > 0 && carried_turns == 0)
+        .then(|| crate::meditation::render::newest_turn_tokens(turns))
+        .flatten();
+    (carried_turns, unkept)
+}
+
+impl Event {
+    /// A fork's settle with nothing beside its outcome: no cost, no
+    /// refusal, no trailer.
+    fn settled(fork: u64, outcome: log::ForkOutcome) -> Self {
+        Self::ForkSettled {
+            fork,
+            outcome,
+            prompt_tokens: None,
+            wall_ms: None,
+            refused: None,
+            trailer: None,
+        }
     }
 }
 
@@ -5974,17 +6155,38 @@ fn operator_refusal(state: &State, id: &str, text: &str) -> Option<Refusal> {
     }
 }
 
+/// The entries `lines`' `patch` lines wrote or ruled on, by id.
+fn written_by(lines: &[Event]) -> Vec<String> {
+    lines
+        .iter()
+        .filter_map(|line| match line {
+            Event::Patched { entry, .. } => Some(entry.id.clone()),
+            _ => None,
+        })
+        .collect()
+}
+
+/// Why a capture none of whose patches was kept was refused (#689): the
+/// first `patch.refused` line's reason and the entry it would have changed,
+/// `operator-entry: <id>`.
+fn operator_refused(refusals: &[Event]) -> Option<String> {
+    refusals.iter().find_map(|line| match line {
+        Event::PatchRefused { entry, .. } => Some(format!("{OPERATOR_ENTRY}: {entry}")),
+        _ => None,
+    })
+}
+
 /// Why a model's patch is refused (#150): its target is the operator's.
 const OPERATOR_ENTRY: &str = "operator-entry";
 
 /// `interview`'s working memory rendered for a refill under `budget`, the
-/// operator's changes the seam carries marked (#150).
+/// operator's changes the meditation carries marked (#150).
 fn marked_render(
     state: &State,
     interview: &Interview,
-    budget: Option<crate::seam::render::Budget>,
-) -> crate::seam::render::Rendered {
-    crate::seam::render::rendered_marked(
+    budget: Option<crate::meditation::render::Budget>,
+) -> crate::meditation::render::Rendered {
+    crate::meditation::render::rendered_marked(
         &interview.object,
         state.phase.as_deref(),
         budget,
@@ -5992,7 +6194,7 @@ fn marked_render(
     )
 }
 
-/// An operator change a seam has yet to address (#150).
+/// An operator change a meditation has yet to address (#150).
 #[derive(Debug, Clone)]
 struct Pending {
     /// The entry it changed: the edit's new entry, or the flagged one.
@@ -6004,27 +6206,27 @@ struct Pending {
 }
 
 /// The markers the operator's pending changes put on their notes (#150):
-/// [`crate::seam::render::EDITED`] on an edit's entry, and
-/// [`crate::seam::render::flagged`] for each flag, in order.
-fn operator_marks(pending: &[Pending]) -> crate::seam::render::Marks {
-    let mut marks = crate::seam::render::Marks::new();
+/// [`crate::meditation::render::EDITED`] on an edit's entry, and
+/// [`crate::meditation::render::flagged`] for each flag, in order.
+fn operator_marks(pending: &[Pending]) -> crate::meditation::render::Marks {
+    let mut marks = crate::meditation::render::Marks::new();
     for change in pending {
         let Ok(id) = crate::object::EntryId::new(&change.entry) else {
             continue;
         };
         let marker = change.note.as_deref().map_or_else(
-            || crate::seam::render::EDITED.to_owned(),
-            crate::seam::render::flagged,
+            || crate::meditation::render::EDITED.to_owned(),
+            crate::meditation::render::flagged,
         );
         marks.entry(id).or_default().push_str(&marker);
     }
     marks
 }
 
-/// The operator's changes a seam carries (#150) -- each still live, or
-/// addressed by this seam's audit -- and the ones no answer addressed,
-/// which stay pending for the next seam. A change is addressed when the
-/// seam's audit, which marked its note, parsed: every note had its line.
+/// The operator's changes a meditation carries (#150) -- each still live, or
+/// addressed by this meditation's audit -- and the ones no answer addressed,
+/// which stay pending for the next meditation. A change is addressed when the
+/// meditation's audit, which marked its note, parsed: every note had its line.
 fn operator_carried(state: &mut State) -> (Option<Vec<log::OperatorChange>>, Option<Vec<String>>) {
     let live = |id: &str| {
         state.interview.as_ref().is_some_and(|interview| {
@@ -6099,15 +6301,15 @@ fn guarded(
     (kept, refused)
 }
 
-/// A seam `reason` fired (#504): refilled now; or, when the regimen asks
+/// A meditation `reason` fired (#504): refilled now; or, when the regimen asks
 /// for its audit (and the dogma pins one for `reason`) or its pre-warm,
-/// queued for [`seam_work`], which makes those calls on a thread that can
+/// queued for [`meditation_work`], which makes those calls on a thread that can
 /// wait for them, the session in `capture` until it is done. `true` when it
 /// was queued.
-fn seam(
+fn meditation(
     template: &RequestShape,
     state: &mut State,
-    reason: crate::seam::Reason,
+    reason: crate::meditation::Reason,
     to: Option<String>,
 ) -> bool {
     let (audit, warm) = state
@@ -6115,45 +6317,79 @@ fn seam(
         .as_ref()
         .map_or((false, false), |interview| {
             (
-                interview.seams.audit && crate::seam::pinned_ask(reason).is_some(),
-                interview.seams.warm && reason != crate::seam::Reason::Window,
+                interview.meditations.audit && crate::meditation::pinned_ask(reason).is_some(),
+                interview.meditations.warm && reason != crate::meditation::Reason::Window,
             )
         });
     if !audit && !warm {
         refill_trunk(template, state, (reason, None), to);
         return false;
     }
-    state.seam_pending = Some(PendingSeam { reason, to });
+    // A meditation declared again over a held one replaces it (#150's gate).
+    state.held = None;
+    state.meditation_pending = Some(PendingMeditation {
+        reason,
+        to,
+        anyway: false,
+    });
     state.move_to(Settlement::Capture);
     true
 }
 
-/// A seam queued by [`seam`] (#504), done: its audit, when the regimen asks
+/// A meditation queued by [`meditation`] (#504), done: its audit, when the regimen asks
 /// for one and there is a settled `final` turn to cut it from -- a side
 /// call off the warm trunk, the dogma's pinned ask after it, its answer read
 /// by `diet::formats::audit` and folded into working memory, logged as a
 /// fork on the `audit` lane; then the refill; then its pre-warm, when asked
 /// for -- the refilled trunk sent once with an output cap of one, which an
-/// ask cancels, its own request warming the same prefix; then the seam's
+/// ask cancels, its own request warming the same prefix; then the meditation's
 /// line, with the warm's timings when it finished; then back to `awaiting`.
 /// Nothing when nothing is queued.
-fn seam_work<S: Streaming>(shared: &Shared<S>) {
+fn meditation_work<S: Streaming>(shared: &Shared<S>) {
     let mut state = shared.lock();
-    let Some(PendingSeam { reason, to }) = state.seam_pending.take() else {
+    let Some(PendingMeditation { reason, to, anyway }) = state.meditation_pending.take() else {
         return;
     };
-    if let Some(fired) = audit_fired(&shared.template, &mut state, reason) {
-        drop(state);
-        shared.changed.notify_all();
-        audited(shared, fired);
-        state = shared.lock();
+    if !anyway {
+        state = audit_and_gate(shared, state, reason);
+        if let Some(left) = left_unaddressed(&state)
+            .filter(|_| refusing(&state) && crate::meditation::pinned_ask(reason).is_some())
+        {
+            // Held for the operator (#150's gate): no refill, and the line
+            // naming what is left, under the lock that moves to `awaiting`.
+            state.held = Some(PendingMeditation {
+                reason,
+                to,
+                anyway: false,
+            });
+            state.move_to(Settlement::Awaiting);
+            let at_turn = state.turns;
+            state.push(Event::MeditationHeld {
+                at_turn,
+                reason,
+                unaddressed: left,
+            });
+            if state.ending {
+                state.ending = false;
+                state.move_to(Settlement::Ended);
+            }
+            drop(state);
+            shared.changed.notify_all();
+            return;
+        }
     }
-    let mut seamed = refilled(&shared.template, &mut state, (reason, None), to);
+    let mut meditated = refilled(&shared.template, &mut state, (reason, None), to);
+    if let Event::Meditated {
+        refilled_anyway, ..
+    } = &mut meditated
+    {
+        *refilled_anyway = anyway.then_some(true);
+    }
     let warm = state
         .interview
         .as_ref()
-        .is_some_and(|interview| interview.seams.warm)
-        && reason != crate::seam::Reason::Window;
+        .is_some_and(|interview| interview.meditations.warm)
+        && reason != crate::meditation::Reason::Window;
     if warm {
         let mut shape = shared.template.clone();
         shape.messages.clone_from(&state.trunk);
@@ -6168,16 +6404,16 @@ fn seam_work<S: Streaming>(shared: &Shared<S>) {
             .stream(&shape, deadline, &cancel, &mut |_: Piece<'_>| {});
         state = shared.lock();
         state.warming = None;
-        if let (Ok(StreamEnded::Finished { timings, .. }), Event::Seamed { warm, .. }) =
-            (ended, &mut seamed)
+        if let (Ok(StreamEnded::Finished { timings, .. }), Event::Meditated { warm, .. }) =
+            (ended, &mut meditated)
         {
             *warm = timings;
         }
     }
-    // Back to `awaiting`, then the seam's line, under one lock: a seam is
+    // Back to `awaiting`, then the meditation's line, under one lock: a meditation is
     // logged while the session awaits, and nothing comes between.
     state.move_to(Settlement::Awaiting);
-    state.push(seamed);
+    state.push(meditated);
     if state.ending {
         state.ending = false;
         state.move_to(Settlement::Ended);
@@ -6186,22 +6422,83 @@ fn seam_work<S: Streaming>(shared: &Shared<S>) {
     shared.changed.notify_all();
 }
 
-/// A seam's audit, fired (#504): its fork line and its request, when the
+/// A meditation's audit, made and folded (#504); then, under `reconcile_gate =
+/// "refuse"` with an operator change still unaddressed (#150), the same
+/// reconciling ask once more over only the notes whose changes are left.
+fn audit_and_gate<'a, S: Streaming>(
+    shared: &'a Shared<S>,
+    mut state: std::sync::MutexGuard<'a, State>,
+    reason: crate::meditation::Reason,
+) -> std::sync::MutexGuard<'a, State> {
+    if let Some(fired) = audit_fired(&shared.template, &mut state, reason, None) {
+        drop(state);
+        shared.changed.notify_all();
+        audited(shared, fired);
+        state = shared.lock();
+    }
+    let Some(left) = left_unaddressed(&state).filter(|_| refusing(&state)) else {
+        return state;
+    };
+    if let Some(fired) = audit_fired(&shared.template, &mut state, reason, Some(&left)) {
+        drop(state);
+        shared.changed.notify_all();
+        audited(shared, fired);
+        state = shared.lock();
+    }
+    state
+}
+
+/// Whether the session's regimen refuses to refill over an unaddressed
+/// operator change (#150's gate).
+fn refusing(state: &State) -> bool {
+    state.interview.as_ref().is_some_and(|interview| {
+        interview.meditations.reconcile_gate == crate::meditation::policy::ReconcileGate::Refuse
+    })
+}
+
+/// The entries of the operator's pending changes, still live, that no
+/// audit at this meditation addressed (#150), in order; `None` when there are none.
+fn left_unaddressed(state: &State) -> Option<Vec<String>> {
+    let live = |id: &str| {
+        state.interview.as_ref().is_some_and(|interview| {
+            crate::object::EntryId::new(id)
+                .ok()
+                .and_then(|id| interview.object.entry(&id))
+                .is_some_and(|entry| entry.state.is_live())
+        })
+    };
+    let mut left: Vec<String> = Vec::new();
+    for change in &state.operator_pending {
+        if live(&change.entry)
+            && !state.operator_addressed.contains(&change.entry)
+            && !left.contains(&change.entry)
+        {
+            left.push(change.entry.clone());
+        }
+    }
+    (!left.is_empty()).then_some(left)
+}
+
+/// A meditation's audit, fired (#504): its fork line and its request, when the
 /// regimen asks for one, the dogma pins an ask for `reason`, working memory
 /// holds an entry, and the latest turn settled `final` -- the audit is cut
 /// from that turn's warm trunk, as a fork is.
 fn audit_fired(
     template: &RequestShape,
     state: &mut State,
-    reason: crate::seam::Reason,
+    reason: crate::meditation::Reason,
+    only: Option<&[String]>,
 ) -> Option<AuditFired> {
     let interview = state
         .interview
         .as_ref()
-        .filter(|interview| interview.seams.audit)?;
+        .filter(|interview| interview.meditations.audit)?;
+    // The gate's re-ask (#150) puts the same ask over only the notes whose
+    // changes are left: `only`.
     let items: Vec<(crate::object::EntryId, String)> = interview
         .object
         .live()
+        .filter(|entry| only.is_none_or(|only| only.iter().any(|id| id == entry.id.as_str())))
         .map(|entry| (entry.id.clone(), entry.content.clone()))
         .collect();
     // #610: a session whose forks answer through the record tools audits
@@ -6211,14 +6508,14 @@ fn audit_fired(
     // the reconciling ask.
     let tools = interview.capture == crate::dogma::asks::Modality::Tools;
     let marks = if tools {
-        crate::seam::render::Marks::new()
+        crate::meditation::render::Marks::new()
     } else {
         operator_marks(&state.operator_pending)
     };
     let ask = if tools {
-        crate::seam::audit_ask_tools(reason, &items, crate::dogma::audits::DEFAULT)?
+        crate::meditation::audit_ask_tools(reason, &items, crate::dogma::audits::DEFAULT)?
     } else {
-        crate::seam::audit_ask_marked(reason, &items, &marks)?
+        crate::meditation::audit_ask_marked(reason, &items, &marks)?
     };
     let marked = ask
         .items
@@ -6258,11 +6555,20 @@ fn audit_fired(
     shape
         .messages
         .push(Message::new(Role::User, ask.text.clone()));
+    // A meditation since that request (#698's run): the audit is cut from its
+    // refill, the trunk the session holds now, and says so.
+    let after_meditation = state
+        .log
+        .iter()
+        .rev()
+        .take_while(|logged| logged.seq > at)
+        .find_map(|logged| matches!(logged.event, Event::Meditated { .. }).then_some(logged.seq));
     let fork = state.push(Event::Audited {
         of_turn: turn,
         at,
         template: ask.template,
         question: ask.text.clone(),
+        after_meditation,
     });
     let max_tokens = state.sized(&mut shape, template.limits.max_output_tokens);
     let request = state.push(Event::Requested {
@@ -6377,7 +6683,7 @@ struct Aside {
     hosted: Hosted,
 }
 
-/// A seam's audit call, made and settled (#504): its pieces streamed into
+/// A meditation's audit call, made and settled (#504): its pieces streamed into
 /// the log on the `audit` lane; on an answer, read by `diet::formats::audit`
 /// against the ask's numbering -- one line per note, 1..n -- and folded:
 /// `UPDATE` supersedes the note, `REMOVE` and a dup retire it, `KEEP`
@@ -6440,7 +6746,11 @@ fn audited<S: Streaming>(shared: &Shared<S>, fired: AuditFired) {
                 lines = patched;
                 // Parsed: every marked note had its line (#150).
                 if outcome != log::ForkOutcome::Unparseable {
-                    state.operator_addressed.clone_from(&marked);
+                    for entry in marked {
+                        if !state.operator_addressed.contains(&entry) {
+                            state.operator_addressed.push(entry);
+                        }
+                    }
                 }
                 outcome
             }
@@ -6476,13 +6786,7 @@ fn audited<S: Streaming>(shared: &Shared<S>, fired: AuditFired) {
             log::ForkOutcome::Failed
         }
     };
-    state.push(Event::ForkSettled {
-        fork,
-        outcome,
-        prompt_tokens: None,
-        wall_ms: None,
-        refused: None,
-    });
+    state.push(Event::settled(fork, outcome));
     for line in lines {
         state.push(line);
     }
@@ -6541,17 +6845,17 @@ fn audit_folded(
     applied(state, &patches, fork)
 }
 
-/// The automatic seam (#617), checked before every trunk request on
+/// The automatic meditation (#617), checked before every trunk request on
 /// `shape`: when serve knows the window, the regimen has not turned it off
-/// ([`crate::seam::policy::SEAM_WINDOW`]), no tangent is open, working
+/// ([`crate::meditation::policy::MEDITATION_WINDOW`]), no tangent is open, working
 /// memory holds an entry and the trunk holds turns the refill would drop,
 /// and the prompt as sized (#588) would leave less than
-/// [`crate::seam::policy::WINDOW_RESERVE`] -- or the output cap, if more --
+/// [`crate::meditation::policy::WINDOW_RESERVE`] -- or the output cap, if more --
 /// of the window: the trunk is refilled, and the turn's own messages so far
 /// ride after the refill as they rode after the trunk. Otherwise the request
 /// goes as it is, as Pi, `OpenCode` 2 and Qwen Code all send it when there is
 /// nothing to compact.
-fn window_seam(
+fn window_meditation(
     template: &RequestShape,
     state: &mut State,
     shape: &mut RequestShape,
@@ -6563,7 +6867,7 @@ fn window_seam(
     let Some(interview) = state.interview.as_ref() else {
         return false;
     };
-    if interview.seams.window_off
+    if interview.meditations.window_off
         || state.tangent.is_some()
         || interview.object.live().next().is_none()
         || !shape.messages.starts_with(&state.trunk)
@@ -6574,12 +6878,14 @@ fn window_seam(
         .trunk
         .get(template.messages.len() + usize::from(state.refilled)..)
         .unwrap_or_default();
-    if crate::seam::render::tail(turns, interview.seams.tail_tokens).len() == turns.len() {
+    if crate::meditation::render::tail(turns, interview.meditations.tail_tokens).len()
+        == turns.len()
+    {
         return false;
     }
     let prompt = state.prompt_of(shape);
     let reserve =
-        u64::from(template.limits.max_output_tokens).max(crate::seam::policy::WINDOW_RESERVE);
+        u64::from(template.limits.max_output_tokens).max(crate::meditation::policy::WINDOW_RESERVE);
     if !forced && prompt <= window.saturating_sub(reserve) {
         return false;
     }
@@ -6588,8 +6894,8 @@ fn window_seam(
         template,
         state,
         (
-            crate::seam::Reason::Window,
-            Some(log::SeamFired {
+            crate::meditation::Reason::Window,
+            Some(log::MeditationFired {
                 prompt_tokens: prompt,
                 window,
             }),
@@ -6602,10 +6908,10 @@ fn window_seam(
 }
 
 /// After a trunk request that overflowed the window (#616), the automatic
-/// seam once more and the request again (#617), as Pi, `OpenCode` 2 and Qwen
-/// Code each compact and retry once after an overflow: the seam forced,
+/// meditation once more and the request again (#617), as Pi, `OpenCode` 2 and Qwen
+/// Code each compact and retry once after an overflow: the meditation forced,
 /// whatever the sizing said, and the same messages sent on the refilled
-/// trunk. Once per turn; and not when the seam has nothing to refill from
+/// trunk. Once per turn; and not when the meditation has nothing to refill from
 /// or nothing to drop, when the turn fails as it would have. The next
 /// request's sequence number when it was sent.
 fn retried(
@@ -6614,7 +6920,7 @@ fn retried(
     shape: &mut RequestShape,
     turn: u32,
 ) -> Option<u64> {
-    if state.overflow_retried == Some(turn) || !window_seam(template, state, shape, true) {
+    if state.overflow_retried == Some(turn) || !window_meditation(template, state, shape, true) {
         return None;
     }
     state.overflow_retried = Some(turn);
@@ -6632,7 +6938,7 @@ fn retried(
     Some(next)
 }
 
-/// Each pruned result in a seam's kept tail replaced in place by its line
+/// Each pruned result in a meditation's kept tail replaced in place by its line
 /// (#612): the tool message stays, answering its call.
 fn replaced_in_tail(kept: &mut [Message], pruned: &[Prune]) {
     for message in kept {
@@ -6643,7 +6949,7 @@ fn replaced_in_tail(kept: &mut [Message], pruned: &[Prune]) {
     }
 }
 
-/// The prunes a seam applies -- every one since the last (#612) -- marked
+/// The prunes a meditation applies -- every one since the last (#612) -- marked
 /// applied, so none is due any more; `None` when there were none.
 fn prunes_applied(state: &mut State) -> Option<Vec<String>> {
     let applied: Vec<String> = state
@@ -6658,10 +6964,10 @@ fn prunes_applied(state: &mut State) -> Option<Vec<String>> {
     (!applied.is_empty()).then_some(applied)
 }
 
-/// What a seam at `at_turn` archives (#566): each message of `compacted`,
-/// keyed by the seam and its position, and each entry of `object` that is
+/// What a meditation at `at_turn` archives (#566): each message of `compacted`,
+/// keyed by the meditation and its position, and each entry of `object` that is
 /// no longer live, keyed by its id.
-fn archived_at_seam(
+fn archived_at_meditation(
     compacted: &[Message],
     object: &WorkingObject,
     at_turn: u32,
@@ -6685,7 +6991,9 @@ fn archived_at_seam(
             format!("{}\n{}", message.content, calls.join("\n"))
         };
         Item {
-            key: format!("seam-{at_turn}/message-{}", at + 1),
+            // The model reads it: `compaction`, the word it was trained on,
+            // the maintainer's choice (#583). Older logs keep `seam-`.
+            key: format!("compaction-{at_turn}/message-{}", at + 1),
             title,
             text,
         }
@@ -6701,7 +7009,7 @@ fn archived_at_seam(
     messages.chain(entries).collect()
 }
 
-/// The outputs in `compacted` -- the trunk's turns a seam compacts away --
+/// The outputs in `compacted` -- the trunk's turns a meditation compacts away --
 /// in call order, each with its call, its turn and what `state` needs of
 /// it (#553): its whole saved by digest for `reference`, the read fork's
 /// excerpts quoted from it for `salient`. Each result is matched to its
@@ -6709,10 +7017,10 @@ fn archived_at_seam(
 fn compacted_outputs(
     log: &[Logged],
     compacted: &[Message],
-    state: log::SeamToolOutputs,
+    state: log::MeditationToolOutputs,
     (recording, pruned): (Option<&std::path::Path>, &[Prune]),
-) -> Vec<crate::seam::outputs::Output> {
-    use crate::seam::outputs::Output;
+) -> Vec<crate::meditation::outputs::Output> {
+    use crate::meditation::outputs::Output;
     let lines: Vec<&ToolLine> = log
         .iter()
         .filter_map(|logged| match &logged.event {
@@ -6739,7 +7047,7 @@ fn compacted_outputs(
             continue;
         };
         // A pruned result is its line, whatever was shown (#612): one an
-        // earlier seam already replaced in the tail has no line to match.
+        // earlier meditation already replaced in the tail has no line to match.
         if let Some(prune) = pruned.iter().find(|prune| prune.is(message)) {
             if let Some(at) = lines.iter().skip(cursor).position(|line| {
                 line.id == call.id && line.shown.as_deref() == Some(message.content.as_str())
@@ -6782,7 +7090,7 @@ fn compacted_outputs(
             pruned: None,
         });
     }
-    if state == log::SeamToolOutputs::Reference {
+    if state == log::MeditationToolOutputs::Reference {
         for (output, file) in outputs
             .iter_mut()
             .zip(files)
@@ -6791,7 +7099,7 @@ fn compacted_outputs(
             output.saved = Some(saved_whole(&output.shown, file, recording));
         }
     }
-    if state == log::SeamToolOutputs::Salient {
+    if state == log::MeditationToolOutputs::Salient {
         for (turn, excerpt) in read_excerpts(log) {
             let quoted = excerpt.trim();
             if let Some(output) = outputs.iter_mut().find(|output| {
@@ -6814,18 +7122,18 @@ fn saved_whole(
     shown: &str,
     file: Option<log::RecordedFile>,
     recording: Option<&std::path::Path>,
-) -> crate::seam::outputs::Saved {
+) -> crate::meditation::outputs::Saved {
     let file = file.or_else(|| {
         recording
             .and_then(|dir| super::attach::kept_whole(dir, shown.as_bytes(), "text/plain").ok())
     });
     match (file, recording) {
-        (Some(file), Some(dir)) => crate::seam::outputs::Saved {
+        (Some(file), Some(dir)) => crate::meditation::outputs::Saved {
             bytes: file.bytes,
             sha256: file.sha256,
             path: Some(dir.join(&file.path).to_string_lossy().into_owned()),
         },
-        _ => crate::seam::outputs::Saved {
+        _ => crate::meditation::outputs::Saved {
             bytes: shown.len() as u64,
             sha256: crate::digest::sha256_hex(shown.as_bytes()),
             path: None,
@@ -6868,7 +7176,7 @@ fn read_excerpts(log: &[Logged]) -> Vec<(u32, String)> {
 }
 
 /// The turn is over: back to awaiting, or on to ended; then, while
-/// awaiting, the seam the regimen's cadence or budget makes due, if working
+/// awaiting, the meditation the regimen's cadence or budget makes due, if working
 /// memory holds an entry to refill from. Not due with nothing to refill
 /// from: it stays due, and fires after the next turn that leaves an entry.
 fn turn_over(template: &RequestShape, state: &mut State) {
@@ -6876,7 +7184,7 @@ fn turn_over(template: &RequestShape, state: &mut State) {
     if state.settlement != Settlement::Awaiting {
         return;
     }
-    // No derived seam while a tangent is open (#22): its close restores the
+    // No derived meditation while a tangent is open (#22): its close restores the
     // fork point's trunk, which a refill would have replaced.
     let due = state
         .interview
@@ -6885,18 +7193,18 @@ fn turn_over(template: &RequestShape, state: &mut State) {
         .and_then(|interview| {
             interview.object.live().next()?;
             interview
-                .seams
-                .due(state.turns - state.turns_at_seam, state.trunk_tokens)
+                .meditations
+                .due(state.turns - state.turns_at_meditation, state.trunk_tokens)
                 // A prune applied as its turn settles (#612): deferred, as
-                // any derived seam is, while it cannot fire.
+                // any derived meditation is, while it cannot fire.
                 .or_else(|| {
                     (state.pruned.iter().any(|prune| !prune.applied)
-                        && interview.prune == Some(super::prune::PruneSeam::TurnEnd))
-                    .then_some(crate::seam::Reason::Prune)
+                        && interview.prune == Some(super::prune::PruneMeditation::TurnEnd))
+                    .then_some(crate::meditation::Reason::Prune)
                 })
         });
     if let Some(reason) = due {
-        seam(template, state, reason, None);
+        meditation(template, state, reason, None);
     }
 }
 
@@ -6918,14 +7226,16 @@ pub fn fork_tail(regimen: &Regimen) -> Option<u32> {
     }
 }
 
-/// A seam queued for [`seam_work`] (#504): what fired it, and the phase it
+/// A meditation queued for [`meditation_work`] (#504): what fired it, and the phase it
 /// moves to.
-struct PendingSeam {
-    reason: crate::seam::Reason,
+struct PendingMeditation {
+    reason: crate::meditation::Reason,
     to: Option<String>,
+    /// The operator's refill-anyway (#150's gate): no audit, no gate.
+    anyway: bool,
 }
 
-/// A seam's audit, fired ([`audit_fired`], #504).
+/// A meditation's audit, fired ([`audit_fired`], #504).
 struct AuditFired {
     /// The turn it audits after.
     turn: u32,
@@ -6946,8 +7256,8 @@ struct AuditFired {
 vocabulary! {
     /// What the operator ruled on the model's phase proposal (#124).
     PhaseChoice {
-        /// Start the new phase from the summary: a seam that moves to it.
-        Seam => "seam",
+        /// Start the new phase from the summary: a meditation that moves to it.
+        Meditation => "meditation",
         /// Move to the new phase and keep the trunk.
         Continue => "continue",
         /// Stay: the proposal is declined.
@@ -6968,7 +7278,7 @@ struct PendingProposal {
 /// The phase graph's ruling on a move from `from` to `to` (#563, #124),
 /// as a refusal when it refuses.
 fn graph_refusal(state: &State, to: &str) -> Option<Refusal> {
-    use crate::seam::phase::{Decision, Refusal as Graph};
+    use crate::meditation::phase::{Decision, Refusal as Graph};
     let graph = state
         .interview
         .as_ref()
@@ -7030,7 +7340,7 @@ fn estimate_of(shape: &RequestShape) -> u64 {
     shape
         .messages
         .iter()
-        .map(crate::seam::render::estimated_tokens)
+        .map(crate::meditation::render::estimated_tokens)
         .sum()
 }
 
@@ -7336,6 +7646,7 @@ fn fire<S>(
     });
     if refused {
         state.push(Event::ForkSettled {
+            trailer: None,
             fork,
             outcome: log::ForkOutcome::Refused,
             prompt_tokens: None,
@@ -7464,6 +7775,7 @@ fn one_fork<S: Streaming>(shared: &Shared<S>, forked: Fired) -> Option<Fired> {
     state.forking = None;
     let reasoning = Some(reasoning).filter(|thought| !thought.is_empty());
     let mut patches = Vec::new();
+    let mut trailer = None;
     let mut prompt_tokens = None;
     let outcome = match result {
         Ok(StreamEnded::Finished {
@@ -7504,7 +7816,10 @@ fn one_fork<S: Streaming>(shared: &Shared<S>, forked: Fired) -> Option<Fired> {
             } else if called {
                 log::ForkOutcome::Unparseable
             } else {
-                let (outcome, lines) = folded(&mut state, &text, turn, fork);
+                // What trails the last field is no field (levers run A).
+                let (fields, after) = trailed(&text);
+                trailer = after;
+                let (outcome, lines) = folded(&mut state, &fields, turn, fork);
                 patches = lines;
                 outcome
             }
@@ -7552,6 +7867,7 @@ fn one_fork<S: Streaming>(shared: &Shared<S>, forked: Fired) -> Option<Fired> {
         (None, None)
     };
     state.push(Event::ForkSettled {
+        trailer,
         fork,
         outcome,
         prompt_tokens,
@@ -7593,7 +7909,7 @@ fn captured(
 }
 
 /// [`captured`], its patches on `lane`: `interview` for a fork's, `audit`
-/// for a seam's audit's (#610).
+/// for a meditation's audit's (#610).
 fn captured_in(
     state: &mut State,
     calls: &[Call],
@@ -7624,12 +7940,18 @@ fn captured_in(
                     lane.tag().clone_into(&mut at.lane);
                     at.fork = Some(format!("f/{fork}"));
                 }
-                let entries = entries_of(&patches);
                 if patches.is_empty() {
-                    (None, entries, Vec::new())
+                    (None, Vec::new(), Vec::new())
                 } else {
                     match applied(state, &patches, fork) {
-                        (log::ForkOutcome::Value, lines) => (None, entries, lines),
+                        // The entries it wrote are its `patch` lines', not
+                        // a refused one's (#689).
+                        (log::ForkOutcome::Value, lines) => (None, written_by(&lines), lines),
+                        // Every patch refused over the operator's entry: it
+                        // says whose, and its refusals are logged (#689).
+                        (log::ForkOutcome::Decline, lines) if !lines.is_empty() => {
+                            (operator_refused(&lines), Vec::new(), lines)
+                        }
                         _ => (
                             Some("the working object refused it".to_owned()),
                             Vec::new(),
@@ -7660,6 +7982,49 @@ fn captured_in(
         log::ForkOutcome::Decline
     };
     (outcome, lines)
+}
+
+/// A fork's answer `text` cut at its last field's end (levers run A): what
+/// that field wrote after a blank line is no part of it -- a sign-off an
+/// instruction file asked of every answer, a remark -- and comes back on
+/// its own, trimmed, to be logged and recorded as no entry. A field before
+/// the last keeps its lines across a blank one, as the grammar reads them,
+/// since the next field's tag ends it; and the last keeps every line up to
+/// its first blank one. `None` when nothing trails.
+fn trailed(text: &str) -> (std::borrow::Cow<'_, str>, Option<String>) {
+    let unchanged = (std::borrow::Cow::Borrowed(text), None);
+    let Ok(answer) = crate::formats::interview::parse(text) else {
+        return unchanged;
+    };
+    let Some(last) = answer.fields.iter().rev().find(|field| field.tag.is_some()) else {
+        return unchanged;
+    };
+    let mut lines = last.raw.split('\n');
+    let _first = lines.next();
+    let mut rest = lines.skip_while(|line| !line.trim().is_empty());
+    if rest.next().is_none() {
+        return unchanged;
+    }
+    let after: Vec<&str> = rest.collect();
+    let trailer = after.join("\n").trim().to_owned();
+    if trailer.is_empty() {
+        return unchanged;
+    }
+    let first = after
+        .iter()
+        .find(|line| !line.trim().is_empty())
+        .copied()
+        .unwrap_or_default();
+    let Some(at) = text.rfind(first.trim_end()) else {
+        return unchanged;
+    };
+    // An answer the grammar read inside a fence keeps the fence's close.
+    let closing = text[at..].trim_end().strip_suffix("```").is_some();
+    let mut body = text[..at].trim_end().to_owned();
+    if closing {
+        body.push_str("\n```");
+    }
+    (std::borrow::Cow::Owned(body), Some(trailer))
 }
 
 /// The fork's answer, read by the interview grammar and folded as the
@@ -7718,8 +8083,8 @@ fn applied(state: &mut State, patches: &[Patch], fork: u64) -> (log::ForkOutcome
     let patches = kept.as_slice();
     // The entry each delivered line names, read before the patches apply:
     // a supersede's voided entry, a verdict's target. An `add` names none
-    // and is carried at the seam only (no measured sentence fits it).
-    let delivering = interview.delivery != log::ForkDelivery::Seam;
+    // and is carried at the meditation only (no measured sentence fits it).
+    let delivering = interview.delivery != log::ForkDelivery::Meditation;
     let named: Vec<(log::PatchOp, String, String)> = patches
         .iter()
         .filter(|_| delivering)
@@ -7757,7 +8122,7 @@ const SUPERSEDE_FIELD: &str = "supersede: ";
 /// `patches` with each `SUPERSEDE` field that cites a live entry of
 /// `object` made the supersession the format defines (#562): `SUPERSEDE:
 /// <id> <the entry that should stand>` voids `<id>`, linked, and records the
-/// rest under the field's own id. The seam's render shows each entry as
+/// rest under the field's own id. The meditation's render shows each entry as
 /// `<id>\t<content>`, so the id is what a model that saw it can cite; quotes,
 /// backticks and brackets around it, and a colon or dash after it, are read
 /// past. A field that cites nothing live, or names no entry to stand, stays
@@ -7786,11 +8151,8 @@ fn cited(patches: Vec<Patch>, object: &WorkingObject) -> Vec<Patch> {
             let Some(field) = content.strip_prefix(SUPERSEDE_FIELD) else {
                 return vec![patch];
             };
-            let pairs: Vec<&str> = field
-                .split(';')
-                .map(str::trim)
-                .filter(|pair| !pair.is_empty())
-                .collect();
+            let pairs = pairs_of(field, object);
+            let pairs: Vec<&str> = pairs.iter().map(String::as_str).collect();
             if pairs.len() < 2 {
                 return vec![
                     superseding(field.trim(), object, id.clone(), provenance).unwrap_or(patch),
@@ -7829,6 +8191,39 @@ fn cited(patches: Vec<Patch>, object: &WorkingObject) -> Vec<Patch> {
         }
     }
     read
+}
+
+/// A `SUPERSEDE` field's pairs (#562): `;` starts a new pair only where a
+/// live entry's id follows it -- the id a pair cites first. Elsewhere it is
+/// the prose's own, and stays in the pair it is part of (levers run A: a
+/// one-line supersede whose reason held two `;` was read as three pairs, two
+/// of them additions of its own fragments).
+fn pairs_of(field: &str, object: &WorkingObject) -> Vec<String> {
+    let quoted = |c: char| "`'\"[]()<>*:,—-".contains(c);
+    let cites = |piece: &str| {
+        let first = piece.split(char::is_whitespace).next().unwrap_or_default();
+        let first = first.split("→").next().unwrap_or_default();
+        let first = first.split("->").next().unwrap_or_default();
+        crate::object::EntryId::new(first.trim_matches(quoted))
+            .ok()
+            .is_some_and(|id| object.live().any(|entry| entry.id == id))
+    };
+    let mut pairs: Vec<String> = Vec::new();
+    for piece in field.split(';') {
+        let trimmed = piece.trim();
+        match pairs.last_mut() {
+            Some(pair) if !cites(trimmed) => {
+                pair.push(';');
+                pair.push_str(piece.trim_end());
+            }
+            _ if trimmed.is_empty() => {}
+            _ => pairs.push(trimmed.to_owned()),
+        }
+    }
+    for pair in &mut pairs {
+        *pair = pair.trim().to_owned();
+    }
+    pairs
 }
 
 /// One `SUPERSEDE` pair (#562): the cited id, then -- after whitespace, a
@@ -7977,13 +8372,7 @@ fn crashed_fork(template: &RequestShape, state: &mut State, why: String) {
             partial,
             why,
         });
-        state.push(Event::ForkSettled {
-            fork,
-            outcome: log::ForkOutcome::Failed,
-            prompt_tokens: None,
-            wall_ms: None,
-            refused: None,
-        });
+        state.push(Event::settled(fork, log::ForkOutcome::Failed));
     }
     turn_over(template, state);
 }
@@ -8773,6 +9162,119 @@ pub(in crate::drive) mod tests {
         object.apply_turn(&patches).expect("both apply");
     }
 
+    /// Levers run A's turn-2 fork answer, verbatim: its fields, then the
+    /// sign-off the worktree's AGENTS.md asks of every answer.
+    const RUN_A_T2: &str = "\n\nDECISION: Add `#anchor` validation to `linkcheck.py` for local links — GitHub-style slugs via `slugify()`/`anchors_of()` (duplicates numbered `a`, `a-1`), same-file `#anchor` supported, output format and exit codes unchanged; samples updated to show valid anchor, broken file, and broken anchor.\nPLAN: No open work; optional follow-ups only if asked — verify `[x](b.md#b \"B\")` title-with-anchor handling and decide whether headings inside fenced code blocks should be ignored.\nSUPERSEDE: NONE\n\n-- checked against AGENTS.md";
+
+    /// Levers run A's turn-7 fork answer, verbatim: a one-line SUPERSEDE
+    /// whose reason holds two `;`, then the sign-off.
+    const RUN_A_T7: &str = "\n\nDECISION: Dropped `--quiet` entirely in `linkcheck.py` — `main()` no longer filters argv for it; it takes the directory from `argv[1]` (default `.`) and always prints each broken link as `path:lineno: target`, exiting 1 if any were found. Verified: `python3 linkcheck.py docs` prints `docs/c.md:3: missing.md` and exits 1; a clean fixture dir prints nothing and exits 0. (Side effect worth noting: a stray `--quiet` argument would now be treated as a directory name.)\n\nPLAN: NONE — the change is made and verified; no further work this turn, per your note that you'll review the record yourself.\n\nSUPERSEDE: r3421/call_22baf3929b944b80b538212e/decision — its `--quiet` clause (\"main() accepts --quiet anywhere in argv (silences output…)\", \"--quiet prints nothing and exits 1 on broken / 0 on clean\") is replaced by this turn's decision: `--quiet` is gone; broken links always print. Also r4621/call_66c57752248e464cbd189810/decision — its \"–quiet kept\" clause is superseded by the same change, and its claim that anchor validation (HEADING_RE, FENCE_RE, slugify, anchors_of) was removed contradicts the file I read this turn, which still contains all of it; the entry that should stand on that point is the file's actual state.\n\n-- checked against AGENTS.md";
+
+    /// Levers run A: what trails the last field after a blank line -- the
+    /// sign-off -- is cut off and comes back on its own; `SUPERSEDE: NONE`
+    /// is then a decline and no entry, as the grammar reads it. Lines before
+    /// a blank one stay their field's.
+    #[test]
+    fn a_sign_off_after_the_last_field_is_no_field() {
+        let (fields, trailer) = trailed(RUN_A_T2);
+        assert_eq!(trailer.as_deref(), Some("-- checked against AGENTS.md"));
+        assert!(fields.trim_end().ends_with("SUPERSEDE: NONE"), "{fields}");
+        let (patches, _) =
+            super::super::fold(&fields, 2, super::super::INTERVIEW, Some("f/9")).expect("read");
+        let contents: Vec<String> = patches
+            .iter()
+            .map(|patch| match patch {
+                Patch::Add { content, .. } => content.clone(),
+                other => panic!("{other:?}"),
+            })
+            .collect();
+        assert_eq!(contents.len(), 2, "{contents:?}");
+        assert!(contents[0].starts_with("decision: Add `#anchor` validation"));
+        assert!(contents[1].starts_with("plan: No open work"));
+        // A last field's continuation line, with no blank line, is its own.
+        let (kept, none) = trailed("DECISION: first\nsecond\n");
+        assert_eq!((kept.as_ref(), none), ("DECISION: first\nsecond\n", None));
+    }
+
+    /// Levers run A, served: the fork's sign-off is on its `fork.settled`
+    /// line and in no entry; the log reads back.
+    #[test]
+    fn a_forks_sign_off_is_logged_on_its_settle_and_recorded_nowhere() {
+        let mut interview = interviewing(&[log::Warrant::Scoping]);
+        interview.asks = &crate::dogma::asks::V4;
+        let session = Session::open_with(
+            Canned::new([deltas(&[SCOPED]), deltas(&[RUN_A_T2])]),
+            template(),
+            None,
+            None,
+            None,
+            Some(interview),
+        );
+        session
+            .ask_marked("what are we building?", None, true)
+            .expect("accepted");
+        wait_until(&session, "the fork to settle", |log| {
+            settled(log) && !fork_outcomes(log).is_empty()
+        });
+        let held = live_entries(&session);
+        assert_eq!(held.len(), 2, "{held:?}");
+        assert!(
+            !held
+                .iter()
+                .any(|(_, content)| content.contains("AGENTS.md")),
+            "{held:?}"
+        );
+        let trailers: Vec<Option<String>> = whole_log(&session)
+            .iter()
+            .filter_map(|line| match &line.event {
+                log::Event::ForkSettled { trailer, .. } => Some(trailer.clone()),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(trailers, [Some("-- checked against AGENTS.md".to_owned())]);
+        reads_whole(&session);
+    }
+
+    /// Levers run A: a `;` in a SUPERSEDE's prose is the prose's -- one
+    /// pair, voiding the one entry it cites, its whole reason the entry that
+    /// stands -- and never an addition of its fragments.
+    #[test]
+    fn a_semicolon_in_a_supersedes_prose_is_no_new_pair() {
+        let object = object_of(&[
+            "r3421/call_22baf3929b944b80b538212e/decision",
+            "r4621/call_66c57752248e464cbd189810/decision",
+        ]);
+        let (fields, trailer) = trailed(RUN_A_T7);
+        assert_eq!(trailer.as_deref(), Some("-- checked against AGENTS.md"));
+        let (patches, _) =
+            super::super::fold(&fields, 7, super::super::INTERVIEW, Some("f/9")).expect("read");
+        let patches = cited(patches, &object);
+        let superseding: Vec<(&str, &str)> = patches
+            .iter()
+            .filter_map(|patch| match patch {
+                Patch::Supersede { voids, content, .. } => Some((voids.as_str(), content.as_str())),
+                _ => None,
+            })
+            .collect();
+        let [(voids, content)] = superseding.as_slice() else {
+            panic!("{patches:?}");
+        };
+        assert_eq!(*voids, "r3421/call_22baf3929b944b80b538212e/decision");
+        assert!(content.starts_with("its `--quiet` clause"), "{content}");
+        assert!(
+            content
+                .ends_with("the entry that should stand on that point is the file's actual state."),
+            "{content}"
+        );
+        assert!(
+            !patches.iter().any(|patch| matches!(
+                patch,
+                Patch::Add { content, .. } if content.starts_with("supersede: ")
+            )),
+            "{patches:?}"
+        );
+    }
+
     /// #562: `→` or `->` between the cited id and what replaces it.
     #[test]
     fn a_supersede_pair_may_point_with_an_arrow() {
@@ -8796,7 +9298,7 @@ pub(in crate::drive) mod tests {
         }
     }
 
-    /// #562, from the seam smoke run: a pair whose replacement is itself a
+    /// #562, from the meditation smoke run: a pair whose replacement is itself a
     /// live entry's id retires the cited entry in favour of it, writing no
     /// new text -- the id never becomes an entry's text.
     #[test]
@@ -8902,7 +9404,7 @@ pub(in crate::drive) mod tests {
         events
     }
 
-    /// #157, from the seam smoke runs: a whole-trunk fork's head is the
+    /// #157, from the meditation smoke runs: a whole-trunk fork's head is the
     /// trunk's, so the second fork's request -- its head moved by the turns
     /// between -- is verified against the rebuilt trunk and its move named
     /// as the trunk's are, attributed (run 1's q/2142 was named
@@ -9316,8 +9818,8 @@ pub(in crate::drive) mod tests {
         assert_eq!(session.cancel(0, None), Err(Rejected::NoSuchTurn(0)));
         assert_eq!(session.cancel(2, None), Err(Rejected::NoSuchTurn(2)));
         assert_eq!(
-            session.declare_seam(None),
-            Err(Rejected::Refused(Refusal::NothingToSeam))
+            session.declare_meditation(None),
+            Err(Rejected::Refused(Refusal::NothingToMeditate))
         );
         assert_eq!(session.end(None), Ok(()));
         assert_eq!(session.settlement(), Settlement::Ended);
@@ -9330,7 +9832,7 @@ pub(in crate::drive) mod tests {
             Err(Rejected::Refused(Refusal::Ended))
         );
         assert_eq!(
-            session.declare_seam(None),
+            session.declare_meditation(None),
             Err(Rejected::Refused(Refusal::Ended))
         );
         assert_eq!(session.end(None), Err(Rejected::Refused(Refusal::Ended)));
@@ -9355,8 +9857,8 @@ pub(in crate::drive) mod tests {
                     Settlement::Awaiting
                 ),
                 (
-                    CommandKind::DeclareSeam,
-                    Refusal::NothingToSeam,
+                    CommandKind::DeclareMeditation,
+                    Refusal::NothingToMeditate,
                     Settlement::Awaiting
                 ),
             ]
@@ -9907,6 +10409,7 @@ pub(in crate::drive) mod tests {
                 max_tokens: 8192,
             },
             Event::ForkSettled {
+                trailer: None,
                 fork: 20,
                 outcome: log::ForkOutcome::Value,
                 prompt_tokens: Some(281),
@@ -9925,11 +10428,13 @@ pub(in crate::drive) mod tests {
                 supersedes: None,
                 tangent: Some("t/1".to_owned()),
             },
-            Event::Seamed {
+            Event::Meditated {
+                newest_turn_tokens: None,
+                refilled_anyway: None,
                 operator_changes: None,
                 unaddressed: None,
                 at_turn: 1,
-                reason: crate::seam::Reason::Operator,
+                reason: crate::meditation::Reason::Operator,
                 prefix_hash_before: "c".repeat(64),
                 prefix_hash_after: "d".repeat(64),
                 render: "# regime\n".to_owned(),
@@ -9938,7 +10443,7 @@ pub(in crate::drive) mod tests {
                 carried_turns: 0,
                 carried_tokens: 0,
                 phase: None,
-                tool_outputs: log::SeamToolOutputs::Evict,
+                tool_outputs: log::MeditationToolOutputs::Evict,
                 outputs: None,
                 background: None,
                 render_budget: None,
@@ -9951,7 +10456,7 @@ pub(in crate::drive) mod tests {
                 recall: log::RecallState::Literal,
                 text: "<system-reminder>\n## Relevant memory\n</system-reminder>".to_owned(),
                 items: vec![log::RecalledItem {
-                    key: "seam-1/message-2".to_owned(),
+                    key: "compaction-1/message-2".to_owned(),
                     sha256: "f".repeat(64),
                     score: 2,
                 }],
@@ -10025,6 +10530,7 @@ pub(in crate::drive) mod tests {
                 text: "Anything you meant to record?".to_owned(),
             },
             Event::Audited {
+                after_meditation: None,
                 of_turn: 1,
                 at: 3,
                 template: crate::dogma::Template::AuditQHuman,
@@ -10046,6 +10552,11 @@ pub(in crate::drive) mod tests {
                 choice: PhaseChoice::Continue,
                 from: Some("plan".to_owned()),
                 to: "build".to_owned(),
+            },
+            Event::MeditationHeld {
+                at_turn: 2,
+                reason: crate::meditation::Reason::Operator,
+                unaddressed: vec!["interview-t1-0".to_owned()],
             },
         ];
         let mut kinds = std::collections::BTreeSet::new();
@@ -10074,7 +10585,7 @@ pub(in crate::drive) mod tests {
                 Event::Forked { .. } => 20,
                 Event::ForkSettled { .. } => 21,
                 Event::Patched { .. } => 22,
-                Event::Seamed { .. } => 23,
+                Event::Meditated { .. } => 23,
                 Event::Delivered { .. } => 24,
                 Event::Recalled { .. } => 25,
                 Event::TangentOpened { .. } => 26,
@@ -10090,9 +10601,10 @@ pub(in crate::drive) mod tests {
                 Event::PhaseRuled { .. } => 36,
                 Event::Flagged { .. } => 37,
                 Event::PatchRefused { .. } => 38,
+                Event::MeditationHeld { .. } => 39,
             });
         }
-        assert_eq!(kinds.len(), 39, "a variant has no sample");
+        assert_eq!(kinds.len(), 40, "a variant has no sample");
         events
             .into_iter()
             .enumerate()
@@ -10333,6 +10845,7 @@ pub(in crate::drive) mod tests {
                 timeout_ms: None,
             },
             log::Event::Fork {
+                after_meditation: None,
                 lane: log::Lane::Interview,
                 of_turn: 1,
                 at: 3,
@@ -10356,6 +10869,7 @@ pub(in crate::drive) mod tests {
                 max_tokens: Some(8192),
             },
             log::Event::ForkSettled {
+                trailer: None,
                 fork: 20,
                 outcome: log::ForkOutcome::Value,
                 prompt_tokens: Some(281),
@@ -10374,21 +10888,23 @@ pub(in crate::drive) mod tests {
                 supersedes: None,
                 tangent: Some("t/1".to_owned()),
             },
-            log::Event::Seam {
+            log::Event::Meditation {
+                newest_turn_tokens: None,
+                refilled_anyway: None,
                 operator_changes: None,
                 unaddressed: None,
                 at_turn: 1,
-                reason: log::SeamReason::Operator,
+                reason: log::MeditationReason::Operator,
                 prefix_hash_before: "c".repeat(64),
                 prefix_hash_after: "d".repeat(64),
-                frame: crate::seam::render::FRAME_VERSION.to_owned(),
+                frame: crate::meditation::render::FRAME_VERSION.to_owned(),
                 render: "# regime\n".to_owned(),
                 carried_entries: 1,
                 carried_turns: 0,
                 tail_tokens: None,
                 carried_tokens: None,
                 phase: None,
-                tool_outputs: Some(log::SeamToolOutputs::Evict),
+                tool_outputs: Some(log::MeditationToolOutputs::Evict),
                 outputs: None,
                 carried_outputs: None,
                 carried_output_bytes: None,
@@ -10404,7 +10920,7 @@ pub(in crate::drive) mod tests {
                 recall: log::RecallState::Literal,
                 text: "<system-reminder>\n## Relevant memory\n</system-reminder>".to_owned(),
                 items: vec![log::RecalledItem {
-                    key: "seam-1/message-2".to_owned(),
+                    key: "compaction-1/message-2".to_owned(),
                     sha256: "f".repeat(64),
                     score: 2,
                 }],
@@ -10478,10 +10994,11 @@ pub(in crate::drive) mod tests {
                 text: "Anything you meant to record?".to_owned(),
             },
             log::Event::Fork {
+                after_meditation: None,
                 lane: log::Lane::Audit,
                 of_turn: 1,
                 at: 3,
-                why: log::Warrant::Seam,
+                why: log::Warrant::Meditation,
                 question: "audit the notes".to_owned(),
                 view: None,
                 trigger: None,
@@ -10507,6 +11024,11 @@ pub(in crate::drive) mod tests {
                 choice: "continue".to_owned(),
                 from: Some("plan".to_owned()),
                 to: "build".to_owned(),
+            },
+            log::Event::MeditationHeld {
+                at_turn: 2,
+                reason: log::MeditationReason::Operator,
+                unaddressed: vec!["interview-t1-0".to_owned()],
             },
         ]
     }
@@ -10789,8 +11311,8 @@ pub(in crate::drive) mod tests {
         // gap it carried is not logged, and it stays open (ruled on #146,
         // amending D13 (c)).
         assert_eq!(
-            session.declare_seam(Some(gap(first, GapEnd::Seam))),
-            Err(Rejected::Refused(Refusal::NothingToSeam))
+            session.declare_meditation(Some(gap(first, GapEnd::Meditation))),
+            Err(Rejected::Refused(Refusal::NothingToMeditate))
         );
         assert!(
             !session
@@ -10866,7 +11388,7 @@ pub(in crate::drive) mod tests {
         // An end ends the gap too; nothing logs one after the session ended.
         assert_eq!(session.end(None), Ok(()));
         assert_eq!(
-            session.declare_seam(Some(gap(second, GapEnd::Seam))),
+            session.declare_meditation(Some(gap(second, GapEnd::Meditation))),
             Err(Rejected::Refused(Refusal::Ended))
         );
         assert!(
@@ -10973,13 +11495,13 @@ pub(in crate::drive) mod tests {
                     .map(|it| it.tag())
                     .collect::<Vec<_>>()
             ),
-            "ask cancel declare-seam end open-tangent close-tangent background ratify-phase \
-             edit-entry flag-entry"
+            "ask cancel declare-meditation end open-tangent close-tangent background ratify-phase \
+             edit-entry flag-entry refill-anyway"
         );
         assert_eq!(
             tags(&Refusal::ALL.iter().map(|it| it.tag()).collect::<Vec<_>>()),
-            "in-flight ended nothing-in-flight nothing-to-seam no-phase-graph not-a-phase \
-             already-in-phase no-phase-edge stale tangent-open no-tangent bad-tangent not-the-scope nothing-running no-proposal unknown-entry not-live empty"
+            "in-flight ended nothing-in-flight nothing-to-meditate no-phase-graph not-a-phase \
+             already-in-phase no-phase-edge stale tangent-open no-tangent bad-tangent not-the-scope nothing-running no-proposal unknown-entry not-live empty meditation-held nothing-held"
         );
         assert_eq!(
             tags(
@@ -13238,9 +13760,9 @@ pub(in crate::drive) mod tests {
         Interview {
             rules: rules.to_vec(),
             object: WorkingObject::open(regime()),
-            seams: crate::seam::policy::Served::default(),
-            delivery: log::ForkDelivery::Seam,
-            phases: crate::seam::phase::PhaseGraph::none(),
+            meditations: crate::meditation::policy::Served::default(),
+            delivery: log::ForkDelivery::Meditation,
+            phases: crate::meditation::phase::PhaseGraph::none(),
             recall: super::super::archive::Recall::Off,
             role: Role::User,
             view: None,
@@ -13257,14 +13779,14 @@ pub(in crate::drive) mod tests {
     }
 
     /// A session whose scoping fork leaves three decisions in working memory
-    /// and whose seams `shape_it` configures, playing `rest` after the turn
+    /// and whose meditations `shape_it` configures, playing `rest` after the turn
     /// and its fork (#504); the log once the fork settled.
     fn three_decisions_then(
-        shape_it: impl FnOnce(&mut crate::seam::policy::Served),
+        shape_it: impl FnOnce(&mut crate::meditation::policy::Served),
         rest: Vec<Vec<Step>>,
     ) -> Session<Canned> {
         let mut interview = interviewing(&[log::Warrant::Scoping]);
-        shape_it(&mut interview.seams);
+        shape_it(&mut interview.meditations);
         let mut acts = vec![deltas(&[SCOPED]), deltas(&[DECIDED])];
         acts.extend(rest);
         let session = Session::open_with(
@@ -13284,9 +13806,9 @@ pub(in crate::drive) mod tests {
         session
     }
 
-    fn seamed(log: &[Logged]) -> bool {
+    fn meditated(log: &[Logged]) -> bool {
         log.iter()
-            .any(|logged| matches!(logged.event, Event::Seamed { .. }))
+            .any(|logged| matches!(logged.event, Event::Meditated { .. }))
             && log.last().is_some_and(|logged| {
                 !matches!(
                     logged.event,
@@ -13298,14 +13820,158 @@ pub(in crate::drive) mod tests {
             })
     }
 
-    /// A background command still running at a seam (#614) is listed after
+    /// #150's definition of done, item 2, under `reconcile_gate = "refuse"`:
+    /// the operator flags an entry and the model's audit answer ignores it
+    /// -- two lines for three notes, so no note is addressed. The meditation
+    /// re-asks the same reconciling ask once, over the flagged note alone;
+    /// that answer ignores it too, so the meditation holds, names the flag, and
+    /// refills nothing. An ask is refused while it holds. The operator's
+    /// refill anyway refills, carries the flag unaddressed, and is logged on
+    /// the meditation line; the log reads back and the record reads back.
+    #[test]
+    fn under_the_refuse_gate_an_ignored_flag_is_re_asked_once_then_held_until_refilled_anyway() {
+        let session = three_decisions_then(
+            |meditations| {
+                meditations.audit = true;
+                meditations.reconcile_gate = crate::meditation::policy::ReconcileGate::Refuse;
+            },
+            vec![deltas(&["1. KEEP\n2. KEEP\n"]), deltas(&["nothing to say"])],
+        );
+        let flagged = live_entries(&session)[0].0.clone();
+        session.flag_entry(&flagged, "still so?").expect("a flag");
+        session.declare_meditation(None).expect("admitted");
+        let log = wait_until(&session, "the hold", |log| {
+            log.iter()
+                .any(|logged| matches!(logged.event, Event::MeditationHeld { .. }))
+        });
+        // Asked twice, the second time over the flagged note alone, in the
+        // approved reconciling words.
+        let asked: Vec<(crate::dogma::Template, String)> = log
+            .iter()
+            .filter_map(|logged| match &logged.event {
+                Event::Audited {
+                    template, question, ..
+                } => Some((*template, question.clone())),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(asked.len(), 2, "{asked:?}");
+        assert!(
+            asked
+                .iter()
+                .all(|(template, _)| *template == crate::dogma::Template::AuditQHumanReconcile)
+        );
+        assert!(asked[1].1.contains("Output 1 lines"), "{}", asked[1].1);
+        assert!(
+            asked[1].1.ends_with(" [flagged: still so?]"),
+            "{}",
+            asked[1].1
+        );
+        assert!(
+            log.iter().any(|logged| matches!(
+                &logged.event,
+                Event::MeditationHeld { unaddressed, .. } if *unaddressed == [flagged.clone()]
+            )),
+            "held, naming the flag"
+        );
+        assert!(
+            !log.iter()
+                .any(|logged| matches!(logged.event, Event::Meditated { .. }))
+        );
+        assert_eq!(session.settlement(), Settlement::Awaiting);
+        assert_eq!(
+            session.ask("go on", None),
+            Err(Rejected::Refused(Refusal::MeditationHeld))
+        );
+        session.refill_anyway().expect("refilled anyway");
+        let log = wait_until(&session, "the refill", meditated);
+        assert_eq!(
+            every_carried(&log),
+            [(
+                Some(vec![log::OperatorChange {
+                    entry: flagged.clone(),
+                    kind: "flag".to_owned(),
+                }]),
+                Some(vec![flagged.clone()])
+            )]
+        );
+        assert!(log.iter().any(|logged| matches!(
+            logged.event,
+            Event::Meditated {
+                refilled_anyway: Some(true),
+                ..
+            }
+        )));
+        assert_eq!(
+            session.refill_anyway(),
+            Err(Rejected::Refused(Refusal::NothingHeld))
+        );
+        reads_whole(&session);
+        record_read_back(&session);
+    }
+
+    /// The same session under `reconcile_gate = "carry"`, the default: one
+    /// audit, the seam refills, and the flag is recorded `unaddressed`.
+    #[test]
+    fn under_the_carry_gate_an_ignored_flag_refills_and_is_recorded_unaddressed() {
+        let session = three_decisions_then(
+            |meditations| meditations.audit = true,
+            vec![deltas(&["1. KEEP\n2. KEEP\n"])],
+        );
+        let flagged = live_entries(&session)[0].0.clone();
+        session.flag_entry(&flagged, "still so?").expect("a flag");
+        session.declare_meditation(None).expect("admitted");
+        let log = wait_until(&session, "the meditation", meditated);
+        assert_eq!(audited_templates(&log).len(), 1);
+        assert!(
+            !log.iter()
+                .any(|logged| matches!(logged.event, Event::MeditationHeld { .. }))
+        );
+        assert_eq!(
+            every_carried(&log),
+            [(
+                Some(vec![log::OperatorChange {
+                    entry: flagged.clone(),
+                    kind: "flag".to_owned(),
+                }]),
+                Some(vec![flagged])
+            )]
+        );
+        reads_whole(&session);
+    }
+
+    /// Under `refuse`, a re-ask that addresses the change refills: the
+    /// gate holds only what stays unaddressed.
+    #[test]
+    fn under_the_refuse_gate_a_re_ask_that_addresses_the_change_refills() {
+        let session = three_decisions_then(
+            |meditations| {
+                meditations.audit = true;
+                meditations.reconcile_gate = crate::meditation::policy::ReconcileGate::Refuse;
+            },
+            vec![deltas(&["1. KEEP\n2. KEEP\n"]), deltas(&["1. KEEP\n"])],
+        );
+        let flagged = live_entries(&session)[0].0.clone();
+        session.flag_entry(&flagged, "still so?").expect("a flag");
+        session.declare_meditation(None).expect("admitted");
+        let log = wait_until(&session, "the meditation", meditated);
+        assert_eq!(audited_templates(&log).len(), 2);
+        assert!(
+            !log.iter()
+                .any(|logged| matches!(logged.event, Event::MeditationHeld { .. }))
+        );
+        assert_eq!(every_carried(&log)[0].1, Some(Vec::new()));
+        record_read_back(&session);
+    }
+
+    /// A background command still running at a meditation (#614) is listed after
     /// the refill's outputs -- its id, its command and its output file --
     /// with whether it printed anything since it started, then since the
-    /// last seam that listed it; a job no longer running is not listed, and
-    /// every head rebuilds from the seam's `background`.
+    /// last meditation that listed it; a job no longer running is not listed, and
+    /// every head rebuilds from the meditation's `background`.
     #[test]
-    fn a_seam_lists_each_background_command_still_running() {
-        let dir = scratch("bg-seam");
+    fn a_meditation_lists_each_background_command_still_running() {
+        let dir = scratch("bg-meditation");
         let session = three_decisions_then(|_| {}, Vec::new());
         let output = dir.join("shell-bg_0123abcd.output");
         std::fs::write(&output, "").expect("the output file");
@@ -13331,7 +13997,7 @@ pub(in crate::drive) mod tests {
         let backgrounds = |log: &[Logged]| -> Vec<Option<String>> {
             log.iter()
                 .filter_map(|logged| match &logged.event {
-                    Event::Seamed { background, .. } => Some(background.clone()),
+                    Event::Meditated { background, .. } => Some(background.clone()),
                     _ => None,
                 })
                 .collect()
@@ -13346,8 +14012,8 @@ pub(in crate::drive) mod tests {
                 output.display()
             )
         };
-        session.declare_seam(None).expect("admitted");
-        let log = wait_until(&session, "the first seam", |log| {
+        session.declare_meditation(None).expect("admitted");
+        let log = wait_until(&session, "the first meditation", |log| {
             backgrounds(log).len() == 1
         });
         assert_eq!(backgrounds(&log), [Some(row("no output since it started"))]);
@@ -13357,8 +14023,8 @@ pub(in crate::drive) mod tests {
             refill.ends_with(&row("no output since it started")),
             "{refill}"
         );
-        session.declare_seam(None).expect("admitted");
-        let log = wait_until(&session, "the second seam", |log| {
+        session.declare_meditation(None).expect("admitted");
+        let log = wait_until(&session, "the second meditation", |log| {
             backgrounds(log).len() == 2
         });
         assert_eq!(
@@ -13366,8 +14032,8 @@ pub(in crate::drive) mod tests {
             Some(row("no new output since the last compaction"))
         );
         std::fs::write(&output, "Serving HTTP on :: port 8765\n").expect("its output");
-        session.declare_seam(None).expect("admitted");
-        let log = wait_until(&session, "the third seam", |log| {
+        session.declare_meditation(None).expect("admitted");
+        let log = wait_until(&session, "the third meditation", |log| {
             backgrounds(log).len() == 3
         });
         assert_eq!(
@@ -13375,8 +14041,8 @@ pub(in crate::drive) mod tests {
             Some(row("new output since the last compaction"))
         );
         session.shared.lock().jobs.clear();
-        session.declare_seam(None).expect("admitted");
-        let log = wait_until(&session, "the fourth seam", |log| {
+        session.declare_meditation(None).expect("admitted");
+        let log = wait_until(&session, "the fourth meditation", |log| {
             backgrounds(log).len() == 4
         });
         assert_eq!(
@@ -13389,22 +14055,22 @@ pub(in crate::drive) mod tests {
         tidy(&[&dir]);
     }
 
-    /// #504: with the audit on, an operator's seam puts the dogma's pinned
+    /// #504: with the audit on, an operator's meditation puts the dogma's pinned
     /// ask over the three notes on the `audit` lane, off the warm trunk;
     /// its answer -- one line per note -- folds before the refill: `KEEP`
     /// leaves a note, `UPDATE` supersedes it, `REMOVE` retires it. The audit
     /// is a fork line, a request, an answer, a settling and its patches, the
-    /// seam's line after them, and the log reads back and projects.
+    /// meditation's line after them, and the log reads back and projects.
     #[test]
-    fn an_audited_seam_folds_its_answer_before_the_refill() {
+    fn an_audited_meditation_folds_its_answer_before_the_refill() {
         let session = three_decisions_then(
-            |seams| seams.audit = true,
+            |meditations| meditations.audit = true,
             vec![deltas(&[
                 "1. KEEP\n2. UPDATE: for the one team that files bugs\n3. REMOVE — they asked for logins after all\n",
             ])],
         );
-        session.declare_seam(None).expect("admitted");
-        let log = wait_until(&session, "the seam", seamed);
+        session.declare_meditation(None).expect("admitted");
+        let log = wait_until(&session, "the meditation", meditated);
         let audited = log
             .iter()
             .find_map(|logged| match &logged.event {
@@ -13428,12 +14094,12 @@ pub(in crate::drive) mod tests {
             logged.event,
             Event::ForkSettled { fork, outcome: log::ForkOutcome::Value, .. } if fork == audited.0
         )));
-        let seam_at = log
+        let meditation_at = log
             .iter()
-            .find(|logged| matches!(logged.event, Event::Seamed { .. }))
-            .expect("the seam")
+            .find(|logged| matches!(logged.event, Event::Meditated { .. }))
+            .expect("the meditation")
             .seq;
-        assert!(audited.0 < seam_at);
+        assert!(audited.0 < meditation_at);
         let live: std::collections::BTreeSet<String> = session
             .shared
             .lock()
@@ -13475,7 +14141,7 @@ pub(in crate::drive) mod tests {
         // The fork's first decision's id, as the fold names it.
         let settled_id = "interview-t1-0".to_owned();
         let session = three_decisions_then(
-            |seams| seams.audit = true,
+            |meditations| meditations.audit = true,
             vec![vec![
                 Step::Delta("Settling one.".to_owned()),
                 Step::call(
@@ -13497,8 +14163,8 @@ pub(in crate::drive) mod tests {
             interview.capture = crate::dogma::asks::Modality::Tools;
             interview.self_capture = Some(crate::capture::tools::Cadence::DEFAULT);
         }
-        session.declare_seam(None).expect("admitted");
-        let log = wait_until(&session, "the seam", seamed);
+        session.declare_meditation(None).expect("admitted");
+        let log = wait_until(&session, "the meditation", meditated);
         let (fork, question) = log
             .iter()
             .find_map(|logged| match &logged.event {
@@ -13516,7 +14182,7 @@ pub(in crate::drive) mod tests {
             crate::dogma::audits::T1
                 .fill(
                     crate::dogma::Template::AuditQHuman,
-                    crate::seam::AUDIT_CATEGORY,
+                    crate::meditation::AUDIT_CATEGORY,
                     &listing
                 )
                 .expect("the ask")
@@ -13584,9 +14250,9 @@ pub(in crate::drive) mod tests {
         );
     }
 
-    /// #150's refill: both changes the seam carried, marked.
+    /// #150's refill: both changes the meditation carried, marked.
     fn the_refill_marks_them(session: &Session<Canned>, operator: &str) {
-        // The refill marks the changes the seam carried.
+        // The refill marks the changes the meditation carried.
         let refill = refill_of(session);
         let edited_line = format!(
             "{operator}\tdecision: for the one team that files bugs [edited by the operator]\n"
@@ -13598,14 +14264,14 @@ pub(in crate::drive) mod tests {
         );
     }
 
-    /// A seam's operator changes and the entries it left unaddressed.
+    /// A meditation's operator changes and the entries it left unaddressed.
     type Carried = (Option<Vec<log::OperatorChange>>, Option<Vec<String>>);
 
-    /// Each seam's operator changes and the entries it left unaddressed.
+    /// Each meditation's operator changes and the entries it left unaddressed.
     fn every_carried(log: &[Logged]) -> Vec<Carried> {
         log.iter()
             .filter_map(|logged| match &logged.event {
-                Event::Seamed {
+                Event::Meditated {
                     operator_changes,
                     unaddressed,
                     ..
@@ -13630,28 +14296,28 @@ pub(in crate::drive) mod tests {
         session.trunk()[template().messages.len()].content.clone()
     }
 
-    /// A wait for `n` seams.
-    fn seams_logged(n: usize) -> impl Fn(&[Logged]) -> bool {
+    /// A wait for `n` meditations.
+    fn meditations_logged(n: usize) -> impl Fn(&[Logged]) -> bool {
         move |log| {
             log.iter()
-                .filter(|logged| matches!(logged.event, Event::Seamed { .. }))
+                .filter(|logged| matches!(logged.event, Event::Meditated { .. }))
                 .count()
                 == n
         }
     }
 
-    /// The seam's operator changes and the entries it left unaddressed.
+    /// The meditation's operator changes and the entries it left unaddressed.
     fn carried(log: &[Logged]) -> Carried {
         log.iter()
             .find_map(|logged| match &logged.event {
-                Event::Seamed {
+                Event::Meditated {
                     operator_changes,
                     unaddressed,
                     ..
                 } => Some((operator_changes.clone(), unaddressed.clone())),
                 _ => None,
             })
-            .expect("the seam")
+            .expect("the meditation")
     }
 
     /// #150: the operator edits one decision -- a new entry, on the
@@ -13659,13 +14325,13 @@ pub(in crate::drive) mod tests {
     /// of an entry gone or unknown, or with nothing to say, are refused. The
     /// audit's answer that would rewrite the operator's entry is refused per
     /// patch and the rest of the fold goes on. The audit is the reconciling
-    /// ask, each change marked on its note; its answer parsed, so the seam
+    /// ask, each change marked on its note; its answer parsed, so the meditation
     /// records both changes as carried and addressed, and the refill marks
     /// them too.
     #[test]
-    fn the_operators_edits_and_flags_are_theirs_and_a_seam_carries_them() {
+    fn the_operators_edits_and_flags_are_theirs_and_a_meditation_carries_them() {
         let session = three_decisions_then(
-            |seams| seams.audit = true,
+            |meditations| meditations.audit = true,
             vec![deltas(&[
                 "1. KEEP\n2. UPDATE: the model's own take\n3. UPDATE: a model rewrite of the operator's note\n",
             ])],
@@ -13709,8 +14375,8 @@ pub(in crate::drive) mod tests {
                 .by_operator(&crate::object::EntryId::new(&operator).expect("an id"))
         );
 
-        session.declare_seam(None).expect("admitted");
-        let log = wait_until(&session, "the seam", seamed);
+        session.declare_meditation(None).expect("admitted");
+        let log = wait_until(&session, "the meditation", meditated);
         // The audit listed the operator's entry third, marked, and the
         // flagged one first, marked with the flag's note, in the reconciling
         // ask; its UPDATE of the operator's entry is refused, and the UPDATE
@@ -13764,13 +14430,13 @@ pub(in crate::drive) mod tests {
     }
 
     /// #150: an audit whose answer does not parse addresses nothing -- both
-    /// changes carried and left open, still marked -- and the next seam's
-    /// reconciling audit, parsed, addresses them; the seam after that carries
+    /// changes carried and left open, still marked -- and the next meditation's
+    /// reconciling audit, parsed, addresses them; the meditation after that carries
     /// none and asks the trigger's own ask again.
     #[test]
-    fn an_unparsed_audit_leaves_the_changes_open_for_the_next_seam() {
+    fn an_unparsed_audit_leaves_the_changes_open_for_the_next_meditation() {
         let session = three_decisions_then(
-            |seams| seams.audit = true,
+            |meditations| meditations.audit = true,
             vec![
                 deltas(&["not an audit"]),
                 deltas(&["the next answer"]),
@@ -13800,8 +14466,8 @@ pub(in crate::drive) mod tests {
                 kind: "flag".to_owned(),
             },
         ]);
-        session.declare_seam(None).expect("admitted");
-        let log = wait_until(&session, "seam one", seams_logged(1));
+        session.declare_meditation(None).expect("admitted");
+        let log = wait_until(&session, "meditation one", meditations_logged(1));
         assert_eq!(
             every_carried(&log),
             [(
@@ -13815,15 +14481,15 @@ pub(in crate::drive) mod tests {
         wait_until(&session, "turn two", |log: &[Logged]| {
             turns_settled(log) == 2
         });
-        session.declare_seam(None).expect("admitted");
-        let log = wait_until(&session, "seam two", seams_logged(2));
+        session.declare_meditation(None).expect("admitted");
+        let log = wait_until(&session, "meditation two", meditations_logged(2));
         assert_eq!(every_carried(&log)[1], (changes, Some(Vec::new())));
         session.ask("and on", None).expect("accepted");
         wait_until(&session, "turn three", |log: &[Logged]| {
             turns_settled(log) == 3
         });
-        session.declare_seam(None).expect("admitted");
-        let log = wait_until(&session, "seam three", seams_logged(3));
+        session.declare_meditation(None).expect("admitted");
+        let log = wait_until(&session, "meditation three", meditations_logged(3));
         assert_eq!(every_carried(&log)[2], (None, None));
         assert_eq!(
             audited_templates(&log),
@@ -13836,25 +14502,86 @@ pub(in crate::drive) mod tests {
         let refill = refill_of(&session);
         assert!(!refill.contains(" [edited by the operator]"), "{refill}");
         reads_whole(&session);
-        let lines: Vec<log::Line> = session.events_from(0).iter().map(line_of).collect();
-        super::super::projection::project(&lines, &regime(), None).expect("the log projects");
+        // #688: the record reads back; the meditation that addressed both carries
+        // them and no `unaddressed`, the one before both.
+        let rows: Vec<(Option<usize>, Option<usize>)> = record_read_back(&session)
+            .into_iter()
+            .filter_map(|row| match row {
+                crate::formats::record::Event::Meditation {
+                    operator_changes,
+                    unaddressed,
+                    ..
+                } => Some((
+                    operator_changes.map(|changes| changes.len()),
+                    unaddressed.map(|left| left.len()),
+                )),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(rows, [(Some(2), Some(2)), (Some(2), None), (None, None)]);
     }
 
-    /// #654's seam smoke run 2: a session with the audit on and two seams --
+    /// Track 5's gate-and-tail run: the operator flags an entry after a
+    /// meditation's refill and declares the meditation again with no turn between, to
+    /// reconcile it. The second meditation's audit is cut from the first's refill
+    /// -- the trunk the session holds -- and its fork line says so,
+    /// `after_meditation` naming that meditation; the log reads back (the run's log was
+    /// refused: "a fork of turn 1 after a meditation that followed it") and so does
+    /// the record.
+    #[test]
+    fn a_meditation_right_after_a_meditation_audits_the_refill_and_says_so() {
+        let session = three_decisions_then(
+            |meditations| meditations.audit = true,
+            vec![
+                deltas(&["1. KEEP\n2. KEEP\n3. KEEP\n"]),
+                deltas(&["1. KEEP\n2. KEEP\n3. KEEP\n"]),
+            ],
+        );
+        session.declare_meditation(None).expect("admitted");
+        wait_until(&session, "meditation one", meditations_logged(1));
+        let flagged = live_entries(&session)[0].0.clone();
+        session.flag_entry(&flagged, "still so?").expect("a flag");
+        session.declare_meditation(None).expect("admitted");
+        let log = wait_until(&session, "meditation two", meditations_logged(2));
+        let first_meditation = log
+            .iter()
+            .find(|logged| matches!(logged.event, Event::Meditated { .. }))
+            .expect("meditation one")
+            .seq;
+        let audits: Vec<Option<u64>> = log
+            .iter()
+            .filter_map(|logged| match &logged.event {
+                Event::Audited {
+                    after_meditation, ..
+                } => Some(*after_meditation),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(audits, [None, Some(first_meditation)]);
+        assert_eq!(
+            every_carried(&log)[1].1,
+            Some(Vec::new()),
+            "the flag addressed"
+        );
+        reads_whole(&session);
+        record_read_back(&session);
+    }
+
+    /// #654's meditation smoke run 2: a session with the audit on and two meditations --
     /// two requests on the `audit` lane, the trunk moved between them --
     /// writes a record that reads back, the audit lane's move named.
     #[test]
-    fn two_audited_seams_write_a_record_that_reads_back() {
+    fn two_audited_meditations_write_a_record_that_reads_back() {
         let session = three_decisions_then(
-            |seams| seams.audit = true,
+            |meditations| meditations.audit = true,
             vec![
                 deltas(&["1. KEEP\n2. KEEP\n3. KEEP\n"]),
                 deltas(&["the next answer"]),
                 deltas(&["1. KEEP\n2. KEEP\n3. KEEP\n"]),
             ],
         );
-        session.declare_seam(None).expect("admitted");
-        wait_until(&session, "seam one", seamed);
+        session.declare_meditation(None).expect("admitted");
+        wait_until(&session, "meditation one", meditated);
         session.ask("go on", None).expect("accepted");
         wait_until(&session, "turn two", |log| {
             log.iter()
@@ -13862,13 +14589,13 @@ pub(in crate::drive) mod tests {
                 .count()
                 == 2
         });
-        session.declare_seam(None).expect("admitted");
-        let log = wait_until(&session, "seam two", |log| {
+        session.declare_meditation(None).expect("admitted");
+        let log = wait_until(&session, "meditation two", |log| {
             log.iter()
-                .filter(|logged| matches!(logged.event, Event::Seamed { .. }))
+                .filter(|logged| matches!(logged.event, Event::Meditated { .. }))
                 .count()
                 == 2
-                && seamed(log)
+                && meditated(log)
         });
         let audits: Vec<String> = log
             .iter()
@@ -13895,13 +14622,16 @@ pub(in crate::drive) mod tests {
     }
 
     /// #504: an answer that is not the ask's audit -- prose, or a line short
-    /// -- folds nothing and settles `unparseable`; the seam goes on.
+    /// -- folds nothing and settles `unparseable`; the meditation goes on.
     #[test]
-    fn an_audit_answer_not_in_the_grammar_folds_nothing_and_the_seam_goes_on() {
+    fn an_audit_answer_not_in_the_grammar_folds_nothing_and_the_meditation_goes_on() {
         for answer in ["All three look fine to me.", "1. KEEP\n2. KEEP\n"] {
-            let session = three_decisions_then(|seams| seams.audit = true, vec![deltas(&[answer])]);
-            session.declare_seam(None).expect("admitted");
-            let log = wait_until(&session, "the seam", seamed);
+            let session = three_decisions_then(
+                |meditations| meditations.audit = true,
+                vec![deltas(&[answer])],
+            );
+            session.declare_meditation(None).expect("admitted");
+            let log = wait_until(&session, "the meditation", meditated);
             assert!(
                 log.iter().any(|logged| matches!(
                     logged.event,
@@ -13927,12 +14657,12 @@ pub(in crate::drive) mod tests {
         }
     }
 
-    /// #504: with the pre-warm on, a seam sends its refilled trunk once with
+    /// #504: with the pre-warm on, a meditation sends its refilled trunk once with
     /// an output cap of one, and its line carries the warm's timings.
     #[test]
-    fn a_warmed_seam_sends_the_refilled_trunk_once_and_logs_its_timings() {
+    fn a_warmed_meditation_sends_the_refilled_trunk_once_and_logs_its_timings() {
         let session = three_decisions_then(
-            |seams| seams.warm = true,
+            |meditations| meditations.warm = true,
             vec![vec![
                 Step::Delta("x".to_owned()),
                 Step::Timings(Timings {
@@ -13941,15 +14671,15 @@ pub(in crate::drive) mod tests {
                 }),
             ]],
         );
-        session.declare_seam(None).expect("admitted");
-        let log = wait_until(&session, "the seam", seamed);
+        session.declare_meditation(None).expect("admitted");
+        let log = wait_until(&session, "the meditation", meditated);
         let warm = log
             .iter()
             .find_map(|logged| match &logged.event {
-                Event::Seamed { warm, .. } => Some(warm.clone()),
+                Event::Meditated { warm, .. } => Some(warm.clone()),
                 _ => None,
             })
-            .expect("the seam");
+            .expect("the meditation");
         assert_eq!(warm.and_then(|timings| timings.prompt_n), Some(412));
         let sent = session.shared.transport.sent();
         let warmed = sent.last().expect("the warm");
@@ -13958,16 +14688,16 @@ pub(in crate::drive) mod tests {
         reads_whole(&session);
     }
 
-    /// #504: an ask while the warm is in flight cancels it: the seam stands,
+    /// #504: an ask while the warm is in flight cancels it: the meditation stands,
     /// logged without the warm's timings, and the ask is admitted.
     #[test]
-    fn an_ask_cancels_the_warm_and_the_seam_stands() {
+    fn an_ask_cancels_the_warm_and_the_meditation_stands() {
         let gate = Gate::new();
         let session = three_decisions_then(
-            |seams| seams.warm = true,
+            |meditations| meditations.warm = true,
             vec![vec![Step::Hold(gate.clone())], deltas(&["next answer"])],
         );
-        session.declare_seam(None).expect("admitted");
+        session.declare_meditation(None).expect("admitted");
         assert!(gate.wait_for_a_waiter(Duration::from_secs(10)));
         session
             .ask("next", None)
@@ -13980,7 +14710,7 @@ pub(in crate::drive) mod tests {
         });
         assert!(
             log.iter()
-                .any(|logged| matches!(logged.event, Event::Seamed { warm: None, .. }))
+                .any(|logged| matches!(logged.event, Event::Meditated { warm: None, .. }))
         );
         reads_whole(&session);
     }
@@ -14277,14 +15007,14 @@ pub(in crate::drive) mod tests {
     /// The fork delivery lever: patches waiting at the next ask are one
     /// note after it, each line the (b′) sentence of the session's framing,
     /// logged as `delivered`; the note stays on the trunk for the turns
-    /// after. Under `seam`, nothing is delivered.
+    /// after. Under `meditation`, nothing is delivered.
     #[test]
     #[allow(clippy::too_many_lines)]
     fn a_delivered_note_follows_the_ask_and_stays_on_the_trunk() {
         for (delivery, template_name) in [
             (log::ForkDelivery::Advisory, "FORK_NOTE_ADVISORY"),
             (log::ForkDelivery::Imperative, "FORK_NOTE_IMPERATIVE"),
-            (log::ForkDelivery::Seam, ""),
+            (log::ForkDelivery::Meditation, ""),
         ] {
             let mut interview = interviewing(&[]);
             interview.delivery = delivery;
@@ -14326,7 +15056,7 @@ pub(in crate::drive) mod tests {
                 .map(|logged| &logged.event)
                 .filter(|event| matches!(event, Event::Delivered { .. }))
                 .collect();
-            if delivery == log::ForkDelivery::Seam {
+            if delivery == log::ForkDelivery::Meditation {
                 assert!(delivered.is_empty(), "{delivered:?}");
                 assert_eq!(sent[0].messages.last(), Some(&user("go")));
                 continue;
@@ -14391,7 +15121,7 @@ pub(in crate::drive) mod tests {
     }
 
     /// An `add` names no existing entry, and no measured sentence fits it:
-    /// under a mid-turn delivery it is still carried at the seam only.
+    /// under a mid-turn delivery it is still carried at the meditation only.
     fn from_fork(index: u32) -> crate::object::Provenance {
         crate::object::Provenance {
             turn: 1,
@@ -14483,7 +15213,10 @@ pub(in crate::drive) mod tests {
             .collect();
         let (outcome, _) = applied(&mut state, &seeds, 1);
         assert_eq!(outcome, log::ForkOutcome::Value);
-        assert!(state.undelivered.is_empty(), "an add waits for the seam");
+        assert!(
+            state.undelivered.is_empty(),
+            "an add waits for the meditation"
+        );
         let ops = vec![
             Patch::Supersede {
                 id: entry_id("next-a"),
@@ -15011,6 +15744,81 @@ pub(in crate::drive) mod tests {
         );
     }
 
+    /// #598: a session primes only when it forks under a set that primes --
+    /// t2 -- and the priming follows the system prompt after a blank line,
+    /// once; v3, v4 and t1 never prime.
+    #[test]
+    fn a_session_is_primed_only_when_it_forks_under_t2() {
+        let read = |text: &str| priming(&regimen::parse(text).expect("a regimen"));
+        let forks = "interview_warrant = [\"scoping\"]\n";
+        assert_eq!(
+            read(&format!("fork_asks = \"t2\"\n{forks}")),
+            crate::dogma::asks::T2.priming()
+        );
+        assert!(crate::dogma::asks::T2.priming().is_some());
+        assert_eq!(read("fork_asks = \"t2\"\n"), None, "no fork, no priming");
+        for set in ["v3", "v4", "t1"] {
+            assert_eq!(
+                read(&format!("fork_asks = \"{set}\"\n{forks}")),
+                None,
+                "{set}"
+            );
+        }
+        assert_eq!(read(forks), None, "the default set does not prime");
+        assert_eq!(
+            primed("the head\n", Some("the priming\n")),
+            "the head\n\nthe priming"
+        );
+        assert_eq!(primed("the head", None), "the head");
+    }
+
+    /// #598: a primed session's system prompt is the same bytes on every
+    /// request it sends, the trunk's and its forks', from the first to the
+    /// last: the priming is never added, moved or changed mid-session.
+    #[test]
+    fn a_primed_sessions_system_prompt_is_unchanged_across_the_session() {
+        let system = primed(HEAD, crate::dogma::asks::T2.priming());
+        let mut shape = template();
+        shape.messages = vec![Message::new(Role::System, system.clone())];
+        let mut interview = interviewing(&[log::Warrant::Scoping]);
+        interview.self_capture = Some(crate::capture::tools::Cadence::DEFAULT);
+        interview.capture = crate::dogma::asks::Modality::Tools;
+        interview.asks = &crate::dogma::asks::T2;
+        declare_self_capture(&mut shape, Some(&interview));
+        let session = Session::open_with(
+            Canned::new([
+                deltas(&[SCOPED]),
+                deltas(&["nothing to record"]),
+                deltas(&["second answer"]),
+                deltas(&["nothing again"]),
+            ]),
+            shape,
+            None,
+            None,
+            None,
+            Some(interview),
+        );
+        for ask in ["what are we building?", "and then?"] {
+            session.ask_marked(ask, None, true).expect("accepted");
+            wait_until(&session, "the fork to settle", |log| {
+                settled(log) && !fork_outcomes(log).is_empty()
+            });
+        }
+        let sent = session.shared.transport.sent();
+        assert!(sent.len() >= 3, "{} requests", sent.len());
+        for request in &sent {
+            assert_eq!(request.messages[0].role, Role::System);
+            assert_eq!(request.messages[0].content, system);
+        }
+        assert!(system.ends_with("it is not a new request from the operator."));
+        let fork_ask = sent
+            .iter()
+            .filter_map(|request| request.messages.last())
+            .find(|message| message.content.starts_with("<interview>\n"))
+            .expect("a fork's ask in the tags");
+        assert!(fork_ask.content.trim_end().ends_with("</interview>"));
+    }
+
     /// #595: the set is read from the regimen leniently, v3 by default.
     #[test]
     fn the_fork_ask_set_is_read_leniently_and_defaults_to_v3() {
@@ -15127,7 +15935,7 @@ pub(in crate::drive) mod tests {
         assert_eq!(session.trunk(), fork_point, "rolled back to the fork point");
         let held = session.shared.lock();
         let object = &held.interview.as_ref().expect("interviewing").object;
-        let render = crate::seam::render::render(object, None);
+        let render = crate::meditation::render::render(object, None);
         for kept in [
             "interview-t2-0\tdecision: one",
             "interview-t2-3\tdecision: four",
@@ -15224,13 +16032,13 @@ pub(in crate::drive) mod tests {
         ));
     }
 
-    /// #22: a seam while a tangent is open is refused `tangent-open`, as is
+    /// #22: a meditation while a tangent is open is refused `tangent-open`, as is
     /// a second tangent.
     #[test]
-    fn a_seam_or_a_second_tangent_while_one_is_open_is_refused() {
+    fn a_meditation_or_a_second_tangent_while_one_is_open_is_refused() {
         let (session, _) = a_tangent_with_four_entries();
         assert!(matches!(
-            session.declare_seam(None),
+            session.declare_meditation(None),
             Err(Rejected::Refused(Refusal::TangentOpen))
         ));
         assert!(matches!(
@@ -15250,16 +16058,16 @@ pub(in crate::drive) mod tests {
         Session::open_with(Canned::new(acts), shape, None, None, None, Some(interview))
     }
 
-    /// A self-capturing session over a `window`-token context, its seam
-    /// policy `seams`, playing `acts` (#617).
+    /// A self-capturing session over a `window`-token context, its meditation
+    /// policy `meditations`, playing `acts` (#617).
     fn windowed(
         acts: Vec<Vec<Step>>,
         window: u64,
-        seams: crate::seam::policy::Served,
+        meditations: crate::meditation::policy::Served,
     ) -> Session<Canned> {
         let mut interview = interviewing(&[]);
         interview.self_capture = Some(crate::capture::tools::Cadence::DEFAULT);
-        interview.seams = seams;
+        interview.meditations = meditations;
         let mut shape = template();
         shape.limits.context_window = Some(window);
         declare_self_capture(&mut shape, Some(&interview));
@@ -15294,11 +16102,11 @@ pub(in crate::drive) mod tests {
         ]
     }
 
-    fn window_seams(log: &[Logged]) -> Vec<(u64, u32, Option<log::SeamFired>)> {
+    fn window_meditations(log: &[Logged]) -> Vec<(u64, u32, Option<log::MeditationFired>)> {
         log.iter()
             .filter_map(|logged| match &logged.event {
-                Event::Seamed {
-                    reason: crate::seam::Reason::Window,
+                Event::Meditated {
+                    reason: crate::meditation::Reason::Window,
                     at_turn,
                     fired,
                     ..
@@ -15312,14 +16120,14 @@ pub(in crate::drive) mod tests {
     /// reserve of the window, the trunk is refilled from working memory --
     /// under the turn, between its steps -- and the turn goes on: the next
     /// request carries the refill, then the turn's own ask and step. The
-    /// seam names the prompt that fired it and the window, the log reads
+    /// meditation names the prompt that fired it and the window, the log reads
     /// back, and the record projects it.
     #[test]
-    fn a_step_that_would_overflow_the_window_seams_first_and_the_turn_goes_on() {
+    fn a_step_that_would_overflow_the_window_meditates_first_and_the_turn_goes_on() {
         let session = windowed(
             two_turns_measuring(90_000),
             100_000,
-            crate::seam::policy::Served::default(),
+            crate::meditation::policy::Served::default(),
         );
         session
             .ask("how are blank lines treated?", None)
@@ -15332,9 +16140,9 @@ pub(in crate::drive) mod tests {
                 .count()
                 == 2
         });
-        let seams = window_seams(&log);
-        assert_eq!(seams.len(), 1, "{log:#?}");
-        let (at, at_turn, fired) = seams[0];
+        let meditations = window_meditations(&log);
+        assert_eq!(meditations.len(), 1, "{log:#?}");
+        let (at, at_turn, fired) = meditations[0];
         assert_eq!(at_turn, 2);
         let fired = fired.expect("its sizes");
         assert_eq!(fired.window, 100_000);
@@ -15380,12 +16188,12 @@ pub(in crate::drive) mod tests {
         });
         crate::formats::record::parse(&rendered)
             .unwrap_or_else(|why| panic!("the record does not read: {why:?}\n{rendered}"));
-        // The record's seam row names the prompt that fired it and the
+        // The record's meditation row names the prompt that fired it and the
         // window.
         assert!(
             projected.events.iter().any(|event| matches!(
                 event,
-                crate::formats::record::Event::Seam {
+                crate::formats::record::Event::Meditation {
                     at_turn: 2,
                     prompt_tokens: Some(prompt),
                     window: Some(100_000),
@@ -15397,13 +16205,13 @@ pub(in crate::drive) mod tests {
         );
     }
 
-    /// #617: a request the engine refuses as an overflow is seamed once
+    /// #617: a request the engine refuses as an overflow is meditated once
     /// and sent again on the refilled trunk -- the refusal logged, then the
-    /// seam, then the same turn's request again -- and the turn goes on. A
+    /// meditation, then the same turn's request again -- and the turn goes on. A
     /// second overflow fails the turn: once per turn. With nothing in
-    /// working memory there is nothing to seam, and it fails as before.
+    /// working memory there is nothing to meditation, and it fails as before.
     #[test]
-    fn an_overflow_seams_once_and_goes_again() {
+    fn an_overflow_meditates_once_and_goes_again() {
         const TYPED: &str = r#"{"error":{"code":400,"type":"exceed_context_size_error"}}"#;
         let refused = || vec![Step::Reject(400, TYPED.to_owned())];
         let turn_two = |session: &Session<Canned>| {
@@ -15433,13 +16241,17 @@ pub(in crate::drive) mod tests {
         let mut acts = two_turns_measuring(1_000);
         acts.truncate(2);
         acts.push(refused());
-        acts.push(deltas(&["after the seam"]));
-        let once = windowed(acts, 1_000_000, crate::seam::policy::Served::default());
+        acts.push(deltas(&["after the meditation"]));
+        let once = windowed(
+            acts,
+            1_000_000,
+            crate::meditation::policy::Served::default(),
+        );
         let log = turn_two(&once);
         assert_eq!(settled_as(&log), SettleReason::Final);
-        let seams = window_seams(&log);
-        assert_eq!(seams.len(), 1, "{log:#?}");
-        let (at, _, fired) = seams[0];
+        let meditations = window_meditations(&log);
+        assert_eq!(meditations.len(), 1, "{log:#?}");
+        let (at, _, fired) = meditations[0];
         assert_eq!(fired.map(|fired| fired.window), Some(1_000_000));
         let refused_at = log
             .iter()
@@ -15460,10 +16272,14 @@ pub(in crate::drive) mod tests {
         acts.truncate(2);
         acts.push(refused());
         acts.push(refused());
-        let twice = windowed(acts, 1_000_000, crate::seam::policy::Served::default());
+        let twice = windowed(
+            acts,
+            1_000_000,
+            crate::meditation::policy::Served::default(),
+        );
         let log = turn_two(&twice);
         assert_eq!(settled_as(&log), SettleReason::Failed);
-        assert_eq!(window_seams(&log).len(), 1);
+        assert_eq!(window_meditations(&log).len(), 1);
 
         let mut acts = two_turns_measuring(1_000);
         acts.truncate(2);
@@ -15473,17 +16289,21 @@ pub(in crate::drive) mod tests {
             "The cache is flushed every ninety seconds.",
         );
         acts.push(refused());
-        let empty = windowed(acts, 1_000_000, crate::seam::policy::Served::default());
+        let empty = windowed(
+            acts,
+            1_000_000,
+            crate::meditation::policy::Served::default(),
+        );
         let log = turn_two(&empty);
         assert_eq!(settled_as(&log), SettleReason::Failed);
-        assert!(window_seams(&log).is_empty());
+        assert!(window_meditations(&log).is_empty());
     }
 
-    /// #617: with room in the window no seam fires; turned off by the
+    /// #617: with room in the window no meditation fires; turned off by the
     /// regimen none fires however full it is; and with nothing in working
     /// memory the request goes as it is.
     #[test]
-    fn no_window_seam_with_room_when_turned_off_or_with_nothing_to_refill_from() {
+    fn no_window_meditation_with_room_when_turned_off_or_with_nothing_to_refill_from() {
         let run = |session: Session<Canned>| {
             session
                 .ask("how are blank lines treated?", None)
@@ -15497,20 +16317,20 @@ pub(in crate::drive) mod tests {
                     == 2
             });
             reads_whole(&session);
-            window_seams(&log).len()
+            window_meditations(&log).len()
         };
         let roomy = windowed(
             two_turns_measuring(10_000),
             100_000,
-            crate::seam::policy::Served::default(),
+            crate::meditation::policy::Served::default(),
         );
         assert_eq!(run(roomy), 0);
         let off = windowed(
             two_turns_measuring(90_000),
             100_000,
-            crate::seam::policy::Served {
+            crate::meditation::policy::Served {
                 window_off: true,
-                ..crate::seam::policy::Served::default()
+                ..crate::meditation::policy::Served::default()
             },
         );
         assert_eq!(run(off), 0);
@@ -15528,7 +16348,7 @@ pub(in crate::drive) mod tests {
             "fact",
             "The cache is flushed every ninety seconds.",
         );
-        let empty = windowed(acts, 100_000, crate::seam::policy::Served::default());
+        let empty = windowed(acts, 100_000, crate::meditation::policy::Served::default());
         assert_eq!(run(empty), 0);
     }
 
@@ -15799,6 +16619,172 @@ pub(in crate::drive) mod tests {
         );
         let shown = lines(&log)[0].shown.clone();
         assert_eq!(shown, Some(format!("recorded: {entry}")));
+        reads_whole(&session);
+    }
+
+    /// #689, the operator-edits run (`runs/2026-10-10-operator-edits-agent-driven`,
+    /// #690): its `update_record` (`tool_call` 733, the run's own arguments)
+    /// superseding the operator's entry was refused over it (`patch.refused`
+    /// 732), yet capture 731 read `recorded` and the model was shown
+    /// `recorded: r710/…/decision`. Now the capture line and the result the
+    /// model is shown name the refusal and its reason, no entry is claimed,
+    /// and nothing the model sent is in working memory.
+    #[test]
+    fn a_capture_refused_over_the_operators_entry_says_so() {
+        const FACT: &str = "The parser drops blank lines before it tokenizes.";
+        let turn_one = || vec![Step::Delta(FACT.to_owned()), record("call-1", "fact", FACT)];
+        // The operator's entry: the turn's fact, edited. Its id is the
+        // log's length at the edit, the same in both sessions below.
+        let edited = |session: &Session<Canned>| {
+            session
+                .ask("how are blank lines treated?", None)
+                .expect("accepted");
+            wait_until(session, "turn one", settled);
+            let fact = live_entries(session)[0].0.clone();
+            session
+                .edit_entry(&fact, "The parser keeps blank lines.")
+                .expect("an edit");
+            live_entries(session)
+                .into_iter()
+                .find(|(_, content)| content == "The parser keeps blank lines.")
+                .expect("the operator's entry")
+                .0
+        };
+        let probe = self_capturing(vec![turn_one(), deltas(&["done"])], 3);
+        let operator = edited(&probe);
+        let session = self_capturing(
+            vec![
+                turn_one(),
+                deltas(&["done"]),
+                vec![
+                    Step::Delta(RUN_CONTENT.to_owned()),
+                    Step::call(
+                        0,
+                        "call-2",
+                        "update_record",
+                        &serde_json::json!({
+                            "content": RUN_CONTENT,
+                            "field": "decision",
+                            "supersedes": operator,
+                        })
+                        .to_string(),
+                    ),
+                ],
+                deltas(&["ok"]),
+            ],
+            3,
+        );
+        assert_eq!(edited(&session), operator);
+        session.ask("say again?", None).expect("accepted");
+        let log = wait_until(&session, "turn two", |log| {
+            log.iter()
+                .filter(|logged| matches!(logged.event, Event::TurnSettled { .. }))
+                .count()
+                == 2
+        });
+        let recorded = captures(&log);
+        assert_eq!(recorded.len(), 2, "{recorded:?}");
+        assert_eq!(
+            recorded[1],
+            ("refused".to_owned(), Vec::new()),
+            "{recorded:?}"
+        );
+        let shown = lines(&log)
+            .last()
+            .and_then(|line| line.shown.clone())
+            .expect("a result shown");
+        assert_eq!(shown, format!("refused: operator-entry: {operator}"));
+        assert!(
+            !live_entries(&session)
+                .iter()
+                .any(|(_, content)| content == RUN_CONTENT),
+        );
+        reads_whole(&session);
+    }
+
+    /// The content of the operator-edits run's refused `update_record`
+    /// (`tool_call` 733), verbatim.
+    const RUN_CONTENT: &str = "notes.txt date format is now YYYY-MM-DD HH:MM (datetime.now() \
+                               formatted in notes.py main), replacing the earlier date-only \
+                               YYYY-MM-DD decision (operator-547).";
+
+    /// #689, the fork route: a fork answering through the capture tools
+    /// whose `update_record` would supersede the operator's entry settles
+    /// that capture `refused`, naming the reason and the entry; its
+    /// `patch.refused` line is kept; and no entry is claimed or written.
+    #[test]
+    fn a_forks_capture_refused_over_the_operators_entry_says_so() {
+        const SAID: &str = "The parser drops blank lines before it tokenizes.";
+        let first = || vec![deltas(&[SAID]), vec![record_at(0, "f-1", "fact", SAID)]];
+        let edited = |session: &Session<Canned>| {
+            session
+                .ask_marked("how are blank lines treated?", None, true)
+                .expect("accepted");
+            wait_until(session, "the fork", |log| {
+                settled(log) && !fork_outcomes(log).is_empty()
+            });
+            let fact = live_entries(session)[0].0.clone();
+            session
+                .edit_entry(&fact, "The parser keeps blank lines.")
+                .expect("an edit");
+            live_entries(session)
+                .into_iter()
+                .find(|(_, content)| content == "The parser keeps blank lines.")
+                .expect("the operator's entry")
+                .0
+        };
+        let operator = edited(&forks_through_tools(first()));
+        let mut acts = first();
+        acts.push(deltas(&[RUN_CONTENT]));
+        acts.push(vec![Step::call(
+            0,
+            "f-2",
+            "update_record",
+            &serde_json::json!({
+                "content": RUN_CONTENT,
+                "field": "decision",
+                "supersedes": operator,
+            })
+            .to_string(),
+        )]);
+        let session = forks_through_tools(acts);
+        assert_eq!(edited(&session), operator);
+        session
+            .ask_marked("and the dates?", None, true)
+            .expect("accepted");
+        let log = wait_until(&session, "the second fork", |log| {
+            settled(log) && fork_outcomes(log).len() == 2
+        });
+        let refused: Vec<(String, Vec<String>, Option<String>)> = log
+            .iter()
+            .filter_map(|logged| match &logged.event {
+                Event::Captured {
+                    outcome,
+                    entries,
+                    why,
+                    ..
+                } => Some((outcome.clone(), entries.clone(), why.clone())),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(
+            refused.last(),
+            Some(&(
+                "refused".to_owned(),
+                Vec::new(),
+                Some(format!("operator-entry: {operator}"))
+            )),
+            "{refused:?}"
+        );
+        assert!(log.iter().any(|logged| matches!(
+            &logged.event,
+            Event::PatchRefused { entry, .. } if *entry == operator
+        )));
+        assert!(
+            !live_entries(&session)
+                .iter()
+                .any(|(_, content)| content == RUN_CONTENT),
+        );
         reads_whole(&session);
     }
 
@@ -16209,20 +17195,20 @@ pub(in crate::drive) mod tests {
     }
 
     // -----------------------------------------------------------------------
-    // derived seams: the regimen's cadence and budget
+    // derived meditations: the regimen's cadence and budget
     // -----------------------------------------------------------------------
 
-    /// An interview whose regimen declares `seams`.
-    fn seaming(seams: crate::seam::policy::Served) -> Interview {
+    /// An interview whose regimen declares `meditations`.
+    fn meditating(meditations: crate::meditation::policy::Served) -> Interview {
         Interview {
-            seams,
+            meditations,
             ..interviewing(&[log::Warrant::Scoping])
         }
     }
 
     /// An interview under a three-phase graph: plan to build to review.
     fn phased() -> Interview {
-        let mut graph = crate::seam::phase::PhaseGraph::of(&[
+        let mut graph = crate::meditation::phase::PhaseGraph::of(&[
             "plan".to_owned(),
             "build".to_owned(),
             "review".to_owned(),
@@ -16324,7 +17310,7 @@ pub(in crate::drive) mod tests {
         )));
         assert!(
             !log.iter()
-                .any(|logged| matches!(logged.event, Event::Seamed { .. }))
+                .any(|logged| matches!(logged.event, Event::Meditated { .. }))
         );
         assert!(matches!(
             session.ratify_phase("call-p", PhaseChoice::Continue),
@@ -16352,29 +17338,29 @@ pub(in crate::drive) mod tests {
             Event::ToolCalled(line) if line.shown.as_deref() == Some("refused: no-phase-edge")
         )));
         assert!(matches!(
-            session.ratify_phase("call-p", PhaseChoice::Seam),
+            session.ratify_phase("call-p", PhaseChoice::Meditation),
             Err(Rejected::Refused(Refusal::NoProposal))
         ));
         reads_whole(&session);
     }
 
-    /// #124: `seam` declares the seam that moves to the proposed phase;
+    /// #124: `meditation` declares the meditation that moves to the proposed phase;
     /// `stay` declines, moving nothing; a ruling naming another call is
     /// `no-proposal`.
     #[test]
-    fn ratifying_seam_moves_the_phase_at_a_seam_and_stay_declines() {
+    fn ratifying_meditation_moves_the_phase_at_a_meditation_and_stay_declines() {
         let (session, _) = proposing("build", Vec::new());
         assert!(matches!(
-            session.ratify_phase("call-other", PhaseChoice::Seam),
+            session.ratify_phase("call-other", PhaseChoice::Meditation),
             Err(Rejected::Refused(Refusal::NoProposal))
         ));
         session
-            .ratify_phase("call-p", PhaseChoice::Seam)
+            .ratify_phase("call-p", PhaseChoice::Meditation)
             .expect("ruled");
         let log = session.events_from(0);
         assert!(log.iter().any(|logged| matches!(
             &logged.event,
-            Event::Seamed { reason: crate::seam::Reason::Phase, phase: Some(moved), .. }
+            Event::Meditated { reason: crate::meditation::Reason::Phase, phase: Some(moved), .. }
                 if moved.from == "plan" && moved.to == "build"
         )));
         assert_eq!(session.shared.lock().phase.as_deref(), Some("build"));
@@ -16389,20 +17375,20 @@ pub(in crate::drive) mod tests {
             !session
                 .events_from(0)
                 .iter()
-                .any(|logged| matches!(logged.event, Event::Seamed { .. }))
+                .any(|logged| matches!(logged.event, Event::Meditated { .. }))
         );
         reads_whole(&session);
     }
 
     /// #563: a served session opens in its graph's first phase and logs the
-    /// graph; a seam that names a move the graph allows moves, the refill
-    /// renders the new phase, and the seam line says from and to; a move it
+    /// graph; a meditation that names a move the graph allows moves, the refill
+    /// renders the new phase, and the meditation line says from and to; a move it
     /// refuses is refused with the graph's reason, logged; with no phase
     /// named the session stays where it is; and the projection rebuilds the
     /// refilled head.
     #[test]
     #[allow(clippy::too_many_lines)]
-    fn a_served_seam_moves_between_the_phases_its_graph_allows() {
+    fn a_served_meditation_moves_between_the_phases_its_graph_allows() {
         let session = Session::open_with(
             Canned::new([
                 deltas(&[SCOPED]),
@@ -16427,25 +17413,27 @@ pub(in crate::drive) mod tests {
             ("ship", Refusal::NotAPhase),
         ] {
             assert_eq!(
-                session.declare_seam_to(None, Some(to)),
+                session.declare_meditation_to(None, Some(to)),
                 Err(Rejected::Refused(refused)),
                 "{to}"
             );
         }
         session
-            .declare_seam_to(None, Some("build"))
+            .declare_meditation_to(None, Some("build"))
             .expect("plan to build is allowed");
         let render = |phase: &str| {
             let held = session.shared.lock();
             let object = &held.interview.as_ref().expect("interviewing").object;
-            crate::seam::render::render(object, Some(phase))
+            crate::meditation::render::render(object, Some(phase))
         };
         assert_eq!(
             session.trunk(),
-            crate::seam::render::refill(&template().messages, &render("build"))
+            crate::meditation::render::refill(&template().messages, &render("build"))
         );
-        // No phase named: a seam that stays in `build`.
-        session.declare_seam(None).expect("a seam that stays");
+        // No phase named: a meditation that stays in `build`.
+        session
+            .declare_meditation(None)
+            .expect("a meditation that stays");
         session.ask("go on", None).expect("accepted");
         let log = wait_until(&session, "turn two", |log| {
             settled(log)
@@ -16478,7 +17466,7 @@ pub(in crate::drive) mod tests {
         let moves: Vec<Option<log::PhaseMove>> = lines
             .iter()
             .filter_map(|line| match &line.event {
-                log::Event::Seam { phase, .. } => Some(phase.clone()),
+                log::Event::Meditation { phase, .. } => Some(phase.clone()),
                 _ => None,
             })
             .collect();
@@ -16521,12 +17509,12 @@ pub(in crate::drive) mod tests {
         reads_whole(&session);
     }
 
-    /// #566, `literal`: a seam archives what it drops; a later ask that
+    /// #566, `literal`: a meditation archives what it drops; a later ask that
     /// names it gets one note after it, in Qwen Code's reminder shape, logged
     /// `recalled` with each item's key, digest and score; the note stays on
     /// the trunk and the projection rebuilds the head. Under `off`, nothing.
     #[test]
-    fn a_literal_recall_brings_back_what_a_seam_archived() {
+    fn a_literal_recall_brings_back_what_a_meditation_archived() {
         for recall in [
             super::super::archive::Recall::Literal,
             super::super::archive::Recall::Off,
@@ -16552,7 +17540,7 @@ pub(in crate::drive) mod tests {
             wait_until(&session, "the fork to settle", |log| {
                 settled(log) && !fork_outcomes(log).is_empty()
             });
-            session.declare_seam(None).expect("a seam");
+            session.declare_meditation(None).expect("a meditation");
             session
                 .ask("how should the `schema` look?", None)
                 .expect("accepted");
@@ -16590,8 +17578,12 @@ pub(in crate::drive) mod tests {
                 panic!("one recall: {recalled:?}");
             };
             assert_eq!(*turn, 2);
-            // The scoping turn's answer, archived by the seam, names the schema.
-            assert_eq!(items[0].key, "seam-1/message-2");
+            // The scoping turn's answer, archived by the meditation, names the
+            // schema; its key, which the model reads, says `compaction`, the
+            // maintainer's word for it (#583).
+            assert_eq!(items[0].key, "compaction-1/message-2");
+            assert!(text.contains("(compaction-1/message-2)"), "{text}");
+            assert!(!text.contains("seam-"), "{text}");
             assert_eq!(
                 items[0].sha256,
                 crate::digest::sha256_hex(SCOPED.as_bytes())
@@ -16640,7 +17632,7 @@ pub(in crate::drive) mod tests {
             settled(log) && !fork_outcomes(log).is_empty()
         });
         assert_eq!(
-            session.declare_seam_to(None, Some("build")),
+            session.declare_meditation_to(None, Some("build")),
             Err(Rejected::Refused(Refusal::NoPhaseGraph))
         );
         reads_whole(&session);
@@ -16661,7 +17653,7 @@ pub(in crate::drive) mod tests {
     /// tree holds a sizeable `notes.md`.
     fn pruning(
         tree: &Path,
-        prune: super::super::prune::PruneSeam,
+        prune: super::super::prune::PruneMeditation,
         tail_tokens: u64,
         acts: Vec<Vec<Step>>,
     ) -> Session<Canned> {
@@ -16685,9 +17677,9 @@ pub(in crate::drive) mod tests {
             )),
             None,
             Some(Interview {
-                seams: crate::seam::policy::Served {
+                meditations: crate::meditation::policy::Served {
                     tail_tokens,
-                    ..crate::seam::policy::Served::default()
+                    ..crate::meditation::policy::Served::default()
                 },
                 prune: Some(prune),
                 ..interviewing(&[log::Warrant::Scoping])
@@ -16715,27 +17707,27 @@ pub(in crate::drive) mod tests {
             .collect()
     }
 
-    /// The seam lines' `pruned`.
-    fn seam_prunes(log: &[Logged]) -> Vec<Option<Vec<String>>> {
+    /// The meditation lines' `pruned`.
+    fn meditation_prunes(log: &[Logged]) -> Vec<Option<Vec<String>>> {
         log.iter()
             .filter_map(|logged| match line_of(logged).event {
-                log::Event::Seam { pruned, .. } => Some(pruned),
+                log::Event::Meditation { pruned, .. } => Some(pruned),
                 _ => None,
             })
             .collect()
     }
 
     /// #612, `turn_end`: the tool answers at once and the trunk keeps the
-    /// result through the turn -- the prefix rule -- then a seam derived as
+    /// result through the turn -- the prefix rule -- then a meditation derived as
     /// the turn settles replaces it, in the kept tail, by its reference
     /// line; the next request carries the line, and the projection rebuilds
     /// every head.
     #[test]
-    fn a_pruned_result_is_replaced_by_its_line_at_the_seam_its_turn_end_derives() {
+    fn a_pruned_result_is_replaced_by_its_line_at_the_meditation_its_turn_end_derives() {
         let tree = scratch("t612-turn-end");
         let session = pruning(
             &tree,
-            super::super::prune::PruneSeam::TurnEnd,
+            super::super::prune::PruneMeditation::TurnEnd,
             100_000,
             vec![
                 vec![bash("call-1", "cat notes.md")],
@@ -16748,8 +17740,8 @@ pub(in crate::drive) mod tests {
         session
             .ask_marked("read the notes", None, true)
             .expect("accepted");
-        let log = wait_until(&session, "the prune's seam", |log| {
-            !seams_in(log).is_empty()
+        let log = wait_until(&session, "the prune's meditation", |log| {
+            !meditations_in(log).is_empty()
         });
         let notes = std::fs::read_to_string(tree.join("notes.md")).expect("the notes");
         let shown = shown_by_id(&log);
@@ -16777,8 +17769,8 @@ pub(in crate::drive) mod tests {
             sent[2].messages.iter().any(|m| m.content == notes),
             "the trunk was rewritten mid-turn"
         );
-        assert_eq!(seams_in(&log), [(1, log::SeamReason::Prune)]);
-        assert_eq!(seam_prunes(&log), [Some(vec!["call-1".to_owned()])]);
+        assert_eq!(meditations_in(&log), [(1, log::MeditationReason::Prune)]);
+        assert_eq!(meditation_prunes(&log), [Some(vec!["call-1".to_owned()])]);
         // In the kept tail, in place: the tool message answers its call.
         let trunk = session.trunk();
         let result = trunk
@@ -16815,17 +17807,17 @@ pub(in crate::drive) mod tests {
         tidy(&[&tree]);
     }
 
-    /// #612, `next` (the default): no seam is derived for a prune; the
-    /// operator's seam applies it, a total refill carrying its line in the
+    /// #612, `next` (the default): no meditation is derived for a prune; the
+    /// operator's meditation applies it, a total refill carrying its line in the
     /// section under `evict`, as reference. The tool answers a name no call
-    /// matches, a result already pruned, and one a seam compacted away with
+    /// matches, a result already pruned, and one a meditation compacted away with
     /// what is wrong.
     #[test]
-    fn a_pruned_result_waits_for_the_next_seam_and_the_tool_says_what_it_cannot_prune() {
+    fn a_pruned_result_waits_for_the_next_meditation_and_the_tool_says_what_it_cannot_prune() {
         let tree = scratch("t612-next");
         let session = pruning(
             &tree,
-            super::super::prune::PruneSeam::Next,
+            super::super::prune::PruneMeditation::Next,
             0,
             vec![
                 vec![bash("call-1", "cat notes.md")],
@@ -16845,12 +17837,17 @@ pub(in crate::drive) mod tests {
         let log = wait_until(&session, "the fork to settle", |log| {
             settled(log) && !fork_outcomes(log).is_empty()
         });
-        assert!(seams_in(&log).is_empty(), "no seam is derived under `next`");
-        session.declare_seam(None).expect("a seam");
-        let log = wait_until(&session, "the seam", |log| !seams_in(log).is_empty());
-        assert_eq!(seam_prunes(&log), [Some(vec!["call-1".to_owned()])]);
-        let (state, section, ..) = seam_outputs_of(&log);
-        assert_eq!(state, Some(log::SeamToolOutputs::Evict));
+        assert!(
+            meditations_in(&log).is_empty(),
+            "no meditation is derived under `next`"
+        );
+        session.declare_meditation(None).expect("a meditation");
+        let log = wait_until(&session, "the meditation", |log| {
+            !meditations_in(log).is_empty()
+        });
+        assert_eq!(meditation_prunes(&log), [Some(vec!["call-1".to_owned()])]);
+        let (state, section, ..) = meditation_outputs_of(&log);
+        assert_eq!(state, Some(log::MeditationToolOutputs::Evict));
         let section = section.expect("a section carrying the pruned result");
         let [(_, _, text)] = prunes_in(&log).try_into().expect("one prune");
         assert!(
@@ -16892,11 +17889,11 @@ pub(in crate::drive) mod tests {
     }
 
     /// A session whose first turn reads `notes.md` and draws a read fork
-    /// quoting `line two`, whose second runs `echo tail`, and which seams
+    /// quoting `line two`, whose second runs `echo tail`, and which meditations
     /// every `every` turns at `tail_tokens` under `state` (#553).
-    fn seaming_outputs(
+    fn meditating_outputs(
         tree: &Path,
-        state: log::SeamToolOutputs,
+        state: log::MeditationToolOutputs,
         (every, tail_tokens): (u32, u64),
         recording: Option<&Path>,
     ) -> Session<Canned> {
@@ -16927,7 +17924,8 @@ pub(in crate::drive) mod tests {
             Some(tools),
             None,
             Some(Interview {
-                seams: crate::seam::policy::Served {
+                meditations: crate::meditation::policy::Served {
+                    reconcile_gate: crate::meditation::policy::ReconcileGate::Carry,
                     every_turns: Some(every),
                     at_trunk_tokens: None,
                     tail_tokens,
@@ -16942,19 +17940,19 @@ pub(in crate::drive) mod tests {
         )
     }
 
-    /// The seam line's tool-output fields: its state, its section, how many
+    /// The meditation line's tool-output fields: its state, its section, how many
     /// outputs and how many bytes it carried.
-    fn seam_outputs_of(
+    fn meditation_outputs_of(
         log: &[Logged],
     ) -> (
-        Option<log::SeamToolOutputs>,
+        Option<log::MeditationToolOutputs>,
         Option<String>,
         Option<u64>,
         Option<u64>,
     ) {
         log.iter()
             .find_map(|logged| match line_of(logged).event {
-                log::Event::Seam {
+                log::Event::Meditation {
                     tool_outputs,
                     outputs,
                     carried_outputs,
@@ -16963,23 +17961,28 @@ pub(in crate::drive) mod tests {
                 } => Some((tool_outputs, outputs, carried_outputs, carried_output_bytes)),
                 _ => None,
             })
-            .expect("a seam line")
+            .expect("a meditation line")
     }
 
-    /// Runs `seaming_outputs`' turns through the seam and one ask after it:
+    /// Runs `meditating_outputs`' turns through the meditation and one ask after it:
     /// the log, and the request that ask sent.
-    fn through_the_seam(session: &Session<Canned>, turns: u32) -> (Vec<Logged>, RequestShape) {
+    fn through_the_meditation(
+        session: &Session<Canned>,
+        turns: u32,
+    ) -> (Vec<Logged>, RequestShape) {
         session.ask("read the notes", None).expect("accepted");
-        // Settled, or -- at a cadence of one -- seamed after the fork.
+        // Settled, or -- at a cadence of one -- meditated after the fork.
         wait_until(session, "the first turn and its fork", |log| {
-            !fork_outcomes(log).is_empty() && (settled(log) || !seams_in(log).is_empty())
+            !fork_outcomes(log).is_empty() && (settled(log) || !meditations_in(log).is_empty())
         });
         if turns == 2 {
             session.ask("echo something", None).expect("accepted");
         }
-        wait_until(session, "the seam", |log| !seams_in(log).is_empty());
+        wait_until(session, "the meditation", |log| {
+            !meditations_in(log).is_empty()
+        });
         session.ask("go on", None).expect("accepted");
-        let log = wait_until(session, "the turn after the seam", |log| {
+        let log = wait_until(session, "the turn after the meditation", |log| {
             log.iter()
                 .filter(|logged| matches!(logged.event, Event::TurnSettled { .. }))
                 .count()
@@ -16991,21 +17994,21 @@ pub(in crate::drive) mod tests {
     }
 
     /// `evict`, the default: the refill carries nothing of the outputs it
-    /// compacts away, and the seam line names the state alone (#553).
+    /// compacts away, and the meditation line names the state alone (#553).
     #[test]
-    fn evict_carries_no_tool_output_across_the_seam() {
-        let tree = scratch("seam-evict");
-        let session = seaming_outputs(&tree, log::SeamToolOutputs::Evict, (1, 0), None);
-        let (log, sent) = through_the_seam(&session, 1);
+    fn evict_carries_no_tool_output_across_the_meditation() {
+        let tree = scratch("meditation-evict");
+        let session = meditating_outputs(&tree, log::MeditationToolOutputs::Evict, (1, 0), None);
+        let (log, sent) = through_the_meditation(&session, 1);
         assert_eq!(
-            seam_outputs_of(&log),
-            (Some(log::SeamToolOutputs::Evict), None, None, None)
+            meditation_outputs_of(&log),
+            (Some(log::MeditationToolOutputs::Evict), None, None, None)
         );
         let head = template().messages.len();
         assert!(
             !sent.messages[head]
                 .content
-                .contains(crate::seam::outputs::HEADER)
+                .contains(crate::meditation::outputs::HEADER)
         );
         // Nothing of turn 1 after the refill: the next ask follows it.
         assert_eq!(sent.messages[head + 1].content, "go on");
@@ -17013,16 +18016,16 @@ pub(in crate::drive) mod tests {
         tidy(&[&tree]);
     }
 
-    /// After a seam the system message is the session's first, byte for
+    /// After a meditation the system message is the session's first, byte for
     /// byte, and the render rides in a user message after it (#597). A log
-    /// written before #597 -- its seam with no `placement`, its heads hashed
+    /// written before #597 -- its meditation with no `placement`, its heads hashed
     /// over the render in the system message -- still rebuilds every head,
     /// and the digest still decides: the wrong placement verifies nothing.
     #[test]
-    fn the_system_message_survives_a_seam_and_a_log_from_before_597_still_rebuilds() {
-        let tree = scratch("seam-placement");
-        let session = seaming_outputs(&tree, log::SeamToolOutputs::Evict, (1, 0), None);
-        let (log, _) = through_the_seam(&session, 1);
+    fn the_system_message_survives_a_meditation_and_a_log_from_before_597_still_rebuilds() {
+        let tree = scratch("meditation-placement");
+        let session = meditating_outputs(&tree, log::MeditationToolOutputs::Evict, (1, 0), None);
+        let (log, _) = through_the_meditation(&session, 1);
         let head = template().messages.len();
         let sent = session.shared.transport.sent();
         let after: Vec<&RequestShape> = sent
@@ -17032,7 +18035,7 @@ pub(in crate::drive) mod tests {
                     && shape.messages[head].content.starts_with("<summary>\n")
             })
             .collect();
-        assert!(!after.is_empty(), "a request after the seam");
+        assert!(!after.is_empty(), "a request after the meditation");
         for shape in &after {
             assert_eq!(
                 shape.messages[..head],
@@ -17066,7 +18069,7 @@ pub(in crate::drive) mod tests {
                 .map(line_of)
                 .map(|mut line| {
                     match &mut line.event {
-                        log::Event::Seam { placement: at, .. } => *at = placement,
+                        log::Event::Meditation { placement: at, .. } => *at = placement,
                         log::Event::Request {
                             head_sha256: Some(sha),
                             ..
@@ -17106,12 +18109,12 @@ pub(in crate::drive) mod tests {
     /// section, and still on the trunk as they sat (#553).
     #[test]
     fn keep_carries_the_compacted_outputs_and_leaves_the_kept_tail_alone() {
-        let tree = scratch("seam-keep");
-        let session = seaming_outputs(&tree, log::SeamToolOutputs::Keep, (2, 100), None);
-        let (log, sent) = through_the_seam(&session, 2);
-        let (state, section, carried, bytes) = seam_outputs_of(&log);
+        let tree = scratch("meditation-keep");
+        let session = meditating_outputs(&tree, log::MeditationToolOutputs::Keep, (2, 100), None);
+        let (log, sent) = through_the_meditation(&session, 2);
+        let (state, section, carried, bytes) = meditation_outputs_of(&log);
         let section = section.expect("a section");
-        assert_eq!(state, Some(log::SeamToolOutputs::Keep));
+        assert_eq!(state, Some(log::MeditationToolOutputs::Keep));
         assert_eq!(carried, Some(1));
         assert_eq!(bytes, Some(section.len() as u64));
         let notes = std::fs::read_to_string(tree.join("notes.md")).expect("the notes");
@@ -17152,22 +18155,22 @@ pub(in crate::drive) mod tests {
     /// recording at the path the line gives (#553).
     #[test]
     fn reference_names_each_output_and_saves_its_whole_by_digest() {
-        let tree = scratch("seam-reference");
-        let recording = scratch("seam-reference-recording");
+        let tree = scratch("meditation-reference");
+        let recording = scratch("meditation-reference-recording");
         let recording = std::fs::canonicalize(&recording).expect("the recording");
-        let session = seaming_outputs(
+        let session = meditating_outputs(
             &tree,
-            log::SeamToolOutputs::Reference,
+            log::MeditationToolOutputs::Reference,
             (1, 0),
             Some(&recording),
         );
-        let (log, sent) = through_the_seam(&session, 1);
+        let (log, sent) = through_the_meditation(&session, 1);
         let notes = std::fs::read_to_string(tree.join("notes.md")).expect("the notes");
         let sha256 = crate::digest::sha256_hex(notes.as_bytes());
         let saved = recording.join("files").join(&sha256);
-        let (state, section, carried, _) = seam_outputs_of(&log);
+        let (state, section, carried, _) = meditation_outputs_of(&log);
         let section = section.expect("a section");
-        assert_eq!(state, Some(log::SeamToolOutputs::Reference));
+        assert_eq!(state, Some(log::MeditationToolOutputs::Reference));
         assert_eq!(carried, Some(1));
         assert!(
             section.ends_with(&format!(
@@ -17193,12 +18196,12 @@ pub(in crate::drive) mod tests {
     /// nothing for an output no fork quoted (#553).
     #[test]
     fn salient_carries_the_read_forks_excerpts_and_nothing_else() {
-        let tree = scratch("seam-salient");
-        let session = seaming_outputs(&tree, log::SeamToolOutputs::Salient, (2, 0), None);
-        let (log, sent) = through_the_seam(&session, 2);
-        let (state, section, carried, _) = seam_outputs_of(&log);
+        let tree = scratch("meditation-salient");
+        let session = meditating_outputs(&tree, log::MeditationToolOutputs::Salient, (2, 0), None);
+        let (log, sent) = through_the_meditation(&session, 2);
+        let (state, section, carried, _) = meditation_outputs_of(&log);
         let section = section.expect("a section");
-        assert_eq!(state, Some(log::SeamToolOutputs::Salient));
+        assert_eq!(state, Some(log::MeditationToolOutputs::Salient));
         assert_eq!(carried, Some(1));
         assert_eq!(
             section,
@@ -17216,11 +18219,11 @@ pub(in crate::drive) mod tests {
         tidy(&[&tree]);
     }
 
-    /// The seam lines in `log`, as the log writes them: turn and reason.
-    fn seams_in(log: &[Logged]) -> Vec<(u32, log::SeamReason)> {
+    /// The meditation lines in `log`, as the log writes them: turn and reason.
+    fn meditations_in(log: &[Logged]) -> Vec<(u32, log::MeditationReason)> {
         log.iter()
             .filter_map(|logged| match line_of(logged).event {
-                log::Event::Seam {
+                log::Event::Meditation {
                     at_turn, reason, ..
                 } => Some((at_turn, reason)),
                 _ => None,
@@ -17246,11 +18249,11 @@ pub(in crate::drive) mod tests {
     }
 
     /// A cadence of one operator turn: the scoping turn's fork fills working
-    /// memory, and the seam fires on its own once the gap is over, logged
+    /// memory, and the meditation fires on its own once the gap is over, logged
     /// `cadence`; the next ask runs on the refilled trunk, and the turn after
     /// it fires the next. Nobody declared either.
     #[test]
-    fn a_cadence_fires_a_seam_on_its_own_after_each_counted_turn() {
+    fn a_cadence_fires_a_meditation_on_its_own_after_each_counted_turn() {
         let session = Session::open_with(
             Canned::new([
                 deltas(&[SCOPED]),
@@ -17261,11 +18264,12 @@ pub(in crate::drive) mod tests {
             None,
             None,
             None,
-            Some(seaming(crate::seam::policy::Served {
+            Some(meditating(crate::meditation::policy::Served {
+                reconcile_gate: crate::meditation::policy::ReconcileGate::Carry,
                 every_turns: Some(1),
                 at_trunk_tokens: None,
                 tail_tokens: 0,
-                outputs: log::SeamToolOutputs::Evict,
+                outputs: log::MeditationToolOutputs::Evict,
                 render_budget: None,
                 window_off: false,
                 warm: false,
@@ -17275,40 +18279,50 @@ pub(in crate::drive) mod tests {
         session
             .ask_marked("what are we building?", None, true)
             .expect("accepted");
-        let log = wait_until(&session, "the cadence's seam", |log| {
-            !seams_in(log).is_empty()
+        let log = wait_until(&session, "the cadence's meditation", |log| {
+            !meditations_in(log).is_empty()
         });
-        assert_eq!(seams_in(&log), vec![(1, log::SeamReason::Cadence)]);
+        assert_eq!(
+            meditations_in(&log),
+            vec![(1, log::MeditationReason::Cadence)]
+        );
         assert!(
             !session.trunk().iter().any(|m| m.content == SCOPED),
-            "the seam carried a turn of the old trunk"
+            "the meditation carried a turn of the old trunk"
         );
         let refilled = session.trunk();
 
         session.ask("build it", None).expect("accepted");
-        let log = wait_until(&session, "the second seam", |log| seams_in(log).len() == 2);
+        let log = wait_until(&session, "the second meditation", |log| {
+            meditations_in(log).len() == 2
+        });
         assert_eq!(
-            seams_in(&log),
-            vec![(1, log::SeamReason::Cadence), (2, log::SeamReason::Cadence)]
+            meditations_in(&log),
+            vec![
+                (1, log::MeditationReason::Cadence),
+                (2, log::MeditationReason::Cadence)
+            ]
         );
         let sent = session.shared.transport.sent();
         let mut expected = refilled;
         expected.push(user("build it"));
         assert_eq!(
             sent[2].messages, expected,
-            "the ask after the seam runs on the refill"
+            "the ask after the meditation runs on the refill"
         );
         assert_eq!(session.settlement(), Settlement::Awaiting);
         reads_whole(&session);
     }
 
-    /// The compaction depth (#552): a seam with a tail budget keeps the
+    /// The compaction depth (#552): a meditation with a tail budget keeps the
     /// old trunk's most recent whole turn after the refill, as it sat on the
-    /// trunk; the seam line names the depth and what it kept; the next ask
+    /// trunk; the meditation line names the depth and what it kept; the next ask
     /// runs on head, render and tail; the projection rebuilds every head. A
-    /// budget no whole turn fits keeps none.
+    /// budget no whole turn fits keeps none, and its meditation line names the
+    /// newest turn's size for the operator's warning (#693); one that kept a
+    /// turn names none.
     #[test]
-    fn a_seam_with_a_tail_budget_keeps_the_most_recent_whole_turns() {
+    fn a_meditation_with_a_tail_budget_keeps_the_most_recent_whole_turns() {
         let tailed = |tail_tokens: u64| {
             Session::open_with(
                 Canned::new([
@@ -17320,11 +18334,12 @@ pub(in crate::drive) mod tests {
                 None,
                 None,
                 None,
-                Some(seaming(crate::seam::policy::Served {
+                Some(meditating(crate::meditation::policy::Served {
+                    reconcile_gate: crate::meditation::policy::ReconcileGate::Carry,
                     every_turns: Some(1),
                     at_trunk_tokens: None,
                     tail_tokens,
-                    outputs: log::SeamToolOutputs::Evict,
+                    outputs: log::MeditationToolOutputs::Evict,
                     render_budget: None,
                     window_off: false,
                     warm: false,
@@ -17336,7 +18351,9 @@ pub(in crate::drive) mod tests {
         session
             .ask_marked("what are we building?", None, true)
             .expect("accepted");
-        let log = wait_until(&session, "the seam", |log| !seams_in(log).is_empty());
+        let log = wait_until(&session, "the meditation", |log| {
+            !meditations_in(log).is_empty()
+        });
         let trunk = session.trunk();
         let kept = [
             user("what are we building?"),
@@ -17345,46 +18362,71 @@ pub(in crate::drive) mod tests {
         assert_eq!(trunk[trunk.len() - 2..], kept[..], "{trunk:#?}");
         // The head, the refill message (#597), then the tail.
         assert_eq!(trunk.len(), template().messages.len() + 3);
-        let seam = log
+        let meditation = log
             .iter()
             .find_map(|logged| match line_of(logged).event {
-                log::Event::Seam {
+                log::Event::Meditation {
                     tail_tokens,
                     carried_turns,
                     carried_tokens,
-                    tool_outputs: Some(log::SeamToolOutputs::Evict),
+                    tool_outputs: Some(log::MeditationToolOutputs::Evict),
                     outputs: None,
+                    newest_turn_tokens,
                     ..
-                } => Some((tail_tokens, carried_turns, carried_tokens)),
+                } => Some((
+                    tail_tokens,
+                    carried_turns,
+                    carried_tokens,
+                    newest_turn_tokens,
+                )),
                 _ => None,
             })
-            .expect("a seam line");
-        let estimated: u64 = kept.iter().map(crate::seam::render::estimated_tokens).sum();
-        assert_eq!(seam, (Some(10_000), 1, Some(estimated)));
+            .expect("a meditation line");
+        let estimated: u64 = kept
+            .iter()
+            .map(crate::meditation::render::estimated_tokens)
+            .sum();
+        assert_eq!(meditation, (Some(10_000), 1, Some(estimated), None));
 
         session.ask("build it", None).expect("accepted");
-        let log = wait_until(&session, "the second seam", |log| seams_in(log).len() == 2);
+        let log = wait_until(&session, "the second meditation", |log| {
+            meditations_in(log).len() == 2
+        });
         reads_whole(&session);
         let mut expected = trunk.clone();
         expected.push(user("build it"));
         assert_eq!(session.shared.transport.sent()[2].messages, expected);
         every_head_rebuilds(&log);
 
-        // A budget no whole turn fits: the total refill.
+        // A budget no whole turn fits: the total refill, and the newest
+        // turn's size on the meditation line (#693, levers run A's meditation 2804).
         let session = tailed(1);
         session
             .ask_marked("what are we building?", None, true)
             .expect("accepted");
-        wait_until(&session, "the seam", |log| !seams_in(log).is_empty());
+        let log = wait_until(&session, "the meditation", |log| {
+            !meditations_in(log).is_empty()
+        });
         assert_eq!(session.trunk().len(), template().messages.len() + 1);
+        let warned = log.iter().find_map(|logged| match line_of(logged).event {
+            log::Event::Meditation {
+                tail_tokens,
+                carried_turns,
+                newest_turn_tokens,
+                ..
+            } => Some((tail_tokens, carried_turns, newest_turn_tokens)),
+            _ => None,
+        });
+        assert_eq!(warned, Some((Some(1), 0, Some(estimated))));
+        reads_whole(&session);
     }
 
     /// A budget: the trunk call reports 18 prefilled, 160 reused and 66
-    /// generated, 244 tokens, against a limit of 200, so the seam fires
+    /// generated, 244 tokens, against a limit of 200, so the meditation fires
     /// `budget` though the cadence (every 5 turns) has not come round. The
     /// refilled trunk is unmeasured until its next call.
     #[test]
-    fn a_budget_fires_a_seam_once_the_trunk_call_reports_the_limit_reached() {
+    fn a_budget_fires_a_meditation_once_the_trunk_call_reports_the_limit_reached() {
         let session = Session::open_with(
             Canned::new([
                 a_reply_with_timings(SCOPED, 18, 160, 66),
@@ -17394,11 +18436,12 @@ pub(in crate::drive) mod tests {
             None,
             None,
             None,
-            Some(seaming(crate::seam::policy::Served {
+            Some(meditating(crate::meditation::policy::Served {
+                reconcile_gate: crate::meditation::policy::ReconcileGate::Carry,
                 every_turns: Some(5),
                 at_trunk_tokens: Some(200),
                 tail_tokens: 0,
-                outputs: log::SeamToolOutputs::Evict,
+                outputs: log::MeditationToolOutputs::Evict,
                 render_budget: None,
                 window_off: false,
                 warm: false,
@@ -17408,17 +18451,20 @@ pub(in crate::drive) mod tests {
         session
             .ask_marked("what are we building?", None, true)
             .expect("accepted");
-        let log = wait_until(&session, "the budget's seam", |log| {
-            !seams_in(log).is_empty()
+        let log = wait_until(&session, "the budget's meditation", |log| {
+            !meditations_in(log).is_empty()
         });
-        assert_eq!(seams_in(&log), vec![(1, log::SeamReason::Budget)]);
+        assert_eq!(
+            meditations_in(&log),
+            vec![(1, log::MeditationReason::Budget)]
+        );
         assert_eq!(session.shared.lock().trunk_tokens, None);
         reads_whole(&session);
     }
 
-    /// Under the limit, no seam: 18 + 160 + 66 is 244, and the limit is 245.
+    /// Under the limit, no meditation: 18 + 160 + 66 is 244, and the limit is 245.
     #[test]
-    fn a_trunk_under_the_budget_fires_no_seam() {
+    fn a_trunk_under_the_budget_fires_no_meditation() {
         let session = Session::open_with(
             Canned::new([
                 a_reply_with_timings(SCOPED, 18, 160, 66),
@@ -17428,11 +18474,12 @@ pub(in crate::drive) mod tests {
             None,
             None,
             None,
-            Some(seaming(crate::seam::policy::Served {
+            Some(meditating(crate::meditation::policy::Served {
+                reconcile_gate: crate::meditation::policy::ReconcileGate::Carry,
                 every_turns: None,
                 at_trunk_tokens: Some(245),
                 tail_tokens: 0,
-                outputs: log::SeamToolOutputs::Evict,
+                outputs: log::MeditationToolOutputs::Evict,
                 render_budget: None,
                 window_off: false,
                 warm: false,
@@ -17445,7 +18492,11 @@ pub(in crate::drive) mod tests {
         let log = wait_until(&session, "the fork to settle", |log| {
             settled(log) && !fork_outcomes(log).is_empty()
         });
-        assert!(seams_in(&log).is_empty(), "{:#?}", seams_in(&log));
+        assert!(
+            meditations_in(&log).is_empty(),
+            "{:#?}",
+            meditations_in(&log)
+        );
         assert_eq!(session.shared.lock().trunk_tokens, Some(244));
     }
 
@@ -17473,11 +18524,12 @@ pub(in crate::drive) mod tests {
             None,
             None,
             None,
-            Some(seaming(crate::seam::policy::Served {
+            Some(meditating(crate::meditation::policy::Served {
+                reconcile_gate: crate::meditation::policy::ReconcileGate::Carry,
                 every_turns: None,
                 at_trunk_tokens: Some(100),
                 tail_tokens: 0,
-                outputs: log::SeamToolOutputs::Evict,
+                outputs: log::MeditationToolOutputs::Evict,
                 render_budget: None,
                 window_off: false,
                 warm: false,
@@ -17491,7 +18543,7 @@ pub(in crate::drive) mod tests {
             settled(log) && !fork_outcomes(log).is_empty()
         });
         session.ask("go", None).expect("accepted");
-        // The settling and any seam it makes due are pushed under one lock.
+        // The settling and any meditation it makes due are pushed under one lock.
         let log = wait_until(&session, "the second turn", |log| {
             log.iter()
                 .filter(|logged| matches!(logged.event, Event::TurnSettled { .. }))
@@ -17505,7 +18557,11 @@ pub(in crate::drive) mod tests {
                 reason: SettleReason::Failed
             }
         )));
-        assert!(seams_in(&log).is_empty(), "{:#?}", seams_in(&log));
+        assert!(
+            meditations_in(&log).is_empty(),
+            "{:#?}",
+            meditations_in(&log)
+        );
         assert_eq!(session.shared.lock().trunk_tokens, Some(10));
     }
 
@@ -17513,18 +18569,19 @@ pub(in crate::drive) mod tests {
     /// (a refill would drop every turn and carry nothing) and stays due: the
     /// first turn that leaves an entry fires it, at that turn.
     #[test]
-    fn a_due_seam_with_nothing_to_refill_from_waits_for_an_entry() {
+    fn a_due_meditation_with_nothing_to_refill_from_waits_for_an_entry() {
         let session = Session::open_with(
             Canned::new([deltas(&["hello"]), deltas(&[SCOPED]), deltas(&[DECIDED])]),
             template(),
             None,
             None,
             None,
-            Some(seaming(crate::seam::policy::Served {
+            Some(meditating(crate::meditation::policy::Served {
+                reconcile_gate: crate::meditation::policy::ReconcileGate::Carry,
                 every_turns: Some(1),
                 at_trunk_tokens: None,
                 tail_tokens: 0,
-                outputs: log::SeamToolOutputs::Evict,
+                outputs: log::MeditationToolOutputs::Evict,
                 render_budget: None,
                 window_off: false,
                 warm: false,
@@ -17533,18 +18590,23 @@ pub(in crate::drive) mod tests {
         );
         session.ask("hi", None).expect("accepted");
         let log = wait_until(&session, "the first turn", settled);
-        assert!(seams_in(&log).is_empty());
+        assert!(meditations_in(&log).is_empty());
         session
             .ask_marked("what are we building?", None, true)
             .expect("accepted");
-        let log = wait_until(&session, "the seam", |log| !seams_in(log).is_empty());
-        assert_eq!(seams_in(&log), vec![(2, log::SeamReason::Cadence)]);
+        let log = wait_until(&session, "the meditation", |log| {
+            !meditations_in(log).is_empty()
+        });
+        assert_eq!(
+            meditations_in(&log),
+            vec![(2, log::MeditationReason::Cadence)]
+        );
     }
 
-    /// An operator's seam resets the cadence: with a cadence of two, a
-    /// declared seam after turn 1 means turn 2 does not fire one.
+    /// An operator's meditation resets the cadence: with a cadence of two, a
+    /// declared meditation after turn 1 means turn 2 does not fire one.
     #[test]
-    fn an_operator_seam_restarts_the_cadence() {
+    fn an_operator_meditation_restarts_the_cadence() {
         let session = Session::open_with(
             Canned::new([
                 deltas(&[SCOPED]),
@@ -17555,11 +18617,12 @@ pub(in crate::drive) mod tests {
             None,
             None,
             None,
-            Some(seaming(crate::seam::policy::Served {
+            Some(meditating(crate::meditation::policy::Served {
+                reconcile_gate: crate::meditation::policy::ReconcileGate::Carry,
                 every_turns: Some(2),
                 at_trunk_tokens: None,
                 tail_tokens: 0,
-                outputs: log::SeamToolOutputs::Evict,
+                outputs: log::MeditationToolOutputs::Evict,
                 render_budget: None,
                 window_off: false,
                 warm: false,
@@ -17572,7 +18635,7 @@ pub(in crate::drive) mod tests {
         wait_until(&session, "the fork to settle", |log| {
             settled(log) && !fork_outcomes(log).is_empty()
         });
-        session.declare_seam(None).expect("admitted");
+        session.declare_meditation(None).expect("admitted");
         session.ask("build it", None).expect("accepted");
         let log = wait_until(&session, "the second turn", |log| {
             settled(log)
@@ -17582,28 +18645,31 @@ pub(in crate::drive) mod tests {
                     .count()
                     == 2
         });
-        assert_eq!(seams_in(&log), vec![(1, log::SeamReason::Operator)]);
+        assert_eq!(
+            meditations_in(&log),
+            vec![(1, log::MeditationReason::Operator)]
+        );
     }
 
     // -----------------------------------------------------------------------
-    // the operator's seam (#493)
+    // the operator's meditation (#493)
     // -----------------------------------------------------------------------
 
-    /// #493's test: one ask, a declared seam, one ask after it. The seam
+    /// #493's test: one ask, a declared meditation, one ask after it. The meditation
     /// refills the trunk from working memory -- the head, the render after
     /// it, and no turn of the old trunk -- the next ask is sent on exactly
-    /// that, and the log says so: the seam line carries the render, what was
+    /// that, and the log says so: the meditation line carries the render, what was
     /// carried, and the head's digest either side, which the projection's
     /// rebuild of the next request's head checks.
-    /// #565: a seam under the regimen's render budget refills from the
-    /// budgeted render, and its `seam` line names the budget, the tokens the
+    /// #565: a meditation under the regimen's render budget refills from the
+    /// budgeted render, and its `meditation` line names the budget, the tokens the
     /// render ran to, and how many entries it reduced.
     #[test]
-    fn a_seam_under_a_render_budget_records_the_budget_and_what_it_reduced() {
+    fn a_meditation_under_a_render_budget_records_the_budget_and_what_it_reduced() {
         let mut interview = interviewing(&[log::Warrant::Scoping]);
-        interview.seams.render_budget = Some(crate::seam::render::Budget {
+        interview.meditations.render_budget = Some(crate::meditation::render::Budget {
             tokens: 1,
-            over: crate::seam::render::OverBudget::Elide,
+            over: crate::meditation::render::OverBudget::Elide,
         });
         let session = Session::open_with(
             Canned::new([deltas(&[SCOPED]), deltas(&[DECIDED])]),
@@ -17621,22 +18687,22 @@ pub(in crate::drive) mod tests {
         });
         let opened_by = settling_seq(&log, 1);
         session
-            .declare_seam(Some(gap(opened_by, GapEnd::Seam)))
+            .declare_meditation(Some(gap(opened_by, GapEnd::Meditation)))
             .expect("admitted");
         let lines = whole_log(&session);
-        let seam = lines
+        let meditation = lines
             .iter()
             .find_map(|line| match &line.event {
-                log::Event::Seam {
+                log::Event::Meditation {
                     render,
                     render_budget,
                     ..
                 } => Some((render.clone(), render_budget.clone())),
                 _ => None,
             })
-            .expect("a seam line");
-        let (render, Some(budget)) = seam.clone() else {
-            panic!("the seam names its budget: {seam:?}");
+            .expect("a meditation line");
+        let (render, Some(budget)) = meditation.clone() else {
+            panic!("the meditation names its budget: {meditation:?}");
         };
         assert_eq!((budget.tokens, budget.over.as_str()), (1, "elide"));
         assert_eq!(budget.reduced, 3, "the three decisions, elided: {render}");
@@ -17646,7 +18712,7 @@ pub(in crate::drive) mod tests {
 
     #[test]
     #[allow(clippy::too_many_lines)]
-    fn a_declared_seam_refills_the_trunk_from_working_memory_and_the_next_ask_runs_on_it() {
+    fn a_declared_meditation_refills_the_trunk_from_working_memory_and_the_next_ask_runs_on_it() {
         let session = Session::open_with(
             Canned::new([
                 deltas(&[SCOPED]),
@@ -17669,14 +18735,14 @@ pub(in crate::drive) mod tests {
         let before = session.trunk();
 
         session
-            .declare_seam(Some(gap(opened_by, GapEnd::Seam)))
-            .expect("a seam after a settled turn is admitted");
+            .declare_meditation(Some(gap(opened_by, GapEnd::Meditation)))
+            .expect("a meditation after a settled turn is admitted");
 
         let held = session.shared.lock();
         let object = &held.interview.as_ref().expect("interviewing").object;
-        let render = crate::seam::render::render(object, None);
+        let render = crate::meditation::render::render(object, None);
         drop(held);
-        let refilled = crate::seam::render::refill(&template().messages, &render);
+        let refilled = crate::meditation::render::refill(&template().messages, &render);
         assert_eq!(session.trunk(), refilled);
         assert!(
             render.contains("decision: for one team"),
@@ -17697,43 +18763,45 @@ pub(in crate::drive) mod tests {
         on_before.messages.clone_from(&before);
         on_before.messages.push(user("an ask"));
         let log = session.events_from(0);
-        let seam = log
+        let meditation = log
             .iter()
-            .position(|logged| matches!(logged.event, Event::Seamed { .. }))
-            .expect("a seam line");
+            .position(|logged| matches!(logged.event, Event::Meditated { .. }))
+            .expect("a meditation line");
         assert!(
-            matches!(&log[seam - 1].event, Event::IdleGap(gap) if gap.ended_by == GapEnd::Seam),
-            "the gap the seam ended is logged just before it"
+            matches!(&log[meditation - 1].event, Event::IdleGap(gap) if gap.ended_by == GapEnd::Meditation),
+            "the gap the meditation ended is logged just before it"
         );
-        let log::Event::Seam {
+        let log::Event::Meditation {
             prefix_hash_before,
             prefix_hash_after,
             ..
-        } = line_of(&log[seam]).event
+        } = line_of(&log[meditation]).event
         else {
-            panic!("the seam's line is a seam");
+            panic!("the meditation's line is a meditation");
         };
         assert_eq!(
             prefix_hash_before,
             crate::client::head::Head::of(&on_before).digest()
         );
         assert_eq!(
-            line_of(&log[seam]).event,
-            log::Event::Seam {
+            line_of(&log[meditation]).event,
+            log::Event::Meditation {
+                newest_turn_tokens: None,
+                refilled_anyway: None,
                 operator_changes: None,
                 unaddressed: None,
                 at_turn: 1,
-                reason: log::SeamReason::Operator,
+                reason: log::MeditationReason::Operator,
                 prefix_hash_before: prefix_hash_before.clone(),
                 prefix_hash_after: prefix_hash_after.clone(),
-                frame: crate::seam::render::FRAME_VERSION.to_owned(),
+                frame: crate::meditation::render::FRAME_VERSION.to_owned(),
                 render: render.clone(),
                 carried_entries: 3,
                 carried_turns: 0,
                 tail_tokens: None,
                 carried_tokens: None,
                 phase: None,
-                tool_outputs: Some(log::SeamToolOutputs::Evict),
+                tool_outputs: Some(log::MeditationToolOutputs::Evict),
                 outputs: None,
                 carried_outputs: None,
                 carried_output_bytes: None,
@@ -17760,7 +18828,7 @@ pub(in crate::drive) mod tests {
         assert_eq!(
             sent.len(),
             3,
-            "a turn, its fork, and the turn after the seam"
+            "a turn, its fork, and the turn after the meditation"
         );
         let mut expected = refilled.clone();
         expected.push(user("build it"));
@@ -17768,7 +18836,7 @@ pub(in crate::drive) mod tests {
             sent[2].messages, expected,
             "the next ask runs on the refill"
         );
-        // The seam's "after" is the head the next trunk request carried, as
+        // The meditation's "after" is the head the next trunk request carried, as
         // the log itself says.
         let next_head = log
             .iter()
@@ -17787,7 +18855,7 @@ pub(in crate::drive) mod tests {
         let lines: Vec<log::Line> = log.iter().map(line_of).collect();
         let projected =
             crate::drive::projection::project(&lines, &regime(), None).expect("projected");
-        // The seam's record row needs its turn's row, which needs timings
+        // The meditation's record row needs its turn's row, which needs timings
         // this transport does not send: the projection's own test has it.
         let named: Vec<String> = projected
             .unspellable
@@ -17798,16 +18866,16 @@ pub(in crate::drive) mod tests {
         assert_eq!(
             named,
             Vec::<String>::new(),
-            "every head after the seam verifies"
+            "every head after the meditation verifies"
         );
     }
 
-    /// A seam needs something to refill from and a session at rest: before
+    /// A meditation needs something to refill from and a session at rest: before
     /// any turn, or over working memory with no entry, it is refused
-    /// `nothing-to-seam`; mid-turn, `in-flight`. Each refusal is logged and
+    /// `nothing-to-meditate`; mid-turn, `in-flight`. Each refusal is logged and
     /// changes nothing.
     #[test]
-    fn a_seam_with_nothing_to_refill_from_or_under_a_turn_is_refused() {
+    fn a_meditation_with_nothing_to_refill_from_or_under_a_turn_is_refused() {
         let gate = Gate::new();
         let session = Session::open_with(
             Canned::new([vec![
@@ -17821,13 +18889,13 @@ pub(in crate::drive) mod tests {
             Some(interviewing(&[])),
         );
         assert_eq!(
-            session.declare_seam(None),
-            Err(Rejected::Refused(Refusal::NothingToSeam))
+            session.declare_meditation(None),
+            Err(Rejected::Refused(Refusal::NothingToMeditate))
         );
         session.ask("one", None).expect("accepted");
         assert!(gate.wait_for_a_waiter(Duration::from_secs(10)));
         assert_eq!(
-            session.declare_seam(None),
+            session.declare_meditation(None),
             Err(Rejected::Refused(Refusal::InFlight))
         );
         gate.open();
@@ -17835,15 +18903,15 @@ pub(in crate::drive) mod tests {
         // A settled turn, and a working object with nothing in it: a refill
         // would drop the turn and carry nothing.
         assert_eq!(
-            session.declare_seam(None),
-            Err(Rejected::Refused(Refusal::NothingToSeam))
+            session.declare_meditation(None),
+            Err(Rejected::Refused(Refusal::NothingToMeditate))
         );
         assert_eq!(session.trunk()[1..], [user("one"), assistant("Hel")]);
         assert!(
             !session
                 .events_from(0)
                 .iter()
-                .any(|logged| matches!(logged.event, Event::Seamed { .. }))
+                .any(|logged| matches!(logged.event, Event::Meditated { .. }))
         );
         reads_whole(&session);
     }

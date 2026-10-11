@@ -1,0 +1,126 @@
+.ex-meditation {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+  margin: 1.5rem 0 0.5rem;
+  color: var(--meditation);
+  font: var(--size-chrome) / 1.4 var(--font-chrome);
+  position: relative;
+}
+
+.ex-meditation__rule {
+  flex: 1 1 2rem;
+  height: var(--meditation-thickness, 0);
+  border-top: var(--meditation-line, 1px solid);
+  border-color: color-mix(in oklab, var(--meditation) 60%, transparent);
+  border-radius: 999px;
+  box-shadow: var(--meditation-groove, 0 0 0 transparent), 0 0 var(--glow-radius) color-mix(in oklab, var(--meditation) var(--glow-meditation), transparent);
+}
+
+.ex-meditation__label {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 0.35rem 1rem;
+}
+
+.ex-meditation__label strong {
+  font-weight: 600;
+}
+
+.ex-meditation__kind {
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+}
+
+.ex-meditation__reason {
+  color: var(--ink-muted);
+}
+
+/* An automatic meditation's size (#633). */
+.ex-meditation__size {
+  color: var(--warn);
+}
+
+/* The operator's changes the refill carried, and the flags it left open (#150). */
+.ex-meditation__operator {
+  color: var(--warn);
+}
+
+/* The background commands still running at this meditation (#614): a row under the rule, one line per job. */
+.ex-meditation:has(.ex-meditation__background) {
+  flex-wrap: wrap;
+}
+
+.ex-meditation__background {
+  flex: 1 0 100%;
+  display: grid;
+  gap: 0.25rem;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  justify-items: center;
+}
+
+.ex-meditation__job {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 0.25rem 0.75rem;
+  max-width: 100%;
+}
+
+.ex-meditation__job-command,
+.ex-meditation__job-output {
+  font: var(--size-tool) / 1.4 var(--font-tool);
+  overflow-wrap: anywhere;
+}
+
+.ex-meditation__job-since,
+.ex-meditation__job-output {
+  color: var(--ink-muted);
+}
+
+/* Refilled over the operator's unaddressed changes (#150's gate). */
+.ex-meditation__anyway {
+  color: var(--warn);
+}
+
+/* A compaction tail that kept no turn (#693). */
+.ex-meditation__zero {
+  color: var(--warn);
+}
+
+/* A meditation's reconcile, the interstitial (#150, DoD 4): before, the operator's changes, the answer, after -- one row. */
+.ex-meditation:has(.ex-meditation__reconcile) {
+  flex-wrap: wrap;
+}
+
+.ex-meditation__reconcile {
+  flex: 1 0 100%;
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(10rem, 1fr));
+  gap: 0.5rem 1rem;
+  color: var(--ink);
+}
+
+.ex-meditation__part ul {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  font: var(--size-tool) / 1.4 var(--font-memory);
+  overflow-wrap: anywhere;
+}
+
+.ex-meditation__part pre {
+  margin: 0;
+  font: var(--size-tool) / 1.4 var(--font-tool);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.ex-meditation__part-label,
+.ex-meditation__part-none {
+  display: block;
+  color: var(--ink-muted);
+}

@@ -1,7 +1,7 @@
 # The dev-loop regimen: the smallest thing a drive can be run under.
 #
 # #23's argument is that iterating on the machinery -- routers, reconcilers,
-# seams -- needs a PROTOCOL-COMPLIANT substrate rather than a capable one. The
+# meditations -- needs a PROTOCOL-COMPLIANT substrate rather than a capable one. The
 # floor below that is a substrate whose every answer is written down in
 # advance, which is what `diet-drive` serves when it is given no endpoint. So
 # this regimen names a canned server, and the name is what a later reader
@@ -72,8 +72,8 @@ substrate_hardware = "486ad478be67ee9ae6a22a0940d8106ee8df88c3eef9a33ece7fd6ea44
 # real session declares `isolation = "sandbox"` and gets it.
 isolation = "none"
 
-# Nothing but the operator's own declaration fires a seam: no cadence, no byte
-# budget, no phases. The script declares a boundary on turn two, so the seam
+# Nothing but the operator's own declaration fires a meditation: no cadence, no byte
+# budget, no phases. The script declares a boundary on turn two, so the meditation
 # lands where the script chose rather than where a cadence happened to put it.
 
 # NO `[reasoning]`, and that is a declaration rather than an omission. The

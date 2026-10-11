@@ -17,7 +17,7 @@ Each run is one directory, `runs/YYYY-MM-DD-<name>/`, where the name says what w
 A run whose record was never written has no `record.jsonl`, and its README says why.
 
 **Before a run lands:**
-- `diet check-log` and `diet check-record` accept its log and record, and its README says they were run.
+- `diet check-log` and `diet check-record` accept its log and record, and its README says they were run. A log or record that serve wrote and diet refuses lands as the run's finding: its README quotes the refusal and names the issue that fixes it.
 - The tree-wide hygiene check (`./verify.sh --only hygiene`) covers `runs/`. A log is scrubbed until it passes, and the README names each replacement. Digests the log and record carry inside them were taken over the unscrubbed bytes.
 
 A run another person or agent drove says so in its first lines. Runs the maintainer drives and runs an agent drives sit side by side here, and the differences between them are data.

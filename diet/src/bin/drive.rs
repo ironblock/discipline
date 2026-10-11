@@ -51,7 +51,7 @@ use diet::formats::record::Regime;
 use diet::formats::record::json::{self, Value};
 use diet::formats::regimen;
 use diet::isolation::{self, Policy as IsolationPolicy};
-use diet::seam::policy::Policy as SeamPolicy;
+use diet::meditation::policy::Policy as MeditationPolicy;
 
 /// Exit code for a usage error, kept distinct from a drive that did not run.
 const EXIT_USAGE: u8 = 2;
@@ -368,6 +368,14 @@ fn serve(args: &[String]) -> ExitCode {
         }
         _ => Vec::new(),
     };
+    // The fork ask set's priming (#598): what an interview is, in the
+    // system prompt from the session's start and never changed after.
+    let priming = regimen_file
+        .as_deref()
+        .and_then(|path| std::fs::read_to_string(path).ok())
+        .and_then(|text| regimen::parse(&text).ok())
+        .and_then(|read| session::priming(&read));
+    let system = session::primed(&system, priming);
     let system = diet::drive::instructions::into_system(&system, &instructions);
     let instruction_files: Vec<_> = instructions
         .iter()
@@ -1058,10 +1066,10 @@ fn served_dialect(id: &str) -> Result<Dialect, String> {
 
 /// What `serve`'s capture gap forks under (#374): the rules the regimen at
 /// `regimen` lists under `interview_warrant`, a working object under
-/// `regime`, and the cadence and budget its derived seams fire on, the
+/// `regime`, and the cadence and budget its derived meditations fire on, the
 /// budget taken of the substrate's registered `serving_context`. `None` when
 /// it lists no rule, or there is no regimen: then no fork and no derived
-/// seam ever fires, and a regimen that declares a seam trigger anyway is
+/// meditation ever fires, and a regimen that declares a meditation trigger anyway is
 /// refused.
 fn serving_interview(
     regimen: Option<&str>,
@@ -1078,21 +1086,22 @@ fn serving_interview(
         diet::drive::registry::REGISTRY,
         &regime.substrates[0].id,
     );
-    let seams = diet::seam::policy::Served::from_regimen(&read, window)
+    let meditations = diet::meditation::policy::Served::from_regimen(&read, window)
         .map_err(|why| format!("{path}: {why}"))?;
     let delivery = session::fork_delivery(&read).map_err(|why| format!("{path}: {why}"))?;
     // The phase graph, by the scripted drive's own reader (#563).
-    let phases = diet::seam::policy::phase_graph(&read).map_err(|why| format!("{path}: {why}"))?;
+    let phases =
+        diet::meditation::policy::phase_graph(&read).map_err(|why| format!("{path}: {why}"))?;
     if rules.is_empty() && !phases.is_empty() {
         return Err(format!(
             "{path} declares phases and no `interview_warrant`: nothing fills working \
-             memory, so no seam could ever move between them"
+             memory, so no meditation could ever move between them"
         ));
     }
-    if rules.is_empty() && seams.declares_a_trigger() {
+    if rules.is_empty() && meditations.declares_a_trigger() {
         return Err(format!(
-            "{path} declares a seam trigger and no `interview_warrant`: nothing fills \
-             working memory, so no seam could ever fire"
+            "{path} declares a meditation trigger and no `interview_warrant`: nothing fills \
+             working memory, so no meditation could ever fire"
         ));
     }
     // Self-capture (#609) keeps working memory too, forks or none.
@@ -1104,8 +1113,21 @@ fn serving_interview(
     if rules.is_empty() && self_capture.is_none() && diet::drive::prune::of(&read).is_some() {
         return Err(format!(
             "{path} declares `model_pruning = \"on\"` and neither an `interview_warrant` nor \
-             self-capture: nothing fills working memory, so no seam could ever replace a \
+             self-capture: nothing fills working memory, so no meditation could ever replace a \
              pruned result"
+        ));
+    }
+    // #150's gate: a tools-route audit marks nothing (its pinned words
+    // carry no markers), so under `refuse` every meditation with a change would
+    // hold.
+    if meditations.reconcile_gate == diet::meditation::policy::ReconcileGate::Refuse
+        && capture == diet::dogma::asks::Modality::Tools
+    {
+        return Err(format!(
+            "{path} declares `{} = \"refuse\"` with `{}` = \"tools\": the tools-route \
+             audit addresses no operator change, so every meditation with one would hold",
+            diet::meditation::policy::RECONCILE_GATE,
+            session::CAPTURE_MODALITY
         ));
     }
     if capture == diet::dogma::asks::Modality::Tools {
@@ -1132,7 +1154,7 @@ fn serving_interview(
         (!rules.is_empty() || self_capture.is_some()).then(|| Interview {
             rules,
             object: diet::object::WorkingObject::open(regime.clone()),
-            seams,
+            meditations,
             delivery,
             phases,
             // #566: how archived items are recalled; off unless declared.
@@ -1661,7 +1683,7 @@ const NO_TOTAL: std::time::Duration = std::time::Duration::from_secs(24 * 60 * 6
 ///
 /// Each call is bounded by `idle`, the longest silence it sits through, and
 /// not by its total (#569): Pi and `OpenCode` 2 bound a stream so, and a
-/// fixed 180 s total cut a turn whose reasoning was still arriving (seam
+/// fixed 180 s total cut a turn whose reasoning was still arriving (meditation
 /// smoke run 3). [`NO_TOTAL`] stands in for the total the vote has none of.
 fn trunk(
     model: String,
@@ -2176,7 +2198,7 @@ fn main() -> ExitCode {
         return ExitCode::from(EXIT_USAGE);
     }
 
-    let (regime, isolation_policy, seam_policy) =
+    let (regime, isolation_policy, meditation_policy) =
         match declared(regimen_path, args.get(3).is_some()) {
             Ok(three) => three,
             Err((code, why)) => return fail(code, &why),
@@ -2237,7 +2259,7 @@ fn main() -> ExitCode {
             confinement: &confinement,
             isolation: &isolation_policy,
             worktree: &worktree,
-            seam: seam_policy,
+            meditation: meditation_policy,
         },
     );
 
@@ -2253,7 +2275,7 @@ fn main() -> ExitCode {
 fn declared(
     path: &str,
     endpoint_given: bool,
-) -> Result<(Regime, IsolationPolicy, SeamPolicy), (u8, String)> {
+) -> Result<(Regime, IsolationPolicy, MeditationPolicy), (u8, String)> {
     let text = std::fs::read_to_string(path)
         .map_err(|why| (EXIT_INPUT, format!("{path} could not be read: {why}")))?;
     let regimen = regimen::parse(&text)
@@ -2287,9 +2309,9 @@ fn declared(
     }
     let isolation_policy = IsolationPolicy::from_regimen(&regimen)
         .map_err(|why| (EXIT_INPUT, format!("its isolation policy: {why}")))?;
-    let seam_policy = SeamPolicy::from_regimen(&regimen)
-        .map_err(|why| (EXIT_INPUT, format!("its seam policy: {why:?}")))?;
-    Ok((regime, isolation_policy, seam_policy))
+    let meditation_policy = MeditationPolicy::from_regimen(&regimen)
+        .map_err(|why| (EXIT_INPUT, format!("its meditation policy: {why:?}")))?;
+    Ok((regime, isolation_policy, meditation_policy))
 }
 
 /// The server this run calls, and the stub serving it when that is this
@@ -2339,7 +2361,7 @@ fn written(drive: &diet::drive::Drive, out_path: &str) -> ExitCode {
                 ("record".to_owned(), Value::String(out_path.to_owned())),
                 ("product".to_owned(), Value::String(product_path)),
                 ("events".to_owned(), count(drive.record.events.len())),
-                ("seams".to_owned(), count(drive.seams.len())),
+                ("meditations".to_owned(), count(drive.meditations.len())),
                 ("unspellable".to_owned(), count(drive.unspellable.len())),
                 (
                     "uncaptured".to_owned(),
@@ -2347,7 +2369,7 @@ fn written(drive: &diet::drive::Drive, out_path: &str) -> ExitCode {
                 ),
                 // Every audit, because none of them was folded: the verdict
                 // grammar is not built. Reported as a count rather than
-                // silently absent, so a reader of this line knows a seam's
+                // silently absent, so a reader of this line knows a meditation's
                 // ask was put and its answer not read.
                 ("audits_unread".to_owned(), count(drive.audits.len())),
                 // The cache census (#79). BESIDE the record, not in it: the

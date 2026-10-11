@@ -31,14 +31,18 @@ export interface ComposerProps {
   readonly nearTimeout?: boolean;
   /** The model's phase proposal waiting on the operator (#124, #651): the move, its reason, and the call it is. */
   readonly proposal?: { readonly call: string; readonly from?: string; readonly to: string; readonly reason?: string };
+  /** Why a meditation has nothing to refill from now, when it has none (#685): serve refuses a meditation then (`nothing-to-meditate`). */
+  readonly noMeditation?: string;
+  /** A meditation held for the operator (#150's gate): the changes its reconcile left unaddressed, each with its entry's text. */
+  readonly held?: { readonly unaddressed: readonly { readonly id: string; readonly text: string }[] };
 }
 
 const DISPOSITIONS: readonly Disposition[] = ['keep', 'drop', 'park'];
 
 /** The three rulings on a proposed phase move (#651), in the order offered, and what each does. */
 const PHASE_CHOICES: readonly { readonly choice: PhaseChoice; readonly title: string }[] = [
-  { choice: 'seam', title: 'move to the proposed phase now, through a seam: the trunk is refilled from working memory' },
-  { choice: 'continue', title: 'move to the proposed phase without a seam: the trunk goes on as it is' },
+  { choice: 'meditation', title: 'move to the proposed phase now, through a meditation: the trunk is refilled from working memory' },
+  { choice: 'continue', title: 'move to the proposed phase without a meditation: the trunk goes on as it is' },
   { choice: 'stay', title: 'stay in this phase' },
 ];
 
@@ -62,7 +66,7 @@ const STATE_LINE: Readonly<Record<SessionState, string>> = {
 /** How long the question "end the session?" shows before a press answers it. */
 const CONFIRM_AFTER_MS = 500;
 
-export function Composer({ state, link = 'live', phase, phases, dispatch, hint, upload, tangents = false, tangent, foreground = false, nearTimeout = false, proposal }: ComposerProps) {
+export function Composer({ state, link = 'live', phase, phases, dispatch, hint, upload, tangents = false, tangent, foreground = false, nearTimeout = false, proposal, noMeditation, held }: ComposerProps) {
   // Ending a tangent (#608): the operator rules on each of its entries, keep by default, then closes it.
   const [closing, setClosing] = useState(false);
   const [rulings, setRulings] = useState<Readonly<Record<string, Disposition>>>({});
@@ -194,7 +198,24 @@ export function Composer({ state, link = 'live', phase, phases, dispatch, hint, 
       data-state={state}
       data-link={link}
     >
-      {/* The model proposes a phase move (#124): the operator rules -- refill now, move without a seam, or stay. */}
+      {/* A meditation held for the operator (#150's gate): the reconcile left their changes unaddressed, so no refill yet. */}
+      {held && dispatch ? (
+        <section className="ex-composer__held" aria-label="the meditation is held for you">
+          <span className="ex-composer__label">the meditation is held: the reconcile left your changes unaddressed</span>
+          <ul className="ex-composer__held-list">
+            {held.unaddressed.map((entry) => (
+              <li key={entry.id} className="ex-composer__held-entry">{`${entry.id} · ${entry.text}`}</li>
+            ))}
+          </ul>
+          <span className="ex-composer__held-actions">
+            <span className="ex-composer__held-else">or edit or flag those entries, or declare the refill again</span>
+            <button type="button" disabled={!idle} title="refill now, carrying the changes as they stand" onClick={() => run({ kind: 'refill-anyway' })}>
+              refill anyway
+            </button>
+          </span>
+        </section>
+      ) : null}
+      {/* The model proposes a phase move (#124): the operator rules -- refill now, move without a meditation, or stay. */}
       {proposal && dispatch ? (
         <section className="ex-composer__proposal" aria-label="the model proposes a phase move">
           <span className="ex-composer__label">the model proposes</span>{' '}
@@ -202,11 +223,19 @@ export function Composer({ state, link = 'live', phase, phases, dispatch, hint, 
           {proposal.reason !== undefined ? <p className="ex-composer__proposal-reason">{proposal.reason}</p> : null}
           <span className="ex-composer__proposal-actions">
             {PHASE_CHOICES.map(({ choice, title }) => (
-              <button key={choice} type="button" disabled={!idle} title={title} onClick={() => run({ kind: 'ratify-phase', call: proposal.call, choice })}>
+              <button
+                key={choice}
+                type="button"
+                disabled={!idle || (choice === 'meditation' && noMeditation !== undefined)}
+                title={choice === 'meditation' && noMeditation !== undefined ? `no meditation: ${noMeditation}` : title}
+                onClick={() => run({ kind: 'ratify-phase', call: proposal.call, choice })}
+              >
                 {choice}
               </button>
             ))}
           </span>
+          {/* Nothing to refill from (#685): the meditation is not offered, and this says why, as serve would refuse it. */}
+          {noMeditation !== undefined ? <span className="ex-composer__proposal-why">no meditation: {noMeditation}</span> : null}
         </section>
       ) : null}
       {tangents && open && closing ? (
@@ -281,7 +310,7 @@ export function Composer({ state, link = 'live', phase, phases, dispatch, hint, 
         <span className="ex-composer__phase">
           <span className="ex-composer__label">phase</span> {phase || (phases.length === 0 ? 'not declared' : 'not said')}
         </span>
-        <span className="ex-composer__seam">
+        <span className="ex-composer__meditation">
           {/* The moves the graph allows from here (#563); with none -- no graph, or the last phase -- a refill names no phase. */}
           {phases.length > 0 ? (
             <>
@@ -295,7 +324,7 @@ export function Composer({ state, link = 'live', phase, phases, dispatch, hint, 
               </select>
             </>
           ) : null}
-          <button type="button" disabled={!idle || !dispatch} onClick={() => run(phases.length > 0 ? { kind: 'seam', to } : { kind: 'seam' })}>
+          <button type="button" disabled={!idle || !dispatch} onClick={() => run(phases.length > 0 ? { kind: 'meditation', to } : { kind: 'meditation' })}>
             refill
           </button>
         </span>

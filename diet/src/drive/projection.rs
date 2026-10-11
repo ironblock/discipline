@@ -536,6 +536,8 @@ pub fn project_in(
         // Each lever's state, as `session.start` names it (#573): the
         // record's start says what the log says.
         levers: levers.clone(),
+        // #583: the version this crate writes, spelling it `meditation`.
+        version: Some(crate::formats::record::VERSION),
     }];
     events.extend(walk.events);
     Ok(Projection {
@@ -562,10 +564,10 @@ struct Walk<'a> {
     /// The model the session's requests name, from its first line.
     model: String,
     /// The trunk as the session holds it: its head, then each answered
-    /// turn's ask and answer -- or, after a seam, the head refilled from the
-    /// seam's render (v6, #493).
+    /// turn's ask and answer -- or, after a meditation, the head refilled from the
+    /// meditation's render (v6, #493).
     trunk: Vec<Message>,
-    /// The session's head, from `session.start`: what a seam refills from.
+    /// The session's head, from `session.start`: what a meditation refills from.
     head: Vec<Message>,
     /// Each turn's ask.
     asks: BTreeMap<u32, String>,
@@ -605,7 +607,7 @@ struct Walk<'a> {
     /// attachment could not be read back: every later head names it (#471's
     /// review, NB3).
     trunk_unrebuilt: Option<String>,
-    /// Whether the trunk carries a seam's refill message after the head
+    /// Whether the trunk carries a meditation's refill message after the head
     /// (#597): the turns start after it.
     refilled: bool,
     /// Each lane but the trunk's last logged head digest (v5, #374): a live
@@ -768,7 +770,7 @@ struct Pruned {
 
 impl Pruned {
     /// Whether `message` is the result it prunes, as the trunk carried it
-    /// or as a seam already replaced it: the session's own test.
+    /// or as a meditation already replaced it: the session's own test.
     fn is(&self, message: &Message) -> bool {
         message.role == Role::Tool
             && message.tool_call_id.as_deref() == Some(self.call.as_str())
@@ -918,6 +920,7 @@ impl<'a> Walk<'a> {
             Line::TimeoutNear { .. } => log::Kind::TimeoutNear,
             Line::ForkSkipped { .. } => log::Kind::ForkSkipped,
             Line::Flag { .. } => log::Kind::Flag,
+            Line::MeditationHeld { .. } => log::Kind::MeditationHeld,
             Line::PatchRefused { .. } => log::Kind::PatchRefused,
             // The trunk's own self-capture patch (#609), fork-less.
             Line::Patch { .. } => log::Kind::Patch,
@@ -938,7 +941,7 @@ impl<'a> Walk<'a> {
     #[allow(clippy::too_many_lines)]
     fn line(&mut self, line: &log::Line) -> Result<(), String> {
         match &line.event {
-            // A prune (v7, #612): applied to the trunk by the seam that
+            // A prune (v7, #612): applied to the trunk by the meditation that
             // lists its call, as the session applies it.
             Line::Pruned { .. } => self.pruned_line(line),
             Line::Ask {
@@ -1008,10 +1011,10 @@ impl<'a> Walk<'a> {
             // `value` is carried by its capture row, and any other outcome is
             // named with its word.
             Line::ForkSettled { fork, outcome, .. } => self.fork_settled(line.seq, *fork, *outcome),
-            // A seam (v6, #493): its row, and the trunk refilled exactly as
+            // A meditation (v6, #493): its row, and the trunk refilled exactly as
             // the session refills it, so the next request's head is rebuilt
             // and checked like any other.
-            Line::Seam { .. } => self.seam(line),
+            Line::Meditation { .. } => self.meditation(line),
             // A tangent (v7, #22): its close rolls the rebuilt trunk back to
             // the fork point, as the session's does; neither line has a row.
             Line::TangentOpen { .. } | Line::TangentClose { .. } => self.tangent(line),
@@ -1035,13 +1038,16 @@ impl<'a> Walk<'a> {
             | Line::TimeoutNear { .. }
             | Line::ForkSkipped { .. }
             | Line::Capture { .. }
-            // The operator's ruling on a phase proposal (#124): a seam it
+            // The operator's ruling on a phase proposal (#124): a meditation it
             // declares has its own row.
             | Line::PhaseRuled { .. }
             // The operator's flag, and a model patch refused over the
-            // operator's entry (#150): the seam row names what was carried.
+            // operator's entry (#150): the meditation row names what was carried.
             | Line::Flag { .. }
             | Line::PatchRefused { .. }
+            // A meditation held for the operator (#150's gate): the trunk was
+            // not refilled, so no meditation row; the one that refills has it.
+            | Line::MeditationHeld { .. }
             // The trunk's own self-capture patch (#609): no fork row to
             // count it on, as its `capture` line has none.
             | Line::Patch { fork: None, .. } => self.no_row(line),
@@ -1227,7 +1233,7 @@ impl<'a> Walk<'a> {
         });
     }
 
-    /// A `pruned` line (#612), kept until the seam that lists its call: the
+    /// A `pruned` line (#612), kept until the meditation that lists its call: the
     /// pruned call's row and what the trunk carried as its result.
     fn pruned_line(&mut self, line: &log::Line) {
         let Line::Pruned {
@@ -1254,13 +1260,13 @@ impl<'a> Walk<'a> {
         });
     }
 
-    /// A seam's row, `s/<seq>`, at the turn it follows, and the trunk
+    /// A meditation's row, `s/<seq>`, at the turn it follows, and the trunk
     /// refilled from `render` and the section of tool outputs it carried
-    /// through [`crate::seam::render::refill`]. The
+    /// through [`crate::meditation::render::refill`]. The
     /// row is named rather than written when that turn has no row; the
     /// trunk is refilled either way, since the session's was.
-    fn seam(&mut self, line: &log::Line) {
-        let Line::Seam {
+    fn meditation(&mut self, line: &log::Line) {
+        let Line::Meditation {
             at_turn,
             render,
             tail_tokens,
@@ -1277,15 +1283,21 @@ impl<'a> Walk<'a> {
             return;
         };
         let (seq, at_turn, tail_tokens) = (line.seq, *at_turn, tail_tokens.unwrap_or(0));
-        let (operator_changes, unaddressed) = (operator_changes.clone(), unaddressed.clone());
+        // Every change addressed is the log's `unaddressed: []` and the
+        // record's `unaddressed` absent beside its `operator_changes`: a
+        // record row's list is never empty (#688).
+        let (operator_changes, unaddressed) = (
+            operator_changes.clone(),
+            unaddressed.clone().filter(|left| !left.is_empty()),
+        );
         // The tail the session kept after the refill (#552), cut from the
         // rebuilt trunk by the same function.
         let turns = self
             .trunk
             .get(self.head.len() + usize::from(self.refilled)..)
             .unwrap_or_default();
-        let mut kept = crate::seam::render::tail(turns, tail_tokens).to_vec();
-        // The prunes this seam applied (#612), then each pruned result in
+        let mut kept = crate::meditation::render::tail(turns, tail_tokens).to_vec();
+        // The prunes this meditation applied (#612), then each pruned result in
         // the kept tail replaced by its line, as the session replaces it.
         let mut applied = Vec::new();
         for call in pruned.iter().flatten() {
@@ -1310,22 +1322,22 @@ impl<'a> Walk<'a> {
             .count() as u64;
         let carried_tokens = kept
             .iter()
-            .map(crate::seam::render::estimated_tokens)
+            .map(crate::meditation::render::estimated_tokens)
             .sum::<u64>();
-        // The section the seam carried of the outputs it compacted away
+        // The section the meditation carried of the outputs it compacted away
         // (#553), after the render, as sent.
         let sent = outputs
             .as_ref()
             .map_or_else(|| render.clone(), |section| format!("{render}{section}"));
-        // Where the seam put it (#597): a user message after the head, or --
-        // a seam logged before #597 -- appended to the system message.
+        // Where the meditation put it (#597): a user message after the head, or --
+        // a meditation logged before #597 -- appended to the system message.
         self.refilled = *placement == Some(log::RenderPlacement::Message);
         self.trunk = if self.refilled {
             // Its list of the background commands still running (#614),
             // after the summary.
-            crate::seam::render::refill_with(&self.head, &sent, background.as_deref())
+            crate::meditation::render::refill_with(&self.head, &sent, background.as_deref())
         } else {
-            crate::seam::render::refill_in_the_system_message(&self.head, &sent)
+            crate::meditation::render::refill_in_the_system_message(&self.head, &sent)
         };
         self.trunk.extend(kept);
         // An attachment the old trunk carried and could not be read back is
@@ -1338,8 +1350,8 @@ impl<'a> Walk<'a> {
         if !turned {
             self.name(
                 seq,
-                "seam",
-                format!("a seam at turn {at_turn}, which has no row"),
+                "meditation",
+                format!("a meditation at turn {at_turn}, which has no row"),
                 None,
             );
             return;
@@ -1347,21 +1359,21 @@ impl<'a> Walk<'a> {
         let Ok(rendered_bytes) = Count::new(render.len() as u64) else {
             self.name(
                 seq,
-                "seam",
+                "meditation",
                 "a render past the record's bound".to_owned(),
                 None,
             );
             return;
         };
         let tailed = tail_tokens > 0;
-        self.events.push(Event::Seam {
+        self.events.push(Event::Meditation {
             id: format!("s/{seq}"),
             at_turn,
             rendered_bytes,
             tail_tokens: tailed.then_some(tail_tokens),
             carried_turns: tailed.then_some(carried_turns),
             carried_tokens: tailed.then_some(carried_tokens),
-            // An automatic seam names the prompt that fired it (#617).
+            // An automatic meditation names the prompt that fired it (#617).
             prompt_tokens: fired.map(|fired| fired.prompt_tokens),
             window: fired.map(|fired| fired.window),
             pruned: (!applied.is_empty()).then_some(applied),
@@ -1577,7 +1589,7 @@ impl<'a> Walk<'a> {
     /// A side lane's head moving (v5, #374). A whole-trunk fork on the
     /// trunk's own server sends the trunk as it stands, then its call's last
     /// message, so its head is rebuilt from the projected trunk and verified
-    /// by digest (#157); a seam's audit (#504) is such a fork. A move between
+    /// by digest (#157); a meditation's audit (#504) is such a fork. A move between
     /// two verified heads on a lane is attributed as the trunk's moves are --
     /// the record names every move a lane's digests prove (`ChangeNotNamed`),
     /// so a verified move is named, never left out. A move from or to a head
@@ -1970,6 +1982,7 @@ impl<'a> Walk<'a> {
             output_from,
             text: Some(text.to_owned()),
             timings: timings.and_then(timings_of),
+            model: None,
         });
     }
 }
@@ -2018,6 +2031,54 @@ mod tests {
             tools_of(&names, None, &C1).expect("declared")[0],
             sent[0],
             "c1's and c2's update_record differ"
+        );
+    }
+
+    /// #688, the operator-edits run (`runs/2026-10-10-operator-edits-agent-driven`,
+    /// #690): its log, whole, projects to a record that reads back. Serve
+    /// refused it there -- the meditation at seq 1079 addressed both operator
+    /// changes and logged `unaddressed: []`, which the projection carried
+    /// into the row the reader refuses; that row now carries
+    /// `operator_changes` and no `unaddressed`.
+    #[test]
+    fn the_operator_edits_runs_log_projects_to_a_record_that_reads_back() {
+        const LOG: &str =
+            include_str!("../../../runs/2026-10-10-operator-edits-agent-driven/session.log");
+        // Read whole, in the spelling its version declares (#583).
+        let lines: Vec<log::Line> = log::parse(LOG).expect("the run's log reads");
+        let events = project(&lines, &regime(), None)
+            .expect("the run's log projects")
+            .events;
+        let rendered = record::render(&record::Record {
+            events: events.clone(),
+        });
+        record::parse(&rendered).unwrap_or_else(|why| panic!("does not read back: {why:?}"));
+        let meditations: Vec<_> = events
+            .iter()
+            .filter_map(|row| match row {
+                record::Event::Meditation {
+                    operator_changes,
+                    unaddressed,
+                    ..
+                } => Some((operator_changes.clone(), unaddressed.clone())),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(
+            meditations,
+            [(
+                Some(vec![
+                    log::OperatorChange {
+                        entry: "operator-547".to_owned(),
+                        kind: "edit".to_owned(),
+                    },
+                    log::OperatorChange {
+                        entry: "interview-t2-1".to_owned(),
+                        kind: "flag".to_owned(),
+                    },
+                ]),
+                None
+            )]
         );
     }
 
@@ -2344,21 +2405,23 @@ mod tests {
         validates(&projection);
     }
 
-    /// A seam (log v6, #493) is the record's `seam` row at its turn, its
+    /// A meditation (log v6, #493) is the record's `meditation` row at its turn, its
     /// `rendered_bytes` the render's length.
     #[test]
-    fn a_seam_is_a_seam_row_at_its_turn() {
+    fn a_meditation_is_a_meditation_row_at_its_turn() {
         let render = "# working set\nd1\ta tracker\n";
         let mut events = vec![start()];
         events.extend(answered(1, 3, Some(warm()), None));
-        events.push(Line::Seam {
+        events.push(Line::Meditation {
+            newest_turn_tokens: None,
+            refilled_anyway: None,
             operator_changes: None,
             unaddressed: None,
             at_turn: 1,
-            reason: log::SeamReason::Operator,
+            reason: log::MeditationReason::Operator,
             prefix_hash_before: "a".repeat(64),
             prefix_hash_after: "b".repeat(64),
-            frame: crate::seam::render::FRAME_VERSION.to_owned(),
+            frame: crate::meditation::render::FRAME_VERSION.to_owned(),
             render: render.to_owned(),
             carried_entries: 1,
             carried_turns: 0,
@@ -2385,7 +2448,7 @@ mod tests {
         assert!(
             projection.events.iter().any(|event| matches!(
                 event,
-                Event::Seam { at_turn: 1, rendered_bytes, .. }
+                Event::Meditation { at_turn: 1, rendered_bytes, .. }
                     if rendered_bytes.get() == render.len() as u64
             )),
             "{:#?}",
@@ -2394,21 +2457,23 @@ mod tests {
         validates(&projection);
     }
 
-    /// A seam that kept a tail (#552): its row names the depth and what
+    /// A meditation that kept a tail (#552): its row names the depth and what
     /// the projection's own cut of the rebuilt trunk kept -- the turn before
     /// it, whole -- and the record validates.
     #[test]
-    fn a_seam_that_kept_a_tail_names_its_depth_and_what_it_kept() {
+    fn a_meditation_that_kept_a_tail_names_its_depth_and_what_it_kept() {
         let mut events = vec![start()];
         events.extend(answered(1, 3, Some(warm()), None));
-        events.push(Line::Seam {
+        events.push(Line::Meditation {
+            newest_turn_tokens: None,
+            refilled_anyway: None,
             operator_changes: None,
             unaddressed: None,
             at_turn: 1,
-            reason: log::SeamReason::Operator,
+            reason: log::MeditationReason::Operator,
             prefix_hash_before: "a".repeat(64),
             prefix_hash_after: "b".repeat(64),
-            frame: crate::seam::render::FRAME_VERSION.to_owned(),
+            frame: crate::meditation::render::FRAME_VERSION.to_owned(),
             render: "# working set\n".to_owned(),
             carried_entries: 1,
             carried_turns: 1,
@@ -2436,7 +2501,7 @@ mod tests {
             .events
             .iter()
             .find_map(|event| match event {
-                Event::Seam {
+                Event::Meditation {
                     tail_tokens,
                     carried_turns,
                     carried_tokens,
@@ -2444,7 +2509,7 @@ mod tests {
                 } => Some((*tail_tokens, *carried_turns, carried_tokens.is_some())),
                 _ => None,
             })
-            .expect("a seam row");
+            .expect("a meditation row");
         assert_eq!(row, (Some(10_000), Some(1), true));
         validates(&projection);
     }
@@ -3085,11 +3150,11 @@ mod tests {
         assert_eq!(named, vec![Some("ls -la (")]);
     }
 
-    /// #612: a seam that applied a prune names it on its row -- the pruned
+    /// #612: a meditation that applied a prune names it on its row -- the pruned
     /// call's row, its whole's sha256, the bytes it removed -- and the
     /// projection reads the log's own fixture to say so.
     #[test]
-    fn a_seam_row_names_each_prune_it_applied() {
+    fn a_meditation_row_names_each_prune_it_applied() {
         let text = include_str!(
             "../../formats/log/fixtures/valid/a-v7-prune-applied-at-the-turns-seam.jsonl"
         );
@@ -3100,7 +3165,7 @@ mod tests {
             .events
             .iter()
             .filter_map(|event| match event {
-                Event::Seam { pruned, .. } => Some(pruned.clone()),
+                Event::Meditation { pruned, .. } => Some(pruned.clone()),
                 _ => None,
             })
             .collect();
@@ -3126,6 +3191,7 @@ mod tests {
     /// turn 3's read fork, declined.
     fn two_forks() -> Projection {
         let fork = |at: u64, of_turn: u32, why: log::Warrant| Line::Fork {
+            after_meditation: None,
             lane: Lane::Interview,
             of_turn,
             at,
@@ -3179,6 +3245,7 @@ mod tests {
         events.push(fork(3, 1, log::Warrant::Scoping));
         events.extend(call(1, 8));
         events.push(Line::ForkSettled {
+            trailer: None,
             fork: 8,
             outcome: log::ForkOutcome::Value,
             prompt_tokens: None,
@@ -3191,6 +3258,7 @@ mod tests {
         events.push(fork(24, 3, log::Warrant::Read));
         events.extend(call(3, 29));
         events.push(Line::ForkSettled {
+            trailer: None,
             fork: 29,
             outcome: log::ForkOutcome::Decline,
             prompt_tokens: None,

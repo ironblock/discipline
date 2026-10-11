@@ -527,6 +527,7 @@ pub fn project(journal: &Journal, substrate: &str) -> Projection {
                     timings: timings_of
                         .get(to_request.as_str())
                         .and_then(|timings| spelled_timings(timings, &mut note)),
+                    model: None,
                 });
                 answered.insert(to_request.as_str());
                 if *capped {

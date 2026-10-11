@@ -51,8 +51,8 @@ describe('the idle gap, measured (Q4)', () => {
     expect(m.phase).toBe('notice');
     m.visibility(false, 30_000);
     expect(m.phase).toBe('read');
-    const g = m.end(31_000, 'seam');
-    expect(g).toMatchObject({ notice: 0, read: 1000, away: 30_000, ended_by: 'seam' });
+    const g = m.end(31_000, 'meditation');
+    expect(g).toMatchObject({ notice: 0, read: 1000, away: 30_000, ended_by: 'meditation' });
   });
 
   it('counts blocked from the first send refused because work was in flight, not as composing', () => {

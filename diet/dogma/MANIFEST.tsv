@@ -55,6 +55,15 @@ fork-asks/t1/imperative	cf7ae8f170047df5	29
 fork-asks/t1/judgment	a4da4b8db8e532b8	413
 fork-asks/t1/outcome	dc328c8ca04596df	308
 fork-asks/t1/reminder	4a4a7a8c4d759496	240
+fork-asks/t2/api_surface	5b6cbc7a900f0672	410
+fork-asks/t2/change	74b5e4949a9b2dc4	332
+fork-asks/t2/finding	853393d427fd6215	335
+fork-asks/t2/generic	6873fc97c7aa9e90	294
+fork-asks/t2/imperative	cf7ae8f170047df5	29
+fork-asks/t2/judgment	78844ffa1569ff0f	438
+fork-asks/t2/outcome	57382d5d5b329968	333
+fork-asks/t2/priming	022fb70bf838aba4	281
+fork-asks/t2/reminder	80e7b42fd5251727	265
 audit-tools/t1/AUDIT_Q	b5e4d23dacd91983	165
 audit-tools/t1/AUDIT_Q_CADENCE	af07f4b05c7c3228	239
 audit-tools/t1/AUDIT_Q_HUMAN	08c8bb084d45f524	195

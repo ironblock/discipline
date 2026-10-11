@@ -1,7 +1,7 @@
 //! `diet::drive` -- a session, end to end, with a record at the end of it.
 //!
 //! Everything else in this crate is a piece: a client that talks to a
-//! substrate, a controller that renders and ratifies at a seam, a confinement
+//! substrate, a controller that renders and ratifies at a meditation, a confinement
 //! that runs a command and types what it was denied, an object that holds
 //! what the session knows, a record format that says how a drive is written
 //! down. Nothing put them together, so nothing had ever run.
@@ -16,7 +16,7 @@
 //! a boundary is declared. It fixes nothing about what comes back. Put
 //! against a canned server the whole run is determined and takes
 //! milliseconds, which is the point of #23: iterating on routers,
-//! reconcilers and seams does not need a capable substrate. Put against a
+//! reconcilers and meditations does not need a capable substrate. Put against a
 //! real one the same script is a real drive. The difference is the transport,
 //! and this module cannot tell which it has.
 //!
@@ -45,7 +45,7 @@
 //!
 //! # What it cannot do yet, and says so
 //!
-//! The fold at a seam and the fold of a fork's answer are done HERE, from the
+//! The fold at a meditation and the fold of a fork's answer are done HERE, from the
 //! interview grammar, and they are not the reconciler. The reconciler and the
 //! collectors live in `capture`, which is not this seat's module; when they
 //! are ready the two folds in this file become calls into them. Until then a
@@ -75,7 +75,7 @@
 //! reason. It is run against the REAL regimen this lane ships --
 //! `the_reference_regimens_own_rendered_head_carries_no_timestamp` parses
 //! `diet/drive/dev-loop.toml`, crosses it into a regime, renders it through
-//! the seam's own renderer and puts the result to the lint -- and the same
+//! the meditation's own renderer and puts the result to the lint -- and the same
 //! test appends a date and requires the refusal, so the pass is not vacuous.
 //!
 //! `diet-drive` exits [`Halt::EXIT`] (two) on any halt rather than one: that
@@ -130,9 +130,9 @@ use crate::formats::interview;
 use crate::formats::record::json::Value;
 use crate::formats::record::{Count, Event, ParseError, Record, Source, Summary, render};
 use crate::isolation::{Confinement, NotRun, Policy as IsolationPolicy, Unavailable};
+use crate::meditation::policy::Policy as MeditationPolicy;
+use crate::meditation::{Ask, Controller, Meditation, MeditationError, Ratifier};
 use crate::object::{Applied, EntryId, ObjectError, Patch, Provenance, WorkingObject};
-use crate::seam::policy::Policy as SeamPolicy;
-use crate::seam::{Ask, Controller, Ratifier, Seam, SeamError};
 
 use script::Script;
 
@@ -140,7 +140,7 @@ use script::Script;
 pub const MAIN: &str = "main";
 /// The lane an interview fork is made on.
 pub const INTERVIEW: &str = "interview";
-/// The lane a seam's ratification ask is made on.
+/// The lane a meditation's ratification ask is made on.
 pub const RATIFY: &str = "ratify";
 /// The lane the kwarg-delivery negative control is made on.
 ///
@@ -171,7 +171,7 @@ pub const KWARG_CONTROL_ASK: &str = "Reply with the single word: ok";
 
 /// Everything a drive runs against, borrowed for the length of the run.
 ///
-/// A borrowed bundle rather than fields on [`Drive`], because the seam
+/// A borrowed bundle rather than fields on [`Drive`], because the meditation
 /// controller owns a ratifier that has to reach the client, and a struct
 /// holding both the client and the controller that borrows it would be
 /// self-referential. Passing the gym in keeps the borrow where the compiler
@@ -189,8 +189,8 @@ pub struct Gym<'a, T: Transport> {
     pub isolation: &'a IsolationPolicy,
     /// The working tree, which is the only writable path.
     pub worktree: &'a Path,
-    /// When a seam fires and what it may transition between.
-    pub seam: SeamPolicy,
+    /// When a meditation fires and what it may transition between.
+    pub meditation: MeditationPolicy,
 }
 
 /// Why a drive stopped without a record.
@@ -246,12 +246,12 @@ pub enum Halt {
         /// Why.
         why: ObjectError,
     },
-    /// A seam refused to settle.
-    SeamRefused {
+    /// A meditation refused to settle.
+    MeditationRefused {
         /// The turn.
         turn: u32,
         /// Why.
-        why: SeamError,
+        why: MeditationError,
     },
     /// The negative control came back with reasoning in it, so the template
     /// kwargs this drive sends are not reaching the template.
@@ -349,7 +349,7 @@ impl fmt::Display for Halt {
             ),
             Self::CommandNotRun { turn, why } => write!(f, "turn {turn}: {why}"),
             Self::ObjectRefused { turn, why } => write!(f, "turn {turn}: {why:?}"),
-            Self::SeamRefused { turn, why } => write!(f, "turn {turn}: {why:?}"),
+            Self::MeditationRefused { turn, why } => write!(f, "turn {turn}: {why:?}"),
             Self::KwargsNotDelivered {
                 lane,
                 reasoning_chars,
@@ -470,24 +470,24 @@ crate::client::vocabulary! {
     }
 }
 
-/// What became of one seam's ratification.
+/// What became of one meditation's ratification.
 ///
 /// **The audit verdict grammar is not implemented and this module will not
-/// improvise one.** The ask a seam puts (`seam::pinned_ask`) demands
+/// improvise one.** The ask a meditation puts (`meditation::pinned_ask`) demands
 /// `1. KEEP` / `2. UPDATE: …` / `3. REMOVE — …`; ruling 1 on #25 puts that
 /// vocabulary in `diet/formats/` as its own verdict enum and it is not built.
-/// The seam lane refused to write a second parser for it and said so; this
+/// The meditation lane refused to write a second parser for it and said so; this
 /// module briefly did the worse thing, folding the audit answer with the
 /// *interview* grammar -- so a model answering the ask exactly as pinned
 /// produced **zero patches and no warning**, while an answer carrying a
 /// `DECISION:` line the ask never requested was banked as a ratified note.
 ///
 /// So the ask is put, the answer is kept, and nothing is folded from it until
-/// the verdict format exists. A seam still fires and still re-renders; what
+/// the verdict format exists. A meditation still fires and still re-renders; what
 /// it does not do is pretend to have read a reply it cannot read.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Audit {
-    /// The turn the seam settled after.
+    /// The turn the meditation settled after.
     pub turn: u32,
     /// The ask that was put, as the dogma pinned it.
     pub asked: String,
@@ -511,13 +511,13 @@ pub struct Drive {
     /// can check. A caller writes this beside the record and `sha256sum` is
     /// the audit.
     pub product: String,
-    /// Every seam that fired, with its dumps either side.
-    pub seams: Vec<Seam>,
+    /// Every meditation that fired, with its dumps either side.
+    pub meditations: Vec<Meditation>,
     /// What the client learned that record v0 has no spelling for.
     pub unspellable: Vec<Unspellable>,
     /// What each fork's answer carried that this fold did not keep.
     pub uncaptured: Vec<Uncaptured>,
-    /// What became of each seam's ratification. See [`Audit`]: the verdict
+    /// What became of each meditation's ratification. See [`Audit`]: the verdict
     /// grammar is not built, so every one of these is an ask put and an
     /// answer kept and not folded.
     pub audits: Vec<Audit>,
@@ -536,17 +536,17 @@ pub struct Drive {
     pub cache: crate::client::cache::Census,
 }
 
-/// The ratifier a drive uses: it puts the seam's ask to the substrate.
+/// The ratifier a drive uses: it puts the meditation's ask to the substrate.
 ///
-/// A ratifier that answered from a table would make the seam a fixture. This
-/// one makes a real call on the [`RATIFY`] lane, so the ask a seam builds is
+/// A ratifier that answered from a table would make the meditation a fixture. This
+/// one makes a real call on the [`RATIFY`] lane, so the ask a meditation builds is
 /// exercised against whatever is serving, and the call's journal becomes rows
 /// of the record like any other.
 struct Interviewer<'a, T: Transport> {
     client: &'a Client<T>,
     shape: RequestShape,
     ids: IdSource,
-    /// The turn the seam is settling, for the provenance its patches carry.
+    /// The turn the meditation is settling, for the provenance its patches carry.
     ///
     /// A [`Cell`] because the controller owns this and lends it back as `&R`,
     /// while the turn is only known outside. It is not a shortcut around the
@@ -597,7 +597,7 @@ impl<T: Transport> Ratifier for Interviewer<'_, T> {
         // different format. An empty patch list here is not "the model kept
         // everything" -- it is "this module cannot read the reply" -- and the
         // difference is recorded in `audits` rather than left for a reader of
-        // the record to infer from a seam that moved nothing.
+        // the record to infer from a meditation that moved nothing.
         self.audits.push(Audit {
             turn: self.turn.get(),
             asked: ask.text.clone(),
@@ -816,7 +816,7 @@ pub fn run<T: Transport>(script: &Script, gym: &Gym<'_, T>) -> Result<Drive, Hal
         .clone();
     let mut object = WorkingObject::open(script.regime.clone());
     let mut controller = Controller::open(
-        gym.seam.clone(),
+        gym.meditation.clone(),
         &object,
         Interviewer {
             client: gym.client,
@@ -839,10 +839,12 @@ pub fn run<T: Transport>(script: &Script, gym: &Gym<'_, T>) -> Result<Drive, Hal
         fork_delivery: None,
         tool_output: None,
         levers: None,
+        // #583: the version this crate writes, spelling it `meditation`.
+        version: Some(crate::formats::record::VERSION),
     }];
     let mut unspellable: Vec<Unspellable> = Vec::new();
     let mut uncaptured: Vec<Uncaptured> = Vec::new();
-    let mut seams: Vec<Seam> = Vec::new();
+    let mut meditations: Vec<Meditation> = Vec::new();
     let mut prefill_total = Count::default();
 
     let mut heads = Heads::new();
@@ -850,7 +852,7 @@ pub fn run<T: Transport>(script: &Script, gym: &Gym<'_, T>) -> Result<Drive, Hal
     let mut fork_ids = IdSource::new("i");
     let mut tool_ids = IdSource::new("t");
     let mut capture_ids = IdSource::new("p");
-    let mut seam_ids = IdSource::new("s");
+    let mut meditation_ids = IdSource::new("s");
     let mut control_ids = IdSource::new("c");
 
     // THE NEGATIVE CONTROL, before a single turn has run. #94 design point 4.
@@ -1173,21 +1175,21 @@ pub fn run<T: Transport>(script: &Script, gym: &Gym<'_, T>) -> Result<Drive, Hal
             controller.operator_declares_a_boundary();
         }
 
-        // The seam, if this turn is one. The ratifier's call happens inside
+        // The meditation, if this turn is one. The ratifier's call happens inside
         // `settle`, so its rows are drained afterwards -- and they are the
         // reason the ratification is a real exchange rather than a fixture.
         controller.ratifier().turn.set(index);
         let before = controller.ratifier().calls.len();
         let settled = controller
             .settle(&mut object)
-            .map_err(|why| Halt::SeamRefused { turn: index, why })?;
+            .map_err(|why| Halt::MeditationRefused { turn: index, why })?;
         let asked: Vec<_> = controller.ratifier().calls[before..].to_vec();
         // Taken from the ratifier, which is the only thing that was present
         // when these calls were made. See `Interviewer::called`.
         let gaps: Vec<_> = controller.ratifier().gaps[before..].to_vec();
         for (one, gap) in asked.iter().zip(gaps) {
             // The same rule as the other two lanes, and it was missing here:
-            // a ratify call that never answered used to produce a seam row
+            // a ratify call that never answered used to produce a meditation row
             // anyway, asserting the prompt was rebuilt after an audit that did
             // not happen. `Ratifier` cannot fail, so the check is made here,
             // after `settle`, where it can.
@@ -1208,21 +1210,21 @@ pub fn run<T: Transport>(script: &Script, gym: &Gym<'_, T>) -> Result<Drive, Hal
                 &mut heads,
             )?;
         }
-        if let Some(seam) = settled {
+        if let Some(meditation) = settled {
             // No `unwrap_or_default()`. A render this module could not
             // count is not a render of zero bytes, and zero is the one
             // number a reader would believe. Unreachable on any platform --
             // `Count::MAX` is `i64::MAX` -- and it is a Halt rather than a
             // fabricated number because a total conversion still has to
             // produce something, and the something must not be a lie.
-            let Ok(rendered_bytes) = Count::new(seam.prefix.len() as u64) else {
+            let Ok(rendered_bytes) = Count::new(meditation.prefix.len() as u64) else {
                 return Err(Halt::Unmeasured {
                     turn: index,
                     what: "seam.rendered_bytes",
                 });
             };
-            events.push(Event::Seam {
-                id: seam_ids.take(),
+            events.push(Event::Meditation {
+                id: meditation_ids.take(),
                 at_turn: index,
                 rendered_bytes,
                 // The scripted drive refills totally.
@@ -1236,7 +1238,7 @@ pub fn run<T: Transport>(script: &Script, gym: &Gym<'_, T>) -> Result<Drive, Hal
                 operator_changes: None,
                 unaddressed: None,
             });
-            seams.push(seam);
+            meditations.push(meditation);
         }
     }
 
@@ -1277,7 +1279,7 @@ pub fn run<T: Transport>(script: &Script, gym: &Gym<'_, T>) -> Result<Drive, Hal
         record,
         rendered,
         product,
-        seams,
+        meditations,
         unspellable,
         uncaptured,
         audits: controller.ratifier().audits.clone(),
@@ -1450,7 +1452,7 @@ mod tests {
         Summary, Weights,
     };
     use crate::isolation::{Confinement, Policy as IsolationPolicy};
-    use crate::seam::policy::Policy as SeamPolicy;
+    use crate::meditation::policy::Policy as MeditationPolicy;
 
     use super::canned;
     use super::script::{Command, Script};
@@ -1605,14 +1607,14 @@ mod tests {
                 confinement: &Confinement::Unconfined,
                 isolation: &isolation,
                 worktree: &ground.tree,
-                // Nothing but the operator's own declaration fires a seam
+                // Nothing but the operator's own declaration fires a meditation
                 // here: no cadence, no byte budget, no phases. A drive whose
-                // seam landed somewhere the script did not choose would prove
+                // meditation landed somewhere the script did not choose would prove
                 // less than it looks like it does.
-                seam: SeamPolicy {
+                meditation: MeditationPolicy {
                     every_turns: None,
                     at_working_set_bytes: None,
-                    phases: crate::seam::phase::PhaseGraph::none(),
+                    phases: crate::meditation::phase::PhaseGraph::none(),
                 },
             },
         );
@@ -1638,7 +1640,7 @@ mod tests {
     // -----------------------------------------------------------------------
 
     #[test]
-    fn three_turns_produce_a_record_the_format_accepts_with_a_seam_and_a_capture_in_it() {
+    fn three_turns_produce_a_record_the_format_accepts_with_a_meditation_and_a_capture_in_it() {
         let ground = Ground::make("milestone");
         let drive = against(&three_turns(), canned::acts(), &ground).expect("the drive ran");
 
@@ -1655,7 +1657,7 @@ mod tests {
             Kind::Response,
             Kind::Fork,
             Kind::Capture,
-            Kind::Seam,
+            Kind::Meditation,
             Kind::ToolCall,
             Kind::Summary,
         ] {
@@ -1678,13 +1680,13 @@ mod tests {
         assert_eq!(turns, [1, 2, 3], "three turns, and the record says which");
 
         assert_eq!(
-            drive.seams.len(),
+            drive.meditations.len(),
             1,
-            "one seam, where the script declared it"
+            "one meditation, where the script declared it"
         );
-        assert_eq!(drive.seams[0].at_turn, 2);
+        assert_eq!(drive.meditations[0].at_turn, 2);
         assert!(
-            !drive.seams[0].after.is_empty(),
+            !drive.meditations[0].after.is_empty(),
             "and it dumped an object with something in it"
         );
 
@@ -1760,7 +1762,7 @@ mod tests {
         // from "the last attempt". A hung-up connection is retried, so this
         // call has two request rows -- and the second is a different message
         // list from the first, because the drive rebuilds the prompt from a
-        // prefix the seam may have moved. A record that gave both rows the
+        // prefix the meditation may have moved. A record that gave both rows the
         // same body would be an archive of a session that did not happen.
         let ground = Ground::make("retried");
         let mut script = three_turns();
@@ -2302,8 +2304,8 @@ mod tests {
     // -----------------------------------------------------------------------
 
     #[test]
-    fn a_seams_audit_answer_is_kept_and_not_folded_with_the_wrong_grammar() {
-        // The ask a seam puts demands `1. KEEP` / `2. UPDATE: ...`; that
+    fn a_meditations_audit_answer_is_kept_and_not_folded_with_the_wrong_grammar() {
+        // The ask a meditation puts demands `1. KEEP` / `2. UPDATE: ...`; that
         // vocabulary is #47 item 1 and is not built. The first version folded
         // the answer with the INTERVIEW grammar, so a model answering the ask
         // exactly as pinned produced zero patches and no warning, while an
@@ -2323,7 +2325,7 @@ mod tests {
             .collect();
         let drive = against(&three_turns(), acts, &ground).expect("the drive ran");
 
-        assert_eq!(drive.audits.len(), 1, "one seam, one audit");
+        assert_eq!(drive.audits.len(), 1, "one meditation, one audit");
         let audit = &drive.audits[0];
         assert_eq!(audit.turn, 2);
         assert!(audit.items > 0, "the ask handed over entries: {audit:?}");
@@ -2334,7 +2336,7 @@ mod tests {
              this is what it will be given"
         );
         assert_eq!(
-            drive.seams[0].patches.len(),
+            drive.meditations[0].patches.len(),
             0,
             "and NOTHING was folded from it: a fold with the wrong grammar is \
              worse than no fold, because it produces a number a reader believes"
@@ -2350,14 +2352,14 @@ mod tests {
     fn a_ratify_call_that_did_not_answer_stops_the_drive() {
         // The same rule as the other two lanes. `Ratifier` cannot fail, so
         // this is checked after `settle` -- and before it was, a hung-up
-        // ratify call produced a seam row asserting the prompt had been
+        // ratify call produced a meditation row asserting the prompt had been
         // rebuilt after an audit that never happened.
         let ground = Ground::make("ratify-hangup");
         let mut acts: Vec<Act> = canned::acts().into_iter().take(4).collect();
         acts.push(Act::Hangup);
         acts.push(Act::Hangup);
         let halt = against(&three_turns(), acts, &ground)
-            .expect_err("a seam cannot follow an audit that did not happen");
+            .expect_err("a meditation cannot follow an audit that did not happen");
         assert!(
             matches!(&halt, Halt::NoAnswer { turn: 2, lane, .. } if lane == super::RATIFY),
             "{halt:?}"
@@ -2371,9 +2373,9 @@ mod tests {
     #[test]
     fn every_row_the_drive_writes_is_true_of_the_run_that_produced_it() {
         // A fresh-instance review replaced TWELVE fields here with fabricated
-        // constants -- a tool call's exit and output and argv, a seam's
+        // constants -- a tool call's exit and output and argv, a meditation's
         // rendered size, a capture's count, the regime's arm, the fork's lane
-        // and turn, the tool call's and the seam's turn, an entry's lane, an
+        // and turn, the tool call's and the meditation's turn, an entry's lane, an
         // entry's tag -- and the suite stayed green for every one. This is
         // that test. It is one test rather than twelve because they are one
         // claim: the record says what happened.
@@ -2455,12 +2457,12 @@ mod tests {
             "each fork names its own lane and its own turn"
         );
 
-        let seams: Vec<_> = drive
+        let meditations: Vec<_> = drive
             .record
             .events
             .iter()
             .filter_map(|event| match event {
-                Event::Seam {
+                Event::Meditation {
                     at_turn,
                     rendered_bytes,
                     ..
@@ -2468,11 +2470,11 @@ mod tests {
                 _ => None,
             })
             .collect();
-        assert_eq!(seams.len(), 1);
-        assert_eq!(seams[0].0, 2, "the seam fired after turn two");
+        assert_eq!(meditations.len(), 1);
+        assert_eq!(meditations[0].0, 2, "the meditation fired after turn two");
         assert_eq!(
-            seams[0].1,
-            drive.seams[0].prefix.len() as u64,
+            meditations[0].1,
+            drive.meditations[0].prefix.len() as u64,
             "and its size is the render's size, measured"
         );
     }
@@ -2514,8 +2516,8 @@ mod tests {
     #[test]
     fn the_record_carries_what_the_drive_actually_sent() {
         // Four things the drive assembles and sends, none of which any test
-        // checked: the seam's render as the system message, the turn's ask,
-        // the fork's question, and the seam's audit ask. Each could be
+        // checked: the meditation's render as the system message, the turn's ask,
+        // the fork's question, and the meditation's audit ask. Each could be
         // replaced with text the script never said and the record still
         // archived it as what was sent. The working set reaching the model is
         // the artefact this whole architecture exists to produce.
@@ -2549,7 +2551,7 @@ mod tests {
         }
         assert!(
             all.contains("# working set"),
-            "and the seam's render is the system message, not an empty string"
+            "and the meditation's render is the system message, not an empty string"
         );
         assert!(
             all.contains("keep the reconciler"),
@@ -2558,7 +2560,7 @@ mod tests {
         );
         assert!(
             all.contains(&drive.audits[0].asked.replace('\n', "\\n")),
-            "and the seam's audit ask is what was sent on the ratify lane, as \
+            "and the meditation's audit ask is what was sent on the ratify lane, as \
              the dogma pinned it"
         );
     }
@@ -2696,7 +2698,7 @@ mod tests {
 
         assert_eq!(
             drive.audits[0].turn, 2,
-            "the seam fired after turn 2, so its audit belongs to turn 2"
+            "the meditation fired after turn 2, so its audit belongs to turn 2"
         );
 
         // And the fork lane's entries, which is the half that was already
@@ -2752,7 +2754,7 @@ mod tests {
              runner, and a sandbox that refuses to start is the correct \
              behaviour and the wrong thing to gate a round trip on"
         );
-        SeamPolicy::from_regimen(&regimen).expect("its seam policy");
+        MeditationPolicy::from_regimen(&regimen).expect("its meditation policy");
 
         // The keys `diet-drive` reads for the regime facts regimen v1 has no
         // place for. Named here so that a rename in the binary that did not
@@ -2793,7 +2795,7 @@ mod tests {
     }
 
     /// #79's fourth acceptance row, asked of the REAL regimen this lane
-    /// ships -- parsed, crossed into a regime, rendered through the seam's
+    /// ships -- parsed, crossed into a regime, rendered through the meditation's
     /// own renderer, and put to the lint.
     ///
     /// A test that built its own regimen would be a test about a fixture.
@@ -2811,7 +2813,7 @@ mod tests {
         let declared = crate::drive::regimen::regime_of(&regimen, false)
             .expect("the shipped regimen crosses into a regime");
         let object = WorkingObject::open(declared);
-        let prefix = crate::seam::render::render(&object, None);
+        let prefix = crate::meditation::render::render(&object, None);
 
         let sending = RequestShape {
             messages: vec![
@@ -2878,7 +2880,7 @@ mod tests {
     /// The lint fires BEFORE the call, and the drive stops.
     ///
     /// A dated regime tag is how this arrives in practice -- an arm named for
-    /// the day it was run -- and the seam's render puts the arm at the top of
+    /// the day it was run -- and the meditation's render puts the arm at the top of
     /// every system prompt, so the date is in the frozen head of every turn.
     #[test]
     fn a_head_carrying_a_date_stops_the_drive_before_the_call() {
@@ -2901,9 +2903,9 @@ mod tests {
         );
     }
 
-    /// #79's first acceptance row, end to end on this crate's own seam.
+    /// #79's first acceptance row, end to end on this crate's own meditation.
     ///
-    /// The seam re-renders the working set into the system prompt at turn
+    /// The meditation re-renders the working set into the system prompt at turn
     /// two, so turn three's head is not turn two's -- and the record says so,
     /// with a diff naming the lines the render added.
     ///
@@ -2918,7 +2920,7 @@ mod tests {
     /// (`valid/head-date-changed-between-turns.jsonl`); what runs here is the
     /// same mechanism on the same code path.
     #[test]
-    fn the_seams_own_render_is_recorded_as_a_prefix_change_naming_the_lines() {
+    fn the_meditations_own_render_is_recorded_as_a_prefix_change_naming_the_lines() {
         let ground = Ground::make("prefix-changed");
         let drive = against(&three_turns(), canned::acts(), &ground).expect("the drive ran");
 
@@ -2939,7 +2941,7 @@ mod tests {
         assert_eq!(
             changes.len(),
             1,
-            "one seam fired, so the head moved once: {changes:?}"
+            "one meditation fired, so the head moved once: {changes:?}"
         );
         let (at_request, reason, deltas) = changes[0];
         assert_eq!(
@@ -2955,7 +2957,7 @@ mod tests {
 
         // The digests are on the REQUEST rows, where they cannot contradict
         // the change row. Turn two's head and turn three's differ; turn one's
-        // and turn two's do not, which is the seam controller's own claim.
+        // and turn two's do not, which is the meditation controller's own claim.
         let heads: Vec<_> = drive
             .record
             .events
@@ -2975,7 +2977,7 @@ mod tests {
             heads[0].1, heads[1].1,
             "the prefix is byte-identical within a phase"
         );
-        assert_ne!(heads[1].1, heads[2].1, "and the seam moved it");
+        assert_ne!(heads[1].1, heads[2].1, "and the meditation moved it");
     }
 
     /// The census reports every register, and reads its lifetimes out of the

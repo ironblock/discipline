@@ -37,8 +37,8 @@
 | row | lever(s) | instrument | waits on |
 | --- | --- | --- | --- |
 | **reasoning effort** (the maintainer, 2026-10-09: "one of the more common things that I imagine we'll be testing") | reasoning state | the same trajectory at xhigh / medium / low, one effort per session. Forks always inherit the trunk's effort: a different effort changes the system prompt, so a fork would miss the warm prefix it exists to reuse | #531 (landed) |
-| **compaction depth 0-1-n** | compaction depth | the same trajectory refilled at none / one / n / total; the second half's success and the receipt | the seam (#493, landed) and the v0.2.0 session |
-| supersession at the seam (#132) | seam · supersession | the ratify ask over the register's mined reversals; recall vs the collector's ~0 | the seam's audit (#504) |
+| **compaction depth 0-1-n** | compaction depth | the same trajectory refilled at none / one / n / total; the second half's success and the receipt | the meditation (#493, landed) and the v0.2.0 session |
+| supersession at the meditation (#132) | meditation · supersession | the ratify ask over the register's mined reversals; recall vs the collector's ~0 | the meditation's audit (#504) |
 | model-elected purge (#149) | tool-output disposition | a true advisory nudge in the tool-result envelope vs policy-forced vs none vs sham | forks (the tool loop, #298, has landed) |
 | "how long" (tool-call duration) | approval · cache lifetime | a typed score from (command, repo, history); labels free from the logged timings | timings in committed results |
 | token carriage as a receipt number (#31) | tool-output disposition | sum over tool outputs of size × later requests carrying it | T1's recording |

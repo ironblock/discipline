@@ -108,7 +108,13 @@ pub mod vocabulary;
 ///   the operator's markers mean and one asking for each marked note to be
 ///   addressed, the maintainer's approval of the drafted wording. No
 ///   template already pinned changed.
-pub const VERSION: u32 = 9;
+/// * 10, 2026-10-10: fork ask set `t2` joined (#598): t1's asks each
+///   wrapped in `<interview>` tags, and a priming paragraph the system prompt
+///   carries from the session's start saying what the tags mean, the
+///   maintainer's approval of the drafted wording. The record names the
+///   priming by the set's digest. No template and no set already pinned
+///   changed.
+pub const VERSION: u32 = 10;
 
 /// The digest of `diet/dogma/MANIFEST.tsv` that [`VERSION`] was declared
 /// against.
@@ -118,7 +124,7 @@ pub const VERSION: u32 = 9;
 /// that recomputes it fails until both lines are edited together. Without it
 /// the manifest could be regenerated after an edit and the version left at
 /// what it was, which is a bump that never happened.
-pub const MANIFEST_DIGEST: &str = "a1a60a121f483469";
+pub const MANIFEST_DIGEST: &str = "7846bdf8e0f45035";
 
 /// The per-model operating points, as TOML text, exactly as pinned.
 ///
@@ -1123,7 +1129,7 @@ mod tests {
         for site in Site::ALL {
             assert_eq!(Site::from_name(site.name()), Some(*site));
         }
-        assert_eq!(Site::from_name("seam"), None);
+        assert_eq!(Site::from_name("meditation"), None);
     }
 
     #[test]

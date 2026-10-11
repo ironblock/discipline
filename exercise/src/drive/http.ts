@@ -8,7 +8,7 @@
  *                             another process's log is refused 410.
  *   POST /commands            one command, JSON: `{"kind": "ask", "text"}`,
  *                             `{"kind": "cancel", "turn"}`, `{"kind":
- *                             "declare-seam"}`, `{"kind": "end"}`. A refusal is
+ *                             "declare-meditation"}`, `{"kind": "end"}`. A refusal is
  *                             409 `{"refused": <tag>}`, and logged.
  *   GET  /files/<sha256>      a file the log names, its bytes; 404 naming the
  *                             digest when it has none (#372, 5976915436). The
@@ -223,9 +223,9 @@ export class HttpTransport implements DriveTransport {
         const turn = this.#log.findLast((l) => l.kind === 'ask');
         return turn?.kind === 'ask' ? { kind: 'cancel', turn: turn.turn } : { refused: 'nothing-in-flight' };
       }
-      case 'seam':
+      case 'meditation':
         // The phase to move to, when the operator picked one (log v7, #563); without one the session stays in its phase.
-        return { kind: 'declare-seam', ...(command.to !== undefined ? { phase: command.to } : {}) };
+        return { kind: 'declare-meditation', ...(command.to !== undefined ? { phase: command.to } : {}) };
       case 'end':
         return { kind: 'end' };
       // A tangent's open and close, as serve takes them (#608).
@@ -241,6 +241,8 @@ export class HttpTransport implements DriveTransport {
         return { kind: 'ratify-phase', call: command.call, choice: command.choice };
       case 'background':
         return { kind: 'background' };
+      case 'refill-anyway':
+        return { kind: 'refill-anyway' };
     }
   }
 

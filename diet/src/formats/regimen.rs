@@ -81,13 +81,83 @@ pub enum Value {
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct Regimen {
     entries: BTreeMap<String, Value>,
+    /// The bindings as read under their current names (#583): an old
+    /// spelling's key under its new name, an old word in a value respelled.
+    /// [`Regimen::get`] reads these first; [`Regimen::iter`] never does.
+    aliased: BTreeMap<String, Value>,
+}
+
+/// The top-level keys renamed when the boundary was respelled `meditation`
+/// (#583), old and new: a regimen written before still reads under the new
+/// name, and one binding both is refused.
+pub const RENAMED_KEYS: &[(&str, &str)] = &[
+    ("seam_every_turns", "meditation_every_turns"),
+    (
+        "seam_at_working_set_bytes",
+        "meditation_at_working_set_bytes",
+    ),
+    ("seam_at_context_fraction", "meditation_at_context_fraction"),
+    ("seam_tail_tokens", "meditation_tail_tokens"),
+    ("seam_tool_outputs", "meditation_tool_outputs"),
+    ("seam_window", "meditation_window"),
+    ("seam_audit", "meditation_audit"),
+    ("seam_warm", "meditation_warm"),
+    ("prune_seam", "prune_meditation"),
+];
+
+/// The keys whose value may hold the old word, read as the new one (#583).
+const RESPELLED_VALUES: &[&str] = &["fork_delivery", "interview_warrant"];
+
+/// `value` with each `seam` word respelled `meditation`, if it held one.
+fn respelled(value: &Value) -> Option<Value> {
+    let word = |item: &Value| match item {
+        Value::String(word) if word == "seam" => Value::String("meditation".to_owned()),
+        other => other.clone(),
+    };
+    match value {
+        Value::String(word) if word == "seam" => Some(word_of("meditation")),
+        Value::Array(items)
+            if items
+                .iter()
+                .any(|item| matches!(item, Value::String(w) if w == "seam")) =>
+        {
+            Some(Value::Array(items.iter().map(word).collect()))
+        }
+        _ => None,
+    }
+}
+
+fn word_of(text: &str) -> Value {
+    Value::String(text.to_owned())
+}
+
+/// The aliased bindings of `entries` (#583).
+fn aliased(entries: &BTreeMap<String, Value>) -> Result<BTreeMap<String, Value>, ParseError> {
+    let mut aliased = BTreeMap::new();
+    for (old, new) in RENAMED_KEYS {
+        if let Some(value) = entries.get(*old) {
+            if entries.contains_key(*new) {
+                return Err(ParseError::BothSpellings {
+                    old: (*old).to_owned(),
+                    new: (*new).to_owned(),
+                });
+            }
+            aliased.insert((*new).to_owned(), value.clone());
+        }
+    }
+    for key in RESPELLED_VALUES {
+        if let Some(value) = entries.get(*key).and_then(respelled) {
+            aliased.insert((*key).to_owned(), value);
+        }
+    }
+    Ok(aliased)
 }
 
 impl Regimen {
     /// The value bound to `key`, if the document binds it.
     #[must_use]
     pub fn get(&self, key: &str) -> Option<&Value> {
-        self.entries.get(key)
+        self.aliased.get(key).or_else(|| self.entries.get(key))
     }
 
     /// Every binding, in sorted key order.
@@ -154,6 +224,14 @@ pub enum ParseError {
     EmptyTable {
         /// The header that bound nothing.
         name: String,
+    },
+    /// One key bound under both its spellings, before and after #583's
+    /// rename: two values for one setting, and no saying which was meant.
+    BothSpellings {
+        /// The spelling before the rename.
+        old: String,
+        /// The current one.
+        new: String,
     },
     /// The document opens a table whose name a top-level key already holds.
     ///
@@ -256,6 +334,11 @@ impl fmt::Display for ParseError {
                 key,
             } => write!(f, "duplicate key `{key}` in table `{table}`"),
             Self::DuplicateTable { name } => write!(f, "duplicate table `{name}`"),
+            Self::BothSpellings { old, new } => write!(
+                f,
+                "`{old}` and `{new}` are one key, spelled before and after the boundary \
+                 became `meditation`; bind it once, as `{new}`"
+            ),
             Self::ParentIsNotATable { name, parent } => write!(
                 f,
                 "table `{name}` cannot be opened: `{parent}` is bound to a value, \
@@ -321,6 +404,7 @@ impl Error for ParseError {
             | Self::ParentIsNotATable { .. }
             | Self::TableShadowsKey { .. }
             | Self::EmptyTable { .. }
+            | Self::BothSpellings { .. }
             | Self::FloatNotADecimal { .. }
             | Self::IntegerOutOfRange { .. }
             | Self::ReasoningPairIncomplete { .. }
@@ -340,7 +424,8 @@ impl Error for ParseError {
 /// [`ParseError::DuplicateTable`] if a header arrives twice,
 /// [`ParseError::TableShadowsKey`] if a header takes a top-level key's name,
 /// [`ParseError::EmptyTable`] if a header binds nothing before the next one
-/// or the end,
+/// or the end, [`ParseError::BothSpellings`] if a key renamed by #583 is
+/// bound under both its names,
 /// [`ParseError::IntegerOutOfRange`] if an integer literal
 /// overflows `i64`, [`ParseError::FloatNotADecimal`] if the record's decimal
 /// constructor refuses a float this grammar accepted, and
@@ -426,7 +511,8 @@ pub fn parse(input: &str) -> Result<Regimen, ParseError> {
             name: segments.join("."),
         });
     }
-    let parsed = Regimen { entries };
+    let aliased = aliased(&entries)?;
+    let parsed = Regimen { entries, aliased };
     // THE SAME READER THE CROSSING USES. `reasoning_of` is called here for
     // its verdict and by `drive::regimen::regime_of` for its value, so the
     // rule that refuses a half-written pair and the rule that builds the
@@ -715,6 +801,51 @@ fn tagged(value: &Value) -> crate::formats::record::json::Value {
 mod tests {
     use super::{Decimal, ParseError, Value, parse, reasoning_of};
     use crate::formats::record::{Budget, Count, ReasoningControl};
+
+    /// #583: a regimen written before the rename still says what it said --
+    /// each `seam` key read under its `meditation` name, and `seam` as a
+    /// value of `fork_delivery` or `interview_warrant` read as
+    /// `meditation` -- while the document's own bindings are as written.
+    #[test]
+    fn a_regimens_seam_keys_and_values_are_read_under_their_meditation_names() {
+        let read = parse(
+            "seam_every_turns = 3\nprune_seam = \"turn_end\"\nfork_delivery = \"seam\"\n\
+             interview_warrant = [\"scoping\", \"seam\"]\n",
+        )
+        .expect("an old regimen reads");
+        assert_eq!(read.get("meditation_every_turns"), Some(&Value::Integer(3)));
+        assert_eq!(
+            read.get("prune_meditation"),
+            Some(&Value::String("turn_end".to_owned()))
+        );
+        assert_eq!(
+            read.get("fork_delivery"),
+            Some(&Value::String("meditation".to_owned()))
+        );
+        assert_eq!(
+            read.get("interview_warrant"),
+            Some(&Value::Array(vec![
+                Value::String("scoping".to_owned()),
+                Value::String("meditation".to_owned())
+            ]))
+        );
+        let written: Vec<&str> = read.iter().map(|(key, _)| key).collect();
+        assert!(written.contains(&"seam_every_turns"), "{written:?}");
+        let new = parse("meditation_every_turns = 3\n").expect("a new regimen reads");
+        assert_eq!(new.get("meditation_every_turns"), Some(&Value::Integer(3)));
+    }
+
+    /// #583: one key under both its spellings is refused, naming both.
+    #[test]
+    fn a_key_under_both_its_spellings_is_refused() {
+        let refused = parse("seam_audit = \"on\"\nmeditation_audit = \"off\"\n")
+            .expect_err("both spellings of one key");
+        let why = refused.to_string();
+        assert!(
+            why.contains("`seam_audit`") && why.contains("`meditation_audit`"),
+            "{why}"
+        );
+    }
 
     /// An effort level is an instruction and a budget is a cap, and #94's
     /// first design point is that one of them is not the other.

@@ -724,7 +724,7 @@ impl Ask {
     }
 
     /// [`Ask::render`] in ask set `set` (#595), with `record`, the working
-    /// record's live entries as the seam's render writes them (`<id>\t<entry>`
+    /// record's live entries as the meditation's render writes them (`<id>\t<entry>`
     /// lines), for a template that shows it: its `{record}` line is dropped
     /// whole when the record is empty or not given.
     #[must_use]
@@ -1040,7 +1040,7 @@ impl Router {
             | Event::Response { .. }
             | Event::Fork { .. }
             | Event::Capture { .. }
-            | Event::Seam { .. }
+            | Event::Meditation { .. }
             | Event::Rejected { .. }
             | Event::Claim { .. }
             | Event::Comparison { .. }
@@ -1731,6 +1731,7 @@ mod tests {
             output_from: None,
             text: Some("The parser keeps every line. I'll read the caller.".to_owned()),
             timings: None,
+            model: None,
         });
         let decisions = router.observe(&call("t1", 1, "bash", shell("cat diet/src/lib.rs")));
         let ask = decisions[0]
@@ -1768,6 +1769,7 @@ mod tests {
             output_from: None,
             text: Some("Let me answer that.".to_owned()),
             timings: None,
+            model: None,
         });
         let decisions = aside.observe(&call("t1", 1, "bash", shell("cat diet/src/lib.rs")));
         assert_eq!(

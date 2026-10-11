@@ -47,11 +47,11 @@
   background: color-mix(in oklab, var(--c) calc(50% * var(--minimap-ink)), transparent);
 }
 
-.ex-mm__seam {
+.ex-mm__meditation {
   left: 0;
   right: 0;
-  background: var(--seam);
-  box-shadow: 0 0 6px color-mix(in oklab, var(--seam) 60%, transparent);
+  background: var(--meditation);
+  box-shadow: 0 0 6px color-mix(in oklab, var(--meditation) 60%, transparent);
 }
 
 /* Running now: lit. */

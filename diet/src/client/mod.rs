@@ -1,6 +1,6 @@
 //! `diet::client` -- the inference client, and the receipts it keeps.
 //!
-//! Every fork, seam and canonical turn is a request to an inference server.
+//! Every fork, meditation and canonical turn is a request to an inference server.
 //! The transport is where the regime trio is actually asserted, and prior
 //! work's record of it is a catalogue of provenance failures: a 4xx
 //! strip-and-retry whose log could not say which request produced the answer;
@@ -23,7 +23,7 @@
 //! * **Timeouts and caps are typed outcomes** ([`Outcome`]), never empty
 //!   strings.
 //! * **Cache telemetry** ([`Cache`]) per request, because reused-token counts
-//!   are the direct measurement of prefix stability and the seam controller's
+//!   are the direct measurement of prefix stability and the meditation controller's
 //!   claims are checked against them.
 //! * **Template kwargs go somewhere else from sampler pins**
 //!   ([`shape::RequestShape::template_kwargs`]), because they are read by

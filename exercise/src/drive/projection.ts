@@ -4,7 +4,7 @@ import type { LogLine } from './log.ts';
 /**
  * What of a placed log `diet check-log` is asked to read: THE PROJECTION
  * (ruled on #300, 5974717646). A placed log carries what the surface draws
- * ahead of the format -- side calls, working memory, seams, and keys on the
+ * ahead of the format -- side calls, working memory, meditations, and keys on the
  * format's own lines -- which the format's reader refuses today, and that is
  * not a defect in the log. So each placed log is checked with exactly what
  * this list names taken out, and what is left must pass: the turn, its
@@ -34,7 +34,7 @@ export const STRIPPED = {
   shapes: {
     fork: ['slot', 'prefix_tokens'],
     patch: ['authority'],
-    seam: ['render_version'],
+    meditation: ['render_version'],
   },
 } as const satisfies {
   readonly kinds: readonly string[];
@@ -58,7 +58,7 @@ const STRIP_ONLY_WHAT_THE_FORMAT_LACKS: {
   readonly lanes: Lacks<(typeof STRIPPED.lanes)[number], Format.Lane>;
   readonly keys: { readonly [K in keyof Keyed]: Lacks<Keyed[K][number], keyof Extract<Format.LogLine, { kind: K }>> };
   readonly shapes: { readonly [K in keyof Shaped]: Lacks<Shaped[K][number], keyof Extract<Format.LogLine, { kind: K }>> };
-} = { kinds: true, lanes: true, keys: { 'session.start': true, request: true, response: true }, shapes: { fork: true, patch: true, seam: true } };
+} = { kinds: true, lanes: true, keys: { 'session.start': true, request: true, response: true }, shapes: { fork: true, patch: true, meditation: true } };
 void STRIP_ONLY_WHAT_THE_FORMAT_LACKS;
 
 /** The keys that name another line by its `seq`, by kind: renumbered with the lines they name. */

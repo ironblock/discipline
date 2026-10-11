@@ -35,7 +35,7 @@ vocabulary! {
 /// What the graph says about a proposal.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Decision {
-    /// The move is allowed. A seam fires.
+    /// The move is allowed. A meditation fires.
     Ratified,
     /// The move is not allowed. The proposal is recorded and nothing else
     /// happens.

@@ -1,0 +1,7 @@
+<interview>
+{imperative}
+You are in {cwd}.
+You last edited {last_edited}.
+You said: "{intent}"
+What did this turn establish that a later turn would need? Record each thing with update_record, under the field learned, evidence or stuck. If there is nothing to record, call nothing.
+</interview>

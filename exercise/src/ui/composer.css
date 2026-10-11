@@ -83,7 +83,7 @@
   color: var(--ink-faint);
 }
 
-.ex-composer__seam {
+.ex-composer__meditation {
   display: inline-flex;
   align-items: center;
   gap: 0.4rem;
@@ -107,9 +107,9 @@
   cursor: default;
 }
 
-.ex-composer__seam button:not(:disabled) {
-  border-color: var(--seam);
-  color: var(--seam);
+.ex-composer__meditation button:not(:disabled) {
+  border-color: var(--meditation);
+  color: var(--meditation);
 }
 
 .ex-composer__send:not(:disabled) {
@@ -251,4 +251,38 @@
   display: flex;
   gap: 0.5rem;
   justify-content: flex-end;
+}
+
+/* Why the proposal's meditation is not offered (#685): nothing to refill from. */
+.ex-composer__proposal-why {
+  justify-self: end;
+  color: var(--ink-muted);
+}
+
+/* A meditation held for the operator (#150's gate): what is unaddressed, refill anyway, and the alternatives. */
+.ex-composer__held {
+  display: grid;
+  gap: 0.3rem;
+  padding: 0.5rem 0.6rem;
+  border: 1px solid var(--warn);
+  border-radius: var(--radius);
+}
+
+.ex-composer__held-list {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  color: var(--ink);
+}
+
+.ex-composer__held-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  align-items: center;
+  justify-content: flex-end;
+}
+
+.ex-composer__held-else {
+  color: var(--ink-muted);
 }

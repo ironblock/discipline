@@ -6,15 +6,15 @@
  * what is under it, a rim that catches the light. Light is WHAT IS HAPPENING
  * NOW, and it comes from the things themselves, like LEDs in a rack: what
  * generates glows in its colour, a busy slot is a lit LED, fresh memory is
- * lit, the seam glows; idle is dark. A footer is the foot of its card, a
+ * lit, the meditation glows; idle is dark. A footer is the foot of its card, a
  * shaded band under a hairline of the block's own ink. A cable is a patch
  * cable in its lane's colour, jacked in at both ends.
  */
 .ex-root[data-theme='bloom'] {
   --radius: 14px;
   --relief-evicted: 0 0 0 transparent;
-  --seam-thickness: 7px;
-  --seam-line: 0 solid;
+  --meditation-thickness: 7px;
+  --meditation-line: 0 solid;
   --glass-backdrop: blur(14px) saturate(160%);
   --glow-radius: 56px;
   --glow-panel: 0%;
@@ -67,7 +67,7 @@
   --relief-well: inset 0 0 0 1px rgb(255 255 255 / 0.07);
   --relief-control: 3px 3px 7px rgb(0 0 0 / 0.5), -2px -2px 6px rgb(255 255 255 / 0.04);
   --control-rim: transparent;
-  --seam-groove: inset 2px 2px 4px rgb(0 0 0 / 0.6), inset -1px -1px 3px rgb(255 255 255 / 0.05);
+  --meditation-groove: inset 2px 2px 4px rgb(0 0 0 / 0.6), inset -1px -1px 3px rgb(255 255 255 / 0.05);
   --evicted-opacity: 0.62;
 
   --glass-overlay: linear-gradient(150deg, rgb(255 255 255 / 0.1), rgb(255 255 255 / 0.025) 45%, rgb(255 255 255 / 0.05));
@@ -81,7 +81,7 @@
   --glow-lane: 10%;
   --glow-lane-live: 60%;
   --glow-panel-live: 30%;
-  --glow-seam: 70%;
+  --glow-meditation: 70%;
 
   --foot-shade: 26%;
   --foot-rule: 14%;
@@ -128,13 +128,13 @@
   --glow-lane: 10%;
   --glow-lane-live: 40%;
   --glow-panel-live: 24%;
-  --glow-seam: 40%;
+  --glow-meditation: 40%;
   --light-lane: 0%;
   --light-lane-live: 12%;
   --light-panel: 0%;
   --light-panel-live: 10%;
 
-  --seam-groove: inset 0 1px 2px rgb(20 30 50 / 0.14), inset 0 -1px 0 rgb(255 255 255 / 0.8);
+  --meditation-groove: inset 0 1px 2px rgb(20 30 50 / 0.14), inset 0 -1px 0 rgb(255 255 255 / 0.8);
   --evicted-opacity: 0.55;
 
   --foot-shade: 5%;

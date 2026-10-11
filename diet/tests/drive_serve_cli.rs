@@ -1024,7 +1024,7 @@ fn a_drive_server_confirms_a_declared_engines_model_settings_and_draft() {
         ]),
         "{start_line}"
     );
-    assert_eq!(start_line["version"], 7, "{start_line}");
+    assert_eq!(start_line["version"], 8, "{start_line}");
     // And its server speaks TabbyAPI's dialect, by name (#496).
     assert_eq!(start_line["serving"]["dialect"], "tabbyapi", "{start_line}");
 }
@@ -2838,10 +2838,44 @@ fn a_drive_server_starts_a_tools_capture_regimen_on_the_tools_set() {
 }
 
 #[test]
+fn a_drive_server_primes_the_system_prompt_under_t2_alone() {
+    // #598: under set t2 the system prompt the session opens with -- its
+    // head, as session.start records it -- ends with t2's priming paragraph;
+    // under t1, the same regimen otherwise, it carries none.
+    let system_under = |set: &str| {
+        let stub = Stub::serving_with_props(Vec::new(), &diet::drive::canned::build_info())
+            .expect("loopback");
+        let regimen = dev_loop_sampling(
+            &format!(
+                "interview_warrant = [\"scoping\"]\ncapture_modality = \"tools\"\n\
+                 self_capture = true\nfork_asks = \"{set}\"\n"
+            ),
+            "seed = 7\n",
+        );
+        let regimen_path = regimen.0.to_string_lossy().into_owned();
+        let log_file = file_holding("log", "");
+        let logged = log_file.0.to_string_lossy().into_owned();
+        let _served = start(&stub.url(), &["--regimen", &regimen_path, "--log", &logged]);
+        let start_line = first_logged_line(&log_file.0);
+        assert_eq!(start_line["fork_asks"], set, "{start_line}");
+        start_line["head"][0]["content"]
+            .as_str()
+            .expect("a system prompt")
+            .to_owned()
+    };
+    let priming = diet::dogma::asks::T2.priming().expect("t2 primes").trim();
+    let primed = system_under("t2");
+    assert!(primed.ends_with(&format!("\n\n{priming}")), "{primed}");
+    let plain = system_under("t1");
+    assert!(!plain.contains("<interview>"), "{plain}");
+    assert_eq!(primed, format!("{}\n\n{priming}", plain.trim_end()));
+}
+
+#[test]
 fn a_drive_server_runs_a_regimens_phase_graph() {
     // #563: serve reads `phases` and `phase_transitions` (it refused them,
     // #520), logs the graph and the phase it opens in, and takes a phase on
-    // `declare-seam` -- refused here as `nothing-to-seam`, with no turn yet,
+    // `declare-meditation` -- refused here as `nothing-to-meditate`, with no turn yet,
     // rather than as a body it cannot read.
     let stub =
         Stub::serving_with_props(Vec::new(), &diet::drive::canned::build_info()).expect("loopback");
@@ -2870,10 +2904,10 @@ fn a_drive_server_runs_a_regimens_phase_graph() {
     let reply = post(
         &address,
         &address,
-        r#"{"kind":"declare-seam","phase":"build"}"#,
+        r#"{"kind":"declare-meditation","phase":"build"}"#,
     );
     assert_eq!(status(&reply), 409, "{reply}");
-    assert!(reply.contains("nothing-to-seam"), "{reply}");
+    assert!(reply.contains("nothing-to-meditate"), "{reply}");
 }
 
 #[test]
@@ -3586,7 +3620,7 @@ fn a_drive_server_offers_prune_output_only_where_a_prune_can_be_applied() {
         "{start_line}"
     );
 
-    // No warrant: nothing fills working memory, so no seam could apply it.
+    // No warrant: nothing fills working memory, so no meditation could apply it.
     let regimen = commands_regimen(
         &format!("allowed_commands = []\n{pruning}"),
         "isolation = \"none\"",
@@ -3608,7 +3642,7 @@ fn a_drive_server_offers_prune_output_only_where_a_prune_can_be_applied() {
     );
     assert_eq!(code, Some(1), "{said}");
     assert!(
-        said.contains("no seam could ever replace a pruned result"),
+        said.contains("no meditation could ever replace a pruned result"),
         "{said}"
     );
 

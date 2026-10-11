@@ -4,7 +4,7 @@ import type { LogLine } from '../log.ts';
  * A phase proposal, WRITTEN HERE -- not recorded: no diet fixture carries `phase.ruled` yet (#651). The session opens
  * in `plan` under a plan → build graph; the model calls `propose_phase_transition` (to `build`, with its reason),
  * logged beside its `capture` (`proposed`); the turn settles and the session awaits the operator's ruling.
- * `PHASE_RULED_CONTINUE` is the ruling the drive would log for "continue": the phase moves, no seam.
+ * `PHASE_RULED_CONTINUE` is the ruling the drive would log for "continue": the phase moves, no meditation.
  */
 export const PHASE_PROPOSED: readonly LogLine[] = [
   {
@@ -30,6 +30,16 @@ export const PHASE_PROPOSED: readonly LogLine[] = [
   { seq: 9, t: 40, kind: 'response', to_request: 8, text: 'I have proposed moving to build.' },
   { seq: 10, t: 45, kind: 'turn.settled', turn: 1, reason: 'final' },
   { seq: 11, t: 50, kind: 'settlement', from: 'turn', to: 'awaiting' },
+] as LogLine[];
+
+/**
+ * The same proposal with one live entry in working memory: the model recorded a decision before it proposed, so a
+ * meditation has something to refill from (#685). The entry's patch comes after its `capture`, as serve logs it.
+ */
+export const PHASE_PROPOSED_WITH_MEMORY: readonly LogLine[] = [
+  ...PHASE_PROPOSED.slice(0, 7),
+  { seq: 7, t: 28, kind: 'patch', op: 'add', lane: 'self-capture', entry: { id: 'd1', text: 'decision: the spec is settled' } },
+  ...PHASE_PROPOSED.slice(7).map((line) => ({ ...line, seq: line.seq + 1 })),
 ] as LogLine[];
 
 export const PHASE_RULED_CONTINUE: readonly LogLine[] = [

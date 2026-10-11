@@ -10,7 +10,7 @@
 {"kind":"response","seq":9,"t":45,"text":"{\"decisions\":[\"a tracker\"]}","to_request":8}
 {"fork":7,"kind":"fork.settled","outcome":"value","seq":10,"t":50}
 {"entry":{"id":"d1","text":"a tracker"},"fork":7,"kind":"patch","op":"add","seq":11,"t":55}
-{"at_turn":1,"carried_entries":1,"carried_tokens":27,"carried_turns":1,"frame":"placeholder","kind":"seam","prefix_hash_after":"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb","prefix_hash_before":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","reason":"operator","render":"# regime\narm: diet\nsubstrate: a-substrate\ndogma_version: 1\nphase: -\nframe_version: placeholder\n\n# working set\nd1\n1 older entries elided\n","render_budget_tokens":10,"render_over_budget":"elide","render_reduced":1,"render_tokens":34,"seq":12,"t":60,"tail_tokens":4000}
+{"at_turn":1,"carried_entries":1,"carried_tokens":27,"carried_turns":1,"frame":"placeholder","kind":"seam","prefix_hash_after":"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb","prefix_hash_before":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","reason":"operator","render":"# regime\narm: diet\nsubstrate: a-substrate\ndogma_version: 1\nphase: -\nframe_version: placeholder\n\n# working set\nd1\n1 older entries elided\n","render_budget_tokens":10,"render_fits":false,"render_over_budget":"elide","render_reduced":1,"render_tokens":34,"seq":12,"t":60,"tail_tokens":4000}
 {"kind":"ask","seq":13,"t":65,"text":"build it","turn":2}
 {"from":"awaiting","kind":"settlement","seq":14,"t":70,"to":"turn"}
 {"kind":"request","lane":"trunk","seq":15,"t":75,"turn":2}

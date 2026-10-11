@@ -24,10 +24,12 @@
 //!
 //! A record's `start` row carries a regime — the arm, the substrate that
 //! served, the dogma version — and a Claude Code log carries none of it. It
-//! records no model, no quantization and no sampler settings; the `version`
-//! field is the harness's version, not the model's. So the regime cannot be
-//! derived from the log, and deriving it anyway would mean writing
-//! `model = "unknown"` into the one field every result is compared across.
+//! names the model that wrote each response, which the replay carries on each
+//! response row (#501), but it records no quantization, no sampler settings
+//! and no harness settings, and the `version` field is the harness's version.
+//! So the regime cannot be derived from the log, and deriving it anyway would
+//! mean writing what the log never said into the fields every result is
+//! compared across.
 //! The operator knows what they were running; the log does not. They declare
 //! it, exactly as `diet-drive` makes them declare it.
 //!

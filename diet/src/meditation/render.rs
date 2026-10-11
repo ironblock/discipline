@@ -8,11 +8,11 @@
 //! engine's checkpoint boundaries. (One model, one engine, one card;
 //! re-measure per substrate.) So the prefix stays byte-identical during a
 //! phase, state accumulates outside the context, and this function runs only
-//! at a seam.
+//! at a meditation.
 //!
 //! It is a **pure function** of the object and the phase. Nothing here reads
 //! a clock, a counter, or anything that moves: two renders of the same object
-//! in the same phase are the same bytes, and the byte-identity claim the seam
+//! in the same phase are the same bytes, and the byte-identity claim the meditation
 //! controller makes is only checkable because that is true.
 
 use std::fmt::Write as _;
@@ -60,6 +60,9 @@ pub struct Rendered {
     pub tokens: u64,
     /// How many entries it shortened or elided.
     pub reduced: u64,
+    /// Whether it came in at or under its budget; with none, it does. A
+    /// render that does not, with everything reducible reduced, says so.
+    pub fits: bool,
 }
 
 /// The most characters a tiered entry keeps of its first line.
@@ -113,7 +116,7 @@ pub fn rendered_marked(
     budget: Option<Budget>,
     marks: &Marks,
 ) -> Rendered {
-    let mut out = head(object, phase);
+    let head = head(object, phase);
     let mark = |id: &crate::object::EntryId| marks.get(id).map_or("", String::as_str);
     let line = |id: &crate::object::EntryId, content: &str| {
         format!(
@@ -123,77 +126,101 @@ pub fn rendered_marked(
             mark(id)
         )
     };
-    let brief = |content: &str| BRIEF.iter().any(|kind| content.starts_with(kind));
-    // Which entries are reduced: none without a budget; with one, the
-    // header and the brief are spent first, then the rest newest first.
-    let mut reduced = std::collections::BTreeSet::new();
-    if let Some(budget) = budget {
-        let mut spent = estimate(&out)
-            + object
-                .live()
-                .filter(|entry| brief(&entry.content))
-                .map(|entry| estimate(&line(&entry.id, &entry.content)))
-                .sum::<u64>();
-        let mut rest: Vec<_> = object
-            .live()
-            .filter(|entry| !brief(&entry.content))
-            .collect();
-        rest.sort_by(|a, b| {
-            b.provenances
-                .iter()
-                .max()
-                .cmp(&a.provenances.iter().max())
-                .then_with(|| b.id.cmp(&a.id))
-        });
-        let mut over = false;
-        for entry in rest {
-            let cost = estimate(&line(&entry.id, &entry.content));
-            over = over || spent + cost > budget.tokens;
-            if over {
-                reduced.insert(entry.id.clone());
-            } else {
-                spent += cost;
-            }
-        }
-    }
     let over = budget.map_or(OverBudget::Tier, |budget| budget.over);
-    let mut count = 0_u64;
-    for entry in object.live() {
-        if !reduced.contains(&entry.id) {
-            out.push_str(&line(&entry.id, &entry.content));
-            continue;
-        }
-        match over {
-            OverBudget::Tier => {
-                let first = entry.content.split('\n').next().unwrap_or_default();
-                let mut cut: String = first.chars().take(TIER_CHARS).collect();
-                // An entry already one short line is left as it is, and not
-                // counted: tiering did nothing to it.
-                if cut.chars().count() < entry.content.chars().count() {
-                    cut.push('…');
+    // The render with `reduced` shortened or elided, and how many were.
+    let compose = |reduced: &std::collections::BTreeSet<&crate::object::EntryId>| {
+        let mut out = head.clone();
+        let mut count = 0_u64;
+        for entry in object.live() {
+            if !reduced.contains(&entry.id) {
+                out.push_str(&line(&entry.id, &entry.content));
+                continue;
+            }
+            match over {
+                OverBudget::Tier => {
+                    let first = entry.content.split('\n').next().unwrap_or_default();
+                    let mut cut: String = first.chars().take(TIER_CHARS).collect();
+                    // An entry already one short line is left as it is, and
+                    // not counted: tiering did nothing to it.
+                    if cut.chars().count() < entry.content.chars().count() {
+                        cut.push('…');
+                        count += 1;
+                    }
+                    out.push_str(&line(&entry.id, &cut));
+                }
+                OverBudget::Elide => {
+                    out.push_str(&one_line(entry.id.as_str()));
+                    out.push_str(mark(&entry.id));
+                    out.push('\n');
                     count += 1;
                 }
-                out.push_str(&line(&entry.id, &cut));
-            }
-            OverBudget::Elide => {
-                out.push_str(&one_line(entry.id.as_str()));
-                out.push_str(mark(&entry.id));
-                out.push('\n');
-                count += 1;
             }
         }
-    }
-    if count > 0 {
-        let what = match over {
-            OverBudget::Tier => "shortened",
-            OverBudget::Elide => "elided",
+        if count > 0 {
+            let what = match over {
+                OverBudget::Tier => "shortened",
+                OverBudget::Elide => "elided",
+            };
+            let _ = writeln!(out, "{count} older entries {what}");
+        }
+        (out, count)
+    };
+    let Some(budget) = budget else {
+        let (text, reduced) = compose(&std::collections::BTreeSet::new());
+        return Rendered {
+            tokens: estimate(&text),
+            text,
+            reduced,
+            fits: true,
         };
-        let _ = writeln!(out, "{count} older entries {what}");
+    };
+    // The brief is never reduced; the rest are, oldest first -- newest by
+    // latest patch. The newest are kept whole while their whole lines fit
+    // beside the header and the brief; then, while the render with its
+    // reduced lines and its count still does not fit, one more is reduced,
+    // until it fits or nothing is left to reduce (levers run A: a render
+    // that counted only the whole lines overshot its budget).
+    let brief = |content: &str| BRIEF.iter().any(|kind| content.starts_with(kind));
+    let mut rest: Vec<_> = object
+        .live()
+        .filter(|entry| !brief(&entry.content))
+        .collect();
+    rest.sort_by(|a, b| {
+        b.provenances
+            .iter()
+            .max()
+            .cmp(&a.provenances.iter().max())
+            .then_with(|| b.id.cmp(&a.id))
+    });
+    let mut spent = estimate(&head)
+        + object
+            .live()
+            .filter(|entry| brief(&entry.content))
+            .map(|entry| estimate(&line(&entry.id, &entry.content)))
+            .sum::<u64>();
+    let mut whole = 0;
+    for entry in &rest {
+        let cost = estimate(&line(&entry.id, &entry.content));
+        if spent + cost > budget.tokens {
+            break;
+        }
+        spent += cost;
+        whole += 1;
     }
-    Rendered {
-        tokens: estimate(&out),
-        text: out,
-        reduced: count,
+    loop {
+        let reduced = rest[whole..].iter().map(|entry| &entry.id).collect();
+        let (text, count) = compose(&reduced);
+        let tokens = estimate(&text);
+        let fits = tokens <= budget.tokens;
+        if fits || whole == 0 {
+            return Rendered {
+                tokens,
+                text,
+                reduced: count,
+                fits,
+            };
+        }
+        whole -= 1;
     }
 }
 
@@ -219,7 +246,7 @@ fn head(object: &WorkingObject, phase: Option<&str>) -> String {
     // repository exists to measure -- so a frame naming one of them would be
     // naming whichever happened to be first.
     //
-    // This CHANGES THE RENDERED BYTES of every seam, and there was no option
+    // This CHANGES THE RENDERED BYTES of every meditation, and there was no option
     // that did not: the field this line used to read, `substrate.name`, no
     // longer exists. Prose identity was what the digest replaced. The frame's
     // shape is unchanged -- one line, one label, one value -- which is what
@@ -262,17 +289,17 @@ pub fn entries(object: &WorkingObject) -> String {
     lines
 }
 
-/// The trunk a served session continues from after a seam (#493): its
+/// The trunk a served session continues from after a meditation (#493): its
 /// `head`, untouched, then [`refill_message`] carrying `render`, and nothing
 /// of the old trunk.
 ///
 /// A TOTAL compaction, by the maintainer's intent on #493: the refill is not
 /// a summary of the old turns with the later ones kept, and it does not try
-/// to make the model believe it is continuing the session. Each seam hands it
+/// to make the model believe it is continuing the session. Each meditation hands it
 /// a better starting point, built from working memory alone.
 ///
 /// The system message is never changed (#597, the maintainer: "System
-/// prompt mutation is forbidden"): after a seam it is byte-identical to the
+/// prompt mutation is forbidden"): after a meditation it is byte-identical to the
 /// session's first. The session and the record's projection both rebuild
 /// the trunk through this one function, so the projection's head check
 /// holds the session to it.
@@ -283,7 +310,7 @@ pub fn refill(head: &[Message], render: &str) -> Vec<Message> {
     trunk
 }
 
-/// [`refill`], with `after` -- a seam's list of the background commands
+/// [`refill`], with `after` -- a meditation's list of the background commands
 /// still running (#614) -- following the summary in the same message, as
 /// Qwen Code puts its list after the summary
 /// (`chatCompressionService.ts:1139`).
@@ -296,7 +323,7 @@ pub fn refill_with(head: &[Message], render: &str, after: Option<&str>) -> Vec<M
     trunk
 }
 
-/// The message a seam's refill rides in (#597), shaped as Pi and `OpenCode`
+/// The message a meditation's refill rides in (#597), shaped as Pi and `OpenCode`
 /// 2 carry a compaction summary: a user message, the text inside
 /// `<summary>` tags, opened and closed on lines of their own (Pi
 /// `core/messages.ts:11-17`, `OpenCode` 2 `session/runner/to-llm-message.ts:
@@ -308,7 +335,7 @@ pub fn refill_message(render: &str) -> Message {
     Message::new(Role::User, format!("<summary>\n{render}\n</summary>"))
 }
 
-/// The trunk after a seam logged before #597: `render` appended to the
+/// The trunk after a meditation logged before #597: `render` appended to the
 /// head's system message after a blank line, or a system message of its
 /// own when the head has none. What those logs' heads were sent, so they
 /// still rebuild.
@@ -347,7 +374,7 @@ pub fn estimated_tokens(message: &Message) -> u64 {
     u64::try_from(chars.div_ceil(4)).unwrap_or(u64::MAX)
 }
 
-/// The recent tail of `turns` -- the trunk after its head -- a seam keeps
+/// The recent tail of `turns` -- the trunk after its head -- a meditation keeps
 /// after the refill (#552): whole turns, from the newest back, while their
 /// estimated tokens stay within `budget`. A turn starts at its user message:
 /// the tail never starts at an assistant reply or a tool result, so no call
@@ -373,6 +400,17 @@ pub fn tail(turns: &[Message], budget: u64) -> &[Message] {
         }
     }
     &turns[start..]
+}
+
+/// The estimated tokens of the newest whole turn of `turns` -- from its
+/// last user message on, as [`tail`] measures one -- or `None` when it holds
+/// no turn (#693): what a tail that kept nothing could not fit.
+#[must_use]
+pub fn newest_turn_tokens(turns: &[Message]) -> Option<u64> {
+    let start = turns
+        .iter()
+        .rposition(|message| message.role == Role::User)?;
+    Some(turns[start..].iter().map(estimated_tokens).sum())
 }
 
 /// The last `n` whole turns of `turns` (#567), each starting at its user

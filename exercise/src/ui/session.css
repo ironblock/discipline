@@ -184,7 +184,8 @@
   z-index: 5;
   top: calc(var(--ex-pinned-top, 0px) + 2.6rem);
   right: 0;
-  bottom: 0;
+  /* Above the composer, never over it (SessionView keeps its height). */
+  bottom: var(--ex-composer-height, 0px);
   width: min(calc(var(--memory-width) + 2rem), calc(100vw - 3rem));
   margin: 0;
   padding: 0.75rem 1rem 1rem;
@@ -361,7 +362,7 @@
   text-shadow: 0 0 var(--led-radius) var(--led);
 }
 
-/* Eras before the latest seam were evicted from the prefix: kept in the archive,
+/* Eras before the latest meditation were evicted from the prefix: kept in the archive,
    drawn as such -- and so are the side calls that hung off them. */
 .ex-era:not(:last-of-type) .ex-block {
   box-shadow: var(--relief-evicted);
@@ -439,8 +440,8 @@
   margin: 0.5rem 0 0 1.25rem;
 }
 
-/* A seam crosses every column: the refill changes the prefix every slot forks from. */
-.ex-session--curtain .ex-seam {
+/* A meditation crosses every column: the refill changes the prefix every slot forks from. */
+.ex-session--curtain .ex-meditation {
   margin-right: calc(-1 * var(--lanes) * (var(--lane-width) + var(--gutter)));
 }
 

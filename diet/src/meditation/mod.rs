@@ -1,4 +1,4 @@
-//! `diet::seam` -- the render-and-ratify controller.
+//! `diet::meditation` -- the render-and-ratify controller.
 //!
 //! Nothing else in this library owns the **render**: the moment the working
 //! object is turned into a prompt and the session continues from it. That
@@ -8,7 +8,7 @@
 //!
 //! Two things decide the design.
 //!
-//! **A seam fires on a deterministic trigger, never on the model's judgment.**
+//! **A meditation fires on a deterministic trigger, never on the model's judgment.**
 //! A declared cadence, a phase transition the graph ratified, or the working
 //! set reaching a declared byte count. Who decides when to compact is the
 //! metacognition problem this architecture refuses to hand to the model; the
@@ -16,9 +16,9 @@
 //! *propose* a phase transition, and [`phase::PhaseGraph`] rules on it -- an
 //! unratified proposal is recorded and not acted on.
 //!
-//! **The prefix stays byte-identical between seams.** [`render::render`] is a
+//! **The prefix stays byte-identical between meditations.** [`render::render`] is a
 //! pure function of the object and the phase, and the controller re-runs it
-//! only when a seam fires. That is what makes the claim checkable rather than
+//! only when a meditation fires. That is what makes the claim checkable rather than
 //! merely stated.
 //!
 //! # What is NOT built here, and why
@@ -53,7 +53,7 @@
 //! **The phase and the pending triggers were committed above the fallible
 //! steps.** A ratifier whose patches the reconciler refused left the
 //! controller having advanced its phase and spent the operator's declaration
-//! with no seam recorded -- rendering a prompt for the phase the session had
+//! with no meditation recorded -- rendering a prompt for the phase the session had
 //! left. Nothing exercised the error path at all.
 //!
 //! **The render had no grammar.** Entry content reaches it from model output
@@ -79,12 +79,12 @@ use phase::{Decision, Proposal};
 use policy::Policy;
 
 vocabulary! {
-    /// Why a seam fired.
+    /// Why a meditation fired.
     ///
     /// **Declaration order is precedence.** Where two triggers are true at
     /// once, the reason a record carries is the first of these, and the
-    /// others are carried beside it rather than dropped -- a seam attributed
-    /// to a cadence that would have fired on the budget anyway is a seam
+    /// others are carried beside it rather than dropped -- a meditation attributed
+    /// to a cadence that would have fired on the budget anyway is a meditation
     /// whose record answers the wrong question.
     ///
     /// An explicit act outranks every derived one, so the operator comes
@@ -106,7 +106,7 @@ vocabulary! {
         /// The declared cadence came round.
         Cadence => "cadence",
         /// A served session's next trunk request would not fit the context
-        /// window with room for its output (#617): the automatic seam. The
+        /// window with room for its output (#617): the automatic meditation. The
         /// scripted drive never fires it.
         Window => "window",
         /// The model pruned a tool result, and the regimen applies a prune
@@ -116,9 +116,9 @@ vocabulary! {
 }
 
 vocabulary! {
-    /// Why a seam rendered without a ratification.
+    /// Why a meditation rendered without a ratification.
     ///
-    /// A seam still fires: the render is the point, and a prompt rebuilt
+    /// A meditation still fires: the render is the point, and a prompt rebuilt
     /// without an audit is a prompt rebuilt. What does not happen is a fold,
     /// and the reason it did not is typed rather than absent.
     Blocked {
@@ -144,10 +144,10 @@ vocabulary! {
 /// `diet/object/`'s to add.
 pub const AUDIT_CATEGORY: &str = "working notes";
 
-/// The ask a seam puts to the model, and what it is about.
+/// The ask a meditation puts to the model, and what it is about.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Ask {
-    /// Why the seam fired.
+    /// Why the meditation fired.
     pub reason: Reason,
     /// The pinned template the ask was built from.
     pub template: Template,
@@ -159,7 +159,7 @@ pub struct Ask {
     pub items: Vec<EntryId>,
 }
 
-/// Something that can answer a seam's ask.
+/// Something that can answer a meditation's ask.
 ///
 /// The trait exists because the answer's GRAMMAR is not this module's: see
 /// the note at the top of the file. An implementation parses an answer into
@@ -181,16 +181,16 @@ pub enum Ratification {
     Blocked(Blocked),
 }
 
-/// One seam: everything about the moment the prompt was rebuilt.
+/// One meditation: everything about the moment the prompt was rebuilt.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct Seam {
+pub struct Meditation {
     /// Its position in the session, from 1.
     pub index: u32,
     /// The turn it fired after.
     pub at_turn: u32,
     /// Why, in [`Reason`]'s precedence order.
     pub reason: Reason,
-    /// Every other trigger that was also true, so a reader can tell a seam
+    /// Every other trigger that was also true, so a reader can tell a meditation
     /// that would have fired anyway from one that would not.
     pub also: Vec<Reason>,
     /// The phase the render was built for.
@@ -210,7 +210,7 @@ pub struct Seam {
     /// The prefix the session continues from.
     pub prefix: String,
     /// The working object's version after the fold. #27 asks for a
-    /// *versioned* dump either side of a seam; the dumps themselves carry no
+    /// *versioned* dump either side of a meditation; the dumps themselves carry no
     /// header (it would appear in every diff), so the version is recorded
     /// here instead of being unrecoverable.
     pub object_version: u32,
@@ -218,15 +218,15 @@ pub struct Seam {
     /// the frame as dogma, this is [`render::FRAME_VERSION`] and a reader can
     /// tell these renders from renders under the authored one.
     pub frame_version: &'static str,
-    /// What the working set measured when the seam fired.
+    /// What the working set measured when the meditation fired.
     pub working_set_bytes: u64,
 }
 
-impl Seam {
-    /// Whether the entries this seam's dumps differ on are exactly the ones
+impl Meditation {
+    /// Whether the entries this meditation's dumps differ on are exactly the ones
     /// its patches touched.
     ///
-    /// The acceptance question for a seam, asked of the seam rather than
+    /// The acceptance question for a meditation, asked of the meditation rather than
     /// reconstructed by a caller: a render that moved an entry no patch names
     /// is a render that edited the object, and the object is not the render's
     /// to edit.
@@ -242,9 +242,9 @@ impl Seam {
     }
 }
 
-/// Why a seam could not be taken.
+/// Why a meditation could not be taken.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub enum SeamError {
+pub enum MeditationError {
     /// The reconciler refused the ratification's patches.
     Object(ObjectError),
     /// A pinned ask could not be filled, which is a defect in this module
@@ -252,24 +252,24 @@ pub enum SeamError {
     Fill(FillError),
 }
 
-impl fmt::Display for SeamError {
+impl fmt::Display for MeditationError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::Object(why) => write!(f, "the ratification did not apply: {why}"),
-            Self::Fill(why) => write!(f, "the seam's ask could not be filled: {why}"),
+            Self::Fill(why) => write!(f, "the meditation's ask could not be filled: {why}"),
         }
     }
 }
 
-impl Error for SeamError {}
+impl Error for MeditationError {}
 
-impl From<ObjectError> for SeamError {
+impl From<ObjectError> for MeditationError {
     fn from(why: ObjectError) -> Self {
         Self::Object(why)
     }
 }
 
-impl From<FillError> for SeamError {
+impl From<FillError> for MeditationError {
     fn from(why: FillError) -> Self {
         Self::Fill(why)
     }
@@ -283,7 +283,7 @@ pub struct Controller<R: Ratifier> {
     phase: Option<String>,
     turn: u32,
     prefix: String,
-    seams: Vec<Seam>,
+    meditations: Vec<Meditation>,
     proposals: Vec<Proposal>,
     /// An operator-declared boundary, waiting for the turn to settle.
     ///
@@ -292,7 +292,7 @@ pub struct Controller<R: Ratifier> {
     declared: bool,
     /// A transition the graph ratified, waiting for the turn to settle.
     ///
-    /// A proposal does not fire a seam the instant it is made: the turn it
+    /// A proposal does not fire a meditation the instant it is made: the turn it
     /// was made in is still running, and rebuilding the prompt underneath it
     /// would be the controller acting on the model's judgment at the moment
     /// the model expressed it -- which is the thing the whole design refuses.
@@ -305,7 +305,7 @@ impl<R: Ratifier> Controller<R> {
     /// The session starts in the graph's first phase, or in no phase where
     /// the graph is empty. The opening prefix is rendered here, so that the
     /// byte-identity claim covers the whole session and not only the part
-    /// after the first seam.
+    /// after the first meditation.
     pub fn open(policy: Policy, object: &WorkingObject, ratifier: R) -> Self {
         let phase = policy.phases.first().map(str::to_owned);
         let prefix = render::render(object, phase.as_deref());
@@ -315,7 +315,7 @@ impl<R: Ratifier> Controller<R> {
             phase,
             turn: 0,
             prefix,
-            seams: Vec::new(),
+            meditations: Vec::new(),
             proposals: Vec::new(),
             declared: false,
             pending: None,
@@ -334,15 +334,15 @@ impl<R: Ratifier> Controller<R> {
         self.phase.as_deref()
     }
 
-    /// Every seam so far.
+    /// Every meditation so far.
     #[must_use]
-    pub fn seams(&self) -> &[Seam] {
-        &self.seams
+    pub fn meditations(&self) -> &[Meditation] {
+        &self.meditations
     }
 
     /// The ratifier, so a caller can read what it was asked.
     ///
-    /// The asks are the half of a seam that leaves this module, and a test
+    /// The asks are the half of a meditation that leaves this module, and a test
     /// that could not see them would be checking that the controller talks to
     /// itself.
     #[must_use]
@@ -393,20 +393,23 @@ impl<R: Ratifier> Controller<R> {
         decision
     }
 
-    /// Settle the current turn: fire a seam if a trigger says to.
+    /// Settle the current turn: fire a meditation if a trigger says to.
     ///
     /// # Errors
     ///
-    /// Returns [`SeamError`] if the reconciler refuses the ratification's
+    /// Returns [`MeditationError`] if the reconciler refuses the ratification's
     /// patches, or if a pinned ask could not be filled.
-    pub fn settle(&mut self, object: &mut WorkingObject) -> Result<Option<Seam>, SeamError> {
-        // One turn, one seam. A second `settle` in the same turn used to fire
+    pub fn settle(
+        &mut self,
+        object: &mut WorkingObject,
+    ) -> Result<Option<Meditation>, MeditationError> {
+        // One turn, one meditation. A second `settle` in the same turn used to fire
         // a second one at the same index -- two full re-prefills for a turn
         // that only ever had one prompt to rebuild.
         if self
-            .seams
+            .meditations
             .last()
-            .is_some_and(|seam| seam.at_turn == self.turn)
+            .is_some_and(|meditation| meditation.at_turn == self.turn)
         {
             return Ok(None);
         }
@@ -422,10 +425,10 @@ impl<R: Ratifier> Controller<R> {
         // The phase used to be taken and the pending triggers cleared right
         // here, above the `?`s below -- so a ratifier whose patches the
         // reconciler refused left the controller having advanced its phase,
-        // spent the operator's declaration, and recorded no seam. The prefix
+        // spent the operator's declaration, and recorded no meditation. The prefix
         // still rendered the phase the session had left, which is the exact
         // failure the byte-identity design exists to prevent, and the
-        // declared boundary never happened at all. The `Ratifier` is the seam
+        // declared boundary never happened at all. The `Ratifier` is the meditation
         // to model output, so that is not a rare path.
         let taking = self.pending.clone();
         let phase = taking.clone().or_else(|| self.phase.clone());
@@ -444,8 +447,8 @@ impl<R: Ratifier> Controller<R> {
         self.declared = false;
         self.prefix = render::render(object, phase.as_deref());
 
-        let index = u32::try_from(self.seams.len()).unwrap_or(u32::MAX) + 1;
-        let seam = Seam {
+        let index = u32::try_from(self.meditations.len()).unwrap_or(u32::MAX) + 1;
+        let meditation = Meditation {
             index,
             at_turn: self.turn,
             reason,
@@ -462,8 +465,8 @@ impl<R: Ratifier> Controller<R> {
             object_version: object.version(),
             working_set_bytes,
         };
-        self.seams.push(seam.clone());
-        Ok(Some(seam))
+        self.meditations.push(meditation.clone());
+        Ok(Some(meditation))
     }
 
     /// Every trigger that is true right now, in precedence order.
@@ -480,7 +483,7 @@ impl<R: Ratifier> Controller<R> {
                     .is_some_and(|at| working_set_bytes >= at),
                 // `turn > 0` because turn zero is before the session started,
                 // and every number divides zero: without it a controller that
-                // settled before its first turn would fire a seam over an
+                // settled before its first turn would fire a meditation over an
                 // empty object.
                 Reason::Cadence => self
                     .policy
@@ -499,7 +502,7 @@ impl<R: Ratifier> Controller<R> {
         &mut self,
         object: &WorkingObject,
         reason: Reason,
-    ) -> Result<(Ratification, Vec<Patch>), SeamError> {
+    ) -> Result<(Ratification, Vec<Patch>), MeditationError> {
         let Some(template) = pinned_ask(reason) else {
             return Ok((Ratification::Blocked(Blocked::NoPinnedAsk), Vec::new()));
         };
@@ -541,7 +544,7 @@ impl<R: Ratifier> Controller<R> {
     }
 }
 
-/// The audit ask a seam fired by `reason` puts over `items` (#504): the
+/// The audit ask a meditation fired by `reason` puts over `items` (#504): the
 /// pinned template filled with the notes numbered 1..n, one line each, or
 /// `None` when the dogma pins no ask for `reason` or there is nothing to
 /// audit. The served session's audit and the controller's are the same ask.
@@ -612,7 +615,7 @@ pub fn pinned_reconcile(reason: Reason) -> Option<Template> {
     }
 }
 
-/// The tools-route audit ask a seam fired by `reason` puts over `items`, in
+/// The tools-route audit ask a meditation fired by `reason` puts over `items`, in
 /// `set` (#610): the set's text for the pinned template, the notes as
 /// `<id>\t<note>` lines so a call can name them; `None` where [`audit_ask`]
 /// would give none.
@@ -644,7 +647,7 @@ pub fn audit_ask_tools(
 /// A table rather than a guess. The dogma pins an ask for a phase boundary
 /// and one for a scheduled checkpoint, and it pins none for a budget
 /// threshold: `AUDIT_Q_CADENCE`'s own text says "a cadence fired", so
-/// borrowing it for a budget seam would put a sentence in the prompt that is
+/// borrowing it for a budget meditation would put a sentence in the prompt that is
 /// not true. Writing a new one is authoring dogma, which is not this seat's.
 #[must_use]
 pub fn pinned_ask(reason: Reason) -> Option<Template> {
@@ -663,8 +666,8 @@ mod tests {
     use super::phase::{Decision, Refusal};
     use super::policy::{Policy, PolicyError};
     use super::{
-        Ask, Blocked, Controller, Ratification, Ratifier, Reason, Seam, SeamError, pinned_ask,
-        render,
+        Ask, Blocked, Controller, Meditation, MeditationError, Ratification, Ratifier, Reason,
+        pinned_ask, render,
     };
     use crate::formats::record::{Engine, Reasoning, Regime, Substrate, Weights};
     use crate::formats::regimen;
@@ -734,19 +737,26 @@ mod tests {
         ]);
         let plain = render::render(&object, None);
         let line = |id: &str| format!("{id}\t{}\n", long(id).replace('\n', "\\n"));
-        // Room for the header, the constraint and one long entry: the newest.
-        let without = plain.replace(&line("old"), "").replace(&line("mid"), "");
-        let room = (without.chars().count() as u64).div_ceil(4);
-        let tiered = render::rendered(&object, None, Some(budget(room, render::OverBudget::Tier)));
-        assert_eq!(tiered.reduced, 2, "{}", tiered.text);
-        assert!(tiered.text.contains(&line("new")), "the newest stays whole");
-        assert!(tiered.text.contains("rule\tconstraint: no login\n"));
         let cut = |id: &str| {
             long(id)
                 .chars()
                 .take(render::TIER_CHARS)
                 .collect::<String>()
         };
+        // Room for the header, the constraint, one long entry -- the newest
+        // -- and the two older ones tiered, with the count line.
+        let expected = format!(
+            "{}2 older entries shortened\n",
+            plain
+                .replace(&line("old"), &format!("old\t{}…\n", cut("old")))
+                .replace(&line("mid"), &format!("mid\t{}…\n", cut("mid")))
+        );
+        let room = (expected.chars().count() as u64).div_ceil(4);
+        let tiered = render::rendered(&object, None, Some(budget(room, render::OverBudget::Tier)));
+        assert_eq!(tiered.reduced, 2, "{}", tiered.text);
+        assert!(tiered.fits);
+        assert!(tiered.text.contains(&line("new")), "the newest stays whole");
+        assert!(tiered.text.contains("rule\tconstraint: no login\n"));
         assert!(
             tiered.text.contains(&format!("old\t{}…\n", cut("old"))),
             "{}",
@@ -762,7 +772,20 @@ mod tests {
             "{}",
             tiered.text
         );
-        let elided = render::rendered(&object, None, Some(budget(room, render::OverBudget::Elide)));
+        let elided_room = (format!(
+            "{}2 older entries elided\n",
+            plain
+                .replace(&line("old"), "old\n")
+                .replace(&line("mid"), "mid\n")
+        )
+        .chars()
+        .count() as u64)
+            .div_ceil(4);
+        let elided = render::rendered(
+            &object,
+            None,
+            Some(budget(elided_room, render::OverBudget::Elide)),
+        );
         assert!(
             elided.text.contains("\nold\n") && elided.text.contains("\nmid\n"),
             "{}",
@@ -775,10 +798,67 @@ mod tests {
             "{}",
             elided.text
         );
-        // A budget the brief alone passes still renders the brief whole.
+        // A budget the brief alone passes still renders the brief whole,
+        // and says it does not fit.
         let tight = render::rendered(&object, None, Some(budget(1, render::OverBudget::Elide)));
         assert!(tight.text.contains("rule\tconstraint: no login\n"));
         assert_eq!(tight.reduced, 3);
+        assert!(!tight.fits);
+    }
+
+    /// Levers run A (meditations 2804 and 4039): an entry kept whole beside
+    /// reduced ones whose shortened lines and count push the render past its
+    /// budget is reduced too, until the render fits -- here at the run's own
+    /// three entries, with room for the newest two whole lines and nothing
+    /// for what reducing the third costs.
+    #[test]
+    fn a_render_keeps_reducing_until_it_fits_its_budget() {
+        let object = holding(&[
+            (
+                "interview-t2-0",
+                "decision: Add `#anchor` validation to `linkcheck.py` for local links \u{2014} \
+                 GitHub-style slugs via `slugify()`/`anchors_of()` (duplicates numbered `a`, \
+                 `a-1`), same-file `#anchor` supported, output format and exit codes \
+                 unchanged; samples updated to show valid anchor, broken file, and broken \
+                 anchor.",
+            ),
+            (
+                "interview-t2-1",
+                "plan: No open work; optional follow-ups only if asked \u{2014} verify \
+                 `[x](b.md#b \"B\")` title-with-anchor handling and decide whether headings \
+                 inside fenced code blocks should be ignored.",
+            ),
+            ("interview-t2-2", "supersede: NONE"),
+        ]);
+        // Room for the render with both older entries tiered: the newest
+        // two whole lines fit in it too, so a reduction that counted only
+        // whole lines kept the second whole and ran past it.
+        let floor = render::rendered(&object, None, Some(budget(1, render::OverBudget::Tier)));
+        let room = floor.tokens;
+        let plain = render::render(&object, None);
+        let first = plain
+            .lines()
+            .find(|line| line.starts_with("interview-t2-0\t"))
+            .expect("the oldest's line");
+        assert!(((plain.chars().count() - first.chars().count() - 1) as u64).div_ceil(4) <= room);
+        let tiered = render::rendered(&object, None, Some(budget(room, render::OverBudget::Tier)));
+        assert!(
+            tiered.tokens <= room,
+            "{} tokens against {room}:\n{}",
+            tiered.tokens,
+            tiered.text
+        );
+        assert!(tiered.fits);
+        assert_eq!(tiered.reduced, 2, "{}", tiered.text);
+        assert!(tiered.text.contains("interview-t2-2\tsupersede: NONE\n"));
+        // One token less and nothing is left to reduce: it says so.
+        let short = render::rendered(
+            &object,
+            None,
+            Some(budget(room - 1, render::OverBudget::Tier)),
+        );
+        assert!(!short.fits);
+        assert_eq!(short.text, floor.text);
     }
 
     /// #565: recency is an entry's latest patch, not its creation: an old
@@ -930,24 +1010,24 @@ mod tests {
     // -----------------------------------------------------------------------
 
     /// Row two, both readings. The issue says "five turns at
-    /// `seam_every_turns = 3`" and then "seams fire at turns 3 and 6 only",
+    /// `meditation_every_turns = 3`" and then "meditations fire at turns 3 and 6 only",
     /// and a five-turn drive has no turn 6. Rather than pick one, this asserts
     /// both: seven turns fire at 3 and 6, five turns fire at 3 alone. The
     /// discrepancy is disclosed on the pull request.
     #[test]
-    fn seams_fire_on_the_declared_cadence_and_nowhere_else() {
+    fn meditations_fire_on_the_declared_cadence_and_nowhere_else() {
         let mut object = three_facts();
         let mut controller = Controller::open(
-            policy("seam_every_turns = 3\n"),
+            policy("meditation_every_turns = 3\n"),
             &object,
             Scripted::silent(),
         );
         drive(&mut controller, &mut object, 7);
 
         let fired: Vec<(u32, Reason)> = controller
-            .seams()
+            .meditations()
             .iter()
-            .map(|seam| (seam.at_turn, seam.reason))
+            .map(|meditation| (meditation.at_turn, meditation.reason))
             .collect();
         assert_eq!(
             fired,
@@ -955,37 +1035,40 @@ mod tests {
             "turns 3 and 6, and no others, each because the cadence came round"
         );
         assert!(
-            controller.seams().iter().all(|seam| seam.also.is_empty()),
+            controller
+                .meditations()
+                .iter()
+                .all(|meditation| meditation.also.is_empty()),
             "no other trigger was declared, so none can also have been true"
         );
         assert_eq!(Reason::Cadence.tag(), "cadence");
 
         let mut short_object = three_facts();
         let mut short = Controller::open(
-            policy("seam_every_turns = 3\n"),
+            policy("meditation_every_turns = 3\n"),
             &short_object,
             Scripted::silent(),
         );
         drive(&mut short, &mut short_object, 5);
         assert_eq!(
             short
-                .seams()
+                .meditations()
                 .iter()
-                .map(|seam| seam.at_turn)
+                .map(|meditation| meditation.at_turn)
                 .collect::<Vec<_>>(),
             vec![3],
             "five turns reach turn 3 and not turn 6"
         );
     }
 
-    /// Row two's other half: the prefix between seams is byte-identical.
+    /// Row two's other half: the prefix between meditations is byte-identical.
     #[test]
-    fn the_prefix_is_byte_identical_between_seams_and_changes_only_at_one() {
+    fn the_prefix_is_byte_identical_between_meditations_and_changes_only_at_one() {
         let mut object = three_facts();
         let mut controller = Controller::open(
-            policy("seam_every_turns = 3\n"),
+            policy("meditation_every_turns = 3\n"),
             &object,
-            // A seam that folds a patch, so the render has something to
+            // A meditation that folds a patch, so the render has something to
             // change. A prefix that never moved would make this test pass on
             // a controller that never rendered at all.
             Scripted::answering(vec![vec![add("e4", "and a fourth fact", 3, 0)]]),
@@ -1000,7 +1083,7 @@ mod tests {
         assert_eq!(prefixes[1], opening, "so does turn 2");
         assert_ne!(
             prefixes[2], opening,
-            "the seam at turn 3 rebuilt it, or nothing here is being measured"
+            "the meditation at turn 3 rebuilt it, or nothing here is being measured"
         );
         assert_eq!(
             prefixes[3], prefixes[2],
@@ -1028,7 +1111,7 @@ mod tests {
     fn the_prefix_does_not_move_while_the_object_does() {
         let mut object = three_facts();
         let mut controller = Controller::open(
-            policy("seam_every_turns = 3\n"),
+            policy("meditation_every_turns = 3\n"),
             &object,
             Scripted::silent(),
         );
@@ -1061,7 +1144,7 @@ mod tests {
              object and not yet in the prompt"
         );
 
-        assert_ne!(prefixes[2], opening, "the seam at turn 3 rebuilt it");
+        assert_ne!(prefixes[2], opening, "the meditation at turn 3 rebuilt it");
         assert!(
             prefixes[2].contains("a fact captured on turn 1")
                 && prefixes[2].contains("a fact captured on turn 3"),
@@ -1080,7 +1163,7 @@ mod tests {
         );
     }
 
-    /// Row three: a proposal the graph forbids is recorded, and no seam fires.
+    /// Row three: a proposal the graph forbids is recorded, and no meditation fires.
     #[test]
     fn a_transition_the_graph_forbids_is_recorded_and_fires_nothing() {
         let declared = "phases = [\"brainstorm\", \"plan\", \"implement\"]\n\
@@ -1116,7 +1199,7 @@ mod tests {
             Some("brainstorm"),
             "and the session did not move"
         );
-        assert!(controller.seams().is_empty());
+        assert!(controller.meditations().is_empty());
     }
 
     #[test]
@@ -1149,7 +1232,7 @@ mod tests {
     }
 
     #[test]
-    fn a_transition_the_graph_allows_fires_a_seam_whose_reason_is_the_phase() {
+    fn a_transition_the_graph_allows_fires_a_meditation_whose_reason_is_the_phase() {
         let declared = "phases = [\"plan\", \"implement\"]\n\
                         [phase_transitions]\n\
                         plan = [\"implement\"]\n";
@@ -1158,33 +1241,33 @@ mod tests {
 
         controller.begin_turn();
         assert_eq!(controller.propose("implement"), Decision::Ratified);
-        let seam = controller
+        let meditation = controller
             .settle(&mut object)
             .expect("the fold applies")
-            .expect("a ratified transition fires a seam");
+            .expect("a ratified transition fires a meditation");
 
-        assert_eq!(seam.reason, Reason::Phase);
-        assert_eq!(seam.phase.as_deref(), Some("implement"));
+        assert_eq!(meditation.reason, Reason::Phase);
+        assert_eq!(meditation.phase.as_deref(), Some("implement"));
         assert_eq!(controller.phase(), Some("implement"));
         assert!(
-            seam.prefix.contains("phase: implement"),
+            meditation.prefix.contains("phase: implement"),
             "and the new prompt is built for the new phase: {}",
-            seam.prefix
+            meditation.prefix
         );
         assert_eq!(
-            seam.ratified,
+            meditation.ratified,
             Ratification::Folded { patches: 0 },
             "a phase boundary has a pinned ask, and this ratifier had nothing to say"
         );
     }
 
-    /// Row four: the dumps either side of a seam differ by exactly the
+    /// Row four: the dumps either side of a meditation differ by exactly the
     /// ratification's patches.
     #[test]
-    fn the_dumps_either_side_of_a_seam_differ_by_exactly_the_ratifications_patches() {
+    fn the_dumps_either_side_of_a_meditation_differ_by_exactly_the_ratifications_patches() {
         let mut object = three_facts();
         let mut controller = Controller::open(
-            policy("seam_every_turns = 1\n"),
+            policy("meditation_every_turns = 1\n"),
             &object,
             Scripted::answering(vec![
                 vec![add("e4", "a fact the audit added", 1, 0)],
@@ -1199,27 +1282,27 @@ mod tests {
 
         for expected in [1_usize, 2] {
             controller.begin_turn();
-            let seam = controller
+            let meditation = controller
                 .settle(&mut object)
                 .expect("the fold applies")
-                .expect("a seam every turn");
+                .expect("a meditation every turn");
             assert!(
-                seam.diff_is_exactly_the_patches(),
-                "seam {} moved {:?}, and its patches touched something else",
-                seam.index,
-                seam.moved
+                meditation.diff_is_exactly_the_patches(),
+                "meditation {} moved {:?}, and its patches touched something else",
+                meditation.index,
+                meditation.moved
             );
             assert!(
-                !seam.moved.is_empty(),
-                "a seam whose dumps are identical proves nothing about attribution"
+                !meditation.moved.is_empty(),
+                "a meditation whose dumps are identical proves nothing about attribution"
             );
-            assert_eq!(seam.patches.len(), 1);
-            assert_eq!(seam.index, u32::try_from(expected).expect("small"));
+            assert_eq!(meditation.patches.len(), 1);
+            assert_eq!(meditation.index, u32::try_from(expected).expect("small"));
         }
 
         // The supersede: the voided entry is still there, linked, and the
         // diff names both it and its replacement.
-        let last = controller.seams().last().expect("two seams");
+        let last = controller.meditations().last().expect("two meditations");
         assert!(last.moved.contains(&id("e1")), "the voided entry moved");
         assert!(last.moved.contains(&id("e5")), "and so did its replacement");
         assert!(
@@ -1233,7 +1316,7 @@ mod tests {
     // -----------------------------------------------------------------------
 
     #[test]
-    fn a_regimen_that_declares_no_trigger_never_fires_a_seam() {
+    fn a_regimen_that_declares_no_trigger_never_fires_a_meditation() {
         // The scale-adaptive case: forcing a three-phase ceremony onto a
         // one-line change is the known rigidity cost, so a regimen may decline
         // the whole apparatus by saying nothing.
@@ -1245,7 +1328,10 @@ mod tests {
         let opening = controller.prefix().to_owned();
         let prefixes = drive(&mut controller, &mut object, 9);
 
-        assert!(controller.seams().is_empty(), "nine turns, no seam");
+        assert!(
+            controller.meditations().is_empty(),
+            "nine turns, no meditation"
+        );
         assert!(
             prefixes.iter().all(|prefix| *prefix == opening),
             "and one prefix throughout"
@@ -1254,25 +1340,25 @@ mod tests {
     }
 
     #[test]
-    fn a_budget_seam_renders_and_says_no_ask_is_pinned_for_it() {
+    fn a_budget_meditation_renders_and_says_no_ask_is_pinned_for_it() {
         let mut object = three_facts();
         let bytes = render::working_set_bytes(&object);
         let mut controller = Controller::open(
-            policy(&format!("seam_at_working_set_bytes = {bytes}\n")),
+            policy(&format!("meditation_at_working_set_bytes = {bytes}\n")),
             &object,
             Scripted::silent(),
         );
 
         controller.begin_turn();
-        let seam = controller
+        let meditation = controller
             .settle(&mut object)
             .expect("nothing folds")
             .expect("the working set reached the declared count");
 
-        assert_eq!(seam.reason, Reason::Budget);
-        assert_eq!(seam.working_set_bytes, bytes);
+        assert_eq!(meditation.reason, Reason::Budget);
+        assert_eq!(meditation.working_set_bytes, bytes);
         assert_eq!(
-            seam.ratified,
+            meditation.ratified,
             Ratification::Blocked(Blocked::NoPinnedAsk),
             "dogma v1 pins an ask for a phase boundary and one for a cadence, and \
              none for a budget; borrowing the cadence's would put a sentence in the \
@@ -1281,14 +1367,14 @@ mod tests {
         assert!(pinned_ask(Reason::Budget).is_none());
         assert!(controller.ratifier().seen.is_empty(), "nothing was asked");
         assert!(
-            !seam.prefix.is_empty(),
+            !meditation.prefix.is_empty(),
             "the render still happened -- the render is the point"
         );
     }
 
     #[test]
     fn a_phase_transition_outranks_a_cadence_that_also_came_round() {
-        let declared = "seam_every_turns = 1\n\
+        let declared = "meditation_every_turns = 1\n\
                         phases = [\"plan\", \"implement\"]\n\
                         [phase_transitions]\n\
                         plan = [\"implement\"]\n";
@@ -1297,20 +1383,20 @@ mod tests {
 
         controller.begin_turn();
         assert_eq!(controller.propose("implement"), Decision::Ratified);
-        let seam = controller
+        let meditation = controller
             .settle(&mut object)
             .expect("the fold applies")
             .expect("both triggers are true");
 
         assert_eq!(
-            seam.reason,
+            meditation.reason,
             Reason::Phase,
             "the stronger reason is the record's"
         );
         assert_eq!(
-            seam.also,
+            meditation.also,
             vec![Reason::Cadence],
-            "and the one it outranked is beside it, not dropped: a seam that would \
+            "and the one it outranked is beside it, not dropped: a meditation that would \
              have fired anyway is a different fact from one that would not"
         );
     }
@@ -1320,8 +1406,8 @@ mod tests {
         // All four true at once. An operator saying "we are done with that
         // part" is a fact, not a proposal: no graph rules on it and nothing
         // may refuse it.
-        let declared = "seam_every_turns = 1\n\
-                        seam_at_working_set_bytes = 1\n\
+        let declared = "meditation_every_turns = 1\n\
+                        meditation_at_working_set_bytes = 1\n\
                         phases = [\"plan\", \"implement\"]\n\
                         [phase_transitions]\n\
                         plan = [\"implement\"]\n";
@@ -1331,14 +1417,14 @@ mod tests {
         controller.begin_turn();
         assert_eq!(controller.propose("implement"), Decision::Ratified);
         controller.operator_declares_a_boundary();
-        let seam = controller
+        let meditation = controller
             .settle(&mut object)
             .expect("the fold applies")
-            .expect("four triggers, one seam");
+            .expect("four triggers, one meditation");
 
-        assert_eq!(seam.reason, Reason::Operator);
+        assert_eq!(meditation.reason, Reason::Operator);
         assert_eq!(
-            seam.also,
+            meditation.also,
             vec![Reason::Phase, Reason::Budget, Reason::Cadence],
             "and the three it outranked are beside it, in precedence order"
         );
@@ -1349,7 +1435,7 @@ mod tests {
              stronger trigger fired in the same turn"
         );
         assert_eq!(
-            seam.ratified,
+            meditation.ratified,
             Ratification::Folded { patches: 0 },
             "and the operator's boundary has a pinned ask of its own"
         );
@@ -1368,7 +1454,7 @@ mod tests {
                 .settle(&mut object)
                 .expect("nothing folds")
                 .is_some(),
-            "a declaration fires a seam even where the regimen declares no trigger"
+            "a declaration fires a meditation even where the regimen declares no trigger"
         );
 
         controller.begin_turn();
@@ -1379,11 +1465,11 @@ mod tests {
                 .is_none(),
             "an operator who said `now` did not say `and again`"
         );
-        assert_eq!(controller.seams().len(), 1);
+        assert_eq!(controller.meditations().len(), 1);
     }
 
     #[test]
-    fn an_operator_seam_puts_the_ask_the_dogma_pins_for_one() {
+    fn an_operator_meditation_puts_the_ask_the_dogma_pins_for_one() {
         let mut object = three_facts();
         let mut controller =
             Controller::open(policy("model = \"a-model\"\n"), &object, Scripted::silent());
@@ -1420,17 +1506,17 @@ mod tests {
 
         let mut object = object;
         let mut controller = Controller::open(
-            policy("seam_every_turns = 1\n"),
+            policy("meditation_every_turns = 1\n"),
             &object,
             Scripted::silent(),
         );
         controller.begin_turn();
-        let seam = controller
+        let meditation = controller
             .settle(&mut object)
             .expect("nothing folds")
-            .expect("a seam");
+            .expect("a meditation");
         assert_eq!(
-            seam.frame_version, "placeholder",
+            meditation.frame_version, "placeholder",
             "and so does the record of it"
         );
     }
@@ -1439,19 +1525,19 @@ mod tests {
     fn an_empty_working_set_is_not_audited() {
         let mut object = WorkingObject::open(regime());
         let mut controller = Controller::open(
-            policy("seam_every_turns = 1\n"),
+            policy("meditation_every_turns = 1\n"),
             &object,
             Scripted::silent(),
         );
 
         controller.begin_turn();
-        let seam = controller
+        let meditation = controller
             .settle(&mut object)
             .expect("nothing folds")
             .expect("the cadence came round");
 
         assert_eq!(
-            seam.ratified,
+            meditation.ratified,
             Ratification::Blocked(Blocked::NothingToAudit),
             "a check of nothing is not a pass"
         );
@@ -1462,7 +1548,7 @@ mod tests {
     fn the_ask_is_the_pinned_dogma_template_filled_with_the_live_entries() {
         let mut object = three_facts();
         let mut controller = Controller::open(
-            policy("seam_every_turns = 1\n"),
+            policy("meditation_every_turns = 1\n"),
             &object,
             Scripted::silent(),
         );
@@ -1470,7 +1556,7 @@ mod tests {
         controller.settle(&mut object).expect("nothing folds");
 
         let seen = &controller.ratifier().seen;
-        assert_eq!(seen.len(), 1, "one seam, one ask");
+        assert_eq!(seen.len(), 1, "one meditation, one ask");
         let ask = &seen[0];
         assert_eq!(ask.template, crate::dogma::Template::AuditQCadence);
         assert_eq!(ask.reason, Reason::Cadence);
@@ -1498,7 +1584,7 @@ mod tests {
 
     /// A ratifier whose patches the reconciler will refuse.
     ///
-    /// Two patches from different turns. The `Ratifier` is this module's seam
+    /// Two patches from different turns. The `Ratifier` is this module's meditation
     /// to model output, so an answer the reconciler will not take is the
     /// ordinary case rather than a strange one.
     #[derive(Debug, Clone)]
@@ -1515,7 +1601,7 @@ mod tests {
         // The phase and the pending triggers used to be committed ABOVE the
         // two fallible steps, so a refused fold left the controller having
         // advanced its phase, spent the operator's declaration, and recorded
-        // no seam -- with the prefix still rendering the phase the session had
+        // no meditation -- with the prefix still rendering the phase the session had
         // left. That is the failure the byte-identity design exists to
         // prevent, produced by the controller itself.
         let declared = "phases = [\"plan\", \"implement\"]\n\
@@ -1531,9 +1617,12 @@ mod tests {
         let refused = controller
             .settle(&mut object)
             .expect_err("the fold is refused");
-        assert!(matches!(refused, SeamError::Object(_)), "{refused:?}");
+        assert!(matches!(refused, MeditationError::Object(_)), "{refused:?}");
 
-        assert!(controller.seams().is_empty(), "no seam was recorded");
+        assert!(
+            controller.meditations().is_empty(),
+            "no meditation was recorded"
+        );
         assert_eq!(
             controller.phase(),
             Some("plan"),
@@ -1545,28 +1634,28 @@ mod tests {
             "and the prompt still describes where it actually is"
         );
 
-        // And the triggers were not spent by a seam that did not happen.
+        // And the triggers were not spent by a meditation that did not happen.
         let mut object = three_facts();
         let mut controller = Controller::open(policy(declared), &object, Scripted::silent());
         controller.begin_turn();
         assert_eq!(controller.propose("implement"), Decision::Ratified);
         controller.operator_declares_a_boundary();
-        let seam = controller
+        let meditation = controller
             .settle(&mut object)
             .expect("this ratifier's answer applies")
             .expect("the declared boundary still fires");
-        assert_eq!(seam.reason, Reason::Operator);
+        assert_eq!(meditation.reason, Reason::Operator);
         assert_eq!(controller.phase(), Some("implement"));
     }
 
     #[test]
-    fn a_seam_whose_dumps_moved_an_entry_no_patch_names_is_not_exactly_the_patches() {
+    fn a_meditation_whose_dumps_moved_an_entry_no_patch_names_is_not_exactly_the_patches() {
         // The predicate acceptance row four turns on had only ever been
         // asserted TRUE, so replacing its body with `true` left the suite
         // green. This is the other side.
         let mut object = three_facts();
         let mut controller = Controller::open(
-            policy("seam_every_turns = 1\n"),
+            policy("meditation_every_turns = 1\n"),
             &object,
             Scripted::answering(vec![vec![add("e4", "a fact the audit added", 1, 0)]]),
         );
@@ -1574,10 +1663,10 @@ mod tests {
         let honest = controller
             .settle(&mut object)
             .expect("the fold applies")
-            .expect("a seam");
+            .expect("a meditation");
         assert!(honest.diff_is_exactly_the_patches());
 
-        let forged = Seam {
+        let forged = Meditation {
             moved: honest
                 .moved
                 .iter()
@@ -1684,7 +1773,7 @@ mod tests {
             ])
             .expect("three adds apply");
         let mut controller = Controller::open(
-            policy("seam_every_turns = 1\n"),
+            policy("meditation_every_turns = 1\n"),
             &object,
             Scripted::silent(),
         );
@@ -1713,10 +1802,10 @@ mod tests {
     fn a_cadence_too_large_for_the_field_is_refused_rather_than_clamped() {
         assert_eq!(
             Policy::from_regimen(
-                &regimen::parse("seam_every_turns = 5000000000\n").expect("a regimen")
+                &regimen::parse("meditation_every_turns = 5000000000\n").expect("a regimen")
             ),
             Err(PolicyError::DoesNotFit {
-                key: "seam_every_turns",
+                key: "meditation_every_turns",
                 value: 5_000_000_000,
             }),
             "it used to clamp to u32::MAX -- a declared cadence becoming a \
@@ -1731,7 +1820,7 @@ mod tests {
         // that happens to be missing an edge.
         let mut object = three_facts();
         let mut controller = Controller::open(
-            policy("seam_every_turns = 3\n"),
+            policy("meditation_every_turns = 3\n"),
             &object,
             Scripted::silent(),
         );
@@ -1751,12 +1840,12 @@ mod tests {
     #[test]
     fn a_controller_that_settles_before_its_first_turn_fires_nothing() {
         // Every number divides zero, so without the `turn > 0` guard a cadence
-        // fires a seam over an empty session before it has begun. Only the
+        // fires a meditation over an empty session before it has begun. Only the
         // manifest's drift guard caught this, which is a red for the wrong
         // reason.
         let mut object = three_facts();
         let mut controller = Controller::open(
-            policy("seam_every_turns = 1\n"),
+            policy("meditation_every_turns = 1\n"),
             &object,
             Scripted::silent(),
         );
@@ -1767,14 +1856,14 @@ mod tests {
                 .is_none(),
             "turn zero is before the session started"
         );
-        assert!(controller.seams().is_empty());
+        assert!(controller.meditations().is_empty());
     }
 
     #[test]
-    fn one_turn_gets_one_seam() {
+    fn one_turn_gets_one_meditation() {
         let mut object = three_facts();
         let mut controller = Controller::open(
-            policy("seam_every_turns = 1\n"),
+            policy("meditation_every_turns = 1\n"),
             &object,
             Scripted::silent(),
         );
@@ -1782,22 +1871,22 @@ mod tests {
         assert!(controller.settle(&mut object).expect("folds").is_some());
         assert!(
             controller.settle(&mut object).expect("folds").is_none(),
-            "a second settle in one turn used to fire a second seam at the same \
+            "a second settle in one turn used to fire a second meditation at the same \
              turn index -- two full re-prefills for one prompt"
         );
-        assert_eq!(controller.seams().len(), 1);
+        assert_eq!(controller.meditations().len(), 1);
     }
 
     #[test]
-    fn the_cadence_is_absolute_so_a_seam_can_land_beside_another() {
+    fn the_cadence_is_absolute_so_a_meditation_can_land_beside_another() {
         // Documented rather than fixed: the cadence counts turns, not
-        // turns-since-the-last-seam, so an operator boundary on turn 4 under
-        // `seam_every_turns = 5` is followed by a cadence seam on turn 5. A
+        // turns-since-the-last-meditation, so an operator boundary on turn 4 under
+        // `meditation_every_turns = 5` is followed by a cadence meditation on turn 5. A
         // reader would reasonably predict the cadence restarts, and it does
         // not.
         let mut object = three_facts();
         let mut controller = Controller::open(
-            policy("seam_every_turns = 5\n"),
+            policy("meditation_every_turns = 5\n"),
             &object,
             Scripted::silent(),
         );
@@ -1810,39 +1899,39 @@ mod tests {
         }
         assert_eq!(
             controller
-                .seams()
+                .meditations()
                 .iter()
-                .map(|seam| (seam.at_turn, seam.reason))
+                .map(|meditation| (meditation.at_turn, meditation.reason))
                 .collect::<Vec<_>>(),
             vec![(4, Reason::Operator), (5, Reason::Cadence)]
         );
     }
 
     #[test]
-    fn a_seam_records_the_object_version_its_dumps_are_of() {
+    fn a_meditation_records_the_object_version_its_dumps_are_of() {
         // #27 asks for a versioned dump either side. The dumps carry no header
-        // -- it would appear in every diff -- so the version is on the seam.
+        // -- it would appear in every diff -- so the version is on the meditation.
         let mut object = three_facts();
         let before = object.version();
         let mut controller = Controller::open(
-            policy("seam_every_turns = 1\n"),
+            policy("meditation_every_turns = 1\n"),
             &object,
             Scripted::answering(vec![vec![add("e4", "a fact the audit added", 1, 0)]]),
         );
         controller.begin_turn();
-        let seam = controller
+        let meditation = controller
             .settle(&mut object)
             .expect("the fold applies")
-            .expect("a seam");
-        assert_eq!(seam.object_version, object.version());
+            .expect("a meditation");
+        assert_eq!(meditation.object_version, object.version());
         assert_ne!(
-            seam.object_version, before,
-            "the fold moved the object, and the seam says which version its `after` is"
+            meditation.object_version, before,
+            "the fold moved the object, and the meditation says which version its `after` is"
         );
     }
 
     #[test]
-    fn the_seams_vocabularies_are_the_words_a_record_carries() {
+    fn the_meditations_vocabularies_are_the_words_a_record_carries() {
         assert_eq!(
             Reason::ALL.iter().map(|r| r.tag()).collect::<Vec<_>>(),
             ["operator", "phase", "budget", "cadence", "window", "prune"],
@@ -1867,8 +1956,8 @@ mod tests {
         let read = |text: &str| Policy::from_regimen(&regimen::parse(text).expect("a regimen"));
 
         let full = read(
-            "seam_every_turns = 3\n\
-             seam_at_working_set_bytes = 4096\n\
+            "meditation_every_turns = 3\n\
+             meditation_at_working_set_bytes = 4096\n\
              phases = [\"plan\", \"implement\"]\n\
              [phase_transitions]\n\
              plan = [\"implement\"]\n",
@@ -1886,14 +1975,14 @@ mod tests {
         );
 
         assert_eq!(
-            read("seam_every_turns = 0\n"),
-            Err(PolicyError::NotPositive("seam_every_turns")),
+            read("meditation_every_turns = 0\n"),
+            Err(PolicyError::NotPositive("meditation_every_turns")),
             "zero would fire on every turn or on none depending on how it is read; \
              the way to declare no cadence is to leave the key out"
         );
         assert_eq!(
-            read("seam_every_turns = \"three\"\n"),
-            Err(PolicyError::NotAnInteger("seam_every_turns"))
+            read("meditation_every_turns = \"three\"\n"),
+            Err(PolicyError::NotAnInteger("meditation_every_turns"))
         );
         assert_eq!(
             read("phases = \"plan\"\n"),
@@ -1993,20 +2082,20 @@ mod tests {
         );
     }
 
-    /// A seam is a value a caller can hold onto after the controller moves on.
+    /// A meditation is a value a caller can hold onto after the controller moves on.
     #[test]
-    fn a_seam_returned_is_the_seam_recorded() {
+    fn a_meditation_returned_is_the_meditation_recorded() {
         let mut object = three_facts();
         let mut controller = Controller::open(
-            policy("seam_every_turns = 1\n"),
+            policy("meditation_every_turns = 1\n"),
             &object,
             Scripted::silent(),
         );
         controller.begin_turn();
-        let returned: Seam = controller
+        let returned: Meditation = controller
             .settle(&mut object)
             .expect("nothing folds")
-            .expect("a seam");
-        assert_eq!(controller.seams(), [returned]);
+            .expect("a meditation");
+        assert_eq!(controller.meditations(), [returned]);
     }
 }

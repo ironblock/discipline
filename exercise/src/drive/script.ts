@@ -11,10 +11,10 @@
  * the log. A session run against `diet` never passes through here.
  */
 
-import type { Approval, Authority, FailReason, FileRef, ForkLane, ForkOutcome, Lane, PatchOp, SeamReason, SettleReason, Timings, Tool, ToolRefusal } from './log.ts';
+import type { Approval, Authority, FailReason, FileRef, ForkLane, ForkOutcome, Lane, PatchOp, MeditationReason, SettleReason, Timings, Tool, ToolRefusal } from './log.ts';
 import type { Segment } from './transport.ts';
 
-export type { Approval, Authority, FailReason, ForkLane, ForkOutcome, Lane, PatchOp, SeamReason, SettleReason, Timings, Tool, ToolRefusal } from './log.ts';
+export type { Approval, Authority, FailReason, ForkLane, ForkOutcome, Lane, PatchOp, MeditationReason, SettleReason, Timings, Tool, ToolRefusal } from './log.ts';
 export type { Need, Open } from './log.ts';
 import type { Open } from './log.ts';
 
@@ -224,12 +224,12 @@ export interface Patch extends At {
 }
 
 /** The one deliberate prefill event: the trunk rebuilt from working memory. */
-export interface Seam extends At {
-  readonly kind: 'seam';
+export interface Meditation extends At {
+  readonly kind: 'meditation';
   readonly id: string;
   readonly at_turn: number;
-  readonly reason: SeamReason;
-  /** Absent when the record did not say (the predecessor's seams). */
+  readonly reason: MeditationReason;
+  /** Absent when the record did not say (the predecessor's meditations). */
   readonly phase?: { readonly from: string; readonly to: string };
   readonly prefix_hash_before: string;
   readonly prefix_hash_after: string;
@@ -257,7 +257,7 @@ export type DriveEvent =
   | Fork
   | ForkSettled
   | Patch
-  | Seam
+  | Meditation
   | SessionEnd;
 
 export type Kind = DriveEvent['kind'];

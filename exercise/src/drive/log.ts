@@ -17,13 +17,16 @@ import type * as V0 from '../../../diet/formats/log/log.ts';
 /**
  * What the surface draws that `diet` does not write yet, by what it is: the "what diet can't emit yet" overlay
  * outlines a line carrying any of it (`needsOf`). Every kind is `diet`'s now (#503); what is left is fields. One source.
+ *
+ * Each need names the open ticket that closes it, and that ticket's Done-when says to remove the need from here
+ * (`exercise/AGENTS.md`). The lines that carry these are the surface's own placed sessions: `diet` writes none.
  */
 export const NEEDS = {
-  record: 'the arm a session runs, and its system prompt’s size in tokens, on its start',
-  slots: 'the server’s slots, and the one that served each call',
-  phases: 'phases: the one a session opens in, and the move a seam makes',
-  lanes: 'the ratify and extraction side lanes',
-} as const;
+  record: { what: 'the arm a session runs, and its system prompt’s size in tokens, on its start', ticket: 678 },
+  slots: { what: 'the server’s slots, the one the trunk is pinned to, and the one that served each call', ticket: 677 },
+  forks: { what: 'a side call’s slot and the prefix it shared, in the surface’s pre-v5 fork shape', ticket: 427 },
+  lanes: { what: 'the ratify and extraction side lanes of the surface’s recorded and authored sessions', ticket: 427 },
+} as const satisfies Readonly<Record<string, { readonly what: string; readonly ticket: number }>>;
 
 export type Need = keyof typeof NEEDS;
 
@@ -111,8 +114,8 @@ export type PatchOp = Open<'add' | 'supersede' | 'resolve' | 'retire' | 'park' |
 /** How an entry was known -- `authority`, ruled on #117 (naming 5). */
 export type Authority = Open<'stated' | 'extracted' | 'observed' | 'arm'>;
 
-/** Why a seam fired: the format's words (log v6, #493), open. A served session writes only `operator`. */
-export type SeamReason = Open<V0.SeamReason>;
+/** Why a meditation fired: the format's words (log v6, #493), open. A served session writes only `operator`. */
+export type MeditationReason = Open<V0.MeditationReason>;
 
 // ------------------------------------------------------------------ `diet`'s lines, with what is AHEAD on them
 
@@ -131,7 +134,10 @@ export type SessionStart = V0.SessionStartLine & {
   readonly slots?: number;
   /** AHEAD (`slots`): the slot the trunk is pinned to. */
   readonly trunk_slot?: number;
-  /** AHEAD (`phases`): the phase the session opens in. `diet` writes it as `opening_phase` (v7, #563). */
+  /**
+   * The phase the session opens in, as a placed log spells it. `diet` writes it as `opening_phase` (v7, #563), which a
+   * placed log, declaring v3 or v4, may not carry; the fold reads either. Not a need: `diet` writes the phase.
+   */
   readonly phase?: string;
   /** AHEAD (`record`): the system prompt's size in tokens. */
   readonly system_tokens?: number;
@@ -221,13 +227,13 @@ export type ToolCall = Omit<V0.ToolCallLine, 'reason' | 'approval'> & {
  */
 export type FileRef = V0.RecordedFile;
 
-// ------------------------------------------------------------------ forks, patches, the seam
+// ------------------------------------------------------------------ forks, patches, the meditation
 
 /** A side call off the trunk's warm tail (`diet`'s from log v5), with what is AHEAD on it. */
 export interface Fork extends At {
   readonly kind: 'fork';
   readonly lane: ForkLane;
-  /** AHEAD (`slots`): `diet`'s fork line names no slot; the surface puts such a fork beside the trunk. */
+  /** AHEAD (`forks`): `diet`'s fork line names no slot; the surface puts such a fork beside the trunk. */
   readonly slot?: number;
   readonly of_turn: number;
   /** The `seq` of the trunk line it branches from: a `request` (its answer), or a tool call's first fragment. */
@@ -235,7 +241,7 @@ export interface Fork extends At {
   /** What `diet` noticed that made it ask. */
   readonly why: string;
   readonly question: string;
-  /** AHEAD (`slots`): prefix tokens shared with the trunk, the warm tail it forked from. `diet`'s fork line does not say. */
+  /** AHEAD (`forks`): prefix tokens shared with the trunk, the warm tail it forked from. `diet`'s fork line does not say. */
   readonly prefix_tokens?: number;
   /** An offboard seat's registry id, when the fork ran off the warm trunk (log v7, #615); with the model it served. */
   readonly substrate?: string;
@@ -258,6 +264,8 @@ export interface ForkSettled extends At {
   readonly wall_ms?: number;
   /** Why it was never sent, when its outcome is `refused` (log v7, #637): `pool` when the slots had no room for it. */
   readonly refused?: string;
+  /** What its answer wrote after its last field, past a blank line (log v7): read as no entry. */
+  readonly trailer?: string;
 }
 
 export interface Entry {
@@ -290,13 +298,13 @@ export type TangentClose = V0.TangentCloseLine;
 
 /**
  * The one deliberate prefill event -- the trunk refilled from working memory (log v6, #493): the head, the render
- * after it, and no turn of the old trunk. The format's line, with what is AHEAD on it. A seam placed in the surface's
+ * after it, and no turn of the old trunk. The format's line, with what is AHEAD on it. A meditation placed in the surface's
  * own older shape (`render_version`, drawn before v6; its re-recording is #427) carries none of `frame`,
  * `carried_entries` and `carried_turns`.
  */
-export type Seam = Omit<V0.SeamLine, 'reason' | 'frame' | 'carried_entries' | 'carried_turns'> &
-  Partial<Pick<V0.SeamLine, 'frame' | 'carried_entries' | 'carried_turns'>> & {
-    readonly reason: SeamReason;
+export type Meditation = Omit<V0.MeditationLine, 'reason' | 'frame' | 'carried_entries' | 'carried_turns'> &
+  Partial<Pick<V0.MeditationLine, 'frame' | 'carried_entries' | 'carried_turns'>> & {
+    readonly reason: MeditationReason;
     /** The phases it moved between (v7, #563). */
     readonly phase?: { readonly from: string; readonly to: string };
     /** The pre-warm (log v7, #504): the new prefix sent once so the next ask finds it cached. */
@@ -317,6 +325,8 @@ export type Recalled = V0.RecalledLine;
 export type Flag = V0.FlagLine;
 /** A model's patch refused over an entry the operator wrote (v7, #150): the fold went on. */
 export type PatchRefused = V0.PatchRefusedLine;
+/** A meditation held for the operator under `reconcile_gate = "refuse"` (v7, #150): no refill; `refill-anyway` refills. Folded, not yet drawn. */
+export type MeditationHeld = V0.MeditationHeldLine;
 /** A background command's end (v7, #614). Folded, not yet drawn. */
 export type BackgroundEnded = V0.BackgroundEndedLine;
 /** Ended background commands' notifications delivered after an ask (v7, #614). */
@@ -325,7 +335,7 @@ export type Notice = V0.NoticeLine;
 export type TimeoutNear = V0.TimeoutNearLine;
 /** A fork the turn's own self-capture already recorded, screened out of its gap (v7, #611). Folded, not yet drawn. */
 export type ForkSkipped = V0.ForkSkippedLine;
-/** A tool result the model pruned, replaced at a later seam (v7, `prune_output`, #612). */
+/** A tool result the model pruned, replaced at a later meditation (v7, `prune_output`, #612). */
 export type Pruned = V0.PrunedLine;
 
 export type LogLine =
@@ -346,7 +356,7 @@ export type LogLine =
   | Fork
   | ForkSettled
   | Patch
-  | Seam
+  | Meditation
   | Delivered
   | Recalled
   | Reminded
@@ -360,9 +370,10 @@ export type LogLine =
   | ForkSkipped
   | Flag
   | PatchRefused
+  | MeditationHeld
   | PhaseRuled;
 
-/** The operator's ruling on the model's phase proposal (log v7, #651): `seam` (a seam follows), `continue`, or `stay`. */
+/** The operator's ruling on the model's phase proposal (log v7, #651): `meditation` (a meditation follows), `continue`, or `stay`. */
 export type PhaseRuled = V0.PhaseRuledLine;
 
 export type Kind = LogLine['kind'];
@@ -384,17 +395,16 @@ export function needsOf(line: LogLine): Need[] {
     case 'session.start':
       has('record', line.arm, line.system_tokens);
       has('slots', line.slots, line.trunk_slot);
-      has('phases', line.phase);
       break;
     case 'request':
       has('slots', line.slot);
       if (AHEAD_LANES.has(line.lane)) out.push('lanes');
       break;
     case 'fork':
-      has('slots', line.slot, line.prefix_tokens);
+      has('forks', line.slot, line.prefix_tokens);
       if (AHEAD_LANES.has(line.lane)) out.push('lanes');
       break;
-    case 'seam':
+    case 'meditation':
       // `phase` is the format's own since v7 (#563); `render_tokens`, the render's estimated size, since v7's render
       // budget (#565), written beside the budget that produced it; `warm`, the pre-warm's timings, since #504.
       break;
