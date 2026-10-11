@@ -11,7 +11,7 @@
 
 ## Setup
 
-- **Build:** develop `22da91a43e4a1fe8bd4bf55ebf2fcb2b9dd7a2a6`.
+- **Build:** develop `22da91a493ff56c751896bd7d3eefa4351c91c47`.
 - **Floor:** `accel24-tabbyapi-exl3-qwen38-27b-3p00`, config r2. Serve declared the engine and reported it warmed.
 - **Regimen:** `regimen.toml` here. It is seam smoke run 2's, plus:
   - `fork_asks = "t1"` and `capture_modality = "tools"`;
@@ -41,7 +41,7 @@ The log's `session.start` opens in phase `plan`.
    - The operator ruled **seam**, and serve refused it: `nothing-to-seam`, because working memory was empty (break 1).
    - The operator then ruled **continue**, and the phase became `build`.
 2. **Scope answer (marked scoping):** add, list and done, with `todo.json`; write `todo.py` in one write. The interview fork ran and answered through `update_record`.
-3. "Smoke-test it, one command per tool call", with eight commands. The turn stopped after six.
+3. "Smoke-test it, one command per tool call", with eight commands. The turn stopped at the sixth, which was refused.
 4. "Finish the smoke test …". **The operator cancelled the turn after it had run three steps.**
 5. **Tangent:** opened before turn 5, which asked a side question (should a `remove` command come later?) and asked for the answer to be recorded as a follow-up. The tangent was closed with that entry **parked**.
 6. Ended with confirm; serve exited.
@@ -51,7 +51,7 @@ The log's `session.start` opens in phase `plan`.
 | lever | shown | where (log `seq`) |
 | --- | --- | --- |
 | capture modality: tools | yes | fork 608 (scoping) settled `value` (671); its `capture` lines 672 and 674 carry `fork: 608` and `tool: update_record`, each recorded |
-| step limit | yes | turn 3 settled `max_steps` (814) after 6 tool calls of the 8 asked |
+| step limit | yes | turn 3 settled `max_steps` (814) after 5 tool calls of the 8 asked ran; the 6th (813) was refused, `reason: max_steps` |
 | seam trigger: model-proposed, operator-ruled | yes | `capture` 322 `propose_phase_transition` plan → build, `outcome: proposed`; `phase.ruled` 355, `choice: continue` |
 | tangent closure | yes | `tangent.open` 1202; `tangent.close` 1399: `parked` the follow-up, `rolled_back: 4`, `prefix_intact: true` |
 | failed turns on the trunk: kept | yes | turn 4 settled `cancelled` (1200) after 3 tool calls ran (1081, 1082, 1182). The record's prefix change at the next trunk request (`q/1206`) only adds a message (the third step's result); nothing is removed |
