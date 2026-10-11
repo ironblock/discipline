@@ -86,6 +86,43 @@ export function Meditation({ node }: { readonly node: Folded<MeditationNode> }) 
           ))}
         </ul>
       ) : null}
+      {/* Its reconcile, the interstitial (#150, DoD 4): working memory before, what the operator changed, the answer, after. */}
+      {node.reconcile ? (
+        <section className="ex-meditation__reconcile" aria-label="the meditation's reconcile">
+          <div className="ex-meditation__part" data-part="before">
+            <span className="ex-meditation__part-label">before</span>
+            <ul>
+              {node.reconcile.before.map((entry) => (
+                <li key={entry.id}>{`${entry.id} · ${entry.text}`}</li>
+              ))}
+            </ul>
+          </div>
+          <div className="ex-meditation__part" data-part="changes">
+            <span className="ex-meditation__part-label">your changes</span>
+            {node.reconcile.changes.length > 0 ? (
+              <ul>
+                {node.reconcile.changes.map((change) => (
+                  <li key={`${change.kind}/${change.entry}`}>{`${change.kind} ${change.entry}${change.detail !== undefined ? ` · ${change.detail}` : ''}`}</li>
+                ))}
+              </ul>
+            ) : (
+              <span className="ex-meditation__part-none">none</span>
+            )}
+          </div>
+          <div className="ex-meditation__part" data-part="answer">
+            <span className="ex-meditation__part-label">the answer</span>
+            {node.reconcile.answer !== undefined ? <pre>{node.reconcile.answer}</pre> : <span className="ex-meditation__part-none">not recorded</span>}
+          </div>
+          <div className="ex-meditation__part" data-part="after">
+            <span className="ex-meditation__part-label">after</span>
+            <ul>
+              {node.reconcile.after.map((entry) => (
+                <li key={entry.id}>{`${entry.id} · ${entry.text}`}</li>
+              ))}
+            </ul>
+          </div>
+        </section>
+      ) : null}
     </div>
   );
 }

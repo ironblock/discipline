@@ -274,8 +274,8 @@ impl Adapter for ClaudeCode {
     }
 
     fn adapt(&self, log: &str, substrate: &str) -> Result<Adapted, Drift> {
-        let rows = parse(log)?;
         let mut run = Run::new(self.name(), substrate);
+        let rows = unrepeated(parse(log)?, &mut run.census)?;
         for (at, (at_row, raw, row)) in rows.iter().enumerate() {
             run.row(*at_row, raw, row, rows.get(at + 1..).unwrap_or(&[]))?;
         }
@@ -319,6 +319,57 @@ fn parse(log: &str) -> Result<Vec<(usize, &str, serde_json::Value)>, Drift> {
         rows.push((at + 1, line, row));
     }
     Ok(rows)
+}
+
+/// The fields that are a row's content: what a repeat must match to be one
+/// (#500). Everything else -- `slug`, `promptId`, `cwd`, `gitBranch`,
+/// `parentUuid` -- is the envelope the app rewrites when a session resumes.
+const CONTENT: &[&str] = &["type", "message", "toolUseResult", "attachment"];
+
+/// `rows` with every repeat of a row id already read dropped (#500): the
+/// first occurrence kept, each drop counted by what it rewrote, and every
+/// row without a `uuid` kept.
+///
+/// The desktop app writes a resumed session's earlier rows again, under
+/// their own ids, sometimes with the envelope rewritten. A repeat is the
+/// same row written twice, so it is dropped; a row under a known id whose
+/// content differs is two rows, and is refused.
+fn unrepeated<'a>(
+    rows: Vec<(usize, &'a str, serde_json::Value)>,
+    census: &mut Census,
+) -> Result<Vec<(usize, &'a str, serde_json::Value)>, Drift> {
+    let mut first: BTreeMap<String, usize> = BTreeMap::new();
+    let mut kept: Vec<(usize, &'a str, serde_json::Value)> = Vec::with_capacity(rows.len());
+    for (at_row, raw, row) in rows {
+        let Some(id) = row.get("uuid").and_then(serde_json::Value::as_str) else {
+            kept.push((at_row, raw, row));
+            continue;
+        };
+        let Some(&at) = first.get(id) else {
+            first.insert(id.to_owned(), kept.len());
+            kept.push((at_row, raw, row));
+            continue;
+        };
+        let (first_row, _, original) = &kept[at];
+        if let Some(field) = CONTENT
+            .iter()
+            .find(|field| row.get(**field) != original.get(**field))
+        {
+            return Err(Drift::RepeatDiffers {
+                at_row,
+                first_row: *first_row,
+                field: (*field).to_owned(),
+            });
+        }
+        census.repeated_one(if row == *original {
+            "exact"
+        } else if row.get("parentUuid") != original.get("parentUuid") {
+            "parent-rewritten"
+        } else {
+            "envelope-rewritten"
+        });
+    }
+    Ok(kept)
 }
 
 /// The walk over one log.
@@ -2308,6 +2359,39 @@ mod tests {
         );
     }
 
+    /// #500: a log written by the desktop app repeats rows when a session
+    /// resumes, under the same row `uuid`. The first is kept; a repeat whose
+    /// content (`type`, `message`, `toolUseResult`, `attachment`) matches is
+    /// dropped and counted -- as exact, as an envelope rewritten (`slug`,
+    /// `promptId`, `cwd`, `gitBranch`), or as a `parentUuid` rewritten, on a
+    /// line of its own because it changes the tree. Rows without a `uuid`
+    /// are all kept.
+    #[test]
+    fn a_repeated_row_is_dropped_and_counted_by_what_its_repeat_rewrote() {
+        let log = include_str!("../../adapters/fixtures/claude-code/rows-that-repeat.jsonl");
+        let adapted = ClaudeCode.adapt(log, A_SUBSTRATE).expect("it adapts");
+        assert_eq!(
+            adapted.census.repeated,
+            std::collections::BTreeMap::from([
+                ("exact".to_owned(), 1),
+                ("envelope-rewritten".to_owned(), 1),
+                ("parent-rewritten".to_owned(), 1),
+            ])
+        );
+        assert_eq!(adapted.census.repeated_rows(), 3);
+        let calls = adapted
+            .events
+            .iter()
+            .filter(|event| matches!(event, Event::ToolCall { .. }))
+            .count();
+        assert_eq!(calls, 1, "the repeated call is one call, not two");
+        let rendered = adapted.census.render();
+        assert!(
+            rendered.contains(r#""repeated":{"envelope-rewritten":1,"exact":1,"parent-rewritten":1},"repeated_rows":3"#),
+            "{rendered}"
+        );
+    }
+
     /// #501: a row that names no model at all -- a log from before the
     /// harness recorded one -- carries none, counted as such.
     #[test]
@@ -2324,6 +2408,25 @@ mod tests {
         assert!(adapted.census.unattributed.contains_key("no model named"));
     }
 
+    /// #500: a repeat whose content differs from the row it repeats is
+    /// refused, naming both rows: two different rows under one id.
+    #[test]
+    fn a_repeat_whose_content_differs_is_refused() {
+        let log = include_str!(
+            "../../adapters/fixtures/claude-code/a-repeat-whose-content-differs.jsonl"
+        );
+        let refused = ClaudeCode.adapt(log, A_SUBSTRATE).expect_err("refused");
+        assert_eq!(
+            refused,
+            Drift::RepeatDiffers {
+                at_row: 4,
+                first_row: 1,
+                field: "message".to_owned()
+            }
+        );
+        assert!(refused.to_string().contains("row 4"), "{refused}");
+    }
+
     /// The corpus is committed, and it is what the tests above are about.
     ///
     /// Table-driven against the DIRECTORY rather than against a list of
@@ -2334,15 +2437,17 @@ mod tests {
     #[test]
     fn the_committed_corpus_adapts_and_refuses_as_it_says_it_does() {
         /// What one fixture is claimed to do: `(rows, unmapped rows, dropped
-        /// content)`, or `None` for a fixture whose whole point is that it is
-        /// refused.
-        type Claim = Option<(u64, u64, u64)>;
+        /// content, repeats dropped)`, or `None` for a fixture whose whole
+        /// point is that it is refused.
+        type Claim = Option<(u64, u64, u64, u64)>;
         const EXPECTED: &[(&str, Claim)] = &[
-            ("session", Some((9, 3, 1))),
-            ("an-unmapped-kind", Some((3, 1, 0))),
-            ("a-path-that-resolves-to-nothing", Some((3, 0, 0))),
+            ("session", Some((9, 3, 1, 0))),
+            ("an-unmapped-kind", Some((3, 1, 0, 0))),
+            ("a-path-that-resolves-to-nothing", Some((3, 0, 0, 0))),
             ("a-renamed-field", None),
-            ("turns-from-three-models", Some((8, 0, 0))),
+            ("turns-from-three-models", Some((8, 0, 0, 0))),
+            ("rows-that-repeat", Some((5, 1, 0, 3))),
+            ("a-repeat-whose-content-differs", None),
         ];
 
         let dir =
@@ -2371,8 +2476,13 @@ mod tests {
             let log = std::fs::read_to_string(dir.join(format!("{name}.jsonl")))
                 .unwrap_or_else(|why| panic!("{name}: {why}"));
             match (ClaudeCode.adapt(&log, A_SUBSTRATE), expected) {
-                (Ok(adapted), Some((rows, unmapped, dropped))) => {
+                (Ok(adapted), Some((rows, unmapped, dropped, repeats))) => {
                     assert_eq!(adapted.census.rows(), *rows, "{name}: rows");
+                    assert_eq!(
+                        adapted.census.repeated_rows(),
+                        *repeats,
+                        "{name}: repeats dropped"
+                    );
                     assert_eq!(
                         adapted.census.unmapped_rows(),
                         *unmapped,
@@ -2386,7 +2496,14 @@ mod tests {
                 }
                 (Err(drift), None) => {
                     assert!(
-                        matches!(drift, Drift::MissingField { .. }),
+                        matches!(
+                            (*name, &drift),
+                            ("a-renamed-field", Drift::MissingField { .. })
+                                | (
+                                    "a-repeat-whose-content-differs",
+                                    Drift::RepeatDiffers { .. }
+                                )
+                        ),
                         "{name}: it refuses for the reason it was written for, not \
                          another one: {drift}"
                     );

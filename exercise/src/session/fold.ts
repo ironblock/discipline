@@ -284,6 +284,12 @@ export interface MeditationNode extends Provenance {
   readonly size?: { readonly promptTokens: number; readonly window: number };
   /** What the operator changed in working memory since the last meditation (log v7, #150), and the flags this meditation left open. */
   readonly operatorChanges?: readonly { readonly entry: string; readonly kind: string }[];
+  /**
+   * Its reconcile, the interstitial (#150, DoD 4): working memory when its audit forked, the operator's changes it
+   * carried (an edit's text, a flag's note), the audit's answer, and working memory after the refill. Absent when no
+   * audit forked for it.
+   */
+  readonly reconcile?: Reconcile;
   readonly unaddressed?: readonly string[];
   /** A compaction tail that kept no turn (log v7, #693): the newest turn's size, and the tail's budget it was over. */
   readonly zeroTurns?: { readonly newest: number; readonly budget: number };
@@ -291,6 +297,14 @@ export interface MeditationNode extends Provenance {
   readonly refilledAnyway?: true;
   /** The background commands still running at this meditation (log v7, #614), as the refill listed them after its summary. */
   readonly background?: readonly BackgroundListed[];
+}
+
+/** A meditation's reconcile, as the log carries it (#150, DoD 4). */
+export interface Reconcile {
+  readonly before: readonly { readonly id: string; readonly text: string }[];
+  readonly changes: readonly { readonly entry: string; readonly kind: string; readonly detail?: string }[];
+  readonly answer?: string;
+  readonly after: readonly { readonly id: string; readonly text: string }[];
 }
 
 /** One background command a meditation's refill listed as still running. */
@@ -610,7 +624,7 @@ export function fold(written: readonly LogLine[]): Session {
     | { kind: 'tool'; call: number }
     | { kind: 'settled'; line: LineOf<'turn.settled'> };
   const system = start.head.find((m) => m.role === 'system');
-  const eras: { meditation?: LineOf<'meditation'>; system: SystemNode; slots: Slot[] }[] = [
+  const eras: { meditation?: LineOf<'meditation'>; reconcile?: Reconcile; system: SystemNode; slots: Slot[] }[] = [
     {
       system: {
         kind: 'system',
@@ -639,6 +653,8 @@ export function fold(written: readonly LogLine[]): Session {
   let phase = start.opening_phase ?? start.phase ?? '';
   let proposal: { call: string; from?: string; to: string; reason?: string } | undefined;
   let held: { atTurn: number; reason: string; unaddressed: readonly string[] } | undefined;
+  // The last meditation's seq: an audit forked after it belongs to the next one.
+  let lastMeditation = -1;
   const rulings = new Map<string, LineOf<'phase.ruled'>>();
   let openTurn: number | undefined;
   let lastAskSeq = -1;
@@ -868,7 +884,25 @@ export function fold(written: readonly LogLine[]): Session {
           render: e.render_version !== undefined ? `v${e.render_version}` : (e.frame ?? 'frame not recorded'),
           ...provenance(e),
         };
-        eras.push({ meditation: e, system: rendered, slots: [] });
+        // Its reconcile (#150, DoD 4): the latest audit forked since the last meditation, and what it was given and gave.
+        const audit = [...forks.values()].filter((f) => f.fork.lane === 'audit' && f.fork.seq > lastMeditation).at(-1);
+        const live = () => [...entries.values()].filter((x) => x.state === 'live').map((x) => ({ id: x.id, text: x.text }));
+        const reconcile: Reconcile | undefined = audit
+          ? {
+              before: (audit.audited ?? []).map((entry) => ({ id: entry, text: entries.get(entry)?.text ?? entry })),
+              changes: (e.operator_changes ?? []).map((change) => {
+                const detail = change.kind === 'flag' ? entries.get(change.entry)?.flag : change.kind === 'edit' ? entries.get(change.entry)?.text : undefined;
+                return { entry: change.entry, kind: change.kind, ...(detail !== undefined ? { detail } : {}) };
+              }),
+              ...(() => {
+                const text = audit.request !== undefined ? generations.get(audit.request)?.response?.text : undefined;
+                return text !== undefined ? { answer: text.trim() } : {};
+              })(),
+              after: live(),
+            }
+          : undefined;
+        lastMeditation = e.seq;
+        eras.push({ meditation: e, ...(reconcile ? { reconcile } : {}), system: rendered, slots: [] });
         break;
       }
       case 'tangent.open':
@@ -1076,6 +1110,7 @@ export function fold(written: readonly LogLine[]): Session {
           ...(meditationLine.unaddressed !== undefined && meditationLine.unaddressed.length > 0 ? { unaddressed: meditationLine.unaddressed } : {}),
           ...(meditationLine.background !== undefined ? { background: backgroundListed(meditationLine.background) } : {}),
           ...(meditationLine.refilled_anyway ? { refilledAnyway: true as const } : {}),
+          ...(raw.reconcile ? { reconcile: raw.reconcile } : {}),
           ...(meditationLine.newest_turn_tokens !== undefined && meditationLine.tail_tokens !== undefined
             ? { zeroTurns: { newest: meditationLine.newest_turn_tokens, budget: meditationLine.tail_tokens } }
             : {}),

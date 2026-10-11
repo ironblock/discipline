@@ -23,6 +23,7 @@ import meditationBackground from '../../../diet/formats/log/fixtures/valid/a-v7-
 import meditationHeld from '../../../diet/formats/log/fixtures/valid/a-v7-seam-held-for-the-operator-then-refilled-anyway.jsonl?raw';
 import tailKeptNone from '../../../diet/formats/log/fixtures/valid/a-v7-seam-whose-tail-kept-no-turn.jsonl?raw';
 import answeredTurn from '../../../diet/formats/log/fixtures/valid/an-answered-turn.jsonl?raw';
+import meditationReconciles from '../../../diet/formats/log/fixtures/valid/a-v8-meditation-right-after-a-meditation-audits-its-refill.jsonl?raw';
 import toolCallRan from '../../../diet/formats/log/fixtures/valid/a-v3-tool-call-that-ran.jsonl?raw';
 import forks from '../../../diet/formats/log/fixtures/valid/a-v5-scoping-fork-that-patched-and-a-read-fork-that-declined.jsonl?raw';
 import { App } from '../App.tsx';
@@ -873,6 +874,25 @@ export const ServedMeditationRefilledAnyway: Story = {
     });
     await expect(meditation.textContent).toBe('refilled anyway');
     await expect(canvasElement.querySelector('.ex-composer__held')).toBeNull();
+  },
+};
+
+/** `?drive`, log v8 (#150 DoD 4): a meditation's reconcile is its own row -- before, the changes, the answer, after. */
+export const ServedMeditationReconcile: Story = {
+  name: '?drive: a meditation’s reconcile, as its own row',
+  args: { drive: true, web: serving(meditationReconciles) },
+  play: async ({ canvasElement }) => {
+    const row = await waitFor(async () => {
+      const found = [...canvasElement.querySelectorAll<HTMLElement>('.ex-meditation__reconcile')].find((r) => r.querySelector('[data-part="changes"] li'));
+      await expect(found).toBeDefined();
+      return found!;
+    });
+    const items = (part: string) => [...row.querySelectorAll(`[data-part="${part}"] li`)].map((li) => li.textContent);
+    const three = ['interview-t1-0 · decision: a tracker', 'interview-t1-1 · decision: for one team', 'interview-t1-2 · decision: no login'];
+    await expect(items('before')).toEqual(three);
+    await expect(items('changes')).toEqual(['flag interview-t1-0 · still so?']);
+    await expect(row.querySelector('[data-part="answer"] pre')?.textContent).toBe('1. KEEP\n2. KEEP\n3. KEEP');
+    await expect(items('after')).toEqual(three);
   },
 };
 
