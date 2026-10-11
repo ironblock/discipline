@@ -937,9 +937,11 @@ export function fold(written: readonly LogLine[]): Session {
             }
           : undefined;
         lastMeditation = e.seq;
-        // diet empties the pending flags at every meditation: its reconcile addressed them, or recorded them unaddressed.
+        // A meditation clears the flags its reconcile addressed. One it left unaddressed (the line's `unaddressed`) stays
+        // pending to the next meditation, which marks it again (diet's `operator_carried`, #749).
+        const pending = new Set(e.unaddressed ?? []);
         for (const [key, entry] of entries) {
-          if (entry.flag === undefined) continue;
+          if (entry.flag === undefined || pending.has(key)) continue;
           const addressed = { ...entry };
           delete addressed.flag;
           entries.set(key, addressed);
