@@ -1334,6 +1334,11 @@ pub enum Event {
         cache_creation_5m: Option<u64>,
         /// Of those, written for an hour (#555).
         cache_creation_1h: Option<u64>,
+        /// The model that answered, as the log named it (#501): a foreign
+        /// harness's log names one per response, and one session may mix
+        /// several. Absent where the log named none, or named a placeholder
+        /// no model wrote.
+        model: Option<String>,
     },
     /// An interview fork was opened.
     Fork {
@@ -4332,6 +4337,7 @@ fn response_row(
         cache_creation: take_optional_count(members, of, "cache_creation")?,
         cache_creation_5m: take_optional_count(members, of, "cache_creation_5m")?,
         cache_creation_1h: take_optional_count(members, of, "cache_creation_1h")?,
+        model: take_optional_text(members, of, "model")?,
     })
 }
 
@@ -5273,6 +5279,7 @@ fn event_value(event: &Event) -> BTreeMap<String, Value> {
             cache_creation,
             cache_creation_5m,
             cache_creation_1h,
+            model,
             ..
         } => {
             members.put_text("to_request", to_request);
@@ -5289,6 +5296,7 @@ fn event_value(event: &Event) -> BTreeMap<String, Value> {
             members.put_optional("cache_creation", count(cache_creation));
             members.put_optional("cache_creation_5m", count(cache_creation_5m));
             members.put_optional("cache_creation_1h", count(cache_creation_1h));
+            members.put_optional("model", model.clone().map(Value::String));
         }
         Event::Fork {
             lane,
@@ -5943,6 +5951,32 @@ mod tests {
         PrefixReason, Reasoning, Regime, SchemaError, StructureError, Verdict, Weights,
         WeightsKind, delta, delta_value, objects, parse, reason_of, regime_value, render,
     };
+
+    /// #501: a response names the model that answered, when its log named
+    /// one; the key reads back as written, and a model that is not text is
+    /// refused.
+    #[test]
+    fn a_response_names_its_model_and_reads_back() {
+        let session = include_str!("../../../formats/record/fixtures/valid/full-session.jsonl");
+        let named = session.replacen(
+            r#""record":"response""#,
+            r#""record":"response","model":"a-model""#,
+            1,
+        );
+        assert_ne!(named, session);
+        let read = parse(&named).expect("a response naming its model");
+        assert!(read.events.iter().any(|event| matches!(
+            event,
+            Event::Response { model: Some(model), .. } if model == "a-model"
+        )));
+        assert!(render(&read).contains(r#""model":"a-model""#));
+        let wrong = session.replacen(
+            r#""record":"response","#,
+            r#""record":"response","model":3,"#,
+            1,
+        );
+        assert!(parse(&wrong).is_err(), "a model that is not text");
+    }
 
     /// The committed full-session record: unversioned, so version 1, with a
     /// `seam` row.

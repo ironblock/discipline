@@ -328,8 +328,8 @@ struct Run {
     /// The declared substrate every request row names.
     ///
     /// Carried rather than looked up, because there is nowhere to look it up:
-    /// the log does not record what answered. It comes from the regimen the
-    /// operator wrote.
+    /// the log names a model per response (#501), not the substrate that
+    /// served it. It comes from the regimen the operator wrote.
     substrate: String,
     /// The turn a person most recently opened. Zero means none yet.
     turn: u32,
@@ -693,7 +693,9 @@ impl Run {
                 .no_event_one("assistant/spoke before any turn was opened");
             return Ok(());
         }
+        let model = self.model_of(row);
         self.events.push(Event::Response {
+            model,
             cache_read: None,
             cache_creation: None,
             cache_creation_5m: None,
@@ -706,6 +708,30 @@ impl Run {
             timings: None,
         });
         Ok(())
+    }
+
+    /// The model an assistant row names as having answered (#501), counted:
+    /// `message.model`, unless it is `<synthetic>` -- the harness's
+    /// placeholder for a message no model wrote -- or absent, as in a log
+    /// from before the harness recorded one.
+    fn model_of(&mut self, row: &serde_json::Value) -> Option<String> {
+        match row
+            .pointer("/message/model")
+            .and_then(serde_json::Value::as_str)
+        {
+            Some("<synthetic>") => {
+                self.census.unattributed_one("synthetic");
+                None
+            }
+            Some(model) => {
+                self.census.model_one(model);
+                Some(model.to_owned())
+            }
+            None => {
+                self.census.unattributed_one("no model named");
+                None
+            }
+        }
     }
 
     /// A `tool_use` block becomes a call awaiting its answer.
@@ -2232,6 +2258,72 @@ mod tests {
         );
     }
 
+    /// #501: each response carries the model its assistant row names, and
+    /// the census counts the models seen by rows; `<synthetic>` -- the app's
+    /// placeholder for a message no model wrote -- names no model and is
+    /// counted as synthetic.
+    #[test]
+    fn each_response_carries_the_model_its_row_names() {
+        let log = include_str!("../../adapters/fixtures/claude-code/turns-from-three-models.jsonl");
+        let adapted = ClaudeCode.adapt(log, A_SUBSTRATE).expect("it adapts");
+        let models: Vec<Option<String>> = adapted
+            .events
+            .iter()
+            .filter_map(|event| match event {
+                Event::Response { model, .. } => Some(model.clone()),
+                _ => None,
+            })
+            .collect();
+        let named = |name: &str| Some(name.to_owned());
+        assert_eq!(
+            models,
+            [
+                named("model-one"),
+                named("model-two"),
+                named("model-two"),
+                None,
+                named("model-three")
+            ]
+        );
+        assert_eq!(
+            adapted.census.models,
+            std::collections::BTreeMap::from([
+                ("model-one".to_owned(), 1),
+                ("model-three".to_owned(), 1),
+                ("model-two".to_owned(), 2),
+            ])
+        );
+        assert_eq!(
+            adapted.census.unattributed,
+            std::collections::BTreeMap::from([("synthetic".to_owned(), 1)])
+        );
+        let rendered = adapted.census.render();
+        assert!(
+            rendered.contains(r#""models":{"model-one":1,"model-three":1,"model-two":2}"#),
+            "{rendered}"
+        );
+        assert!(
+            rendered.contains(r#""unattributed":{"synthetic":1}"#),
+            "{rendered}"
+        );
+    }
+
+    /// #501: a row that names no model at all -- a log from before the
+    /// harness recorded one -- carries none, counted as such.
+    #[test]
+    fn a_row_naming_no_model_carries_none() {
+        let log = include_str!("../../adapters/fixtures/claude-code/session.jsonl");
+        let adapted = ClaudeCode.adapt(log, A_SUBSTRATE).expect("it adapts");
+        assert!(
+            adapted
+                .events
+                .iter()
+                .all(|event| !matches!(event, Event::Response { model: Some(_), .. }))
+        );
+        assert!(adapted.census.models.is_empty());
+        assert!(adapted.census.unattributed.contains_key("no model named"));
+    }
+
     /// The corpus is committed, and it is what the tests above are about.
     ///
     /// Table-driven against the DIRECTORY rather than against a list of
@@ -2250,6 +2342,7 @@ mod tests {
             ("an-unmapped-kind", Some((3, 1, 0))),
             ("a-path-that-resolves-to-nothing", Some((3, 0, 0))),
             ("a-renamed-field", None),
+            ("turns-from-three-models", Some((8, 0, 0))),
         ];
 
         let dir =

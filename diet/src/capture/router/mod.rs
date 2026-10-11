@@ -1731,6 +1731,7 @@ mod tests {
             output_from: None,
             text: Some("The parser keeps every line. I'll read the caller.".to_owned()),
             timings: None,
+            model: None,
         });
         let decisions = router.observe(&call("t1", 1, "bash", shell("cat diet/src/lib.rs")));
         let ask = decisions[0]
@@ -1768,6 +1769,7 @@ mod tests {
             output_from: None,
             text: Some("Let me answer that.".to_owned()),
             timings: None,
+            model: None,
         });
         let decisions = aside.observe(&call("t1", 1, "bash", shell("cat diet/src/lib.rs")));
         assert_eq!(
