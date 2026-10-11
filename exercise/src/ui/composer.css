@@ -59,10 +59,11 @@
   .ex-composer__cancel {
     margin-left: auto;
   }
-  .ex-composer__attach + .ex-composer__scope,
-  .ex-composer__attach + .ex-composer__cancel,
-  .ex-composer__background + .ex-composer__cancel,
-  .ex-composer__scope + .ex-composer__send {
+  /* `~`, not `+`: the hidden controls stay in the row (#766). */
+  .ex-composer__attach ~ .ex-composer__scope,
+  .ex-composer__attach ~ .ex-composer__cancel,
+  .ex-composer__background ~ .ex-composer__cancel,
+  .ex-composer__scope ~ .ex-composer__send {
     margin-left: 0;
   }
 }
