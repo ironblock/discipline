@@ -119,6 +119,16 @@ def checked(binary: str, command: str, path: pathlib.Path) -> None:
         raise Refused(f"diet {command} {path.name} exits {ran.returncode}: {(ran.stdout + ran.stderr).strip()[:2000]}")
 
 
+def title(arm: str) -> str:
+    """The skeleton's title: the arm's name, unless it types a figure (a
+    digit, as in `seam-smoke-2`), which check-results refuses in the preamble
+    outside `[uncited: ...]` (#63). Then a placeholder the author fills, as
+    the hypothesis is (#737)."""
+    if any(ch.isdigit() for ch in arm):
+        return "[unwritten: the title; the arm's name types a figure]"
+    return arm
+
+
 def front_matter(regimen: dict, record_digest: str, summary: dict, opened: int) -> str:
     substrate = regimen.get("substrate")
     window = datetime.datetime.fromtimestamp(opened / 1000, datetime.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
@@ -126,7 +136,13 @@ def front_matter(regimen: dict, record_digest: str, summary: dict, opened: int) 
         "+++",
         f'product_sha256 = "{summary["product_sha256"]}"',
         f"turns = {summary['turns']}",
-        f"prefill_tokens_total = {summary['prefill_tokens_total']}",
+        # Optional since #654: a session where a turn's first trunk request
+        # timed out, was cancelled or failed has no total to give (#737).
+        *(
+            [f"prefill_tokens_total = {summary['prefill_tokens_total']}"]
+            if "prefill_tokens_total" in summary
+            else []
+        ),
         'hypothesis = "[unwritten: the author states the claim this session tests]"',
         'result = "inconclusive"',
         'kind = "historical-observation"',
@@ -146,7 +162,7 @@ def front_matter(regimen: dict, record_digest: str, summary: dict, opened: int) 
         f"dogma_version = {int(regimen.get('dogma_version', 0))}",
         "+++",
         "",
-        "# " + str(regimen.get("arm", "a served session")),
+        "# " + title(str(regimen.get("arm", "a served session"))),
         "",
         "Assembled by `scripts/assemble-results.py` from the session's log and record",
         f"(the record as written hashes to `{record_digest}`; `digests.json` has every file).",
