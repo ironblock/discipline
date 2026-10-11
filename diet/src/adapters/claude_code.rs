@@ -2953,11 +2953,7 @@ mod tests {
             .adapt_with(&log, &found, A_SUBSTRATE)
             .expect("it adapts");
         let at = |wanted: &dyn Fn(&Event) -> bool| {
-            adapted
-                .events
-                .iter()
-                .position(wanted)
-                .expect("the event")
+            adapted.events.iter().position(wanted).expect("the event")
         };
         let call = at(&|event| matches!(event, Event::ToolCall { id, .. } if id == "call-a"));
         let fork = at(&|event| matches!(event, Event::Fork { lane, .. } if lane == "sidechain/x1"));
