@@ -494,10 +494,42 @@ fn parse(log: &str) -> Result<Vec<(usize, &str, serde_json::Value)>, Drift> {
     Ok(rows)
 }
 
-/// The fields that are a row's content: what a repeat must match to be one
-/// (#500). Everything else -- `slug`, `promptId`, `cwd`, `gitBranch`,
-/// `parentUuid` -- is the envelope the app rewrites when a session resumes.
-const CONTENT: &[&str] = &["type", "message", "toolUseResult", "attachment"];
+/// What a repeat must match to be one (#500, #736): the row's `type`, its
+/// `message` but for `usage`, and its `attachment` but for `displayPath`.
+/// The rest is what the app rewrites when a session resumes: the envelope
+/// (`slug`, `promptId`, `cwd`, `gitBranch`, `parentUuid`) and the harness's
+/// side copy -- `toolUseResult`, whose output a repeat may carry truncated,
+/// `message.usage`, recounted, `attachment.displayPath`. What the model saw
+/// is in `message.content`, and that is what must match.
+fn content_of_row(row: &serde_json::Value) -> [Option<serde_json::Value>; 3] {
+    let without = |key: &str, drop: &str| {
+        row.get(key).map(|value| {
+            let mut value = value.clone();
+            if let Some(object) = value.as_object_mut() {
+                object.remove(drop);
+            }
+            value
+        })
+    };
+    [
+        row.get("type").cloned(),
+        without("message", "usage"),
+        without("attachment", "displayPath"),
+    ]
+}
+
+/// The names of [`content_of_row`]'s parts, for a refusal.
+const CONTENT: [&str; 3] = ["type", "message", "attachment"];
+
+/// The harness's side copy: what may differ in a repeat without it being a
+/// different row (#736).
+fn side_copy_of(row: &serde_json::Value) -> [Option<&serde_json::Value>; 3] {
+    [
+        row.get("toolUseResult"),
+        row.pointer("/message/usage"),
+        row.pointer("/attachment/displayPath"),
+    ]
+}
 
 /// `rows` with every repeat of a row id already read dropped (#500): the
 /// first occurrence kept, each drop counted by what it rewrote, and every
@@ -524,20 +556,20 @@ fn unrepeated<'a>(
             continue;
         };
         let (first_row, _, original) = &kept[at];
-        if let Some(field) = CONTENT
-            .iter()
-            .find(|field| row.get(**field) != original.get(**field))
-        {
+        let (repeat, first) = (content_of_row(&row), content_of_row(original));
+        if let Some(at) = (0..CONTENT.len()).find(|at| repeat[*at] != first[*at]) {
             return Err(Drift::RepeatDiffers {
                 at_row,
                 first_row: *first_row,
-                field: (*field).to_owned(),
+                field: CONTENT[at].to_owned(),
             });
         }
         census.repeated_one(if row == *original {
             "exact"
         } else if row.get("parentUuid") != original.get("parentUuid") {
             "parent-rewritten"
+        } else if side_copy_of(&row) != side_copy_of(original) {
+            "side-copy-rewritten"
         } else {
             "envelope-rewritten"
         });
@@ -2690,6 +2722,38 @@ mod tests {
         );
         assert!(adapted.census.models.is_empty());
         assert!(adapted.census.unattributed.contains_key("no model named"));
+    }
+
+    /// #736: a repeat whose `message.content` matches but whose harness's
+    /// side copy differs -- `toolUseResult.stdout` a truncated prefix, the
+    /// `usage` recounted -- is the same row written twice, dropped and
+    /// counted as `side-copy-rewritten`, never refused.
+    #[test]
+    fn a_repeat_differing_only_in_the_harness_side_copy_is_a_repeat() {
+        let log = include_str!("../../adapters/fixtures/claude-code/rows-that-repeat.jsonl");
+        let lines: Vec<&str> = log.lines().collect();
+        let truncated = lines[6].replace(
+            r#""toolUseResult":{"stdout":"fn parse() {}"}"#,
+            r#""toolUseResult":{"stdout":"fn pa"}"#,
+        );
+        assert_ne!(truncated, lines[6]);
+        let recounted = lines[5].replace(r#""output_tokens":42"#, r#""output_tokens":43"#);
+        assert_ne!(recounted, lines[5]);
+        let mut edited: Vec<String> = lines.iter().map(|line| (*line).to_owned()).collect();
+        edited[6] = truncated;
+        edited[5] = recounted;
+        let adapted = ClaudeCode
+            .adapt(&edited.join("\n"), A_SUBSTRATE)
+            .expect("a repeat whose side copy differs is a repeat");
+        assert_eq!(
+            adapted.census.repeated,
+            std::collections::BTreeMap::from([
+                ("exact".to_owned(), 1),
+                ("parent-rewritten".to_owned(), 1),
+                ("side-copy-rewritten".to_owned(), 1),
+            ]),
+            "the truncated repeat also moved its parent, which counts first"
+        );
     }
 
     /// #500: a repeat whose content differs from the row it repeats is
