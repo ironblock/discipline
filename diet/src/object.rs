@@ -500,13 +500,18 @@ impl WorkingObject {
         self.entries.get(&self.canonical(id)?)
     }
 
-    /// Whether the operator wrote the entry `id` names, as its latest
-    /// provenance says (#150): such an entry changes only by the operator.
+    /// Whether the operator wrote the entry `id` names (#150): any of its
+    /// provenances is the operator's. Such an entry changes only by the
+    /// operator; a model restating its text adds a provenance and takes
+    /// nothing (#729).
     #[must_use]
     pub fn by_operator(&self, id: &EntryId) -> bool {
-        self.entry(id)
-            .and_then(|entry| entry.provenances.last())
-            .is_some_and(|provenance| provenance.lane == OPERATOR)
+        self.entry(id).is_some_and(|entry| {
+            entry
+                .provenances
+                .iter()
+                .any(|provenance| provenance.lane == OPERATOR)
+        })
     }
 
     /// The entry `id` names, resolving an alias to the entry that holds its
