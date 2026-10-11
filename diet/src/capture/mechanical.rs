@@ -822,8 +822,12 @@ impl Lane {
                 exit,
                 output,
                 exec: _,
+                lane: None,
             } => self.tool_call(id, *at_turn, tool, args.as_ref(), *exit, output.as_deref()),
-            Event::Start { .. }
+            // A delegated run's call (#708) ran in its own shell: its `cd`
+            // is not the trunk's, so it does not move the trunk's state.
+            Event::ToolCall { lane: Some(_), .. }
+            | Event::Start { .. }
             | Event::Turn { .. }
             | Event::Request { .. }
             | Event::Response { .. }
@@ -1834,6 +1838,7 @@ mod tests {
             exit,
             output: output.map(str::to_owned),
             exec: None,
+            lane: None,
         }
     }
 
@@ -3606,6 +3611,7 @@ mod tests {
             exit: None,
             output: None,
             exec: None,
+            lane: None,
         };
         let lane = lane_after(&[event]);
         assert!(

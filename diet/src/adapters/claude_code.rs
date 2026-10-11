@@ -875,6 +875,7 @@ impl Run {
             exit: None,
             output: None,
             exec: None,
+            lane: None,
         });
         Ok(())
     }

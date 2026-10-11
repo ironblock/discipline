@@ -556,7 +556,7 @@ vocabulary! {
         Request => "request",
         /// A response came back.
         Response => "response",
-        /// An interview fork was opened.
+        /// A side lane was opened: an interview fork, or a delegated run.
         Fork => "fork",
         /// A capture wrote to the working object.
         Capture => "capture",
@@ -1340,7 +1340,8 @@ pub enum Event {
         /// no model wrote.
         model: Option<String>,
     },
-    /// An interview fork was opened.
+    /// A side lane was opened: an interview fork, or a harness's delegated
+    /// run joined from its own transcript (#708).
     Fork {
         /// This fork's identifier.
         id: String,
@@ -1422,6 +1423,10 @@ pub enum Event {
         /// How the call ran, when a projected log said (#302): its typed
         /// outcome and, for a `bash` call, what ran it and under what.
         exec: Option<Execution>,
+        /// The lane that ran it, when that is not the trunk (#708): a
+        /// harness's delegated run, joined as a side lane. A lane some fork
+        /// or request opened before it; absent, the trunk ran it.
+        lane: Option<String>,
     },
     /// A lane's output rejected whole because too little of it was grounded
     /// in the input the lane was told to work from.
@@ -1960,6 +1965,14 @@ pub enum StructureError {
         /// What this row names.
         now: String,
     },
+    /// A tool call naming a lane no fork or request opened before it
+    /// (#708): a call run by a lane the record never shows.
+    UnopenedLane {
+        /// The tool call.
+        call: String,
+        /// The lane it names.
+        lane: String,
+    },
     /// A row naming a substrate the run never declared.
     UndeclaredSubstrate {
         /// The row that names it.
@@ -2305,6 +2318,11 @@ impl fmt::Display for StructureError {
                  and a lane is a role on a substrate: a lane that changes \
                  substrate is two lanes, and a row that inherits its lane's \
                  substrate would have two answers"
+            ),
+            Self::UnopenedLane { call, lane } => write!(
+                f,
+                "tool call `{call}` names the `{lane}` lane, and no fork or request opened it \
+                 before"
             ),
             Self::UndeclaredSubstrate { row, id, declared } => write!(
                 f,
@@ -3863,6 +3881,7 @@ fn tool_call(members: &mut BTreeMap<String, Value>, of: &'static str) -> Result<
     let exit = take_optional_integer(members, of, "exit")?;
     let output = take_optional_text(members, of, "output")?;
     let exec = take_execution(members, of, &tool, exit)?;
+    let lane = take_optional_text(members, of, "lane")?;
     Ok(Event::ToolCall {
         id,
         at_turn,
@@ -3871,6 +3890,7 @@ fn tool_call(members: &mut BTreeMap<String, Value>, of: &'static str) -> Result<
         exit,
         output,
         exec,
+        lane,
     })
 }
 
@@ -5004,6 +5024,19 @@ fn validate(events: &[Event]) -> Result<(), ParseError> {
                 .into());
             }
         }
+        if let Event::ToolCall {
+            id,
+            lane: Some(lane),
+            ..
+        } = event
+            && !lanes.contains_key(lane.as_str())
+        {
+            return Err(StructureError::UnopenedLane {
+                call: id.clone(),
+                lane: lane.clone(),
+            }
+            .into());
+        }
         seen.admit(event)?;
         seen.claim_id(event)?;
         summary_seen |= matches!(event, Event::Summary { .. });
@@ -5408,6 +5441,7 @@ fn event_value(event: &Event) -> BTreeMap<String, Value> {
             exit,
             output,
             exec,
+            lane,
             ..
         } => {
             members.put_u32("at_turn", *at_turn);
@@ -5415,6 +5449,7 @@ fn event_value(event: &Event) -> BTreeMap<String, Value> {
             members.put_optional("args", args.clone().map(Value::Object));
             members.put_optional("exit", exit.map(Value::Integer));
             members.put_optional("output", output.clone().map(Value::String));
+            members.put_optional("lane", lane.clone().map(Value::String));
             if let Some(exec) = exec {
                 let words = |items: &Vec<String>| {
                     Value::Array(items.iter().cloned().map(Value::String).collect())
@@ -5951,6 +5986,37 @@ mod tests {
         PrefixReason, Reasoning, Regime, SchemaError, StructureError, Verdict, Weights,
         WeightsKind, delta, delta_value, objects, parse, reason_of, regime_value, render,
     };
+
+    /// #708: a tool call names the lane that ran it when that is not the
+    /// trunk -- a harness's delegated run, joined as a side lane -- and the
+    /// lane is one a fork or request opened before it; absent, the trunk ran
+    /// it, as before.
+    #[test]
+    fn a_tool_call_names_its_lane_and_the_lane_was_opened_before_it() {
+        let session = include_str!("../../../formats/record/fixtures/valid/full-session.jsonl");
+        let (head, tail) = session
+            .split_once("\n{\"record\":\"summary\"")
+            .expect("a summary row last");
+        let with = |row: &str| format!("{head}\n{row}\n{{\"record\":\"summary\"{tail}");
+        let laned = with(
+            r#"{"record":"tool_call","id":"t9","at_turn":1,"tool":"read_file","lane":"interview"}"#,
+        );
+        let read = parse(&laned).expect("a tool call on an opened lane");
+        assert!(read.events.iter().any(|event| matches!(
+            event,
+            Event::ToolCall { id, lane: Some(lane), .. } if id == "t9" && lane == "interview"
+        )));
+        assert!(render(&read).contains(r#""lane":"interview""#));
+        assert!(read.events.iter().any(|event| matches!(
+            event,
+            Event::ToolCall { id, lane: None, .. } if id == "t1"
+        )));
+        let unopened = with(
+            r#"{"record":"tool_call","id":"t9","at_turn":1,"tool":"read_file","lane":"nowhere"}"#,
+        );
+        let refused = parse(&unopened).expect_err("a lane nothing opened");
+        assert!(refused.to_string().contains("nowhere"), "{refused}");
+    }
 
     /// #501: a response names the model that answered, when its log named
     /// one; the key reads back as written, and a model that is not text is
