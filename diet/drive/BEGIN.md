@@ -40,7 +40,7 @@ Only the surface's own tests (`npx --yes pnpm@11.20.0 -C exercise verify`) also 
 - **The auth file:** a file holding `user:password`, named with `--auth-file`. A regimen that runs commands makes `serve` ask every request for it, and the surface presents it for the page. Keep it outside the checkout, where no commit can take it and the model's sandbox never reads it (it joins the session's secrets).
 - **The head:** the trunk's system message, a file you name with `--head`. [`heads/floor.md`](heads/floor.md) is a worked example: the head the 2026-10-03 rehearsal ran with. Edit it, or bring your own. The log carries the head the session ran with, and each request's `head_sha256`, so a recording cites whatever ran.
 - **The regimen:** [`floor.toml`](floor.toml) binds the session to the maintainer's floor, the 3.8 line's config r2 (#497): substrate `accel24-tabbyapi-exl3-qwen38-27b-3p00`, Qwen3.8 27B as EXL3 on TabbyAPI. Its reasoning is `xhigh` and its sampler the registry's card for the line. It turns the product on, so a first drive shows a tool call, a fork and a meditation (#721):
-    - **the model's commands:** `bash`, run in your worktree under the OS's sandbox (Seatbelt on macOS), with approvals off as T1 runs them;
+    - **the model's commands:** `bash`, run in your worktree under macOS's sandbox (Seatbelt), with approvals off as T1 runs them. The regimen lets commands read anywhere (`sandbox_reads = "all"`), which is built for Seatbelt alone, so on a Linux harness host serve refuses it;
     - **interview forks:** one per gap, on a read or a scoping-marked ask, answering through the record tools in ask set `t2`;
     - **self-capture:** the model records what it learns as it goes.
 

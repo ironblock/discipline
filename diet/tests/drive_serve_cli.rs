@@ -392,20 +392,12 @@ fn run_briefly(endpoint: &str, extra: &[&str]) -> (Option<i32>, String) {
     (code, said)
 }
 
-/// Whether this host's sandbox runner is on `PATH`, where serve looks for it.
+/// Whether `sandbox-exec` is on `PATH`, where serve looks for it.
 fn sandbox_runner_on_path() -> bool {
     std::env::var_os("PATH").is_some_and(|path| {
-        std::env::split_paths(&path).any(|dir| dir.join(sandbox_runner()).is_file())
+        std::env::split_paths(&path)
+            .any(|dir| dir.join(diet::isolation::seatbelt::RUNNER).is_file())
     })
-}
-
-/// This host's sandbox runner, as serve names it.
-fn sandbox_runner() -> &'static str {
-    if cfg!(target_os = "macos") {
-        diet::isolation::seatbelt::RUNNER
-    } else {
-        diet::isolation::bwrap::RUNNER
-    }
 }
 
 /// A file holding `text`, removed when dropped. Named by this process and a
@@ -1071,14 +1063,24 @@ fn begins_floor_regimen_starts_against_the_floors_tabbyapi() {
         "--auth-file",
         &auth_path,
     ];
-    // The floor confines the model's commands under the OS's sandbox, so a
-    // host without its runner refuses to start -- CI's Linux image has no
-    // `bwrap`. That refusal is asserted there; the start everywhere else.
+    // The floor reads everywhere under the sandbox (`sandbox_reads = "all"`),
+    // which is built for Seatbelt alone: elsewhere serve refuses it, and so
+    // does a Mac without `sandbox-exec`. Each refusal is asserted where it
+    // applies; the start on a Mac with Seatbelt.
+    if !cfg!(target_os = "macos") {
+        let (code, said) = run_briefly(&stub.url(), &args);
+        assert!(code.is_some_and(|code| code != 0), "{code:?}: {said}");
+        assert!(said.contains("is not built for"), "{said}");
+        return;
+    }
     if !sandbox_runner_on_path() && std::env::var_os("DIET_REQUIRE_SANDBOX").is_none() {
         let (code, said) = run_briefly(&stub.url(), &args);
         assert!(code.is_some_and(|code| code != 0), "{code:?}: {said}");
         assert!(
-            said.contains(&format!("`{}` is not on this host", sandbox_runner())),
+            said.contains(&format!(
+                "`{}` is not on this host",
+                diet::isolation::seatbelt::RUNNER
+            )),
             "{said}"
         );
         return;
