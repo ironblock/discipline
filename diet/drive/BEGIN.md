@@ -154,6 +154,37 @@ Send `end`: `{"kind":"end"}` posted to `serve`'s `/commands`. `serve` then:
 
 You do not need to interrupt it. Once it has exited, a later command finds nothing listening. In the moment before (while the record is written and the streams drain) one is answered `409` and writes nothing to the log.
 
+## An agent drives it over MCP
+
+`diet-drive mcp` is an MCP server on standard input and output. Its tools drive one running `serve`, so a Claude app or Claude Code session drives the session in place of the page. Start `serve` as in step 1, then give the MCP server its `listening` and, when `serve` has one, the same auth file:
+
+```
+diet-drive mcp --url http://127.0.0.1:7801 --auth-file ~/.config/discipline/drive.auth
+```
+
+Attach it to Claude Code with the binary's absolute path:
+
+```
+claude mcp add diet-drive -- /abs/path/to/target/debug/diet-drive mcp --url http://127.0.0.1:7801 --auth-file ~/.config/discipline/drive.auth
+```
+
+In the Claude app, add the same command under `mcpServers` in its MCP configuration, as `command` and `args`.
+
+| tool | what it calls |
+| --- | --- |
+| `status`, `wait` | `GET /state`, `GET /wait` |
+| `ask` | the `ask` command: `text`, `scoping`, `files` |
+| `attach` | a local PNG uploaded to `POST /files`; returns its `sha256` for an ask's `files` |
+| `approve` | `POST /approve`: `call`, `scope` |
+| `cancel`, `end` | the matching commands; `cancel` takes the current turn when none is named |
+| `memory` | `GET /memory`, or `?all` |
+| `edit`, `flag` | `edit-entry`, `flag-entry` |
+| `declare_meditation`, `refill_anyway`, `ratify_phase` | the matching commands |
+| `open_tangent`, `close_tangent` | the matching commands |
+| `events` | `GET /events`: the log lines after a seq, of the kinds named |
+
+Each tool returns `serve`'s status and body as they came, a refusal's `refused` tag included. A tool that cannot reach `serve`, or is given the wrong arguments, says so as a tool error. The loop an agent runs is the one under `status` and `wait`: read the state, send a command, then wait with `after` set to the last state's `last_seq`.
+
 ## No model at hand
 
 Run this first: a whole session, driven end to end, with no model server, no GPU and no regimen. Each long-running command gets its own terminal, every one from the repository root: the stand-in, `serve`, and (for the `curl` path) one watching the events and one sending commands.

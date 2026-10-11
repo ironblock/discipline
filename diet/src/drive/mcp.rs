@@ -1,0 +1,825 @@
+//! An MCP server over `drive serve`'s operator commands (#758): a stdio
+//! process a Claude app or Claude Code session attaches, so an agent drives
+//! a served session through tools instead of a browser pane.
+//!
+//! It speaks JSON-RPC 2.0, one message a line, on its standard input and
+//! output (MCP's stdio transport), and answers `initialize`, `ping`,
+//! `tools/list` and `tools/call`. Each tool is one request to the running
+//! `serve` at `--url`, with the `--auth-file` credential when one is given,
+//! and returns serve's status and body as they came -- a refusal and its
+//! `refused` tag included. No tool reaches anything serve does not expose:
+//! `attach` reads the local file it is named, and uploads it to `POST
+//! /files`, as the page's own picker does.
+//!
+//! | tool | what it calls |
+//! | --- | --- |
+//! | `status`, `wait` | `GET /state`, `GET /wait` (#756) |
+//! | `ask` | `POST /commands` `ask` |
+//! | `attach` | `POST /files` |
+//! | `approve` | `POST /approve` |
+//! | `cancel`, `end` | `POST /commands` |
+//! | `memory` | `GET /memory` (#756) |
+//! | `edit`, `flag` | `POST /commands` `edit-entry`, `flag-entry` |
+//! | `declare_meditation`, `refill_anyway`, `ratify_phase` | `POST /commands` |
+//! | `open_tangent`, `close_tangent` | `POST /commands` |
+//! | `events` | `GET /events`, the log lines after a seq |
+
+use std::fmt::Write as _;
+use std::io::{BufRead, Read as _, Write};
+use std::net::TcpStream;
+use std::time::{Duration, Instant};
+
+use serde_json::{Map, Value, json};
+
+/// The MCP protocol versions this server speaks, newest first: a client
+/// asking for one of them gets it, any other the newest.
+const PROTOCOLS: &[&str] = &["2025-06-18", "2025-03-26", "2024-11-05"];
+
+/// How long a request to serve may take: past `/wait`'s cap of 300 s.
+const PATIENCE: Duration = Duration::from_secs(330);
+
+/// How long `events` reads after the last line before it answers: serve
+/// sends what it has at once and then waits for more.
+const QUIET: Duration = Duration::from_millis(300);
+
+/// How many log lines `events` returns unless told.
+const EVENTS_LIMIT: u64 = 200;
+
+/// A running `serve`: where it listens, and the credential it wants.
+#[derive(Debug, Clone)]
+pub struct Serve {
+    /// `host:port`.
+    address: String,
+    /// `Basic` and the base64 of `user:password`, when serve wants one.
+    authorization: Option<String>,
+}
+
+/// One of serve's answers: its status, and its body -- JSON as it came,
+/// a body that is not JSON as text, none as an empty object.
+#[derive(Debug, Clone, PartialEq)]
+pub struct Answer {
+    /// The HTTP status.
+    pub status: u16,
+    /// The body.
+    pub body: Value,
+}
+
+impl Answer {
+    fn json(&self) -> Value {
+        json!({"status": self.status, "body": self.body})
+    }
+}
+
+impl Serve {
+    /// The `serve` at `url` -- `http://host:port`, or `host:port` -- with
+    /// `credential`, the auth file's `user:password`, when it wants one.
+    ///
+    /// # Errors
+    ///
+    /// When `url` is not plain HTTP to a host and port.
+    pub fn new(url: &str, credential: Option<&str>) -> Result<Self, String> {
+        let address = url.strip_prefix("http://").unwrap_or(url);
+        let address = address.strip_suffix('/').unwrap_or(address);
+        if address.is_empty() || address.contains('/') || !address.contains(':') {
+            return Err(format!(
+                "`{url}` is not serve's address: give http://HOST:PORT, as its `listening`"
+            ));
+        }
+        Ok(Self {
+            address: address.to_owned(),
+            authorization: credential
+                .map(|credential| format!("Basic {}", super::serve::base64(credential.as_bytes()))),
+        })
+    }
+
+    /// One request, its answer read to the end (serve closes each
+    /// connection after its answer).
+    fn request(
+        &self,
+        method: &str,
+        path: &str,
+        body: Option<(&str, &[u8])>,
+    ) -> Result<Answer, String> {
+        let mut stream = self.connect()?;
+        stream
+            .set_read_timeout(Some(PATIENCE))
+            .map_err(|why| why.to_string())?;
+        self.send(&mut stream, method, path, body)?;
+        let mut reply = Vec::new();
+        stream
+            .read_to_end(&mut reply)
+            .map_err(|why| format!("serve's answer could not be read: {why}"))?;
+        parsed(&reply)
+    }
+
+    fn connect(&self) -> Result<TcpStream, String> {
+        TcpStream::connect(&self.address)
+            .map_err(|why| format!("serve at {} could not be reached: {why}", self.address))
+    }
+
+    fn send(
+        &self,
+        stream: &mut TcpStream,
+        method: &str,
+        path: &str,
+        body: Option<(&str, &[u8])>,
+    ) -> Result<(), String> {
+        let mut head = format!(
+            "{method} {path} HTTP/1.1\r\nHost: {}\r\nConnection: close\r\n",
+            self.address
+        );
+        if let Some(authorization) = &self.authorization {
+            let _ = write!(head, "Authorization: {authorization}\r\n");
+        }
+        if let Some((content_type, bytes)) = body {
+            let _ = write!(
+                head,
+                "Content-Type: {content_type}\r\nContent-Length: {}\r\n",
+                bytes.len()
+            );
+        }
+        head.push_str("\r\n");
+        stream
+            .write_all(head.as_bytes())
+            .and_then(|()| stream.write_all(body.map_or(&[][..], |(_, bytes)| bytes)))
+            .map_err(|why| format!("serve could not be sent the request: {why}"))
+    }
+
+    fn get(&self, path: &str) -> Result<Answer, String> {
+        self.request("GET", path, None)
+    }
+
+    fn post(&self, path: &str, body: &Value) -> Result<Answer, String> {
+        // One line, no `null`: serve reads a body by the record's grammar.
+        let text = body.to_string();
+        self.request("POST", path, Some(("application/json", text.as_bytes())))
+    }
+
+    fn command(&self, body: &Value) -> Result<Answer, String> {
+        self.post("/commands", body)
+    }
+
+    /// The log lines after `after`, of `kinds` when given, at most `limit`:
+    /// `GET /events` read until it has sent what it had.
+    fn events(&self, after: Option<u64>, kinds: &[String], limit: u64) -> Result<Value, String> {
+        let from = after.map_or(0, |after| after + 1);
+        let mut stream = self.connect()?;
+        self.send(&mut stream, "GET", &format!("/events?from={from}"), None)?;
+        stream
+            .set_read_timeout(Some(QUIET))
+            .map_err(|why| why.to_string())?;
+        let mut read = Vec::new();
+        let mut chunk = vec![0_u8; 64 * 1024];
+        let started = Instant::now();
+        loop {
+            match stream.read(&mut chunk) {
+                Ok(0) => break,
+                Ok(n) => read.extend_from_slice(&chunk[..n]),
+                Err(why)
+                    if matches!(
+                        why.kind(),
+                        std::io::ErrorKind::WouldBlock | std::io::ErrorKind::TimedOut
+                    ) =>
+                {
+                    break;
+                }
+                Err(why) => return Err(format!("serve's events could not be read: {why}")),
+            }
+            if started.elapsed() > PATIENCE {
+                break;
+            }
+        }
+        let text = String::from_utf8_lossy(&read);
+        let Some((head, stream_body)) = text.split_once("\r\n\r\n") else {
+            return Err("serve's events answer had no head".to_owned());
+        };
+        let status = status_of(head)?;
+        if status != 200 {
+            return Ok(Answer {
+                status,
+                body: body_of(stream_body.as_bytes()),
+            }
+            .json());
+        }
+        let mut lines = Vec::new();
+        let mut more = false;
+        // Only complete events, each ended by a blank line; a named event
+        // (`waiting`, `answered`) carries no `id:` and is not a log line.
+        let complete = stream_body
+            .rfind("\n\n")
+            .map_or("", |end| &stream_body[..end]);
+        for event in complete.split("\n\n") {
+            let logged = event.lines().any(|line| line.starts_with("id:"));
+            let Some(data) = event.lines().find_map(|line| line.strip_prefix("data: ")) else {
+                continue;
+            };
+            if !logged {
+                continue;
+            }
+            let Ok(line) = serde_json::from_str::<Value>(data) else {
+                continue;
+            };
+            let kind = line.get("kind").and_then(Value::as_str).unwrap_or_default();
+            if !kinds.is_empty() && !kinds.iter().any(|wanted| wanted == kind) {
+                continue;
+            }
+            if lines.len() as u64 >= limit {
+                more = true;
+                break;
+            }
+            lines.push(line);
+        }
+        Ok(json!({"status": 200, "events": lines, "more": more}))
+    }
+}
+
+/// An answer's status and body, from its raw bytes.
+fn parsed(reply: &[u8]) -> Result<Answer, String> {
+    let split = reply
+        .windows(4)
+        .position(|window| window == b"\r\n\r\n")
+        .ok_or("serve's answer had no head")?;
+    let head = String::from_utf8_lossy(&reply[..split]);
+    Ok(Answer {
+        status: status_of(&head)?,
+        body: body_of(&reply[split + 4..]),
+    })
+}
+
+fn status_of(head: &str) -> Result<u16, String> {
+    head.lines()
+        .next()
+        .and_then(|line| line.split_whitespace().nth(1))
+        .and_then(|code| code.parse().ok())
+        .ok_or_else(|| "serve's answer had no status".to_owned())
+}
+
+fn body_of(bytes: &[u8]) -> Value {
+    if bytes.iter().all(u8::is_ascii_whitespace) {
+        return json!({});
+    }
+    serde_json::from_slice(bytes)
+        .unwrap_or_else(|_| Value::String(String::from_utf8_lossy(bytes).into_owned()))
+}
+
+/// `text` safe in a query string.
+fn query(text: &str) -> String {
+    text.bytes()
+        .map(|byte| match byte {
+            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'.' | b'_' | b'~' => {
+                char::from(byte).to_string()
+            }
+            _ => format!("%{byte:02X}"),
+        })
+        .collect()
+}
+
+fn tool(name: &str, description: &str, schema: Value) -> Value {
+    let mut tool = Map::new();
+    tool.insert("name".to_owned(), json!(name));
+    tool.insert("description".to_owned(), json!(description));
+    tool.insert("inputSchema".to_owned(), schema);
+    Value::Object(tool)
+}
+
+fn string(description: &str) -> Value {
+    json!({"type": "string", "description": description})
+}
+
+fn integer(description: &str) -> Value {
+    json!({"type": "integer", "minimum": 0, "description": description})
+}
+
+fn object(properties: Value, required: &[&str]) -> Value {
+    let mut schema = Map::new();
+    schema.insert("type".to_owned(), json!("object"));
+    schema.insert("properties".to_owned(), properties);
+    schema.insert("required".to_owned(), json!(required));
+    schema.insert("additionalProperties".to_owned(), Value::Bool(false));
+    Value::Object(schema)
+}
+
+fn none() -> Value {
+    json!({"type": "object", "properties": {}, "additionalProperties": false})
+}
+
+/// The tools, as `tools/list` names them.
+#[must_use]
+pub fn tools() -> Value {
+    let mut all = first_tools();
+    all.extend(later_tools());
+    Value::Array(all)
+}
+
+/// The state, the ask, and the turn's commands.
+fn first_tools() -> Vec<Value> {
+    vec![
+        tool(
+            "status",
+            "The session's state now (GET /state): its settlement, the turn and how it stands, \
+             what is in flight, a held meditation, a waiting approval, the last refusal, \
+             last_seq, and whether it is idle.",
+            none(),
+        ),
+        tool(
+            "wait",
+            "Wait until the session is idle, or until a log line of a kind appears after a seq \
+             (GET /wait). Returns the state, timed_out, and the matching line as event.",
+            object(
+                json!({
+                    "until": string("`idle`, or a log line's kind, such as `turn.settled`."),
+                    "after": integer("Only a line after this seq: pass the last state's last_seq to wait for something new."),
+                    "timeout": integer("Seconds; serve's default is 30 and its cap 300.")
+                }),
+                &["until"],
+            ),
+        ),
+        tool(
+            "ask",
+            "Send the operator's next message (the `ask` command). Returns its seq and turn, or \
+             serve's refusal.",
+            object(
+                json!({
+                    "text": string("The message."),
+                    "scoping": {"type": "boolean", "description": "Mark the ask as scoping."},
+                    "files": {
+                        "type": "array",
+                        "items": {"type": "string"},
+                        "description": "The sha256 of each file `attach` uploaded, in order."
+                    }
+                }),
+                &["text"],
+            ),
+        ),
+        tool(
+            "attach",
+            "Upload a local PNG to serve (POST /files) for a later ask. Returns its sha256 and \
+             size.",
+            object(
+                json!({"path": string("The PNG's absolute path.")}),
+                &["path"],
+            ),
+        ),
+        tool(
+            "approve",
+            "Answer the approval a command waits on (POST /approve): `once`, `session`, \
+             `workspace`, or `decline`.",
+            object(
+                json!({
+                    "call": string("The waiting call's id, as status's approval names it."),
+                    "scope": {"type": "string", "enum": ["once", "session", "workspace", "decline"]}
+                }),
+                &["call", "scope"],
+            ),
+        ),
+        tool(
+            "cancel",
+            "Cancel the turn in flight (the `cancel` command).",
+            object(
+                json!({"turn": integer("The turn; the current one, from status, when omitted.")}),
+                &[],
+            ),
+        ),
+        tool("end", "End the session (the `end` command).", none()),
+    ]
+}
+
+/// Working memory, its meditations and tangents, and the log.
+fn later_tools() -> Vec<Value> {
+    vec![
+        tool(
+            "memory",
+            "The session's working memory (GET /memory): each live entry's id, content, state, \
+             provenances and the operator's edit or flag no meditation has addressed yet; with \
+             all, every entry, voided, resolved, retired and parked ones too.",
+            object(json!({"all": {"type": "boolean"}}), &[]),
+        ),
+        tool(
+            "edit",
+            "Replace a live entry's text as the operator (the `edit-entry` command).",
+            object(
+                json!({"id": string("The entry's id."), "content": string("Its new text.")}),
+                &["id", "content"],
+            ),
+        ),
+        tool(
+            "flag",
+            "Flag a live entry with the operator's note (the `flag-entry` command).",
+            object(
+                json!({"id": string("The entry's id."), "note": string("The note.")}),
+                &["id", "note"],
+            ),
+        ),
+        tool(
+            "declare_meditation",
+            "Declare a meditation (the `declare-meditation` command), optionally moving to a \
+             phase.",
+            object(json!({"phase": string("The phase to move to.")}), &[]),
+        ),
+        tool(
+            "refill_anyway",
+            "Refill from a held meditation as it stands (the `refill-anyway` command).",
+            none(),
+        ),
+        tool(
+            "ratify_phase",
+            "Answer the model's proposed phase move (the `ratify-phase` command).",
+            object(
+                json!({
+                    "call": string("The proposal's call id."),
+                    "choice": {"type": "string", "enum": ["meditation", "continue", "stay"]}
+                }),
+                &["call", "choice"],
+            ),
+        ),
+        tool(
+            "open_tangent",
+            "Open a tangent (the `open-tangent` command).",
+            object(json!({"id": string("The tangent's id.")}), &["id"]),
+        ),
+        tool(
+            "close_tangent",
+            "Close the open tangent (the `close-tangent` command), saying of each entry it \
+             recorded whether to keep, drop or park it.",
+            object(
+                json!({
+                    "dispositions": {
+                        "type": "object",
+                        "additionalProperties": {"type": "string", "enum": ["keep", "drop", "park"]},
+                        "description": "Each entry's id and its disposition."
+                    }
+                }),
+                &["dispositions"],
+            ),
+        ),
+        tool(
+            "events",
+            "The session's log lines after a seq (GET /events), of the kinds named, at most a \
+             limit; `more` says whether there were others.",
+            object(
+                json!({
+                    "after": integer("Only lines after this seq."),
+                    "kinds": {"type": "array", "items": {"type": "string"}, "description": "Only these kinds."},
+                    "limit": integer("At most this many lines; 200 when omitted.")
+                }),
+                &[],
+            ),
+        ),
+    ]
+}
+
+/// A tool's arguments, read.
+struct Args<'a>(&'a Map<String, Value>);
+
+impl Args<'_> {
+    fn string(&self, key: &str) -> Result<&str, String> {
+        self.0
+            .get(key)
+            .and_then(Value::as_str)
+            .ok_or_else(|| format!("`{key}` is required, a string"))
+    }
+
+    fn optional_string(&self, key: &str) -> Result<Option<&str>, String> {
+        match self.0.get(key) {
+            None | Some(Value::Null) => Ok(None),
+            Some(Value::String(text)) => Ok(Some(text)),
+            Some(_) => Err(format!("`{key}` must be a string")),
+        }
+    }
+
+    fn optional_count(&self, key: &str) -> Result<Option<u64>, String> {
+        match self.0.get(key) {
+            None | Some(Value::Null) => Ok(None),
+            Some(value) => value
+                .as_u64()
+                .map(Some)
+                .ok_or_else(|| format!("`{key}` must be a non-negative integer")),
+        }
+    }
+
+    fn optional_bool(&self, key: &str) -> Result<Option<bool>, String> {
+        match self.0.get(key) {
+            None | Some(Value::Null) => Ok(None),
+            Some(Value::Bool(flag)) => Ok(Some(*flag)),
+            Some(_) => Err(format!("`{key}` must be a boolean")),
+        }
+    }
+
+    fn optional_strings(&self, key: &str) -> Result<Option<Vec<String>>, String> {
+        match self.0.get(key) {
+            None | Some(Value::Null) => Ok(None),
+            Some(Value::Array(items)) => items
+                .iter()
+                .map(|item| {
+                    item.as_str()
+                        .map(str::to_owned)
+                        .ok_or_else(|| format!("`{key}` must be a list of strings"))
+                })
+                .collect::<Result<Vec<_>, _>>()
+                .map(Some),
+            Some(_) => Err(format!("`{key}` must be a list of strings")),
+        }
+    }
+}
+
+/// Tool `name` called with `arguments` against `serve`: its result as JSON
+/// text, or why it could not be called.
+///
+/// # Errors
+///
+/// An unknown tool, an argument of the wrong shape, or serve unreachable.
+pub fn call(serve: &Serve, name: &str, arguments: &Map<String, Value>) -> Result<Value, String> {
+    let args = Args(arguments);
+    let answer = match name {
+        "status" => serve.get("/state")?,
+        "wait" => {
+            let mut path = format!("/wait?until={}", query(args.string("until")?));
+            if let Some(after) = args.optional_count("after")? {
+                let _ = write!(path, "&after={after}");
+            }
+            if let Some(timeout) = args.optional_count("timeout")? {
+                let _ = write!(path, "&timeout={timeout}");
+            }
+            serve.get(&path)?
+        }
+        "ask" => {
+            let mut body = json!({"kind": "ask", "text": args.string("text")?});
+            if let Some(scoping) = args.optional_bool("scoping")? {
+                body["scoping"] = Value::Bool(scoping);
+            }
+            if let Some(files) = args.optional_strings("files")? {
+                body["files"] = json!(files);
+            }
+            serve.command(&body)?
+        }
+        "attach" => {
+            let path = args.string("path")?;
+            let bytes =
+                std::fs::read(path).map_err(|why| format!("{path} could not be read: {why}"))?;
+            serve.request("POST", "/files", Some(("image/png", &bytes)))?
+        }
+        "approve" => serve.post(
+            "/approve",
+            &json!({"call": args.string("call")?, "scope": args.string("scope")?}),
+        )?,
+        "cancel" => {
+            let turn = if let Some(turn) = args.optional_count("turn")? {
+                turn
+            } else {
+                let state = serve.get("/state")?;
+                match state.body.pointer("/turn/number").and_then(Value::as_u64) {
+                    Some(turn) => turn,
+                    None => return Ok(state.json()),
+                }
+            };
+            serve.command(&json!({"kind": "cancel", "turn": turn}))?
+        }
+        "end" => serve.command(&json!({"kind": "end"}))?,
+        "memory" => serve.get(if args.optional_bool("all")? == Some(true) {
+            "/memory?all"
+        } else {
+            "/memory"
+        })?,
+        "edit" => serve.command(&json!({
+            "kind": "edit-entry",
+            "id": args.string("id")?,
+            "content": args.string("content")?
+        }))?,
+        "flag" => serve.command(&json!({
+            "kind": "flag-entry",
+            "id": args.string("id")?,
+            "note": args.string("note")?
+        }))?,
+        "declare_meditation" => {
+            let mut body = json!({"kind": "declare-meditation"});
+            if let Some(phase) = args.optional_string("phase")? {
+                body["phase"] = json!(phase);
+            }
+            serve.command(&body)?
+        }
+        "refill_anyway" => serve.command(&json!({"kind": "refill-anyway"}))?,
+        "ratify_phase" => serve.command(&json!({
+            "kind": "ratify-phase",
+            "call": args.string("call")?,
+            "choice": args.string("choice")?
+        }))?,
+        "open_tangent" => {
+            serve.command(&json!({"kind": "open-tangent", "id": args.string("id")?}))?
+        }
+        "close_tangent" => {
+            let dispositions = arguments
+                .get("dispositions")
+                .filter(|value| value.is_object())
+                .ok_or("`dispositions` is required, an object")?;
+            serve.command(&json!({"kind": "close-tangent", "dispositions": dispositions}))?
+        }
+        "events" => {
+            return serve.events(
+                args.optional_count("after")?,
+                &args.optional_strings("kinds")?.unwrap_or_default(),
+                args.optional_count("limit")?.unwrap_or(EVENTS_LIMIT),
+            );
+        }
+        other => return Err(format!("no tool is named `{other}`")),
+    };
+    Ok(answer.json())
+}
+
+/// One JSON-RPC message answered: the response to send, or `None` for a
+/// notification.
+#[must_use]
+pub fn answer(serve: &Serve, message: &str) -> Option<Value> {
+    let Ok(request) = serde_json::from_str::<Value>(message) else {
+        return Some(failure(&Value::Null, -32700, "not JSON"));
+    };
+    // A notification -- `notifications/initialized` and the rest -- has no
+    // id, and no answer.
+    let id = request.get("id")?.clone();
+    let params = request.get("params").cloned().unwrap_or_else(|| json!({}));
+    let result = match request.get("method").and_then(Value::as_str) {
+        Some("initialize") => {
+            let asked = params.get("protocolVersion").and_then(Value::as_str);
+            let protocol = asked
+                .filter(|asked| PROTOCOLS.contains(asked))
+                .unwrap_or(PROTOCOLS[0]);
+            json!({
+                "protocolVersion": protocol,
+                "capabilities": {"tools": {}},
+                "serverInfo": {"name": "diet-drive", "version": env!("CARGO_PKG_VERSION")},
+                "instructions": "Drives one running `diet-drive serve` session. Read `status`, \
+                     act with a command tool, then `wait` with `after` set to the last \
+                     state's last_seq. Each tool returns serve's status and body as they came."
+            })
+        }
+        Some("ping") => json!({}),
+        Some("tools/list") => json!({"tools": tools()}),
+        Some("tools/call") => {
+            let name = params
+                .get("name")
+                .and_then(Value::as_str)
+                .unwrap_or_default();
+            let empty = Map::new();
+            let arguments = params
+                .get("arguments")
+                .and_then(Value::as_object)
+                .unwrap_or(&empty);
+            match call(serve, name, arguments) {
+                Ok(result) => json!({
+                    "content": [{"type": "text", "text": result.to_string()}],
+                    "structuredContent": result,
+                    "isError": false
+                }),
+                Err(why) => json!({
+                    "content": [{"type": "text", "text": why}],
+                    "isError": true
+                }),
+            }
+        }
+        _ => return Some(failure(&id, -32601, "no such method")),
+    };
+    Some(json!({"jsonrpc": "2.0", "id": id, "result": result}))
+}
+
+fn failure(id: &Value, code: i64, message: &str) -> Value {
+    json!({"jsonrpc": "2.0", "id": id, "error": {"code": code, "message": message}})
+}
+
+/// The server's loop: each line of `input` answered on `output`, until
+/// `input` ends.
+///
+/// # Errors
+///
+/// When `input` cannot be read or `output` written.
+pub fn run(serve: &Serve, input: impl BufRead, mut output: impl Write) -> std::io::Result<()> {
+    for line in input.lines() {
+        let line = line?;
+        if line.trim().is_empty() {
+            continue;
+        }
+        if let Some(response) = answer(serve, &line) {
+            writeln!(output, "{response}")?;
+            output.flush()?;
+        }
+    }
+    Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn nowhere() -> Serve {
+        Serve::new("http://127.0.0.1:9", None).expect("an address")
+    }
+
+    #[test]
+    fn an_address_is_http_host_and_port() {
+        assert!(Serve::new("http://127.0.0.1:7900", None).is_ok());
+        assert!(Serve::new("127.0.0.1:7900/", None).is_ok());
+        assert!(Serve::new("https://example.com/x", None).is_err());
+        assert!(Serve::new("localhost", None).is_err());
+        let serve = Serve::new("127.0.0.1:1", Some("author:s3cret")).expect("an address");
+        assert_eq!(
+            serve.authorization.as_deref(),
+            Some("Basic YXV0aG9yOnMzY3JldA==")
+        );
+    }
+
+    #[test]
+    fn initialize_names_the_protocol_and_the_tools() {
+        let serve = nowhere();
+        let reply = answer(
+            &serve,
+            r#"{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-03-26"}}"#,
+        )
+        .expect("an answer");
+        assert_eq!(reply["result"]["protocolVersion"], "2025-03-26");
+        assert!(reply["result"]["capabilities"]["tools"].is_object());
+        let reply = answer(
+            &serve,
+            r#"{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"1999-01-01"}}"#,
+        )
+        .expect("an answer");
+        assert_eq!(reply["result"]["protocolVersion"], PROTOCOLS[0]);
+        assert_eq!(
+            answer(
+                &serve,
+                r#"{"jsonrpc":"2.0","method":"notifications/initialized"}"#
+            ),
+            None
+        );
+        let listed = answer(
+            &serve,
+            r#"{"jsonrpc":"2.0","id":"x","method":"tools/list"}"#,
+        )
+        .expect("an answer");
+        let names: Vec<&str> = listed["result"]["tools"]
+            .as_array()
+            .expect("tools")
+            .iter()
+            .map(|tool| tool["name"].as_str().expect("a name"))
+            .collect();
+        assert_eq!(
+            names,
+            [
+                "status",
+                "wait",
+                "ask",
+                "attach",
+                "approve",
+                "cancel",
+                "end",
+                "memory",
+                "edit",
+                "flag",
+                "declare_meditation",
+                "refill_anyway",
+                "ratify_phase",
+                "open_tangent",
+                "close_tangent",
+                "events"
+            ]
+        );
+        assert_eq!(listed["id"], "x");
+        let missing =
+            answer(&serve, r#"{"jsonrpc":"2.0","id":2,"method":"nope"}"#).expect("an answer");
+        assert_eq!(missing["error"]["code"], -32601);
+        let garbled = answer(&serve, "{").expect("an answer");
+        assert_eq!(garbled["error"]["code"], -32700);
+    }
+
+    #[test]
+    fn a_tool_that_cannot_reach_serve_or_is_misused_says_so() {
+        let serve = nowhere();
+        let reply = answer(
+            &serve,
+            r#"{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"ask","arguments":{}}}"#,
+        )
+        .expect("an answer");
+        assert_eq!(reply["result"]["isError"], true);
+        assert_eq!(
+            reply["result"]["content"][0]["text"],
+            "`text` is required, a string"
+        );
+        let reply = answer(
+            &serve,
+            r#"{"jsonrpc":"2.0","id":4,"method":"tools/call","params":{"name":"status"}}"#,
+        )
+        .expect("an answer");
+        assert_eq!(reply["result"]["isError"], true);
+    }
+
+    #[test]
+    fn an_answer_is_its_status_and_its_body() {
+        let answer = parsed(
+            b"HTTP/1.1 409 Conflict\r\nContent-Length: 22\r\n\r\n{\"refused\":\"in-flight\"}",
+        )
+        .expect("parsed");
+        assert_eq!(answer.status, 409);
+        assert_eq!(answer.body, json!({"refused": "in-flight"}));
+        let empty = parsed(b"HTTP/1.1 204 No Content\r\n\r\n").expect("parsed");
+        assert_eq!(empty.json(), json!({"status": 204, "body": {}}));
+        assert_eq!(query("turn.settled"), "turn.settled");
+        assert_eq!(query("a b&c"), "a%20b%26c");
+    }
+}

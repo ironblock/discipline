@@ -4094,3 +4094,181 @@ fn review_a_drive_server_refuses_a_tools_ask_set_on_the_fields_route() {
         assert_ne!(code, None, "{set} on the fields route listened: {said}");
     }
 }
+
+/// A streamed reply saying `text`.
+fn saying(text: &str) -> Act {
+    let piece = serde_json::json!({"choices": [{"index": 0, "finish_reason": null,
+        "delta": {"content": text}}]});
+    let done = serde_json::json!({"choices": [{"index": 0, "delta": {}, "finish_reason": "stop"}]});
+    Act::Answer(format!("data: {piece}\n\ndata: {done}\n\ndata: [DONE]\n\n"))
+}
+
+/// `diet-drive mcp` attached to a running serve (#758), spoken to as an
+/// MCP client speaks: one JSON-RPC message a line.
+struct Mcp {
+    child: Child,
+    input: std::process::ChildStdin,
+    output: std::io::BufReader<std::process::ChildStdout>,
+    next: u64,
+}
+
+impl Mcp {
+    fn attached(listening: &str) -> Self {
+        let mut child = Command::new(DRIVE)
+            .args(["mcp", "--url", &format!("http://{listening}")])
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .spawn()
+            .expect("diet-drive mcp runs");
+        let input = child.stdin.take().expect("its input");
+        let output = std::io::BufReader::new(child.stdout.take().expect("its output"));
+        Self {
+            child,
+            input,
+            output,
+            next: 0,
+        }
+    }
+
+    fn request(&mut self, method: &str, params: serde_json::Value) -> serde_json::Value {
+        use std::io::{BufRead as _, Write as _};
+        self.next += 1;
+        let mut message = serde_json::Map::new();
+        message.insert("jsonrpc".to_owned(), "2.0".into());
+        message.insert("id".to_owned(), self.next.into());
+        message.insert("method".to_owned(), method.into());
+        message.insert("params".to_owned(), params);
+        let message = serde_json::Value::Object(message);
+        writeln!(self.input, "{message}").expect("sent");
+        let mut line = String::new();
+        self.output.read_line(&mut line).expect("an answer");
+        let reply: serde_json::Value = serde_json::from_str(&line).expect("JSON");
+        assert_eq!(reply["id"], self.next, "{reply}");
+        reply["result"].clone()
+    }
+
+    /// Tool `name`'s result: serve's status and body.
+    fn call(&mut self, name: &str, arguments: serde_json::Value) -> serde_json::Value {
+        let mut params = serde_json::Map::new();
+        params.insert("name".to_owned(), name.into());
+        params.insert("arguments".to_owned(), arguments);
+        let result = self.request("tools/call", serde_json::Value::Object(params));
+        assert_eq!(result["isError"], false, "{name}: {result}");
+        result["structuredContent"].clone()
+    }
+}
+
+impl Drop for Mcp {
+    fn drop(&mut self) {
+        let _ = self.child.kill();
+        let _ = self.child.wait();
+    }
+}
+
+#[test]
+fn an_mcp_client_drives_a_served_session_to_a_held_meditation_and_refills_anyway() {
+    // #758's definition of done: through the MCP tools alone, an ask runs
+    // to idle, its scoping fork fills working memory, the operator flags an
+    // entry, a meditation whose audit ignores the flag is held under the
+    // refuse gate (#150) -- an ask refused while it holds -- and refill
+    // anyway refills it.
+    let stub = Stub::serving_with_props(
+        vec![
+            saying("A tracker for one team, no login. Next, I will sketch the schema."),
+            saying("DECISION: a tracker\nDECISION: for one team\nDECISION: no login\nPLAN: NONE\n"),
+            saying("1. KEEP\n2. KEEP\n"),
+            saying("nothing to say"),
+        ],
+        &diet::drive::canned::build_info(),
+    )
+    .expect("loopback");
+    let regimen = dev_loop_sampling(
+        "interview_warrant = [\"scoping\"]\nmeditation_audit = \"on\"\nreconcile_gate = \"refuse\"\n",
+        "seed = 7\n",
+    );
+    let regimen_path = regimen.0.to_string_lossy().into_owned();
+    let served = start(&stub.url(), &["--regimen", &regimen_path]);
+    let mut mcp = Mcp::attached(&served.listening);
+
+    let started = mcp.request(
+        "initialize",
+        serde_json::json!({"protocolVersion": "2025-06-18"}),
+    );
+    assert_eq!(started["protocolVersion"], "2025-06-18", "{started}");
+    let listed = mcp.request("tools/list", serde_json::json!({}));
+    assert_eq!(
+        listed["tools"].as_array().map(Vec::len),
+        Some(16),
+        "{listed}"
+    );
+
+    let asked = mcp.call(
+        "ask",
+        serde_json::json!({"text": "what are we building?", "scoping": true}),
+    );
+    assert_eq!(asked["status"], 200, "{asked}");
+    assert_eq!(asked["body"]["turn"], 1, "{asked}");
+    let idle = mcp.call("wait", serde_json::json!({"until": "idle", "timeout": 30}));
+    assert_eq!(idle["status"], 200, "{idle}");
+    assert_eq!(idle["body"]["idle"], true, "{idle}");
+    assert_eq!(idle["body"]["timed_out"], false, "{idle}");
+
+    let memory = mcp.call("memory", serde_json::json!({}));
+    assert_eq!(memory["status"], 200, "{memory}");
+    let entries = memory["body"]["entries"]
+        .as_array()
+        .cloned()
+        .unwrap_or_default();
+    assert_eq!(entries.len(), 3, "{memory}");
+    let flagged = entries[0]["id"].as_str().expect("an id").to_owned();
+    let flag = mcp.call(
+        "flag",
+        serde_json::json!({"id": flagged, "note": "still so?"}),
+    );
+    assert_eq!(flag["status"], 200, "{flag}");
+
+    let last = mcp.call("status", serde_json::json!({}))["body"]["last_seq"].clone();
+    let declared = mcp.call("declare_meditation", serde_json::json!({}));
+    assert_eq!(declared["status"], 200, "{declared}");
+    let held = mcp.call(
+        "wait",
+        serde_json::json!({"until": "meditation.held", "after": last, "timeout": 30}),
+    );
+    assert_eq!(held["body"]["event"]["kind"], "meditation.held", "{held}");
+    assert_eq!(
+        held["body"]["event"]["unaddressed"],
+        serde_json::json!([flagged]),
+        "{held}"
+    );
+    let state = mcp.call("status", serde_json::json!({}));
+    assert_eq!(state["body"]["meditation"]["state"], "held", "{state}");
+    let refused = mcp.call("ask", serde_json::json!({"text": "go on"}));
+    assert_eq!(refused["status"], 409, "{refused}");
+    assert_eq!(refused["body"]["refused"], "meditation-held", "{refused}");
+
+    let last = state["body"]["last_seq"].clone();
+    let anyway = mcp.call("refill_anyway", serde_json::json!({}));
+    assert_eq!(anyway["status"], 200, "{anyway}");
+    let refilled = mcp.call(
+        "wait",
+        serde_json::json!({"until": "meditation", "after": last, "timeout": 30}),
+    );
+    assert_eq!(
+        refilled["body"]["event"]["kind"], "meditation",
+        "{refilled}"
+    );
+    let events = mcp.call(
+        "events",
+        serde_json::json!({"kinds": ["meditation.held", "flag"]}),
+    );
+    let kinds: Vec<&str> = events["events"]
+        .as_array()
+        .expect("events")
+        .iter()
+        .filter_map(|line| line["kind"].as_str())
+        .collect();
+    assert_eq!(kinds, ["flag", "meditation.held"], "{events}");
+
+    let ended = mcp.call("end", serde_json::json!({}));
+    assert_eq!(ended["status"], 200, "{ended}");
+}
