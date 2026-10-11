@@ -77,6 +77,9 @@ const SERVE: &str = "serve";
 /// The stream-replay server's subcommand (#411).
 const REPLAY: &str = "replay";
 
+/// The subcommand that serves MCP over a running `serve` (#758).
+const MCP: &str = "mcp";
+
 /// The port `diet-drive replay` listens on unless told another.
 const REPLAY_PORT: u16 = 7902;
 
@@ -2226,6 +2229,8 @@ fn usage() -> String {
     // The interactive server, which the first form's usage once hid (#290).
     out.push_str("       diet-drive serve --endpoint URL --model NAME --head FILE ...\n");
     out.push_str("       (one interactive session over HTTP; `diet-drive serve --help`)\n");
+    out.push_str("       diet-drive mcp --url http://HOST:PORT [--auth-file FILE]\n");
+    out.push_str("       (MCP over stdio, driving a running serve; `diet-drive mcp --help`)\n");
     out.push_str("       diet-drive replay [--answers] [--port N]\n");
     out.push_str("       (substrate `canned-replay-tools` on loopback: captured llama.cpp\n");
     out.push_str("       replies, a `bash` call and then its answer, for a regimen rehearsed\n");
@@ -2307,6 +2312,63 @@ fn replay(args: &[String]) -> ExitCode {
     }
 }
 
+fn mcp_usage() -> String {
+    String::from(
+        "usage: diet-drive mcp --url http://HOST:PORT [--auth-file FILE]\n\
+         An MCP server on standard input and output (JSON-RPC 2.0, one message a\n\
+         line) whose tools drive the running `diet-drive serve` at --url -- its\n\
+         `listening` -- with the credential in --auth-file (`user:password`), the\n\
+         same file serve was given. Each tool returns serve's status and body.\n",
+    )
+}
+
+/// `diet-drive mcp` (#758): the MCP server over a running serve.
+fn mcp(args: &[String]) -> ExitCode {
+    let mut url = None;
+    let mut auth_file = None;
+    let mut rest = args.iter();
+    while let Some(flag) = rest.next() {
+        let value = rest.next();
+        match (flag.as_str(), value) {
+            ("--url", Some(value)) => url = Some(value.clone()),
+            ("--auth-file", Some(value)) => auth_file = Some(value.clone()),
+            _ => {
+                eprint!("{}", mcp_usage());
+                return ExitCode::from(EXIT_USAGE);
+            }
+        }
+    }
+    let Some(url) = url else {
+        eprint!("{}", mcp_usage());
+        return ExitCode::from(EXIT_USAGE);
+    };
+    let credential = match auth_file.map(std::fs::read_to_string).transpose() {
+        Ok(credential) => credential.map(|text| {
+            text.strip_suffix('\n').map_or(text.clone(), |line| {
+                line.strip_suffix('\r').unwrap_or(line).to_owned()
+            })
+        }),
+        Err(why) => {
+            eprintln!("diet-drive mcp: the auth file could not be read: {why}");
+            return ExitCode::from(EXIT_INPUT);
+        }
+    };
+    let serve = match diet::drive::mcp::Serve::new(&url, credential.as_deref()) {
+        Ok(serve) => serve,
+        Err(why) => {
+            eprintln!("diet-drive mcp: {why}");
+            return ExitCode::from(EXIT_USAGE);
+        }
+    };
+    match diet::drive::mcp::run(&serve, std::io::stdin().lock(), std::io::stdout().lock()) {
+        Ok(()) => ExitCode::SUCCESS,
+        Err(why) => {
+            eprintln!("diet-drive mcp: {why}");
+            ExitCode::from(EXIT_OUTPUT)
+        }
+    }
+}
+
 fn main() -> ExitCode {
     // FIRST, before any thread: a sandboxed command can read this process's
     // environment and argv (`KERN_PROCARGS2`), so the drive re-executes
@@ -2326,6 +2388,13 @@ fn main() -> ExitCode {
     }
     if args.first().map(String::as_str) == Some(REPLAY) {
         return replay(&args[1..]);
+    }
+    if args.first().map(String::as_str) == Some(MCP) {
+        if asks_for_help(&args[1..]) {
+            print!("{}", mcp_usage());
+            return ExitCode::SUCCESS;
+        }
+        return mcp(&args[1..]);
     }
     if args
         .first()

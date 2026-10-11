@@ -2252,8 +2252,17 @@ impl Prompt {
     /// `command`, `cwd`, `reason`, `segments`.
     #[must_use]
     pub fn render(&self) -> String {
+        let mut out = String::new();
+        json::render(&self.value(), &mut out);
+        out
+    }
+
+    /// The same keys as a value: what `GET /state` names as its `approval`
+    /// (#756).
+    #[must_use]
+    pub fn value(&self) -> Value {
         let text = |s: &str| Value::String(s.to_owned());
-        let value = Value::Object(BTreeMap::from([
+        Value::Object(BTreeMap::from([
             (
                 "request".to_owned(),
                 Value::Integer(i64::try_from(self.request).unwrap_or(i64::MAX)),
@@ -2263,10 +2272,7 @@ impl Prompt {
             ("cwd".to_owned(), text(&self.cwd)),
             ("reason".to_owned(), text(&self.reason)),
             ("segments".to_owned(), self.segments.clone()),
-        ]));
-        let mut out = String::new();
-        json::render(&value, &mut out);
-        out
+        ]))
     }
 
     /// The `answered` event's data once it is decided: `{request, id}`.

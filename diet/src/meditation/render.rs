@@ -192,16 +192,20 @@ pub fn rendered_marked(
             .cmp(&a.provenances.iter().max())
             .then_with(|| b.id.cmp(&a.id))
     });
-    let mut spent = estimate(&head)
+    // Counted in characters and rounded once, as the render's own estimate
+    // is (#732): rounding each piece up overcounted a render that fits
+    // exactly, and reduced it.
+    let chars = |text: &str| text.chars().count() as u64;
+    let mut spent = chars(&head)
         + object
             .live()
             .filter(|entry| brief(&entry.content))
-            .map(|entry| estimate(&line(&entry.id, &entry.content)))
+            .map(|entry| chars(&line(&entry.id, &entry.content)))
             .sum::<u64>();
     let mut whole = 0;
     for entry in &rest {
-        let cost = estimate(&line(&entry.id, &entry.content));
-        if spent + cost > budget.tokens {
+        let cost = chars(&line(&entry.id, &entry.content));
+        if (spent + cost).div_ceil(4) > budget.tokens {
             break;
         }
         spent += cost;
@@ -353,8 +357,8 @@ pub fn refill_in_the_system_message(head: &[Message], render: &str) -> Vec<Messa
 }
 
 /// A message's estimated tokens: its characters -- content, reasoning, each
-/// tool call's name and arguments, each image's encoding -- divided by four,
-/// rounded up. The harnesses compared estimate the same way, none with a
+/// tool call's name and arguments, each image's encoding, each note (#732)
+/// -- divided by four, rounded up. The harnesses compared estimate the same way, none with a
 /// tokenizer (#552; Pi `compaction.ts` 298-349, `OpenCode` 2 `util/token.ts`
 /// 3-5); Pi's rounding up, which never undercounts.
 #[must_use]
@@ -370,6 +374,13 @@ pub fn estimated_tokens(message: &Message) -> u64 {
             .images
             .iter()
             .map(|image| image.data_uri().len())
+            .sum::<usize>()
+        // The notes an ask carries go on the wire before its words (#609),
+        // so they are counted (#732).
+        + message
+            .notes
+            .iter()
+            .map(|note| note.chars().count())
             .sum::<usize>();
     u64::try_from(chars.div_ceil(4)).unwrap_or(u64::MAX)
 }
@@ -604,6 +615,29 @@ mod tail_tests {
             tail(&turns, u64::MAX).is_empty(),
             "{:?}",
             tail(&turns, u64::MAX)
+        );
+    }
+}
+
+#[cfg(test)]
+mod review_tests {
+    use super::{Message, Role, estimated_tokens, tail};
+
+    /// REVIEW: the notes an ask carries (#609) go on the wire, so a
+    /// message's estimate counts them, and the tail's budget holds.
+    #[test]
+    fn review_an_asks_notes_are_counted() {
+        let mut ask = Message::new(Role::User, "hi");
+        ask.notes = vec!["x".repeat(4_000)];
+        assert!(
+            estimated_tokens(&ask) >= 1_000,
+            "{}",
+            estimated_tokens(&ask)
+        );
+        let turns = vec![ask, Message::new(Role::Assistant, "ok")];
+        assert!(
+            tail(&turns, 100).is_empty(),
+            "a turn of over 1,000 tokens kept under a 100-token tail budget"
         );
     }
 }

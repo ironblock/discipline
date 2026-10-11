@@ -1872,6 +1872,9 @@ struct State {
     /// A meditation queued for its audit or pre-warm (#504), until [`meditation_work`]
     /// takes it.
     meditation_pending: Option<PendingMeditation>,
+    /// What fired the meditation [`meditation_work`] has taken and not yet
+    /// logged the outcome of (#756): what `GET /state` calls `capturing`.
+    meditating: Option<crate::meditation::Reason>,
     /// A meditation held for the operator (#150's gate): `reconcile_gate =
     /// "refuse"` and an operator change no answer addressed.
     held: Option<PendingMeditation>,
@@ -1915,6 +1918,20 @@ struct State {
 }
 
 impl State {
+    /// Whether nothing is running or in flight by the state's own fields
+    /// (#756): awaiting or ended, no call, no fork in flight or queued, no
+    /// pre-warm, and no meditation queued or under way. `GET /state`'s
+    /// `idle` adds no prompt waiting and no fork line unsettled.
+    fn idle(&self) -> bool {
+        matches!(self.settlement, Settlement::Awaiting | Settlement::Ended)
+            && self.flight.is_none()
+            && self.forking.is_none()
+            && self.queued.is_empty()
+            && self.warming.is_none()
+            && self.meditation_pending.is_none()
+            && self.meditating.is_none()
+    }
+
     /// A session's state as it opens: awaiting, on `trunk`, in `phase`.
     fn opening(
         trunk: Vec<Message>,
@@ -1934,6 +1951,7 @@ impl State {
             last_sized: None,
             overflow_retried: None,
             meditation_pending: None,
+            meditating: None,
             held: None,
             warming: None,
             proposal: None,
@@ -3590,6 +3608,170 @@ impl<S: Streaming + 'static> Session<S> {
         self.shared.lock().settlement
     }
 
+    /// What the session is doing now, as `GET /state` answers it (#756),
+    /// read under one lock: whether it is running or ended; its settlement;
+    /// the latest turn -- `running`, `awaiting-approval`, or `settled` with
+    /// its reason; the forks and audits in flight, by their lines' `seq`,
+    /// the forks queued behind them, and whether a pre-warm is in flight;
+    /// the meditation -- `none`, `capturing`, or `held` with what it left
+    /// `unaddressed`; the prompt waiting on the operator, in `waiting`'s
+    /// shape; the last refusal, its `seq`, `command` and `because`; the
+    /// last `seq`; and whether it is `idle`: no turn running, nothing in
+    /// flight, nothing queued and no prompt waiting. `turn`, `approval` and
+    /// `refusal` are absent when there is none, as the log leaves a key out.
+    #[must_use]
+    pub fn status(&self) -> Value {
+        let state = self.shared.lock();
+        let (number, text, object) = (status_number, status_text, status_object);
+        let LogRead {
+            open,
+            settled,
+            refusal,
+            unaddressed,
+        } = LogRead::of(&state);
+        let refusal = refusal.map(|(seq, command, because)| {
+            object(vec![
+                ("seq", number(seq)),
+                ("command", text(command.tag())),
+                ("because", text(because.tag())),
+            ])
+        });
+        let prompt = state
+            .waiting
+            .as_ref()
+            .filter(|waiting| waiting.answer.is_none())
+            .map(|waiting| waiting.prompt.value());
+        let turn = match (state.turns, settled) {
+            (0, _) => None,
+            (n, Some(reason)) => Some(object(vec![
+                ("number", number(u64::from(n))),
+                ("state", text("settled")),
+                ("reason", text(reason.tag())),
+            ])),
+            (n, None) => Some(object(vec![
+                ("number", number(u64::from(n))),
+                (
+                    "state",
+                    text(if prompt.is_some() {
+                        "awaiting-approval"
+                    } else {
+                        "running"
+                    }),
+                ),
+            ])),
+        };
+        let meditation = match (&state.held, unaddressed) {
+            (Some(_), Some(left)) => object(vec![
+                ("state", text("held")),
+                (
+                    "unaddressed",
+                    Value::Array(left.iter().map(|entry| text(entry)).collect()),
+                ),
+            ]),
+            _ if state.meditation_pending.is_some() || state.meditating.is_some() => {
+                object(vec![("state", text("capturing"))])
+            }
+            _ => object(vec![("state", text("none"))]),
+        };
+        let idle = state.idle() && prompt.is_none() && open.is_empty();
+        let seqs = |audits: bool| {
+            Value::Array(
+                open.iter()
+                    .filter(|(_, audit)| *audit == audits)
+                    .map(|(seq, _)| number(*seq))
+                    .collect(),
+            )
+        };
+        let mut status = vec![
+            (
+                "session",
+                text(if state.settlement == Settlement::Ended {
+                    "ended"
+                } else {
+                    "running"
+                }),
+            ),
+            ("settlement", text(state.settlement.tag())),
+            (
+                "in_flight",
+                object(vec![
+                    ("forks", seqs(false)),
+                    ("audits", seqs(true)),
+                    ("queued", number(state.queued.len() as u64)),
+                    ("warming", Value::Boolean(state.warming.is_some())),
+                ]),
+            ),
+            ("meditation", meditation),
+            (
+                "last_seq",
+                number(state.log.last().map_or(0, |logged| logged.seq)),
+            ),
+            ("idle", Value::Boolean(idle)),
+        ];
+        for (key, value) in [("turn", turn), ("approval", prompt), ("refusal", refusal)] {
+            if let Some(value) = value {
+                status.push((key, value));
+            }
+        }
+        object(status)
+    }
+
+    /// Working memory as the session holds it, as `GET /memory` answers it
+    /// (#756): `entries`, each as the object's dump writes it (`id`,
+    /// `content`, `state`, `provenances`, and its links), the live ones
+    /// only unless `all`; on each, the operator's changes no meditation has
+    /// addressed yet as `operator`, each a `kind` -- `edit` or `flag` --
+    /// and a flag's `note`; and `last_seq`, the log's position it was read
+    /// at. A session with no working memory answers no entries.
+    #[must_use]
+    pub fn memory(&self, all: bool) -> Value {
+        let state = self.shared.lock();
+        let entries = state.interview.as_ref().map_or_else(Vec::new, |interview| {
+            interview
+                .object
+                .dump_values()
+                .into_iter()
+                .filter(|(id, _)| {
+                    all || interview
+                        .object
+                        .entry(id)
+                        .is_some_and(|entry| entry.state.is_live())
+                })
+                .map(|(id, mut value)| {
+                    let changes: Vec<Value> = state
+                        .operator_pending
+                        .iter()
+                        .filter(|change| change.entry == id.as_str())
+                        .map(|change| {
+                            let mut members = BTreeMap::from([(
+                                "kind".to_owned(),
+                                Value::String(change.kind.to_owned()),
+                            )]);
+                            if let Some(note) = &change.note {
+                                members.insert("note".to_owned(), Value::String(note.clone()));
+                            }
+                            Value::Object(members)
+                        })
+                        .collect();
+                    if let Value::Object(members) = &mut value
+                        && !changes.is_empty()
+                    {
+                        members.insert("operator".to_owned(), Value::Array(changes));
+                    }
+                    value
+                })
+                .collect()
+        });
+        let last = state.log.last().map_or(0, |logged| logged.seq);
+        Value::Object(BTreeMap::from([
+            ("entries".to_owned(), Value::Array(entries)),
+            (
+                "last_seq".to_owned(),
+                Value::Integer(i64::try_from(last).unwrap_or(i64::MAX)),
+            ),
+        ]))
+    }
+
     /// The trunk as it stands: the head, then every settled exchange.
     #[must_use]
     pub fn trunk(&self) -> Vec<Message> {
@@ -4287,6 +4469,13 @@ pub fn line_of(logged: &Logged) -> log::Line {
 #[must_use]
 pub fn render(logged: &Logged) -> String {
     log::render(&line_of(logged))
+}
+
+/// A logged event as its log line, read back as an object (#756): what
+/// `GET /wait` names as its `event`, and whose `kind` it matches.
+#[must_use]
+pub fn line_value(logged: &Logged) -> BTreeMap<String, Value> {
+    crate::formats::record::json::line(&render(logged)).unwrap_or_default()
 }
 
 /// A call's timings as the log carries them: the same keys, the
@@ -6543,6 +6732,7 @@ fn meditation_work<S: Streaming>(shared: &Shared<S>) {
     let Some(PendingMeditation { reason, to, anyway }) = state.meditation_pending.take() else {
         return;
     };
+    state.meditating = Some(reason);
     if !anyway {
         state = audit_and_gate(shared, state, reason);
         if let Some(left) = left_unaddressed(&state)
@@ -6555,6 +6745,7 @@ fn meditation_work<S: Streaming>(shared: &Shared<S>) {
                 to,
                 anyway: false,
             });
+            state.meditating = None;
             state.move_to(Settlement::Awaiting);
             let at_turn = state.turns;
             state.push(Event::MeditationHeld {
@@ -6605,6 +6796,7 @@ fn meditation_work<S: Streaming>(shared: &Shared<S>) {
     }
     // Back to `awaiting`, then the meditation's line, under one lock: a meditation is
     // logged while the session awaits, and nothing comes between.
+    state.meditating = None;
     state.move_to(Settlement::Awaiting);
     state.push(meditated);
     if state.ending {
@@ -7506,6 +7698,66 @@ pub fn fork_tail(regimen: &Regimen) -> Option<u32> {
     match regimen.get(FORK_TAIL_TOKENS) {
         Some(crate::formats::regimen::Value::Integer(n)) if *n > 0 => u32::try_from(*n).ok(),
         _ => None,
+    }
+}
+
+/// A count as `GET /state` writes it (#756).
+fn status_number(n: u64) -> Value {
+    Value::Integer(i64::try_from(n).unwrap_or(i64::MAX))
+}
+
+/// Text as `GET /state` writes it (#756).
+fn status_text(s: &str) -> Value {
+    Value::String(s.to_owned())
+}
+
+/// An object of `pairs`, as `GET /state` writes it (#756).
+fn status_object(pairs: Vec<(&str, Value)>) -> Value {
+    Value::Object(
+        pairs
+            .into_iter()
+            .map(|(key, value)| (key.to_owned(), value))
+            .collect(),
+    )
+}
+
+/// What `GET /state` reads off the log (#756).
+struct LogRead<'a> {
+    /// The forks and audits with no `fork.settled` yet: each line's `seq`,
+    /// and whether it is an audit.
+    open: Vec<(u64, bool)>,
+    /// How the latest turn settled, once it has.
+    settled: Option<SettleReason>,
+    /// The last refusal: its `seq`, command and reason.
+    refusal: Option<(u64, CommandKind, Refusal)>,
+    /// What the latest hold left unaddressed.
+    unaddressed: Option<&'a Vec<String>>,
+}
+
+impl<'a> LogRead<'a> {
+    fn of(state: &'a State) -> Self {
+        let mut read = LogRead {
+            open: Vec::new(),
+            settled: None,
+            refusal: None,
+            unaddressed: None,
+        };
+        for logged in &state.log {
+            match &logged.event {
+                Event::Forked { .. } => read.open.push((logged.seq, false)),
+                Event::Audited { .. } => read.open.push((logged.seq, true)),
+                Event::ForkSettled { fork, .. } => read.open.retain(|(seq, _)| seq != fork),
+                Event::TurnSettled { turn, reason } if *turn == state.turns => {
+                    read.settled = Some(*reason);
+                }
+                Event::Refused {
+                    command, because, ..
+                } => read.refusal = Some((logged.seq, *command, *because)),
+                Event::MeditationHeld { unaddressed, .. } => read.unaddressed = Some(unaddressed),
+                _ => {}
+            }
+        }
+        read
     }
 }
 

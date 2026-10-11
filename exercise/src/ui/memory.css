@@ -157,9 +157,9 @@
   flex-wrap: wrap;
   gap: 0.3rem;
   align-items: center;
+  margin: 0;
 }
 
-.ex-memory__actions textarea,
 .ex-memory__actions input {
   flex: 1 1 100%;
 }

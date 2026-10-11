@@ -90,12 +90,12 @@ fn is_word_char(c: char) -> bool {
 }
 
 /// Strip the punctuation prose hangs on a token: a trailing period, comma,
-/// colon, semicolon, bracket.
+/// colon, semicolon, bracket, question or exclamation mark (#732).
 fn trim_token(token: &str) -> &str {
     token.trim_matches(|c: char| {
         matches!(
             c,
-            '.' | ',' | ';' | ':' | ')' | '(' | '[' | ']' | '"' | '\''
+            '.' | ',' | ';' | ':' | ')' | '(' | '[' | ']' | '"' | '\'' | '?' | '!'
         )
     })
 }

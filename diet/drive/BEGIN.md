@@ -154,6 +154,37 @@ Send `end`: `{"kind":"end"}` posted to `serve`'s `/commands`. `serve` then:
 
 You do not need to interrupt it. Once it has exited, a later command finds nothing listening. In the moment before (while the record is written and the streams drain) one is answered `409` and writes nothing to the log.
 
+## An agent drives it over MCP
+
+`diet-drive mcp` is an MCP server on standard input and output. Its tools drive one running `serve`, so a Claude app or Claude Code session drives the session in place of the page. Start `serve` as in step 1, then give the MCP server its `listening` and, when `serve` has one, the same auth file:
+
+```
+diet-drive mcp --url http://127.0.0.1:7801 --auth-file ~/.config/discipline/drive.auth
+```
+
+Attach it to Claude Code with the binary's absolute path:
+
+```
+claude mcp add diet-drive -- /abs/path/to/target/debug/diet-drive mcp --url http://127.0.0.1:7801 --auth-file ~/.config/discipline/drive.auth
+```
+
+In the Claude app, add the same command under `mcpServers` in its MCP configuration, as `command` and `args`.
+
+| tool | what it calls |
+| --- | --- |
+| `status`, `wait` | `GET /state`, `GET /wait` |
+| `ask` | the `ask` command: `text`, `scoping`, `files` |
+| `attach` | a local PNG uploaded to `POST /files`; returns its `sha256` for an ask's `files` |
+| `approve` | `POST /approve`: `call`, `scope` |
+| `cancel`, `end` | the matching commands; `cancel` takes the current turn when none is named |
+| `memory` | `GET /memory`, or `?all` |
+| `edit`, `flag` | `edit-entry`, `flag-entry` |
+| `declare_meditation`, `refill_anyway`, `ratify_phase` | the matching commands |
+| `open_tangent`, `close_tangent` | the matching commands |
+| `events` | `GET /events`: the log lines after a seq, of the kinds named |
+
+Each tool returns `serve`'s status and body as they came, a refusal's `refused` tag included. A tool that cannot reach `serve`, or is given the wrong arguments, says so as a tool error. The loop an agent runs is the one under `status` and `wait`: read the state, send a command, then wait with `after` set to the last state's `last_seq`.
+
 ## No model at hand
 
 Run this first: a whole session, driven end to end, with no model server, no GPU and no regimen. Each long-running command gets its own terminal, every one from the repository root: the stand-in, `serve`, and (for the `curl` path) one watching the events and one sending commands.
@@ -206,6 +237,29 @@ An ask is answered `200` with the turn it opened, `{"seq":1,"turn":1}`. `end` is
 8. after `end`, `settlement` from `awaiting` to `ended`, the log's last line.
 
 After `end`, the stream closes, `serve` exits `0`, and `session.log` holds the same lines the stream carried. Before `end`, a command `serve` refuses is answered `409` with `{"refused": <why>}`, and the log gains a `refused` line naming it. An ask sent while a turn is in flight is one: `{"refused":"in-flight"}`.
+
+**An agent driving it reads the state, not the log.** Three routes beside `/events`, under the same `Host`, `Origin` and auth rules, log nothing:
+
+- **`GET /state`** answers what the session is doing now, as one JSON object:
+  - `session`: `running` or `ended`, and `settlement`;
+  - `turn`: `number`, and `state` — `running`, `awaiting-approval`, or `settled` with its `reason`;
+  - `in_flight`: the `forks` and `audits` running, by their lines' `seq`, the forks `queued` behind them, and whether a pre-warm is `warming`;
+  - `meditation`: `state` — `none`, `capturing`, or `held` with its `unaddressed`;
+  - `approval`: the prompt waiting on you, in `event: waiting`'s shape;
+  - `refusal`: the last refused command, its `seq`, `command` and `because`;
+  - `last_seq`, and `idle`: no turn running, nothing in flight or queued, and no prompt waiting.
+
+  `turn`, `approval` and `refusal` are absent when there is none.
+- **`GET /wait?until=idle|<kind>&after=<seq>&timeout=<s>`** is the same object, once the session is idle, or once a line of that `kind` (`meditation.held`, `turn.settled`, any line's) is logged after `after` — the whole log when `after` is absent — with that line as `event`. At `timeout` (30 s when absent, at most 300 s) it answers the state as it is with `"timed_out": true`, so loop on it rather than holding one request open. Any other query is `400`.
+
+- **`GET /memory`** is working memory as `serve` holds it: `entries`, the live ones, each in the object's own dump shape (`id`, `content`, `state`, `provenances` with each one's `lane`, `turn` and `fork`, and `supersedes`, `voided_by` or `aliases` when it has them), and `last_seq`. An entry with an edit or flag of yours no meditation has addressed yet carries `operator`: each change's `kind`, `edit` or `flag`, and a flag's `note`. With `?all`, resolved, parked, retired and voided entries come too. Read memory here rather than folding the log again.
+
+```
+curl -s -X POST -H 'Content-Type: application/json' -d '{"kind":"ask","text":"hello"}' http://127.0.0.1:7801/commands
+curl -s 'http://127.0.0.1:7801/wait?until=idle&timeout=120'
+```
+
+`idle` waits for the gap's forks and a meditation's audit, not only for `turn.settled`. A held meditation is idle: it waits on you, and `meditation.state` says so.
 
 ## Rehearsing a regimen with no model
 
