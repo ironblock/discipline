@@ -17,6 +17,8 @@ test	diet
 results	diet
 # The committed regimens parse.
 regimen	diet
+# Every scenario passes on the canned scenario substrate (#760).
+scenarios	diet
 
 # --- repo: concerns that belong to no single package ---
 hygiene	repo

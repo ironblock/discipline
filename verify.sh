@@ -26,11 +26,11 @@ readonly EXIT_MISUSE=2
 ROOT="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 readonly ROOT
 
-readonly CHECKS=(fmt clippy test results recompute admission regimen hygiene pages exercise history)
+readonly CHECKS=(fmt clippy test results recompute admission regimen scenarios hygiene pages exercise history)
 # What runs with no arguments, and what CI runs (.github/check-owners.tsv;
 # keep the two together). `recompute` and `admission` re-derive committed
 # data and run only by hand, with `--only`.
-readonly DEFAULT_CHECKS=(fmt clippy test results regimen hygiene pages exercise history)
+readonly DEFAULT_CHECKS=(fmt clippy test results regimen scenarios hygiene pages exercise history)
 
 FAILED=()
 
@@ -195,6 +195,44 @@ check_results() {
 # `target/debug/diet`. Reading only CARGO_TARGET_DIR let this check grade
 # every regimen document `ok` through a seventeen-byte shell script, and
 # record its SHA-256 as provenance: accurate, and for the wrong artifact.
+# Every scenario under diet/scenarios/ (#760), run on the canned scenario
+# substrate by `diet-drive scenario`: each step as written, every
+# expectation met, every request answered by a reply the scenario wrote --
+# then assembled into a scratch run directory by scripts/assemble-run.py,
+# its scrub and checks included, so the hand-off is exercised too. A run of
+# zero scenarios fails: a gate that checked nothing is not a pass.
+check_scenarios() {
+  # `diet` too: the assembler checks the log and the record through it.
+  cargo build --quiet -p discipline-diet --bin diet-drive --bin diet || {
+    local build_rc=$?
+    echo "verify: diet-drive and diet did not build (exit ${build_rc})" >&2
+    return "$build_rc"
+  }
+  local drive="${CARGO_TARGET_DIR:-${ROOT}/target}/debug/diet-drive"
+  local scratch rc=0 ran=0 file name out code
+  scratch="$(mktemp -d)" || return 2
+  for file in diet/scenarios/*.jsonl; do
+    [[ -e "$file" ]] || continue
+    ran=$((ran + 1))
+    name="$(basename "$file" .jsonl)"
+    out="${scratch}/${name}"
+    code=0
+    "$drive" scenario "$file" --out "$out" > "${scratch}/${name}.json" || code=$?
+    if [[ "$code" -eq 0 ]]; then
+      echo "  scenario ${name}: passed"
+    else
+      echo "verify: scenario ${name} failed (exit ${code}): $(cat "${scratch}/${name}.json")" >&2
+      rc=1
+    fi
+  done
+  rm -rf -- "${scratch:?}"
+  if [[ "$ran" -eq 0 ]]; then
+    echo "verify: no scenario under diet/scenarios/ ran" >&2
+    return 1
+  fi
+  return "$rc"
+}
+
 check_regimen() {
   local rc=0
 
