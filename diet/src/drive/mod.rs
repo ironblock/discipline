@@ -2846,7 +2846,8 @@ mod tests {
     }
 
     /// #287's floor regimen and worked head, as shipped: the regimen crosses
-    /// into a regime naming its registered substrate, its declared hardware
+    /// into a regime naming today's floor (#718: the 3.8 line's config r2,
+    /// #497, not the retired `BeeLlama` line), its declared hardware
     /// is the registry's for that substrate (or `serve` would refuse it), and
     /// the head carries no timestamp, so a recording's prefix does not expire.
     #[test]
@@ -2858,7 +2859,7 @@ mod tests {
             crate::drive::regimen::regime_registered(&regimen, crate::drive::registry::REGISTRY)
                 .expect("the floor regimen resolves as serve reads it");
         let substrate = &declared.substrates[0];
-        assert_eq!(substrate.id, "accel24-beellama-qwen27b-q4kxl");
+        assert_eq!(substrate.id, "accel24-tabbyapi-exl3-qwen38-27b-3p00");
         let registered =
             crate::drive::registry::identity(crate::drive::registry::REGISTRY, &substrate.id)
                 .expect("the floor substrate is registered");

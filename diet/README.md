@@ -6,7 +6,7 @@ It's primarily a library, but exists primarily to apply a `regimen` - a fixed co
 
 **A regimen** is a TOML file naming the arm, the dogma version, the substrate (a served model on a registered machine, `substrates/README.md`) and the sampler a session runs under, and what else it is held to (`diet check-regimen` reads one). Three ship as specimens:
 
-- [`drive/floor.toml`](drive/floor.toml) binds a session to the maintainer's registered floor substrate. It starts only against that substrate's registered engine.
+- [`drive/floor.toml`](drive/floor.toml) binds a session to the maintainer's floor, the 3.8 line's config r2 on TabbyAPI (#497). It starts only against a server reporting what that substrate's entry declares.
 - [`drive/dev-loop.toml`](drive/dev-loop.toml) names the canned substrate: a scripted server inside this crate, with no weights. It is served only by that canned server, which the batch drive starts for itself.
 - [`drive/replay.toml`](drive/replay.toml) is a rehearsal: commands, approvals and a record, with no model. Its substrate, `canned-replay-tools`, is served by `diet-drive replay`, which answers each ask with a captured llama.cpp `bash` call and then that session's answer, so the shell gate and its approval prompt run.
 
