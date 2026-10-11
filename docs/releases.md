@@ -47,7 +47,7 @@ One working state per lever, a non-default one where the default is off, none or
 | fork asks | v4 | [`seam-smoke-run-1`](../runs/2026-10-10-seam-smoke-run-1-agent-driven): a SUPERSEDE patch at 3188; [`seam-smoke-run-3`](../runs/2026-10-10-seam-smoke-run-3-agent-driven) |
 | self-capture | on, a reminder after 3 silent turns | [`seam-smoke-run-1`](../runs/2026-10-10-seam-smoke-run-1-agent-driven) and [`seam-smoke-run-3`](../runs/2026-10-10-seam-smoke-run-3-agent-driven): captures and the reminder |
 | capture modality | tools, with ask set t1 | [`levers-run-b`](../runs/2026-10-10-levers-run-b-agent-driven): fork 608 answered through `update_record` |
-| model-elected pruning | — | not run: its description awaits the maintainer |
+| model-elected pruning | — | moved to Later — lever candidates (#710; the maintainer, 2026-10-10) |
 | fork delivery of results | advisory | [`levers-run-a`](../runs/2026-10-10-levers-run-a-agent-driven): `delivered` 4042 and 5818 |
 | tool-output disposition | cap on arrival; `reference` at the seam | [`levers-run-a`](../runs/2026-10-10-levers-run-a-agent-driven): call 2592 capped; both seams listed outputs by path |
 | isolation | `sandbox` | [`seam-smoke-run-3`](../runs/2026-10-10-seam-smoke-run-3-agent-driven): a Seatbelt refusal at 12815 |
@@ -69,7 +69,7 @@ One working state per lever, a non-default one where the default is off, none or
 | reconcile gate | `refuse` | [`gate-and-tail`](../runs/2026-10-10-gate-and-tail-agent-driven): set, never held. Across three meditations the model addressed every operator change, including one a contrived flag asked it to leave out. The held state is covered by #698's tests and #699's stories |
 | subagent | — | later |
 
-Every row's evidence is approved (the maintainer, 2026-10-10: "approve all, proceed"). The reconcile gate's row and the zero-turns warning await him. The extraction seat is struck (#570). The milestone closes with its open issues and the v0.2.0 tag.
+Every row's evidence is approved (the maintainer, 2026-10-10: "approve all, proceed"). The reconcile gate's row and the zero-turns warning are approved too, as written (the maintainer, 2026-10-10). The extraction seat is struck (#570). The milestone closes with its open issues and the v0.2.0 tag.
 
 ## v0.3.0 — the hosted API live
 
@@ -94,4 +94,4 @@ Work that serves no open release waits in a `Later —` milestone named for the 
 | Later — claims publication | proofs of the log and record formats; the results linter | when claims are prepared for publication |
 | Later — substrate ladder | admission instruments and substrate work the loop does not need | with the ladder program |
 | Later — gate redesign | defects in the gate and its kept checks | with the gate redesign, after feature complete |
-| Later — lever candidates | levers proposed but not built: a find tool for working memory (#664), how far back a prune may reach (#665) | when a run shows the need, or the feature a candidate extends is turned on |
+| Later — lever candidates | levers proposed but not built: a find tool for working memory (#664), how far back a prune may reach (#665), model-elected pruning shown live (#710) | when a run shows the need, or the feature a candidate extends is turned on |
