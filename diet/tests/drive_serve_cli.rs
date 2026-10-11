@@ -2341,6 +2341,40 @@ fn a_drive_server_that_runs_commands_demands_a_credential_no_command_can_read() 
     assert!(stub.received().is_empty(), "no request reached the server");
 }
 
+/// #735: serve writes the recording unconfined, so it refuses one where the
+/// model's commands can write -- here `--log` inside `--worktree` -- before
+/// anything binds or reaches the server.
+#[test]
+fn a_drive_server_refuses_a_recording_inside_the_worktree() {
+    let tree = Dir::new("recording-in-tree");
+    let stub = Stub::serving(Vec::new()).expect("loopback");
+    let regimen = commands_regimen(
+        "allowed_commands = []\n",
+        "isolation = \"none\"",
+        "[limits]\nmax_steps = 4\n",
+    );
+    let path = regimen.0.to_string_lossy().into_owned();
+    let auth = file_holding("auth", "author:s3cret\n");
+    let auth_path = auth.0.to_string_lossy().into_owned();
+    let log = tree.0.join("session.log").to_string_lossy().into_owned();
+    let (code, said) = run_briefly(
+        &stub.url(),
+        &[
+            "--regimen",
+            &path,
+            "--worktree",
+            &tree.path(),
+            "--auth-file",
+            &auth_path,
+            "--log",
+            &log,
+        ],
+    );
+    assert_eq!(code, Some(1), "{said}");
+    assert!(said.contains("where the model's commands write"), "{said}");
+    assert!(stub.received().is_empty(), "no request reached the server");
+}
+
 /// One `POST` to `path` with the session's credential.
 fn post_authed(address: &str, path: &str, json: &str) -> String {
     exchange(

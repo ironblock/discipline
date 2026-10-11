@@ -410,14 +410,14 @@ pub fn kept_whole_from(
     use std::io::Write as _;
     let dir = recording.join(FILES);
     let failed = |why: std::io::Error| (Check::CopyFailed, format!("{}: {why}", dir.display()));
-    std::fs::create_dir_all(&dir).map_err(failed)?;
+    own_dir(recording, FILES).map_err(failed)?;
     let partial = dir.join(format!(
         ".whole.partial-{}-{}",
         std::process::id(),
         PARTIALS.fetch_add(1, std::sync::atomic::Ordering::Relaxed)
     ));
     let copied = (|| -> std::io::Result<(String, u64)> {
-        let mut out = std::io::BufWriter::new(std::fs::File::create(&partial)?);
+        let mut out = std::io::BufWriter::new(created_new(&partial)?);
         let mut hash = sha2::Sha256::new();
         let mut bytes = 0_u64;
         let mut chunk = vec![0_u8; 64 * 1024];
@@ -655,6 +655,52 @@ fn bounded(stream: impl Read + Send + 'static, limit: u64) -> mpsc::Receiver<Vec
     received
 }
 
+/// `parent/sub`, a directory serve writes into unconfined, made if absent
+/// (#735). Refused when `parent` or `parent/sub` is a symlink, or `sub` is
+/// not a directory: where the recording lies in a path a sandboxed command
+/// can write, a symlink planted there would steer serve's own write outside
+/// the sandbox.
+///
+/// # Errors
+///
+/// That refusal, or the directory's making failed.
+pub fn own_dir(parent: &Path, sub: &str) -> std::io::Result<std::path::PathBuf> {
+    let refused = |path: &Path| {
+        std::io::Error::other(format!(
+            "{} is a symlink or not a directory: serve writes nothing through it",
+            path.display()
+        ))
+    };
+    let linked = |path: &Path| {
+        std::fs::symlink_metadata(path).is_ok_and(|meta| meta.file_type().is_symlink())
+    };
+    if linked(parent) {
+        return Err(refused(parent));
+    }
+    let dir = parent.join(sub);
+    match std::fs::symlink_metadata(&dir) {
+        Ok(meta) if meta.file_type().is_symlink() || !meta.is_dir() => Err(refused(&dir)),
+        Ok(_) => Ok(dir),
+        Err(why) if why.kind() == std::io::ErrorKind::NotFound => {
+            std::fs::create_dir_all(&dir)?;
+            if linked(&dir) {
+                return Err(refused(&dir));
+            }
+            Ok(dir)
+        }
+        Err(why) => Err(why),
+    }
+}
+
+/// A file made at `path` that was not there, a symlink included (#735): a
+/// name planted before serve wrote it is refused, not followed.
+fn created_new(path: &Path) -> std::io::Result<std::fs::File> {
+    std::fs::OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .open(path)
+}
+
 /// How many temporary copies this process has begun: each [`kept`] call's
 /// own temporary name, so two threads keeping the same digest at once never
 /// rename one file out from under the other (#514's review).
@@ -702,14 +748,15 @@ fn kept(recording: &Path, file: &RecordedFile, bytes: &[u8]) -> Result<(), (Chec
         Err(why) if why.kind() == std::io::ErrorKind::NotFound => {}
         Err(why) => return Err(failed(why)),
     }
-    std::fs::create_dir_all(recording.join(FILES)).map_err(failed)?;
+    own_dir(recording, FILES).map_err(failed)?;
     let partial = recording.join(FILES).join(format!(
         ".{}.partial-{}-{}",
         file.sha256,
         std::process::id(),
         PARTIALS.fetch_add(1, std::sync::atomic::Ordering::Relaxed)
     ));
-    std::fs::write(&partial, bytes)
+    created_new(&partial)
+        .and_then(|mut out| std::io::Write::write_all(&mut out, bytes))
         .and_then(|()| std::fs::rename(&partial, &at))
         .map_err(|why| {
             let _ = std::fs::remove_file(&partial);

@@ -2566,6 +2566,7 @@ impl<S: Streaming + 'static> Session<S> {
             .map_or(0, |since| {
                 u64::try_from(since.as_millis()).unwrap_or(u64::MAX)
             });
+        let tools = tools.map(|tools| readable_outputs(tools, opened));
         let mut state = State::opening(trunk, phase_at_open.clone(), interview, tools.as_ref());
         state.push(Event::Started {
             opened,
@@ -5732,26 +5733,57 @@ fn one_call<S: Streaming>(
 /// `background/`, or, with no recording, a directory of the session's own
 /// under the system's temporary one.
 fn background_dir<S>(shared: &Shared<S>, state: &State) -> std::path::PathBuf {
-    let dir = shared
+    let opened = match state.log.first() {
+        Some(Logged {
+            event: Event::Started { opened, .. },
+            ..
+        }) => *opened,
+        _ => 0,
+    };
+    // The recording's `background`, when it is one serve made (#735): a
+    // symlink planted there would steer the job's files; the session's own
+    // temporary directory otherwise.
+    shared
         .tools
         .as_ref()
         .and_then(|tools| tools.recording.as_ref())
-        .map_or_else(
-            || {
-                let opened = match state.log.first() {
-                    Some(Logged {
-                        event: Event::Started { opened, .. },
-                        ..
-                    }) => *opened,
-                    _ => 0,
-                };
-                std::env::temp_dir()
-                    .join(format!("diet-background-{opened}-{}", std::process::id()))
-            },
-            |recording| recording.join("background"),
-        );
-    let _ = std::fs::create_dir_all(&dir);
-    dir
+        .and_then(|recording| super::attach::own_dir(recording, "background").ok())
+        .unwrap_or_else(|| {
+            let dir = temporary_background(opened);
+            let _ = std::fs::create_dir_all(&dir);
+            dir
+        })
+}
+
+/// The session's own directory for background jobs' files when it keeps no
+/// recording (#614), under the system's temporary directory.
+fn temporary_background(opened: u64) -> std::path::PathBuf {
+    std::env::temp_dir().join(format!("diet-background-{opened}-{}", std::process::id()))
+}
+
+/// `tools` with the directories serve points the model to readable under
+/// its sandbox (#735): the recording's, where a capped output is kept whole
+/// and background jobs write; or, with background commands on and no
+/// recording, the session's temporary one, where they write. A sandbox
+/// listing what it reads otherwise refuses the very `sed` and `cat` the
+/// model is told to run.
+fn readable_outputs(mut tools: Tools, opened: u64) -> Tools {
+    if matches!(tools.confinement, crate::isolation::Confinement::Unconfined) {
+        return tools;
+    }
+    let temporary = (tools.background && tools.recording.is_none()).then(|| {
+        let dir = temporary_background(opened);
+        let _ = std::fs::create_dir_all(&dir);
+        dir
+    });
+    let dirs = tools.recording.iter().cloned().chain(temporary);
+    for dir in dirs {
+        let dir = dir.to_string_lossy().into_owned();
+        if !tools.policy.readable.contains(&dir) {
+            tools.policy.readable.push(dir);
+        }
+    }
+    tools
 }
 
 /// A started job, kept and handed to the reaper (#614).
@@ -5781,7 +5813,11 @@ fn background_call<S>(
     let dir = background_dir(shared, &shared.lock());
     let id = super::background::new_id();
     let (output, status_file) = super::background::files_of(&dir, &id);
-    let spawned = std::fs::File::create(&output)
+    // Made new (#735): a name planted there is refused, not followed.
+    let spawned = std::fs::OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .open(&output)
         .map_err(|why| crate::isolation::NotRun::Runner {
             said: format!(
                 "the output file {} could not be made: {why}",
@@ -20084,6 +20120,159 @@ pub(in crate::drive) mod tests {
             }
         )));
         tidy(&[&tree]);
+    }
+
+    /// PROBE: #578's claim, "a later call reads a slice of it through bash",
+    /// under the default sandbox policy (Seatbelt, `sandbox_reads` listed)
+    /// with the recording outside the worktree.
+    #[test]
+    fn probe_capped_output_is_readable_under_the_default_sandbox() {
+        use crate::drive::output::OutputCap;
+        if crate::isolation::Platform::here() != crate::isolation::Platform::MacOs {
+            return;
+        }
+        let tree = scratch("probe-cap-sb");
+        let recording = scratch("probe-cap-sb-recording");
+        let recording = std::fs::canonicalize(&recording).expect("the recording");
+        let whole: String = (1..=5000)
+            .flat_map(|n| [n.to_string(), "\n".to_owned()])
+            .collect();
+        let sha256 = crate::digest::sha256_hex(whole.as_bytes());
+        let kept = recording.join("files").join(&sha256);
+        let slice = format!("sed -n '2500,2502p' \"{}\"", kept.display());
+        let mut replies: Vec<Vec<Step>> = ["seq 1 5000", slice.as_str()]
+            .iter()
+            .enumerate()
+            .map(|(n, command)| vec![bash(&format!("call-{n}"), command)])
+            .collect();
+        replies.push(deltas(&["done"]));
+        let mut tools = tools(Confinement::Unconfined, &tree, &[], None, Decider::Decline);
+        let policy = crate::isolation::Policy::merged_usr();
+        tools.confinement = crate::isolation::open_on(&policy, crate::isolation::Platform::MacOs)
+            .expect("Seatbelt");
+        tools.policy = policy;
+        tools.output_cap = OutputCap::DEFAULT;
+        tools.recording = Some(recording.clone());
+        tools.approvals_off = true;
+        let session = Session::open_looping(Canned::new(replies), looping(), None, tools);
+        session.ask("count", None).expect("accepted");
+        let log = wait_until(&session, "the turn to settle", settled);
+        let written = lines(&log);
+        eprintln!(
+            "PROBE call-0 shown head: {:?}",
+            written[0].shown.as_deref().map(|s| &s[..s.len().min(300)])
+        );
+        eprintln!("PROBE call-1 shown: {:?}", written[1].shown);
+        assert!(kept.exists(), "the drive kept the whole");
+        assert_eq!(written[1].shown.as_deref(), Some("2500\n2501\n2502\n"));
+        tidy(&[&tree, &recording]);
+    }
+
+    /// PROBE: #632's start text tells the model to read the output and
+    /// status files; under the default sandbox, can it?
+    #[test]
+    fn probe_background_files_are_readable_under_the_default_sandbox() {
+        if crate::isolation::Platform::here() != crate::isolation::Platform::MacOs {
+            return;
+        }
+        let tree = scratch("probe-bg-sb");
+        let recording = scratch("probe-bg-sb-recording");
+        let recording = std::fs::canonicalize(&recording).expect("the recording");
+        let look = format!(
+            "ls \"{0}/background\"; for f in \"{0}\"/background/shell-*; do cat \"$f\"; done",
+            recording.display()
+        );
+        let mut tools = tools(Confinement::Unconfined, &tree, &[], None, Decider::Decline);
+        let policy = crate::isolation::Policy::merged_usr();
+        tools.confinement = crate::isolation::open_on(&policy, crate::isolation::Platform::MacOs)
+            .expect("Seatbelt");
+        tools.policy = policy;
+        tools.background = true;
+        tools.approvals_off = true;
+        tools.recording = Some(recording.clone());
+        let mut shape = looping();
+        shape.tools = tool_loop::ToolSurface::Bash.tools_with(true);
+        let session = Session::open_looping(
+            Canned::new(vec![
+                vec![in_the_background("call-1", "echo ready")],
+                deltas(&["started"]),
+                vec![bash("call-2", &look)],
+                deltas(&["looked"]),
+            ]),
+            shape,
+            None,
+            tools,
+        );
+        session.ask("start it", None).expect("accepted");
+        let _ = wait_until(&session, "the job's end", |log| ended_jobs(log).len() == 1);
+        session.ask("look", None).expect("accepted");
+        let log = wait_until(&session, "the second turn", |log| turns_settled(log) == 2);
+        let written = lines(&log);
+        eprintln!("PROBE start text: {:?}", written[0].shown);
+        eprintln!("PROBE look: {:?}", written[1].shown);
+        session.end_commands();
+        let shown = written[1].shown.clone().unwrap_or_default();
+        tidy(&[&tree, &recording]);
+        assert!(shown.contains("ready"), "{shown}");
+    }
+
+    /// PROBE: a recording inside the worktree (where a listed-reads sandbox
+    /// can read capped outputs): can a sandboxed command steer the drive's
+    /// own unconfined write of a capped output outside the policy?
+    #[test]
+    fn probe_kept_output_cannot_be_steered_outside_the_sandbox() {
+        use crate::drive::output::OutputCap;
+        if crate::isolation::Platform::here() != crate::isolation::Platform::MacOs {
+            return;
+        }
+        let tree = scratch("probe-steer-tree");
+        let tree = std::fs::canonicalize(&tree).expect("the tree");
+        let outside = scratch("probe-steer-outside");
+        let outside = std::fs::canonicalize(&outside).expect("outside");
+        let recording = tree.join("rec");
+        std::fs::create_dir_all(&recording).expect("rec");
+        let plant = format!("ln -s \"{}\" rec/files && echo planted", outside.display());
+        let payload = "seq 1 5000";
+        let mut replies: Vec<Vec<Step>> = [
+            plant.as_str(),
+            payload,
+            "echo 'direct' > \"$(dirname rec)/../probe-steer-direct\" ; ls rec/files/",
+        ]
+        .iter()
+        .enumerate()
+        .map(|(n, command)| vec![bash(&format!("call-{n}"), command)])
+        .collect();
+        replies.push(deltas(&["done"]));
+        let mut tools = tools(Confinement::Unconfined, &tree, &[], None, Decider::Decline);
+        let policy = crate::isolation::Policy::merged_usr();
+        tools.confinement = crate::isolation::open_on(&policy, crate::isolation::Platform::MacOs)
+            .expect("Seatbelt");
+        tools.policy = policy;
+        tools.output_cap = OutputCap::DEFAULT;
+        tools.recording = Some(recording.clone());
+        tools.approvals_off = true;
+        let session = Session::open_looping(Canned::new(replies), looping(), None, tools);
+        session.ask("go", None).expect("accepted");
+        let log = wait_until(&session, "the turn to settle", settled);
+        let written = lines(&log);
+        for line in &written {
+            eprintln!(
+                "PROBE {:?}: {:?}",
+                line.argv,
+                line.shown.as_deref().map(|s| &s[..s.len().min(200)])
+            );
+        }
+        let landed: Vec<_> = std::fs::read_dir(&outside)
+            .expect("outside")
+            .filter_map(Result::ok)
+            .map(|entry| entry.file_name())
+            .collect();
+        eprintln!("PROBE files in the directory outside the sandbox: {landed:?}");
+        tidy(&[&tree, &outside]);
+        assert!(
+            landed.is_empty(),
+            "the drive wrote outside the sandbox: {landed:?}"
+        );
     }
 
     /// Two forks in one turn's gap (#564 cadences) that record different
