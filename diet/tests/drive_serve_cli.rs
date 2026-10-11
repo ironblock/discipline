@@ -4029,6 +4029,54 @@ fn a_drive_server_on_a_hosted_api_entry_asks_the_cache_for_the_lifetimes_declare
     assert!(said.contains("cache_ttl"), "{said}");
 }
 
+/// REVIEW: an earlier session's kept-but-refused rows (#658's
+/// `FILE.refused.jsonl`) are an earlier session's output beside this one's
+/// record, as the sidecar and product are.
+#[test]
+fn review_a_drive_server_removes_an_earlier_refused_projection_when_it_starts() {
+    let stub =
+        Stub::serving_with_props(Vec::new(), &diet::drive::canned::build_info()).expect("loopback");
+    let record = file_holding("record", "");
+    let path = record.0.to_string_lossy().into_owned();
+    let refused = PathBuf::from(format!("{path}.refused.jsonl"));
+    std::fs::write(&refused, "an earlier session's refused rows\n").expect("written");
+    let served = start(&stub.url(), &["--regimen", &dev_loop(), "--record", &path]);
+    let still_there = refused.exists();
+    let _ = std::fs::remove_file(&refused);
+    drop(served);
+    assert!(
+        !still_there,
+        "the earlier session's {path}.refused.jsonl is still beside this session's record"
+    );
+}
+
+// REVIEW (net): a base-URL endpoint on a Messages-API entry should reach /v1/messages.
+#[test]
+fn review_net_a_hosted_base_url_is_completed_to_its_messages_path() {
+    let stub = Stub::serving(vec![Act::Raw(HOSTED_ANSWER.to_vec())]).expect("loopback");
+    let regimen = hosted_regimen();
+    let path = regimen.0.to_string_lossy().into_owned();
+    let key = file_holding("key", "sk-rehearsal\n");
+    let key_path = key.0.to_string_lossy().into_owned();
+    let base = format!("http://{}/v1", stub.address());
+    let served = start(&base, &["--regimen", &path, "--key-file", &key_path]);
+    let address = served.listening.clone();
+    let reply = post(&address, &address, r#"{"kind":"ask","text":"hello?"}"#);
+    assert_eq!(status(&reply), 200, "{reply}");
+    let _ = exchange(
+        &address,
+        &format!("GET /events?from=0 HTTP/1.1\r\nHost: {address}\r\n\r\n"),
+        |read| read.contains("turn.settled"),
+    );
+    let _ = post(&address, &address, r#"{"kind":"end"}"#);
+    let heads = stub.heads();
+    let first = heads[0].lines().next().unwrap_or_default().to_owned();
+    assert!(
+        first.starts_with("POST /v1/messages "),
+        "request line: {first}"
+    );
+}
+
 #[test]
 fn review_a_drive_server_refuses_a_tools_ask_set_on_the_fields_route() {
     // #625 refuses `tools` with a fields set. The dual: a set written for

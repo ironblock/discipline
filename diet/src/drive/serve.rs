@@ -669,7 +669,10 @@ impl<S: Streaming + 'static> Serving<S> {
                 .is_some_and(|kind| kind.trim().eq_ignore_ascii_case(attach::MEDIA_TYPE))
         });
         if !png_body {
-            return respond(stream, 415, &empty());
+            // Answered, then its body read before the close (#731): one left
+            // unread resets the connection, and the reply is lost.
+            respond(stream, 415, &empty());
+            return drained(stream, request);
         }
         let Some(length) = request
             .header("content-length")
@@ -760,6 +763,7 @@ impl<S: Streaming + 'static> Serving<S> {
         });
         if !json_body {
             respond(stream, 415, &empty());
+            drained(stream, request);
             return None;
         }
         let Some(length) = request
@@ -770,7 +774,11 @@ impl<S: Streaming + 'static> Serving<S> {
             return None;
         };
         if length > self.config.max_body {
+            // Answered at once, decided on the length, then the body read
+            // before the close (#731): a close with it unread can reset, and
+            // the page then says "unreachable", not "too large".
             respond(stream, 413, &empty());
+            drained(stream, request);
             return None;
         }
         let body = read_body(stream, &request.early_body, length, request.deadline)?;
@@ -926,7 +934,8 @@ enum Command {
 }
 
 /// A command's word as a client written before #583's rename may send it,
-/// in the current spelling: `declare-seam`, and a ruling's `seam`.
+/// in the current spelling: `declare-seam`, and a ruling's or an idle gap's
+/// `seam`.
 fn current(word: &str) -> &str {
     match word {
         "declare-seam" => "declare-meditation",
@@ -1083,7 +1092,11 @@ fn idle_gap(value: &Value) -> Option<IdleGap> {
         _ => None,
     };
     let ended_by = match gap.get("ended_by") {
-        Some(Value::String(tag)) => GapEnd::ALL.iter().copied().find(|end| end.tag() == tag)?,
+        // An old client's `seam` too (#731), as its `declare-seam` is read.
+        Some(Value::String(tag)) => GapEnd::ALL
+            .iter()
+            .copied()
+            .find(|end| end.tag() == current(tag))?,
         _ => return None,
     };
     Some(IdleGap {
@@ -1218,6 +1231,16 @@ fn read_body(
     Some(body)
 }
 
+/// [`drain`] the body `request` declares, when it declares one.
+fn drained(stream: &mut TcpStream, request: &Request) {
+    if let Some(length) = request
+        .header("content-length")
+        .and_then(|length| length.trim().parse::<u64>().ok())
+    {
+        drain(stream, &request.early_body, length, request.deadline);
+    }
+}
+
 /// Read and discard what is left of a body declared `length` long, of which
 /// `early` arrived with the head, until it is all read, the client stops
 /// sending, or `deadline` passes.
@@ -1305,7 +1328,9 @@ fn page(stream: &mut TcpStream, ui: &std::path::Path, path: &str) {
 fn respond_bytes(stream: &mut TcpStream, media_type: &str, bytes: &[u8]) {
     let head = format!(
         "HTTP/1.1 200 OK\r\nContent-Type: {media_type}\r\nContent-Length: {}\r\n\
-         Cache-Control: no-cache\r\nX-Content-Type-Options: nosniff\r\nConnection: close\r\n\r\n",
+         Cache-Control: no-cache\r\nX-Content-Type-Options: nosniff\r\n\
+         X-Frame-Options: DENY\r\nContent-Security-Policy: frame-ancestors 'none'\r\n\
+         Connection: close\r\n\r\n",
         bytes.len()
     );
     let _ = stream.write_all(head.as_bytes());
@@ -1539,6 +1564,22 @@ mod tests {
         assert!(matches!(
             read(r#"{"kind":"ratify-phase","call":"call-p","choice":"seam"}"#),
             Some(Command::RatifyPhase(call, PhaseChoice::Meditation)) if call == "call-p"
+        ));
+    }
+
+    /// REVIEW: a pre-rename surface declares a seam carrying the idle gap it
+    /// ends, `ended_by: "seam"` (exercise App.tsx `gap.carry(command.kind)`).
+    #[test]
+    fn review_old_declare_seam_with_its_idle_gap_is_read() {
+        let read = |body: &str| {
+            let object = crate::formats::record::json::line(body).expect("an object");
+            Command::from_object(&object).map(|posted| posted.command)
+        };
+        assert!(matches!(
+            read(
+                r#"{"kind":"declare-seam","idle_gap":{"opened_by":5,"notice":0,"read":10,"compose":0,"away":0,"blocked":0,"ended_by":"seam"}}"#
+            ),
+            Some(Command::DeclareMeditation(None))
         ));
     }
 
@@ -1796,6 +1837,13 @@ mod tests {
         let (session, server) = serve(Canned::new([deltas(&["ok"])]), config);
         let page = get(&server, "/", "");
         assert_eq!(status(&page), 200, "{page}");
+        // No other site may frame it (#731): on loopback with no auth file,
+        // a framing page could overlay clicks on approve or end.
+        assert!(page.contains("X-Frame-Options: DENY\r\n"), "{page}");
+        assert!(
+            page.contains("Content-Security-Policy: frame-ancestors 'none'\r\n"),
+            "{page}"
+        );
         assert!(
             page.contains("Content-Type: text/html; charset=utf-8\r\n"),
             "{page}"
@@ -3606,6 +3654,48 @@ mod tests {
         drop(session);
         let _ = std::fs::remove_dir_all(&tree);
         let _ = std::fs::remove_dir_all(&recording);
+    }
+
+    /// #731: a command past the cap, and an upload that is not a PNG, are
+    /// answered `413` and `415` after their bodies are read, never a reset --
+    /// the page shows "too large", not "unreachable". Each round sends the
+    /// whole body, then reads the reply.
+    #[test]
+    fn a_command_past_the_cap_and_a_non_png_upload_are_drained_and_answered() {
+        use crate::drive::attach::Attaching;
+
+        let (_session, server, _stub) = serve_attaching(0, Attaching::default(), None);
+        let body = vec![b'x'; 2 * 1024 * 1024];
+        for (path, kind, want) in [
+            ("/commands", "application/json", 413),
+            ("/files", "text/plain", 415),
+        ] {
+            for round in 0..10 {
+                let head = format!(
+                    "POST {path} HTTP/1.1\r\nHost: {}\r\nContent-Type: {kind}\r\n\
+                     Content-Length: {}\r\n\r\n",
+                    host(&server),
+                    body.len()
+                );
+                let mut stream = TcpStream::connect(server.addr()).expect("connects");
+                stream
+                    .set_read_timeout(Some(Duration::from_secs(5)))
+                    .expect("a read timeout");
+                stream.write_all(head.as_bytes()).expect("the head");
+                stream
+                    .write_all(&body)
+                    .unwrap_or_else(|why| panic!("{path} round {round}: refused: {why}"));
+                let mut reply = Vec::new();
+                stream.read_to_end(&mut reply).unwrap_or_else(|why| {
+                    panic!("{path} round {round}: the reply was lost: {why}")
+                });
+                assert_eq!(
+                    status(&String::from_utf8_lossy(&reply)),
+                    want,
+                    "{path} round {round}"
+                );
+            }
+        }
     }
 
     /// An upload past the cap whose body is actually sent is answered `413`
