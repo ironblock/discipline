@@ -9,9 +9,11 @@
 /** A respelled position: the line's kind as v8 spells it (none for `kind` itself), the key, the old and new words. */
 const POSITIONS: readonly (readonly [on: string | undefined, key: string, old: string, now: string])[] = [
   [undefined, 'kind', 'seam', 'meditation'],
+  [undefined, 'kind', 'seam.held', 'meditation.held'],
   ['refused', 'command', 'declare-seam', 'declare-meditation'],
   ['refused', 'because', 'seam-not-built', 'meditation-not-built'],
   ['refused', 'because', 'nothing-to-seam', 'nothing-to-meditate'],
+  ['refused', 'because', 'seam-held', 'meditation-held'],
   ['idle.gap', 'ended_by', 'seam', 'meditation'],
   ['fork', 'why', 'seam', 'meditation'],
   ['session.start', 'fork_delivery', 'seam', 'meditation'],
@@ -21,7 +23,7 @@ const POSITIONS: readonly (readonly [on: string | undefined, key: string, old: s
 /** `line` in the current spelling: itself when it holds no old word. */
 export function respelled<T extends { readonly kind: string }>(line: T): T {
   const fields = line as unknown as Readonly<Record<string, unknown>>;
-  const kind = line.kind === 'seam' ? 'meditation' : line.kind;
+  const kind = POSITIONS.find(([on, key, old]) => on === undefined && key === 'kind' && old === line.kind)?.[3] ?? line.kind;
   let out: Record<string, unknown> | undefined;
   for (const [on, key, old, now] of POSITIONS) {
     if ((on === undefined || on === kind) && fields[key] === old) {

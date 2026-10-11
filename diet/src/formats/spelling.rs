@@ -22,6 +22,7 @@ pub const RESPELLED_IN: i64 = 8;
 /// `kind` key itself), the key, and its old and new words.
 const LOG: &[(Option<&str>, &str, &str, &str)] = &[
     (None, "kind", "seam", "meditation"),
+    (None, "kind", "seam.held", "meditation.held"),
     (
         Some("refused"),
         "command",
@@ -40,6 +41,7 @@ const LOG: &[(Option<&str>, &str, &str, &str)] = &[
         "nothing-to-seam",
         "nothing-to-meditate",
     ),
+    (Some("refused"), "because", "seam-held", "meditation-held"),
     (Some("idle.gap"), "ended_by", "seam", "meditation"),
     (Some("fork"), "why", "seam", "meditation"),
     (Some("session.start"), "fork_delivery", "seam", "meditation"),
@@ -55,7 +57,11 @@ fn positions(
         Some(Value::String(kind)) => Some(kind.as_str()),
         _ => None,
     };
-    let kind = kind.map(|kind| if kind == "seam" { "meditation" } else { kind });
+    let kind = kind.map(|kind| {
+        LOG.iter()
+            .find(|(on, key, old, _)| on.is_none() && *key == "kind" && *old == kind)
+            .map_or(kind, |(_, _, _, new)| new)
+    });
     LOG.iter().filter_map(move |(on, key, old, new)| {
         if on.is_some() && *on != kind {
             return None;

@@ -14,6 +14,8 @@ describe('the boundary respelled (#583)', () => {
     expect(respelled({ kind: 'fork', why: 'seam' }).why).toBe('meditation');
     expect(respelled({ kind: 'session.start', fork_delivery: 'seam' }).fork_delivery).toBe('meditation');
     expect(respelled({ kind: 'phase.ruled', choice: 'seam' }).choice).toBe('meditation');
+    expect(respelled({ kind: 'seam.held', at_turn: 1 }).kind).toBe('meditation.held');
+    expect(respelled({ kind: 'refused', because: 'seam-held' }).because).toBe('meditation-held');
     // On another kind, the same key is free text.
     expect(respelled({ kind: 'captured', why: 'seam' }).why).toBe('seam');
     const current = { kind: 'meditation', at_turn: 2 };
