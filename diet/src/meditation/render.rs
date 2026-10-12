@@ -302,11 +302,13 @@ pub fn entries(object: &WorkingObject) -> String {
 /// to make the model believe it is continuing the session. Each meditation hands it
 /// a better starting point, built from working memory alone.
 ///
-/// The system message is never changed (#597, the maintainer: "System
-/// prompt mutation is forbidden"): after a meditation it is byte-identical to the
-/// session's first. The session and the record's projection both rebuild
-/// the trunk through this one function, so the projection's head check
-/// holds the session to it.
+/// This function never changes the system message (#597). The one change
+/// the program allows is the caller's: a meditation, which misses the cache
+/// anyway, passes a `head` carrying the current phase's ground rules
+/// ([`with_ground_rules`], #787; the maintainer, 2026-10-11: "only allowed
+/// during an event that will cause a cache miss anyways"). The session and
+/// the record's projection both rebuild the trunk through this one
+/// function, so the projection's head check holds the session to it.
 #[must_use]
 pub fn refill(head: &[Message], render: &str) -> Vec<Message> {
     let mut trunk = head.to_vec();
