@@ -2,6 +2,7 @@ import type { Meta, StoryObj } from '@storybook/react-vite';
 import { expect, userEvent, waitFor, within } from 'storybook/test';
 
 import capped from '../../../diet/drive/fixtures/a-capped-turn.jsonl?raw';
+import phaseLibrary from '../../../diet/formats/log/fixtures/valid/a-v8-session-in-a-phase-library.jsonl?raw';
 import toolCallFailed from '../../../diet/formats/log/fixtures/valid/a-v3-tool-call-failed-under-policy.jsonl?raw';
 import toolCallRefused from '../../../diet/formats/log/fixtures/valid/a-v3-tool-call-refused.jsonl?raw';
 import approvalsOff from '../../../diet/formats/log/fixtures/valid/a-v7-call-that-ran-with-approvals-off.jsonl?raw';
@@ -742,21 +743,33 @@ export const ServedPhaseProposal: Story = {
   name: '?drive: the model proposes a phase move, and the operator rules',
   args: { drive: true, web: posting(PHASE_PROPOSED.map((l) => JSON.stringify(l)).join('\n')) },
   play: async ({ canvasElement }) => {
-    const dock = await waitFor(async () => {
-      const found = canvasElement.querySelector<HTMLElement>('.ex-composer__proposal');
-      await expect(found).not.toBeNull();
-      return found!;
-    });
-    await expect(dock.querySelector('.ex-composer__proposal-move')?.textContent).toBe('plan → build');
-    await expect(dock.querySelector('.ex-composer__proposal-reason')?.textContent).toBe('the spec is settled');
-    await expect([...dock.querySelectorAll('button')].map((b) => b.textContent)).toEqual(['meditation', 'continue', 'stay']);
-    // Working memory holds nothing, so there is nothing to meditation: serve would refuse it (#685).
-    const meditation = [...dock.querySelectorAll('button')].find((b) => b.textContent === 'meditation')!;
-    await expect(meditation.disabled).toBe(true);
-    await expect(dock.querySelector('.ex-composer__proposal-why')?.textContent).toBe('no meditation: working memory holds nothing yet');
+    // One control for the model's key (#789), named with its target (#759).
+    const ruling = await within(canvasElement).findByRole('region', { name: 'the model proposes plan → build' });
+    await expect(ruling).toHaveTextContent('the spec is settled');
+    await expect(within(ruling).getAllByRole('button').map((b) => b.getAttribute('aria-label'))).toEqual(['Meditate and move to build', 'Keep, move to build', 'Stay in plan']);
+    // Working memory holds nothing, so there is nothing to meditate on: serve would refuse it (#685).
+    await expect(within(ruling).getByRole('button', { name: 'Meditate and move to build' })).toBeDisabled();
+    await expect(ruling).toHaveTextContent('no meditation: working memory holds nothing yet');
+    await expect(canvasElement.querySelector('.ex-composer__proposal')).toBeNull();
     posted.length = 0;
-    await userEvent.click([...dock.querySelectorAll('button')].find((b) => b.textContent === 'continue')!);
+    // Keep is #788's word; until it lands, serve takes the ruling as #651's `continue`.
+    await userEvent.click(within(ruling).getByRole('button', { name: 'Keep, move to build' }));
     await waitFor(async () => expect(posted).toEqual([{ kind: 'ratify-phase', call: 'p1', choice: 'continue' }]));
+  },
+};
+
+/** `?drive` (#787, #789): the phase the log says is in force -- its moves with their kinds, its ground rules on asking. */
+const PHASE_LIBRARY = phaseLibrary.trim().split('\n');
+
+export const ServedPhaseDocument: Story = {
+  name: '?drive: the phase in force, its moves and its ground rules',
+  args: { drive: true, web: serving(PHASE_LIBRARY.slice(0, PHASE_LIBRARY.findIndex((l) => l.includes('"phase.ruled"'))).join('\n')) },
+  play: async ({ canvasElement }) => {
+    const page = within(canvasElement);
+    const moves = await page.findByRole('list', { name: 'moves from plan' });
+    await expect(within(moves).getAllByRole('listitem').map((li) => li.textContent)).toEqual(['build · suggested']);
+    await userEvent.click(page.getByRole('button', { name: 'Ground rules of plan' }));
+    await expect(page.getByText('Settle the approach before any change.', { selector: '.ex-phases__rules' })).toBeVisible();
   },
 };
 
@@ -765,16 +778,12 @@ export const ServedPhaseProposalWithMemory: Story = {
   name: '?drive: a phase proposal offers the meditation when working memory has something to refill from',
   args: { drive: true, web: posting(PHASE_PROPOSED_WITH_MEMORY.map((l) => JSON.stringify(l)).join('\n')) },
   play: async ({ canvasElement }) => {
-    const dock = await waitFor(async () => {
-      const found = canvasElement.querySelector<HTMLElement>('.ex-composer__proposal');
-      await expect(found).not.toBeNull();
-      return found!;
-    });
-    const meditation = [...dock.querySelectorAll('button')].find((b) => b.textContent === 'meditation')!;
-    await expect(meditation.disabled).toBe(false);
-    await expect(dock.querySelector('.ex-composer__proposal-why')).toBeNull();
+    const ruling = await within(canvasElement).findByRole('region', { name: 'the model proposes plan → build' });
+    const meditate = within(ruling).getByRole('button', { name: 'Meditate and move to build' });
+    await expect(meditate).toBeEnabled();
+    await expect(ruling).not.toHaveTextContent('no meditation');
     posted.length = 0;
-    await userEvent.click(meditation);
+    await userEvent.click(meditate);
     await waitFor(async () => expect(posted).toEqual([{ kind: 'ratify-phase', call: 'p1', choice: 'meditation' }]));
   },
 };

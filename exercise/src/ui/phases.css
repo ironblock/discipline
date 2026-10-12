@@ -15,6 +15,7 @@
 
 .ex-phases__label,
 .ex-phases__reason,
+.ex-phases__why,
 .ex-phases__rules {
   color: var(--ink-faint);
 }
@@ -61,4 +62,14 @@
 .ex-phases button[data-suggested]:not(:disabled) {
   border-color: var(--meditation);
   color: var(--meditation);
+}
+
+/* The model's proposal, waiting on the operator's ruling (#124, #788). */
+.ex-phases__proposal {
+  display: grid;
+  gap: 0.3rem;
+  padding: 0.5rem 0.6rem;
+  border: 1px solid var(--ink-ratify);
+  border-radius: var(--radius);
+  color: var(--ink);
 }

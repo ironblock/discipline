@@ -34,6 +34,8 @@ export interface PhasesProps {
   readonly evidence?: PhaseEvidence;
   /** The model's proposal waiting on the operator. */
   readonly proposal?: { readonly from?: string; readonly to: string; readonly reason?: string };
+  /** Why there is nothing to meditate on (#685), as serve would refuse it: meditate-and-move is not offered. */
+  readonly noMeditation?: string;
   /** `operator_unilateral` (#788): the operator may move alone. */
   readonly unilateral: boolean;
   readonly idle: boolean;
@@ -45,7 +47,7 @@ export interface PhasesProps {
   readonly onMove?: (to: string, how: Exclude<PhaseRuling, 'stay'>) => void;
 }
 
-export function Phases({ phase, moves, groundRules, evidence, proposal, unilateral, idle, start, onStart, onRule, onPropose, onMove }: PhasesProps) {
+export function Phases({ phase, moves, groundRules, evidence, proposal, noMeditation, unilateral, idle, start, onStart, onRule, onPropose, onMove }: PhasesProps) {
   const [rules, setRules] = useState(false);
   const rulesId = useId();
   return (
@@ -93,7 +95,13 @@ export function Phases({ phase, moves, groundRules, evidence, proposal, unilater
           {proposal.reason !== undefined ? <p className="ex-phases__reason">{proposal.reason}</p> : null}
           {evidence ? <Evidence evidence={evidence} /> : null}
           <span className="ex-phases__actions">
-            <button type="button" data-suggested="" aria-label={`Meditate and move to ${proposal.to}`} disabled={!idle} onClick={() => onRule?.('meditation')}>
+            <button
+              type="button"
+              data-suggested=""
+              aria-label={`Meditate and move to ${proposal.to}`}
+              disabled={!idle || noMeditation !== undefined}
+              onClick={() => onRule?.('meditation')}
+            >
               meditate and move
             </button>
             <button type="button" aria-label={`Keep, move to ${proposal.to}`} disabled={!idle} onClick={() => onRule?.('keep')}>
@@ -103,17 +111,18 @@ export function Phases({ phase, moves, groundRules, evidence, proposal, unilater
               stay
             </button>
           </span>
+          {noMeditation !== undefined ? <span className="ex-phases__why">no meditation: {noMeditation}</span> : null}
         </section>
-      ) : moves.length > 0 ? (
+      ) : moves.length > 0 && (onPropose || onMove) ? (
         // The operator's key (#788): propose a move to the model, or, where `operator_unilateral` allows, take it.
         <section className="ex-phases__operator" aria-label={`move from ${phase}`}>
           {evidence ? <Evidence evidence={evidence} /> : null}
           {moves.map((move) => (
             <span key={move.to} className="ex-phases__actions">
               <span className="ex-phases__to">{move.to}</span>
-              {unilateral ? (
+              {unilateral && onMove ? (
                 <>
-                  <button type="button" aria-label={`Meditate and move to ${move.to}`} disabled={!idle} onClick={() => onMove?.(move.to, 'meditation')}>
+                  <button type="button" aria-label={`Meditate and move to ${move.to}`} disabled={!idle || noMeditation !== undefined} onClick={() => onMove?.(move.to, 'meditation')}>
                     meditate and move
                   </button>
                   <button type="button" aria-label={`Keep, move to ${move.to}`} disabled={!idle} onClick={() => onMove?.(move.to, 'keep')}>
@@ -121,9 +130,11 @@ export function Phases({ phase, moves, groundRules, evidence, proposal, unilater
                   </button>
                 </>
               ) : null}
-              <button type="button" aria-label={`Propose ${move.to} to the model`} disabled={!idle} onClick={() => onPropose?.(move.to)}>
-                propose
-              </button>
+              {onPropose ? (
+                <button type="button" aria-label={`Propose ${move.to} to the model`} disabled={!idle} onClick={() => onPropose(move.to)}>
+                  propose
+                </button>
+              ) : null}
             </span>
           ))}
         </section>

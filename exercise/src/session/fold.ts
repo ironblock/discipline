@@ -402,6 +402,13 @@ export interface GapNode {
   readonly residual?: number;
 }
 
+/** A phase as its document says it (#787): what the page shows of the phase in force (#789). */
+export interface PhaseDocument {
+  readonly name: string;
+  readonly groundRules: string;
+  readonly transitions: readonly { readonly to: string; readonly kind: string }[];
+}
+
 export interface Session {
   readonly state: SessionState;
   /** The `seq` of the latest `turn.settled`: the gap a person's next command ends opened there. */
@@ -429,6 +436,9 @@ export interface Session {
   readonly tangentsOpened: number;
   /** The model's phase proposal waiting on the operator's ruling (#124, #651): its call, the move, and its reason. */
   readonly proposal?: { readonly call: string; readonly from?: string; readonly to: string; readonly reason?: string };
+  /** The phase document in force (log v8's `phase_document`, #787): the opening one, then the one each move names -- its
+   * ground rules as the model was given them, and its moves with their kinds. None before v8. */
+  readonly phaseDocument?: PhaseDocument;
   /** A meditation held for the operator (#150's gate, #698): its turn, why it was declared, and the changes left unaddressed. */
   readonly held?: { readonly atTurn: number; readonly reason: string; readonly unaddressed: readonly string[] };
   /** What each slot is serving right now, and for which lane; absent when idle. */
@@ -671,6 +681,7 @@ export function fold(written: readonly LogLine[]): Session {
   // `phase` is a placed log's spelling of `opening_phase`: it declares v3 or v4, before the key arrived (v7, #563).
   let phase = start.opening_phase ?? start.phase ?? '';
   let proposal: { call: string; from?: string; to: string; reason?: string } | undefined;
+  let inForce = start.phase_document;
   let held: { atTurn: number; reason: string; unaddressed: readonly string[] } | undefined;
   // The last meditation's seq: an audit forked after it belongs to the next one.
   let lastMeditation = -1;
@@ -902,12 +913,14 @@ export function fold(written: readonly LogLine[]): Session {
         if (proposal?.call === e.call) proposal = undefined;
         // "continue" moves the phase with no meditation; "meditation" is followed by the meditation line, which moves it.
         if (e.choice === 'continue') phase = e.to;
+        if (e.phase_document) inForce = e.phase_document;
         break;
       }
       case 'meditation': {
         held = undefined;
         for (const call of e.pruned ?? []) replacedByMeditation.add(call);
         if (e.phase) phase = e.phase.to;
+        if (e.phase_document) inForce = e.phase_document;
         // What the model was sent after the meditation -- `diet`'s `meditation::render::refill`, whose output the record's head
         // check verifies: since #597 the head as it was and a user message carrying the render (and the tool outputs
         // the meditation carried, #553); before, the head's system message, a blank line, then the render.
@@ -1279,6 +1292,9 @@ export function fold(written: readonly LogLine[]): Session {
     phase,
     tangentsOpened,
     ...(proposal ? { proposal } : {}),
+    ...(inForce
+      ? { phaseDocument: { name: inForce.name, groundRules: inForce.ground_rules, transitions: inForce.transitions.map(({ to, kind }) => ({ to, kind })) } }
+      : {}),
     ...(held ? { held } : {}),
     ...(openTangent !== undefined
       ? { tangent: { id: openTangent, entries: [...entries.values()].filter((x) => x.tangent === openTangent && x.state === 'live').map((x) => x.id) } }
