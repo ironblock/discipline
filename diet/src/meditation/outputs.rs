@@ -124,12 +124,62 @@ fn kept(output: &Output) -> String {
     format!("{}\n[Tool result]: {result}", call_line(output))
 }
 
-/// `reference`: the call, its whole's size and sha256, and where it was
-/// saved. What a pruned output is carried as (#612).
+/// The most characters of a call's arguments a reference line carries
+/// (#814), Qwen Code's cut for a task's description, as a background
+/// command's list cuts one (#614).
+pub const REFERENCE_ARGS_CHARS: usize = 200;
+
+/// The arguments that name a call (#814): its file -- `path` or
+/// `file_path` -- or its command's first line, as a one-line object; the
+/// whole arguments when they hold neither.
+fn identifying(arguments: &str) -> String {
+    let Ok(serde_json::Value::Object(args)) = serde_json::from_str::<serde_json::Value>(arguments)
+    else {
+        return super::render::one_line(arguments);
+    };
+    let mut named = serde_json::Map::new();
+    for key in ["path", "file_path"] {
+        if let Some(value) = args.get(key) {
+            named.insert(key.to_owned(), value.clone());
+        }
+    }
+    if let Some(serde_json::Value::String(command)) = args.get("command") {
+        let first = command.lines().next().unwrap_or_default();
+        named.insert("command".to_owned(), serde_json::Value::from(first));
+    }
+    if named.is_empty() {
+        return super::render::one_line(arguments);
+    }
+    serde_json::Value::Object(named).to_string()
+}
+
+/// `- turn N: <tool> args=<json>`, the call named by its identifying
+/// arguments within [`REFERENCE_ARGS_CHARS`], the rest elided and counted
+/// (#814): a reference points at an output, and need not carry its input
+/// -- a heredoc that writes a whole file is in the log's `tool_call` line,
+/// whole.
+fn named_call(output: &Output) -> String {
+    let args = identifying(&output.arguments);
+    let total = args.chars().count();
+    let args = if total > REFERENCE_ARGS_CHARS {
+        let cut: String = args.chars().take(REFERENCE_ARGS_CHARS).collect();
+        format!(
+            "{cut}\u{2026} ({} more characters)",
+            total - REFERENCE_ARGS_CHARS
+        )
+    } else {
+        args
+    };
+    format!("- turn {}: {} args={args}", output.turn, output.name)
+}
+
+/// `reference`: the call, named by its identifying arguments (#814), its
+/// whole's size and sha256, and where it was saved. What a pruned output
+/// is carried as (#612).
 #[must_use]
 pub fn reference_line(output: &Output) -> String {
     let Some(saved) = &output.saved else {
-        return format!("{}: not saved\n", call_line(output));
+        return format!("{}: not saved\n", named_call(output));
     };
     let at = saved
         .path
@@ -137,7 +187,7 @@ pub fn reference_line(output: &Output) -> String {
         .map_or_else(|| "not saved".to_owned(), |path| format!("saved at {path}"));
     format!(
         "{}: {} bytes, sha256 {}, {at}\n",
-        call_line(output),
+        named_call(output),
         saved.bytes,
         saved.sha256
     )
@@ -175,6 +225,61 @@ mod tests {
             excerpts: Vec::new(),
             pruned: None,
         }
+    }
+
+    /// #814: a reference line names its call by the arguments that identify
+    /// it, within the bound: a `bash` heredoc that writes a whole file by its
+    /// command's first line, a `write` by its path; a call with neither is
+    /// cut, the rest counted.
+    #[test]
+    fn a_reference_line_names_its_call_within_the_bound() {
+        let saved = Some(Saved {
+            bytes: 14_522,
+            sha256: "a".repeat(64),
+            path: Some("/r/files/aaa".to_owned()),
+        });
+        let body = "print('x')\n".repeat(1_400);
+        let heredoc = Output {
+            arguments: serde_json::json!({"command": format!("cat > big.py <<'EOF'\n{body}EOF")})
+                .to_string(),
+            saved: saved.clone(),
+            ..output(3, "")
+        };
+        let line = reference_line(&heredoc);
+        assert!(
+            line.starts_with(
+                "- turn 3: bash args={\"command\":\"cat > big.py <<'EOF'\"}: 14522 bytes"
+            ),
+            "{line}"
+        );
+        let write = Output {
+            name: "write".to_owned(),
+            arguments: serde_json::json!({"path": "src/big.py", "content": body}).to_string(),
+            saved: saved.clone(),
+            ..output(4, "")
+        };
+        let line = reference_line(&write);
+        assert!(
+            line.starts_with("- turn 4: write args={\"path\":\"src/big.py\"}: 14522 bytes"),
+            "{line}"
+        );
+        let long = Output {
+            name: "grep".to_owned(),
+            arguments: serde_json::json!({"pattern": "x".repeat(500)}).to_string(),
+            saved,
+            ..output(5, "")
+        };
+        let line = reference_line(&long);
+        let args = line
+            .split_once(" args=")
+            .and_then(|(_, rest)| rest.split_once(": 14522 bytes"))
+            .map(|(args, _)| args)
+            .expect("the args");
+        assert!(
+            args.ends_with(&format!("\u{2026} ({} more characters)", 514 - 200)),
+            "{args}"
+        );
+        assert!(args.chars().count() < REFERENCE_ARGS_CHARS + 40, "{args}");
     }
 
     /// #612: a pruned output is its reference line whatever the state; under

@@ -7320,8 +7320,8 @@ fn refilled(
     };
     // The render, under the regimen's budget when it declares one (#565).
     let budget = interview.meditations.render_budget;
-    let rendered = marked_render(state, interview, budget);
-    let render_budget = budget.map(|budget| log::RenderBudget {
+    let mut rendered = marked_render(state, interview, budget);
+    let mut render_budget = budget.map(|budget| log::RenderBudget {
         tokens: budget.tokens,
         over: match budget.over {
             crate::meditation::render::OverBudget::Tier => "tier",
@@ -7331,8 +7331,8 @@ fn refilled(
         rendered: rendered.tokens,
         reduced: rendered.reduced,
         fits: Some(rendered.fits),
+        window_line: None,
     });
-    let render = rendered.text;
     let carried_entries = interview.object.live().count() as u64;
     // The head a trunk request on `messages` carries: `Head::of` leaves
     // out a request's last message, its ask, so one stands in for it.
@@ -7376,14 +7376,48 @@ fn refilled(
             (state.recording.as_deref(), &state.pruned),
         ),
     );
-    let sent = outputs
-        .as_ref()
-        .map_or_else(|| render.clone(), |(text, _)| format!("{render}{text}"));
     // Each background command still running (#614), after the summary in
     // the refill's message, as Qwen Code places its list: the refill
     // compacts away the call that started it.
     let background = super::background::running_at_meditation(state.jobs.values_mut());
     let (head, phase_document) = state.phase_head(&template.messages);
+    // The refill fits the window (#814): sized past its line, the render is
+    // elided, oldest first, to the room the rest leaves -- whatever the
+    // regimen's budget says, unless that is smaller.
+    let around = head
+        .iter()
+        .chain(&kept)
+        .map(crate::meditation::render::estimated_tokens)
+        .sum::<u64>()
+        + estimated_chars(
+            outputs.as_ref().map_or("", |(text, _)| text.as_str()),
+            background.as_deref().unwrap_or_default(),
+        );
+    if let Some(line) = window_line(template)
+        && rendered.tokens + around > line
+    {
+        let room = line.saturating_sub(around);
+        if budget.is_none_or(|budget| budget.tokens > room) {
+            let fitted = crate::meditation::render::Budget {
+                tokens: room,
+                over: crate::meditation::render::OverBudget::Elide,
+            };
+            let interview = state.interview.as_ref().expect("held above");
+            rendered = marked_render(state, interview, Some(fitted));
+            render_budget = Some(log::RenderBudget {
+                tokens: room,
+                over: "elide".to_owned(),
+                rendered: rendered.tokens,
+                reduced: rendered.reduced,
+                fits: Some(rendered.fits),
+                window_line: Some(line),
+            });
+        }
+    }
+    let render = rendered.text;
+    let sent = outputs
+        .as_ref()
+        .map_or_else(|| render.clone(), |(text, _)| format!("{render}{text}"));
     let mut refilled = crate::meditation::render::refill_with(&head, &sent, background.as_deref());
     state.refilled = true;
     refilled.extend(kept);
@@ -7431,6 +7465,26 @@ fn refilled(
         refilled_anyway: None,
         warm: None,
     }
+}
+
+/// The window's line (#617, #814): the window less its reserve -- the
+/// output cap, or [`crate::meditation::policy::WINDOW_RESERVE`] if more --
+/// when serve knows the window.
+fn window_line(template: &RequestShape) -> Option<u64> {
+    let reserve =
+        u64::from(template.limits.max_output_tokens).max(crate::meditation::policy::WINDOW_RESERVE);
+    template
+        .limits
+        .context_window
+        .map(|window| window.saturating_sub(reserve))
+}
+
+/// The estimated tokens of the refill message's text around its render:
+/// the tool-output section, the background list, and the `<summary>` tags.
+fn estimated_chars(outputs: &str, background: &str) -> u64 {
+    let wrapper = "<summary>\n\n</summary>".chars().count();
+    let chars = outputs.chars().count() + background.chars().count() + wrapper;
+    u64::try_from(chars.div_ceil(4)).unwrap_or(u64::MAX)
 }
 
 /// How many whole turns the tail `kept` of `turns` holds; and, when a tail
@@ -16683,6 +16737,79 @@ pub(in crate::drive) mod tests {
             settled(log) && !fork_outcomes(log).is_empty()
         });
         session
+    }
+
+    /// #814: a working memory whose render, with the head, would pass the
+    /// window's line -- the window less its reserve -- is elided, oldest
+    /// first, to the room left, though the regimen declares no budget; the
+    /// meditation line names the line it was fitted to and how many entries
+    /// went.
+    #[test]
+    fn a_refill_past_the_windows_line_is_elided_to_fit_and_says_so() {
+        let mut shape = template();
+        shape.limits.context_window = Some(crate::meditation::policy::WINDOW_RESERVE + 600);
+        let session = Session::open_with(
+            Canned::new(vec![deltas(&[SCOPED]), deltas(&[DECIDED])]),
+            shape,
+            None,
+            None,
+            None,
+            Some(interviewing(&[log::Warrant::Scoping])),
+        );
+        session
+            .ask_marked("what are we building?", None, true)
+            .expect("accepted");
+        wait_until(&session, "the fork to settle", |log| {
+            settled(log) && !fork_outcomes(log).is_empty()
+        });
+        {
+            let mut state = session.shared.lock();
+            let object = &mut state.interview.as_mut().expect("memory").object;
+            for n in 0..60_u32 {
+                object
+                    .apply(&Patch::Add {
+                        id: crate::object::EntryId::new(&format!("bulk-{n:02}")).expect("an id"),
+                        content: format!("decision: {} {n}", "the long form of a fact ".repeat(8)),
+                        provenance: crate::object::Provenance {
+                            turn: 1,
+                            lane: "interview".to_owned(),
+                            fork: None,
+                            tangent: None,
+                            index: n,
+                        },
+                    })
+                    .expect("an entry");
+            }
+        }
+        session.declare_meditation(None).expect("admitted");
+        let log = wait_until(&session, "the meditation", meditated);
+        let (render, budget) = log
+            .iter()
+            .find_map(|logged| match &logged.event {
+                Event::Meditated {
+                    render,
+                    render_budget,
+                    ..
+                } => Some((render.clone(), render_budget.clone())),
+                _ => None,
+            })
+            .expect("a meditation");
+        let budget = budget.expect("the window set a budget");
+        assert_eq!(budget.window_line, Some(600), "{budget:?}");
+        assert_eq!(budget.over, "elide");
+        assert!(budget.reduced > 0, "{budget:?}");
+        assert!(budget.rendered <= budget.tokens, "{budget:?}");
+        assert!(render.contains("older entries elided"), "{render}");
+        let trunk: u64 = session
+            .shared
+            .lock()
+            .trunk
+            .iter()
+            .map(crate::meditation::render::estimated_tokens)
+            .sum();
+        assert!(trunk <= 600, "the refilled trunk is {trunk} tokens");
+        reads_whole(&session);
+        every_head_rebuilds(&log);
     }
 
     fn meditated(log: &[Logged]) -> bool {

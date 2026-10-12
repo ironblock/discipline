@@ -633,6 +633,7 @@ export type MeditationLine = {
   render_tokens?: number;
   render_reduced?: number;
   render_fits?: boolean;
+  render_window_line?: number;
   prompt_tokens?: number;
   window?: number;
   pruned?: string[];
