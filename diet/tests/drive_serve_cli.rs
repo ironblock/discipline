@@ -4257,7 +4257,7 @@ fn an_mcp_client_drives_a_served_session_to_a_held_meditation_and_refills_anyway
     let listed = mcp.request("tools/list", serde_json::json!({}));
     assert_eq!(
         listed["tools"].as_array().map(Vec::len),
-        Some(18),
+        Some(20),
         "{listed}"
     );
 
@@ -4783,4 +4783,169 @@ fn a_drive_server_with_mechanical_capture_alone_keeps_working_memory() {
     );
     assert_eq!(status(&memory), 200, "{memory}");
     assert!(memory.contains(r#""entries":[]"#), "{memory}");
+}
+
+/// A streamed reply making one call, `call-p`, of the phase tool: a move to
+/// `to`, for `reason`.
+fn a_phase_proposal(to: &str, reason: &str) -> Act {
+    let arguments = serde_json::json!({"to": to, "reason": reason}).to_string();
+    let call = serde_json::json!({"choices": [{"index": 0, "finish_reason": null, "delta": {
+        "tool_calls": [{"index": 0, "id": "call-p", "type": "function",
+            "function": {"name": "propose_phase_transition", "arguments": arguments}}]}}]});
+    let done =
+        serde_json::json!({"choices": [{"index": 0, "delta": {}, "finish_reason": "tool_calls"}]});
+    Act::Answer(format!("data: {call}\n\ndata: {done}\n\ndata: [DONE]\n\n"))
+}
+
+#[test]
+fn a_drive_mcp_operator_rules_a_models_phase_proposal_and_the_new_phases_rules_follow() {
+    // #790: over MCP alone, after a scoping turn fills working memory, the
+    // model proposes leaving `plan` for `build`
+    // -- which ends its turn (#788) -- and the waiting `ask` returns
+    // `proposal`, with it and its evidence in the digest; `status` names the
+    // phase and the pending proposal; `rule_phase` meditates and moves; and
+    // the next request's system prompt carries the build phase's ground
+    // rules.
+    let stub = Stub::serving_with_props(
+        vec![
+            saying("A tracker for one team, no login. Next, I will sketch the schema."),
+            saying("DECISION: a tracker\nDECISION: for one team\nDECISION: no login\nPLAN: NONE\n"),
+            a_phase_proposal("build", "the plan is settled"),
+            saying("Building now."),
+        ],
+        &diet::drive::canned::build_info(),
+    )
+    .expect("loopback");
+    let regimen = dev_loop_sampling(
+        "interview_warrant = [\"scoping\"]\nphase_library = \"starter\"\n\
+         starting_phase = \"plan\"\n",
+        "seed = 7\n",
+    );
+    let regimen_path = regimen.0.to_string_lossy().into_owned();
+    let served = start(&stub.url(), &["--regimen", &regimen_path]);
+    let mut mcp = Mcp::attached(&served.listening);
+    let _ = mcp.request("initialize", serde_json::json!({}));
+
+    let scoped = mcp.call(
+        "ask",
+        serde_json::json!({"text": "what are we building?", "scoping": true}),
+    );
+    assert_eq!(scoped["returned"], "idle", "{scoped}");
+    let asked = mcp.call("ask", serde_json::json!({"text": "is the plan done?"}));
+    assert_eq!(asked["returned"], "proposal", "{asked}");
+    let proposal = &asked["digest"]["proposal"];
+    assert_eq!(proposal["by"], "model", "{proposal}");
+    assert_eq!(proposal["to"], "build", "{proposal}");
+    assert_eq!(proposal["reason"], "the plan is settled", "{proposal}");
+    assert!(proposal["phase_steps"].is_number(), "{proposal}");
+
+    let status = mcp.call("status", serde_json::json!({}));
+    assert_eq!(status["phase"]["current"], "plan", "{status}");
+    assert_eq!(status["phase"]["pending"]["to"], "build", "{status}");
+    assert!(
+        status["phase"]["pending"]["tokens_since_meditation"].is_number(),
+        "{status}"
+    );
+
+    let last = status["body"]["last_seq"].clone();
+    let ruled = mcp.call("rule_phase", serde_json::json!({"choice": "meditation"}));
+    assert_eq!(ruled["status"], 200, "{ruled}");
+    let meditated = mcp.call(
+        "wait",
+        serde_json::json!({"until": "meditation", "after": last, "timeout": 30}),
+    );
+    assert_eq!(
+        meditated["body"]["event"]["kind"], "meditation",
+        "{meditated}"
+    );
+    let status = mcp.call("status", serde_json::json!({}));
+    assert_eq!(status["phase"]["current"], "build", "{status}");
+    assert!(status["phase"]["pending"].is_null(), "{status}");
+
+    let next = mcp.call("ask", serde_json::json!({"text": "go on"}));
+    assert_eq!(next["returned"], "idle", "{next}");
+    let ended = mcp.call("end", serde_json::json!({}));
+    assert_eq!(ended["status"], 200, "{ended}");
+    drop(mcp);
+    drop(served);
+    let bodies = stub.received();
+    let last_body = log_line_object(bodies.last().expect("a request"));
+    let system = last_body["messages"][0]["content"]
+        .as_str()
+        .expect("a system message")
+        .to_owned();
+    assert!(
+        system.contains("Ground rules for the build phase:"),
+        "{system}"
+    );
+}
+
+#[test]
+fn a_drive_mcp_start_names_its_phase_and_propose_phase_reaches_serve() {
+    // #790: `start` with a `phase` sends `start-phase` before any ask, and
+    // `propose_phase` sends the operator's proposal -- both answered as serve
+    // answers them, here refused: the canned regimen has no phase graph.
+    let stub =
+        Stub::serving_with_props(Vec::new(), &diet::drive::canned::build_info()).expect("loopback");
+    let config = config_home(&stub.url());
+    let mut mcp = Mcp::spawned(&[], &[("XDG_CONFIG_HOME", &config.0)]);
+    let _ = mcp.request("initialize", serde_json::json!({}));
+    let started = mcp.call(
+        "start",
+        serde_json::json!({"profile": "canned", "phase": "plan"}),
+    );
+    assert_eq!(started["started"], true, "{started}");
+    assert_eq!(
+        started["phase"],
+        serde_json::json!({"status": 409, "body": {"refused": "no-phase-graph"}}),
+        "{started}"
+    );
+    let proposed = mcp.call("propose_phase", serde_json::json!({"to": "build"}));
+    assert_eq!(proposed["body"]["refused"], "no-phase-graph", "{proposed}");
+    let ruled = mcp.request(
+        "tools/call",
+        serde_json::json!({"name": "rule_phase", "arguments": {"choice": "keep"}}),
+    );
+    assert_eq!(ruled["isError"], true, "no proposal awaits: {ruled}");
+    let stopped = mcp.call("stop", serde_json::json!({}));
+    assert_eq!(stopped["exited"], 0, "{stopped}");
+}
+
+#[test]
+fn a_drive_mcp_move_phase_moves_alone_unless_the_regimen_forbids_it() {
+    // #790: `move_phase` sends #788's `move-phase`, the operator moving with
+    // no word from the model; under `operator_unilateral = false` it is
+    // refused `not-unilateral`, returned as serve answered it.
+    let phased = |unilateral: &str| {
+        dev_loop_sampling(
+            &format!(
+                "interview_warrant = [\"scoping\"]\nphase_library = \"starter\"\n\
+                 starting_phase = \"plan\"\n{unilateral}"
+            ),
+            "seed = 7\n",
+        )
+    };
+    let stub =
+        Stub::serving_with_props(Vec::new(), &diet::drive::canned::build_info()).expect("loopback");
+    let regimen = phased("");
+    let served = start(&stub.url(), &["--regimen", &regimen.0.to_string_lossy()]);
+    let mut mcp = Mcp::attached(&served.listening);
+    let _ = mcp.request("initialize", serde_json::json!({}));
+    let moved = mcp.call("move_phase", serde_json::json!({"to": "build"}));
+    assert_eq!(moved["status"], 200, "{moved}");
+    let status = mcp.call("status", serde_json::json!({}));
+    assert_eq!(status["phase"]["current"], "build", "{status}");
+
+    let stub =
+        Stub::serving_with_props(Vec::new(), &diet::drive::canned::build_info()).expect("loopback");
+    let regimen = phased("operator_unilateral = false\n");
+    let served = start(&stub.url(), &["--regimen", &regimen.0.to_string_lossy()]);
+    let mut mcp = Mcp::attached(&served.listening);
+    let _ = mcp.request("initialize", serde_json::json!({}));
+    let refused = mcp.call("move_phase", serde_json::json!({"to": "build"}));
+    assert_eq!(
+        refused,
+        serde_json::json!({"status": 409, "body": {"refused": "not-unilateral"}}),
+        "{refused}"
+    );
 }
