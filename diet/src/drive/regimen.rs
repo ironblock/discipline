@@ -1057,7 +1057,7 @@ fn reconcile_gate_lever(regimen: &Regimen) -> String {
 /// that would not fit its window is refused unsent either way.
 fn fork_memory_share_lever(regimen: &Regimen) -> String {
     crate::drive::session::fork_tail(regimen).map_or_else(
-        || "tail:output-cap".to_owned(),
+        || format!("tail:{}:default", crate::drive::session::FORK_TAIL_DEFAULT),
         |tokens| format!("tail:{tokens}"),
     )
 }

@@ -858,9 +858,11 @@ pub struct ForkSeat {
 pub struct PoolRoom {
     /// The pool's window.
     pub window: u64,
-    /// The trunk's prompt, resident in it; 0 offboard.
+    /// The trunk's prompt, resident in it, and since #826 its output cap:
+    /// the room its next request is sized into; 0 offboard.
     pub trunk: u64,
-    /// The prompts of the forks in flight beside it.
+    /// The prompts of the forks in flight beside it, and since #826 their
+    /// output caps.
     pub beside: u64,
     /// The fork's own reservation: its prompt, less the prefix it shares
     /// with the trunk's on a server that declares `served_prefix_shared`
