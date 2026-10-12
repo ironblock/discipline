@@ -590,6 +590,7 @@ export type ForkSettledLine = {
   wall_ms?: number;
   refused?: string;
   trailer?: string;
+  not_run?: number;
 } & ({ window: number; trunk_tokens: number; beside_tokens: number; fork_tokens: number } | { window?: never; trunk_tokens?: never; beside_tokens?: never; fork_tokens?: never });
 
 export type PatchLine = {

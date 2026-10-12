@@ -629,6 +629,8 @@ pub enum Event {
         trailer: Option<String>,
         /// What a fork refused for the pool did not fit beside (#782).
         pool: Option<log::PoolRoom>,
+        /// The calls the fork made that ran nothing (#806).
+        not_run: Option<u64>,
     },
     /// A meditation fired, and the trunk was refilled from working memory (#493):
     /// the head with the working object rendered after it, and no turn of
@@ -4908,8 +4910,10 @@ pub fn line_of(logged: &Logged) -> log::Line {
             refused,
             trailer,
             pool,
+            not_run,
         } => log::Event::ForkSettled {
             pool: *pool,
+            not_run: *not_run,
             fork: *fork,
             outcome: *outcome,
             prompt_tokens: *prompt_tokens,
@@ -7418,6 +7422,7 @@ impl Event {
             refused: None,
             trailer: None,
             pool: None,
+            not_run: None,
         }
     }
 }
@@ -9490,6 +9495,7 @@ fn fire<S>(
             wall_ms: None,
             refused: Some(REFUSED_POOL.to_owned()),
             pool: room,
+            not_run: None,
         });
         return None;
     }
@@ -9877,6 +9883,7 @@ fn fire_cut<S>(shared: &Shared<S>, state: &mut State, cut: Cut) -> Option<Fired>
             wall_ms: None,
             refused: Some(REFUSED_POOL.to_owned()),
             pool: room,
+            not_run: None,
         });
         return None;
     }
@@ -9974,9 +9981,7 @@ struct ForkRun {
     result: Result<StreamEnded, TransportFailure>,
     partial: String,
     reasoning: String,
-    /// Whether it made a call it may not make.
-    called: bool,
-    /// Its capture calls, when it answers through the tools (#610).
+    /// Every call it made, on either route (#610, #806): none of them runs.
     calls: Calls,
     tools: bool,
     hosted: Hosted,
@@ -9996,7 +10001,6 @@ fn stream_fork<S: Streaming>(shared: &Shared<S>, forked: &Fired) -> ForkRun {
     let deadline = Instant::now() + shared.template.limits.call;
     let mut partial = String::new();
     let mut reasoning = String::new();
-    let mut called = false;
     let tools = shared
         .lock()
         .interview
@@ -10030,12 +10034,15 @@ fn stream_fork<S: Streaming>(shared: &Shared<S>, forked: &Fired) -> ForkRun {
                 request,
                 progress: frame,
             },
+            // Every call is logged on either route (#806): a fork cut from
+            // the trunk carries the trunk's tools, and its answer may be a
+            // call. None runs.
             Piece::ToolCall {
                 index,
                 id,
                 name,
                 arguments,
-            } if tools => {
+            } => {
                 calls.piece(index, id, name, arguments);
                 Event::ToolCallPiece {
                     request,
@@ -10044,10 +10051,6 @@ fn stream_fork<S: Streaming>(shared: &Shared<S>, forked: &Fired) -> ForkRun {
                     name: name.map(str::to_owned),
                     arguments: arguments.to_owned(),
                 }
-            }
-            Piece::ToolCall { .. } => {
-                called = true;
-                return;
             }
             Piece::Signature(_) | Piece::Redacted(_) | Piece::Usage(_) => return,
         };
@@ -10058,7 +10061,6 @@ fn stream_fork<S: Streaming>(shared: &Shared<S>, forked: &Fired) -> ForkRun {
         result,
         partial,
         reasoning,
-        called,
         calls,
         tools,
         hosted,
@@ -10080,12 +10082,17 @@ fn settle_fork<S>(
         result,
         partial,
         reasoning,
-        called,
         calls,
         tools,
         hosted,
         began,
     } = run;
+    let calls = calls.into_calls();
+    // What a fork calls runs nothing (#806); a record tool's call is read
+    // as its answer, and every other is counted on its settled line.
+    let not_run = u64::try_from(calls.iter().filter(|call| !record_tool(call)).count())
+        .ok()
+        .filter(|calls| *calls > 0);
     let reasoning = Some(reasoning).filter(|thought| !thought.is_empty());
     let mut patches = Vec::new();
     let mut trailer = None;
@@ -10122,18 +10129,35 @@ fn settle_fork<S>(
             } else if cut {
                 log::ForkOutcome::Truncated
             } else if tools {
-                let (outcome, lines) = captured(state, &calls.into_calls(), (turn, request), fork);
+                let (outcome, lines) = captured(state, &calls, (turn, request), fork);
                 patches = lines;
                 outcome
-            } else if called {
-                log::ForkOutcome::Unparseable
             } else {
-                // What trails the last field is no field (levers run A).
-                let (fields, after) = trailed(&text);
-                trailer = after;
-                let (outcome, lines) = folded(state, &fields, turn, fork);
-                patches = lines;
-                outcome
+                // The fields route reads the prose and folds any record
+                // tool's call beside it (#806).
+                let recorded = calls.iter().any(record_tool);
+                let prose = if text.trim().is_empty() && (recorded || not_run.is_some()) {
+                    None
+                } else {
+                    // What trails the last field is no field (levers run A).
+                    let (fields, after) = trailed(&text);
+                    trailer = after;
+                    let (outcome, lines) = folded(state, &fields, turn, fork);
+                    patches = lines;
+                    Some(outcome)
+                };
+                let called = recorded.then(|| {
+                    let (outcome, lines) = captured(state, &calls, (turn, request), fork);
+                    patches.extend(lines);
+                    outcome
+                });
+                match (prose, called) {
+                    (Some(log::ForkOutcome::Value), _) | (_, Some(log::ForkOutcome::Value)) => {
+                        log::ForkOutcome::Value
+                    }
+                    (Some(outcome), _) | (None, Some(outcome)) => outcome,
+                    (None, None) => log::ForkOutcome::Unparseable,
+                }
             }
         }
         Ok(StreamEnded::Cancelled) => {
@@ -10187,6 +10211,7 @@ fn settle_fork<S>(
         wall_ms,
         refused: None,
         pool: None,
+        not_run,
     });
     for patch in patches {
         state.push(patch);
@@ -10212,6 +10237,14 @@ fn captured(
     captured_in(state, calls, (turn, request), (fork, Lane::Interview))
 }
 
+/// Whether `call` is a record tool's (`update_record`, `resolve_entry`): the
+/// calls a fork's or an audit's answer is read from (#610, #806). The phase
+/// tool is not one: a fork proposes nothing.
+fn record_tool(call: &Call) -> bool {
+    use crate::capture::tools::CaptureTool;
+    CaptureTool::from_tag(&call.name).is_some_and(|tool| CaptureTool::OFFERED.contains(&tool))
+}
+
 /// [`captured`], its patches on `lane`: `interview` for a fork's, `audit`
 /// for a meditation's audit's (#610).
 fn captured_in(
@@ -10220,13 +10253,9 @@ fn captured_in(
     (turn, request): (u32, u64),
     (fork, lane): (u64, Lane),
 ) -> (log::ForkOutcome, Vec<Event>) {
-    use crate::capture::tools::CaptureTool;
     let mut lines = Vec::new();
     let mut wrote = false;
-    let capture_calls: Vec<&Call> = calls
-        .iter()
-        .filter(|call| CaptureTool::from_tag(&call.name).is_some())
-        .collect();
+    let capture_calls: Vec<&Call> = calls.iter().filter(|call| record_tool(call)).collect();
     if capture_calls.is_empty() {
         let outcome = if calls.is_empty() {
             log::ForkOutcome::Decline
@@ -12780,6 +12809,7 @@ pub(in crate::drive) mod tests {
                 wall_ms: Some(480),
                 refused: None,
                 pool: None,
+                not_run: None,
             },
             Event::Patched {
                 fork: Some(20),
@@ -13284,6 +13314,7 @@ pub(in crate::drive) mod tests {
                 wall_ms: Some(480),
                 refused: None,
                 pool: None,
+                not_run: None,
             },
             log::Event::Patch {
                 fork: Some(20),
@@ -20707,6 +20738,125 @@ pub(in crate::drive) mod tests {
         });
         assert_eq!(fork_outcomes(&log), [log::ForkOutcome::Unparseable]);
         reads_whole(&bash);
+    }
+
+    /// A session whose scoping forks answer in fields (the default) with
+    /// self-capture on, so a fork's request carries the record tools
+    /// (#806), playing `acts`.
+    fn forks_on_fields(acts: Vec<Vec<Step>>) -> Session<Canned> {
+        let mut interview = interviewing(&[log::Warrant::Scoping]);
+        interview.self_capture = Some(crate::capture::tools::Cadence::DEFAULT);
+        let mut shape = template();
+        declare_self_capture(&mut shape, Some(&interview));
+        Session::open_with(Canned::new(acts), shape, None, None, None, Some(interview))
+    }
+
+    /// The fork's settled line: its outcome and the calls it ran nothing
+    /// for.
+    fn fork_settled(log: &[Logged]) -> (log::ForkOutcome, Option<u64>) {
+        log.iter()
+            .find_map(|logged| match &logged.event {
+                Event::ForkSettled {
+                    outcome, not_run, ..
+                } => Some((*outcome, *not_run)),
+                _ => None,
+            })
+            .expect("a fork.settled")
+    }
+
+    /// The names of the calls a request's pieces logged.
+    fn called_names(log: &[Logged]) -> Vec<String> {
+        log.iter()
+            .filter_map(|logged| match &logged.event {
+                Event::ToolCallPiece {
+                    name: Some(name), ..
+                } => Some(name.clone()),
+                _ => None,
+            })
+            .collect()
+    }
+
+    /// #806: on the fields route, a fork that answers only through
+    /// `update_record` is folded as on the tools route: `value`, its call
+    /// logged, its patch the fork's.
+    #[test]
+    fn a_fields_fork_answering_only_through_update_record_settles_value_with_its_patches() {
+        const SAID: &str = "The parser drops blank lines before it tokenizes.";
+        let session = forks_on_fields(vec![
+            deltas(&[SAID]),
+            vec![record_at(0, "f-1", "fact", SAID)],
+        ]);
+        session
+            .ask_marked("how does the parser treat blank lines?", None, true)
+            .expect("accepted");
+        let log = wait_until(&session, "the fork to settle", |log| {
+            settled(log) && !fork_outcomes(log).is_empty()
+        });
+        reads_whole(&session);
+        assert_eq!(fork_settled(&log), (log::ForkOutcome::Value, None));
+        assert_eq!(called_names(&log), ["update_record"]);
+        let recorded = captures(&log);
+        assert_eq!(recorded.len(), 1, "{recorded:?}");
+        assert_eq!(recorded[0].0, "recorded");
+        assert_eq!(
+            patches(&log)
+                .into_iter()
+                .map(|patched| patched.id)
+                .collect::<Vec<_>>(),
+            recorded[0].1
+        );
+    }
+
+    /// #806: on the fields route, a fork that writes its fields and calls
+    /// `update_record` beside them has both folded.
+    #[test]
+    fn a_fields_fork_answering_in_prose_and_a_call_folds_both() {
+        const SAID: &str = "The parser drops blank lines before it tokenizes.";
+        let session = forks_on_fields(vec![
+            deltas(&[SAID]),
+            vec![
+                Step::Delta("DECISION: a tracker\n".to_owned()),
+                record_at(0, "f-1", "fact", SAID),
+            ],
+        ]);
+        session
+            .ask_marked("scope it", None, true)
+            .expect("accepted");
+        let log = wait_until(&session, "the fork to settle", |log| {
+            settled(log) && !fork_outcomes(log).is_empty()
+        });
+        reads_whole(&session);
+        assert_eq!(fork_settled(&log), (log::ForkOutcome::Value, None));
+        assert_eq!(patches(&log).len(), 2, "{:?}", patches(&log));
+        let held = session.shared.lock();
+        let object = &held.interview.as_ref().expect("working memory").object;
+        assert_eq!(object.live().count(), 2);
+    }
+
+    /// #806: on the fields route, a fork that calls `bash` has the call
+    /// logged and run nothing, and its settled line says how many calls
+    /// ran nothing; with no answer beside it, it is `unparseable`.
+    #[test]
+    fn a_fields_fork_calling_bash_logs_the_call_runs_nothing_and_says_so() {
+        let session = forks_on_fields(vec![
+            deltas(&["Scoped."]),
+            vec![Step::call(0, "f-1", "bash", r#"{"command":"ls"}"#)],
+        ]);
+        session
+            .ask_marked("scope it", None, true)
+            .expect("accepted");
+        let log = wait_until(&session, "the fork to settle", |log| {
+            settled(log) && !fork_outcomes(log).is_empty()
+        });
+        reads_whole(&session);
+        assert_eq!(called_names(&log), ["bash"]);
+        assert!(
+            !log.iter()
+                .any(|logged| matches!(logged.event, Event::ToolCalled(_))),
+            "nothing a fork calls runs"
+        );
+        assert_eq!(fork_settled(&log), (log::ForkOutcome::Unparseable, Some(1)));
+        assert!(patches(&log).is_empty());
     }
 
     /// #610: the modality is `fields` unless the regimen says `tools`, and

@@ -3366,6 +3366,7 @@ mod tests {
             wall_ms: None,
             refused: None,
             pool: None,
+            not_run: None,
         });
         events.extend(["d1", "d2", "d3"].map(|id| patch(8, id)));
         events.extend(answered(2, 17, Some(warm()), None));
@@ -3380,6 +3381,7 @@ mod tests {
             wall_ms: None,
             refused: None,
             pool: None,
+            not_run: None,
         });
         let lines = numbered(events);
         let document: String = lines.iter().map(|line| log::render(line) + "\n").collect();
