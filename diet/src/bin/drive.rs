@@ -1227,6 +1227,8 @@ fn serving_interview(
         )
         .map_err(|why| format!("{path}: {why}"))?,
     );
+    // #822: the forks cut during the turn that may wait for a slot.
+    let fork_backlog = session::fork_backlog(&read).map_err(|why| format!("{path}: {why}"))?;
     // #783: the warrants that look at what a step produced.
     let step = session::step_warrants(&read, &rules).map_err(|why| format!("{path}: {why}"))?;
     // #788: whether the operator may move the phase alone.
@@ -1317,6 +1319,7 @@ fn serving_interview(
             fork_tail: session::fork_tail(&read),
             timing,
             fork_slots,
+            fork_backlog,
             prefix_pages,
             step,
             operator_unilateral,

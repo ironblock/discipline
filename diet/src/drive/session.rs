@@ -917,6 +917,19 @@ pub enum Event {
         /// The field that call recorded under.
         field: String,
     },
+    /// A fork cut during the turn and dropped from its queue unsent
+    /// (#822): the queue past its bound, or a declared meditation that
+    /// waits only for the forks in flight.
+    Backlogged {
+        /// The turn it was cut in.
+        of_turn: u32,
+        /// What fired it.
+        trigger: String,
+        /// The ask it would have sent, as its fork line would name it.
+        ask: String,
+        /// The `seq` of the step's last `tool_call` it was cut at.
+        cut: u64,
+    },
     /// The self-capture reminder, as a note after turn `turn`'s ask (#609).
     Reminded {
         /// The turn.
@@ -1208,6 +1221,10 @@ pub struct Interview {
     /// server's slots less the trunk's own, or an offboard seat's; 0 under
     /// the gap. [`fork_slots`] reads it at start.
     pub fork_slots: u32,
+    /// The forks cut during the turn that may wait for a slot (#822):
+    /// past it, the oldest queued are dropped, newest kept. [`fork_backlog`]
+    /// reads it at start.
+    pub fork_backlog: usize,
     /// Whether the trunk's server shares a prefix's pages between
     /// concurrent requests (#797): its entry's `served_prefix_shared`.
     /// [`crate::drive::registry::served_prefix_shared`] reads it at start.
@@ -2346,6 +2363,10 @@ struct State {
     /// The phase an accepted move meditates into once the turn ends
     /// (#788): a meditation never refills under a running turn.
     move_after_turn: Option<String>,
+    /// The operator's meditation declared while forks cut during the turn
+    /// were in flight (#822), and the phase it moves to: run once they
+    /// settle and the turn is over.
+    declared_after_pool: Option<DeclaredMeditation>,
     /// The note that puts the operator's proposal to the model, due at the
     /// next ask (#788).
     operator_note_due: Option<String>,
@@ -2478,6 +2499,7 @@ impl State {
             gap_firings: Vec::new(),
             operator_proposal: None,
             move_after_turn: None,
+            declared_after_pool: None,
             operator_note_due: None,
             proposal_ends_turn: None,
             phase_entered: 0,
@@ -3478,8 +3500,19 @@ impl<S: Streaming + 'static> Session<S> {
     ) -> Result<(), Rejected> {
         let mut state = self.shared.lock();
         state.carry(gap, CommandKind::DeclareMeditation);
+        // Only forks cut during the turn hold the session in `capture`
+        // (#822): the meditation waits for those in flight, and drops the
+        // queued.
+        let pool_only = state.settlement == Settlement::Capture
+            && state.pool_busy()
+            && state.forking.is_none()
+            && state.queued.is_empty()
+            && state.meditation_pending.is_none()
+            && state.meditating.is_none()
+            && state.declared_after_pool.is_none();
         let because = match state.settlement {
             Settlement::Ended => Some(Refusal::Ended),
+            Settlement::Capture if pool_only => pool_refusal(&state, to),
             Settlement::Turn | Settlement::Capture => Some(Refusal::InFlight),
             // Nothing to refill from: no turn yet, no working object, or an
             // empty one -- a refill from an empty object would drop every
@@ -3505,6 +3538,27 @@ impl<S: Streaming + 'static> Session<S> {
             return Err(Rejected::Refused(refused));
         }
         state.admit()?;
+        if pool_only {
+            let dropped: Vec<Cut> = state.pool_queue.drain(..).collect();
+            backlogged(&mut state, dropped);
+            state.declared_after_pool = Some(DeclaredMeditation {
+                to: to.map(str::to_owned),
+            });
+            // With none in flight, the turn is over now.
+            let due = pool_settled(&self.shared.template, &mut state);
+            drop(state);
+            self.shared.changed.notify_all();
+            if due {
+                let shared = Arc::clone(&self.shared);
+                let spawned = std::thread::Builder::new()
+                    .name("diet-meditation".to_owned())
+                    .spawn(move || meditation_work(&shared));
+                if spawned.is_err() {
+                    meditation_work(&self.shared);
+                }
+            }
+            return Ok(());
+        }
         let queued = meditation(
             &self.shared.template,
             &mut state,
@@ -5112,8 +5166,24 @@ pub fn line_of(logged: &Logged) -> log::Line {
             of_turn: *of_turn,
             trigger: trigger.clone(),
             ask: ask.tag().to_owned(),
-            call: call.clone(),
-            field: field.clone(),
+            call: Some(call.clone()),
+            field: Some(field.clone()),
+            reason: None,
+            cut: None,
+        },
+        Event::Backlogged {
+            of_turn,
+            trigger,
+            ask,
+            cut,
+        } => log::Event::ForkSkipped {
+            of_turn: *of_turn,
+            trigger: trigger.clone(),
+            ask: ask.clone(),
+            call: None,
+            field: None,
+            reason: Some(log::SKIPPED_BACKLOG.to_owned()),
+            cut: Some(*cut),
         },
         Event::Reminded { turn, text } => log::Event::Reminded {
             turn: *turn,
@@ -8804,6 +8874,11 @@ fn turn_over(template: &RequestShape, state: &mut State) {
     if state.settlement != Settlement::Awaiting {
         return;
     }
+    // The operator's meditation declared while the forks were in flight
+    // (#822), now they have settled and the turn is over.
+    if declared_now(template, state) {
+        return;
+    }
     // A move the model accepted to meditate into (#788), now the turn is
     // over; with nothing to refill from, the move is kept.
     if let Some(to) = state.move_after_turn.take() {
@@ -8949,6 +9024,41 @@ enum Deferred {
     TurnOver,
     /// A move to `awaiting`.
     Move,
+}
+
+/// An operator's meditation waiting for the forks cut during the turn
+/// (#822): the phase it moves to, if any.
+struct DeclaredMeditation {
+    to: Option<String>,
+}
+
+/// The forks cut during the turn that wait for a slot unless the regimen
+/// says otherwise (#822): one step's trouble trio (#783) -- every failing
+/// command fires all three asks -- so the newest step's full set is never
+/// cut short, and on a two-slot server (one spare) the queue drains in
+/// three fork calls after the turn.
+pub const FORK_BACKLOG_DEFAULT: usize = 3;
+
+/// The regimen key for [`FORK_BACKLOG_DEFAULT`]'s bound (#822).
+pub const FORK_BACKLOG: &str = "fork_backlog";
+
+/// The bound the regimen declares on the forks waiting for a slot (#822):
+/// a whole number, 0 or more; [`FORK_BACKLOG_DEFAULT`] when it declares
+/// none.
+///
+/// # Errors
+///
+/// Any other value, naming it.
+pub fn fork_backlog(regimen: &Regimen) -> Result<usize, String> {
+    match regimen.get(FORK_BACKLOG) {
+        None => Ok(FORK_BACKLOG_DEFAULT),
+        Some(crate::formats::regimen::Value::Integer(n)) if *n >= 0 => {
+            usize::try_from(*n).map_err(|_| format!("`{FORK_BACKLOG} = {n}` is too large"))
+        }
+        Some(other) => Err(format!(
+            "`{FORK_BACKLOG}` is {other:?}, not a whole number of forks"
+        )),
+    }
 }
 
 /// A meditation queued for [`meditation_work`] (#504): what fired it, and the phase it
@@ -9923,6 +10033,34 @@ fn cut_forks<S: Streaming + 'static>(
         });
     }
     launch_pool(shared, state);
+    // The queue past its bound (#822): the oldest dropped, newest kept --
+    // a fork long after its step asks about a trunk that has moved on.
+    let bound = state
+        .interview
+        .as_ref()
+        .map_or(FORK_BACKLOG_DEFAULT, |interview| interview.fork_backlog);
+    let over = state.pool_queue.len().saturating_sub(bound);
+    let dropped: Vec<Cut> = state.pool_queue.drain(..over).collect();
+    backlogged(state, dropped);
+}
+
+/// Each of `dropped`, logged `fork.skipped` `backlog` (#822).
+fn backlogged(state: &mut State, dropped: impl IntoIterator<Item = Cut>) {
+    for cut in dropped {
+        let Firing {
+            ask,
+            pinned,
+            trigger,
+            ..
+        } = cut.firing;
+        state.push(Event::Backlogged {
+            of_turn: cut.turn,
+            trigger,
+            // As its fork line would name it (#783).
+            ask: pinned.map_or_else(|| ask.tag().to_owned(), |t| t.name().to_lowercase()),
+            cut: cut.line,
+        });
+    }
 }
 
 /// Send queued cut forks while a slot is free (#782), each on a thread of
@@ -10182,7 +10320,46 @@ fn pool_settled(template: &RequestShape, state: &mut State) -> bool {
         }
         None => {}
     }
+    if state.settlement == Settlement::Awaiting {
+        declared_now(template, state);
+    }
     state.meditation_pending.is_some()
+}
+
+/// What refuses a meditation declared while only forks cut during the turn
+/// hold the session (#822): as in `awaiting` -- an open tangent, nothing to
+/// refill from, a move the graph does not allow.
+fn pool_refusal(state: &State, to: Option<&str>) -> Option<Refusal> {
+    if state.tangent.is_some() {
+        Some(Refusal::TangentOpen)
+    } else if state.turns == 0
+        || state
+            .interview
+            .as_ref()
+            .is_none_or(|interview| interview.object.live().next().is_none())
+    {
+        Some(Refusal::NothingToMeditate)
+    } else {
+        to.and_then(|to| graph_refusal(state, to))
+    }
+}
+
+/// The operator's meditation declared while forks were in flight (#822),
+/// run now the session awaits: refilled, or queued for its audit or warm.
+/// `true` when there was one; with nothing left to refill from, it is
+/// dropped, as a declaration then would have been refused.
+fn declared_now(template: &RequestShape, state: &mut State) -> bool {
+    let Some(DeclaredMeditation { to }) = state.declared_after_pool.take() else {
+        return false;
+    };
+    let has_memory = state
+        .interview
+        .as_ref()
+        .is_some_and(|interview| interview.object.live().next().is_some());
+    if has_memory && state.tangent.is_none() {
+        meditation(template, state, crate::meditation::Reason::Operator, to);
+    }
+    true
 }
 
 /// One of the gap's forks, run to its settling: then the next queued fork,
@@ -13547,6 +13724,12 @@ pub(in crate::drive) mod tests {
                 phase: "plan".to_owned(),
                 phase_document: None,
             },
+            Event::Backlogged {
+                of_turn: 2,
+                trigger: "call:document-read:call-a".to_owned(),
+                ask: "finding".to_owned(),
+                cut: 9,
+            },
         ];
         let mut kinds = std::collections::BTreeSet::new();
         for event in &events {
@@ -13595,9 +13778,10 @@ pub(in crate::drive) mod tests {
                 Event::PhaseProposed { .. } => 41,
                 Event::PhaseAnswered { .. } => 42,
                 Event::PhaseStarted { .. } => 43,
+                Event::Backlogged { .. } => 44,
             });
         }
-        assert_eq!(kinds.len(), 44, "a variant has no sample");
+        assert_eq!(kinds.len(), 45, "a variant has no sample");
         events
             .into_iter()
             .enumerate()
@@ -13983,8 +14167,10 @@ pub(in crate::drive) mod tests {
                 of_turn: 1,
                 trigger: "turn_end".to_owned(),
                 ask: "judgment".to_owned(),
-                call: "call-c".to_owned(),
-                field: "decision".to_owned(),
+                call: Some("call-c".to_owned()),
+                field: Some("decision".to_owned()),
+                reason: None,
+                cut: None,
             },
             log::Event::Capture {
                 request: 3,
@@ -14071,6 +14257,15 @@ pub(in crate::drive) mod tests {
             log::Event::PhaseStarted {
                 phase: "plan".to_owned(),
                 phase_document: None,
+            },
+            log::Event::ForkSkipped {
+                of_turn: 2,
+                trigger: "call:document-read:call-a".to_owned(),
+                ask: "finding".to_owned(),
+                call: None,
+                field: None,
+                reason: Some(log::SKIPPED_BACKLOG.to_owned()),
+                cut: Some(9),
             },
         ]
     }
@@ -16862,6 +17057,7 @@ pub(in crate::drive) mod tests {
             capture: crate::dogma::asks::Modality::Fields,
             fork_tail: None,
             fork_slots: 0,
+            fork_backlog: FORK_BACKLOG_DEFAULT,
             prefix_pages: PrefixPages::Counted,
             timing: Timing::Gap,
             step: crate::drive::warrants::StepWarrants::DEFAULTS,
@@ -18777,6 +18973,183 @@ pub(in crate::drive) mod tests {
         assert_eq!(fork_outcomes(&log), [log::ForkOutcome::Value; 2]);
         reads_whole(&session);
         tidy(&[&tree]);
+    }
+
+    /// [`during_turn`] with one slot, per call, and a queue of at most
+    /// `backlog` waiting (#822); the first fork held by `gate`.
+    fn backlogged_session(
+        tree: &Path,
+        trunk: Vec<Vec<Step>>,
+        gate: &Gate,
+        backlog: usize,
+    ) -> Session<Canned> {
+        let session = during_turn(
+            tree,
+            trunk,
+            vec![
+                vec![
+                    Step::Hold(gate.clone()),
+                    Step::Delta("LEARNED: the first\n".to_owned()),
+                ],
+                deltas(&["LEARNED: the last\n"]),
+            ],
+            1,
+        );
+        {
+            let mut state = session.shared.lock();
+            let interview = state.interview.as_mut().expect("an interview");
+            interview.cadence = Cadence::PerCall;
+            interview.fork_backlog = backlog;
+        }
+        session
+    }
+
+    /// The `fork.skipped` `backlog` lines: each one's trigger and cut.
+    fn backlog_skips(log: &[Logged]) -> Vec<(String, u64)> {
+        log.iter()
+            .filter_map(|logged| match &logged.event {
+                Event::Backlogged { trigger, cut, .. } => Some((trigger.clone(), *cut)),
+                _ => None,
+            })
+            .collect()
+    }
+
+    /// #822: a step that warrants more forks than the slot and the bound
+    /// hold keeps the newest queued and logs the older ones skipped,
+    /// `backlog`, naming the step they were cut at; the kept one runs.
+    #[test]
+    fn a_queue_past_its_bound_keeps_the_newest_and_logs_the_rest_skipped() {
+        let tree = scratch("during-turn-backlog");
+        let gate = Gate::new();
+        let session = backlogged_session(
+            &tree,
+            vec![
+                vec![
+                    bash("call-1", "cat notes.md"),
+                    Step::call(1, "call-2", "bash", r#"{"command":"cat lib.rs"}"#),
+                    Step::call(2, "call-3", "bash", r#"{"command":"cat notes.md"}"#),
+                ],
+                deltas(&["Done. Next, I will write the schema."]),
+            ],
+            &gate,
+            1,
+        );
+        session.ask("look around", None).expect("accepted");
+        assert!(gate.wait_for_a_waiter(Duration::from_secs(10)));
+        gate.open();
+        let log = wait_until(&session, "the turn and its forks", |log| {
+            settled(log) && fork_outcomes(log).len() == 2
+        });
+        let skips = backlog_skips(&log);
+        assert_eq!(skips.len(), 1, "{skips:?}");
+        assert!(
+            skips[0].0.ends_with(":call-2"),
+            "the older dropped: {skips:?}"
+        );
+        assert_eq!(
+            skips[0].1,
+            call_line(&log, "call-3"),
+            "the step it was cut at"
+        );
+        let triggers: Vec<String> = log
+            .iter()
+            .filter_map(|logged| match &logged.event {
+                Event::Forked { trigger, .. } => Some(trigger.clone()),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(triggers.len(), 2, "{triggers:?}");
+        assert!(
+            triggers[1].ends_with(":call-3"),
+            "the newest kept: {triggers:?}"
+        );
+        reads_whole(&session);
+        tidy(&[&tree]);
+    }
+
+    /// #822: a meditation the operator declares while a fork cut during
+    /// the turn is in flight and another queued is admitted, not refused
+    /// `in-flight`: the queued one is dropped, `backlog`, and the
+    /// meditation runs once the one in flight settles.
+    #[test]
+    fn a_declared_meditation_drops_the_queued_forks_and_waits_for_the_one_in_flight() {
+        let tree = scratch("during-turn-declared");
+        let gate = Gate::new();
+        let session = backlogged_session(
+            &tree,
+            vec![
+                vec![
+                    bash("call-1", "cat notes.md"),
+                    Step::call(1, "call-2", "bash", r#"{"command":"cat lib.rs"}"#),
+                ],
+                deltas(&["Done. Next, I will write the schema."]),
+            ],
+            &gate,
+            FORK_BACKLOG_DEFAULT,
+        );
+        {
+            let mut state = session.shared.lock();
+            let object = &mut state.interview.as_mut().expect("memory").object;
+            object
+                .apply(&Patch::Add {
+                    id: crate::object::EntryId::new("seeded").expect("an id"),
+                    content: "decision: notes.md holds one line per decision".to_owned(),
+                    provenance: crate::object::Provenance {
+                        turn: 0,
+                        lane: "interview".to_owned(),
+                        fork: None,
+                        tangent: None,
+                        index: 0,
+                    },
+                })
+                .expect("an entry");
+        }
+        session.ask("look around", None).expect("accepted");
+        assert!(gate.wait_for_a_waiter(Duration::from_secs(10)));
+        wait_until(&session, "the turn to settle", |log| {
+            turn_settled_at(log).is_some()
+        });
+        assert_eq!(session.settlement(), Settlement::Capture);
+        session
+            .declare_meditation(None)
+            .expect("admitted while a fork runs");
+        let log = session.events_from(0);
+        assert_eq!(backlog_skips(&log).len(), 1, "the queued fork dropped");
+        assert!(!meditated(&log), "it waits for the fork in flight");
+        gate.open();
+        let log = wait_until(&session, "the meditation", meditated);
+        assert_eq!(session.settlement(), Settlement::Awaiting);
+        assert_eq!(fork_outcomes(&log), [log::ForkOutcome::Value]);
+        let fork_settled = log
+            .iter()
+            .position(|logged| matches!(logged.event, Event::ForkSettled { .. }))
+            .expect("the fork settled");
+        let meditation = log
+            .iter()
+            .position(|logged| {
+                matches!(
+                    logged.event,
+                    Event::Meditated {
+                        reason: crate::meditation::Reason::Operator,
+                        ..
+                    }
+                )
+            })
+            .expect("the operator's meditation");
+        assert!(fork_settled < meditation, "after the fork in flight");
+        reads_whole(&session);
+        tidy(&[&tree]);
+    }
+
+    /// #822: the bound is a whole number, 3 unless the regimen says.
+    #[test]
+    fn the_fork_backlog_is_three_unless_the_regimen_says() {
+        let read = |text: &str| fork_backlog(&regimen::parse(text).expect("a regimen"));
+        assert_eq!(read(""), Ok(FORK_BACKLOG_DEFAULT));
+        assert_eq!(read("fork_backlog = 0\n"), Ok(0));
+        assert_eq!(read("fork_backlog = 8\n"), Ok(8));
+        assert!(read("fork_backlog = -1\n").is_err());
+        assert!(read("fork_backlog = \"many\"\n").is_err());
     }
 
     /// #782: the session's end cancels a fork in flight, logged
