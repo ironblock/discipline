@@ -15,8 +15,8 @@ substrate_hardware = "e6489f9c1815a0c4540a0c6663acaa3c62b1b66e03806479475c264534
 isolation = "sandbox"
 network = "host"
 sandbox_reads = "all"
-# The reference is writable like the worktree; the receipt's `reference_modified` covers the whole tree.
-sandbox_writable = ["~/git/reference/Babylon"]
+# The reference is read-only: no `sandbox_writable` entry, so Seatbelt confines writes to the worktree (the
+# maintainer, 2026-10-12; docs/trajectories/t1.md). The receipt's `reference_modified` still checks it.
 
 # T1 runs bash. The maintainer chose a pre-seeded list over an empty one (2026-10-05).
 # Bare `npm` and `pnpm` are left out: serve refuses them as pre-seeds (an npm or pnpm
