@@ -219,15 +219,16 @@ claude mcp add diet-drive -- /abs/path/to/target/debug/diet-drive mcp
 
 | tool | what it calls |
 | --- | --- |
-| `start`, `stop` | a profile launched as `serve`; the session and that process ended |
-| `status`, `wait` | `GET /state`, `GET /wait` |
+| `start`, `stop` | a profile launched as `serve`, with `phase` its `start-phase`; the session and that process ended |
+| `status`, `wait` | `GET /state`, with the current `phase` and a pending proposal and its evidence read from the log; `GET /wait` |
 | `ask` | the `ask` command: `text`, `scoping`, `files`; then waits for the turn (below) unless `wait` is false |
 | `attach` | a local PNG uploaded to `POST /files`; returns its `sha256` for an ask's `files` |
 | `approve` | `POST /approve`: `call`, `scope` |
 | `cancel`, `end` | the matching commands; `cancel` takes the current turn when none is named |
 | `memory` | `GET /memory`, or `?all` |
 | `edit`, `flag` | `edit-entry`, `flag-entry` |
-| `declare_meditation`, `refill_anyway`, `ratify_phase` | the matching commands |
+| `declare_meditation`, `refill_anyway` | the matching commands |
+| `propose_phase`, `move_phase`, `rule_phase` | the operator's proposal (`propose-phase`), the operator's move alone (`move-phase`, refused `not-unilateral` under `operator_unilateral = false`), and a ruling on the model's (`ratify-phase`: `meditation`, `keep` or `stay`, the pending proposal when no `call` is named) |
 | `open_tangent`, `close_tangent` | the matching commands |
 | `events` | `GET /events`: the log lines after a seq, of the kinds named |
 

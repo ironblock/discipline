@@ -341,6 +341,8 @@ pub fn tools() -> Value {
     let mut all = lifecycle_tools();
     all.extend(first_tools());
     all.extend(later_tools());
+    all.extend(phase_tools());
+    all.extend(last_tools());
     Value::Array(all)
 }
 
@@ -373,7 +375,9 @@ fn first_tools() -> Vec<Value> {
              the session is idle, holds a meditation, waits on an approval, or has ended, or \
              the timeout passes. Returns why it returned, the last state, and a digest of what \
              the turn did -- the final answer, tool calls, forks and audits with their patches, \
-             meditations, refusals. With wait false, returns at once with its seq and turn, or \
+             meditations, refusals, and the phase's proposals and rulings. A model's phase \
+             proposal ends its turn: the ask returns `proposal`, the proposal in the digest, \
+             for `rule_phase`. With wait false, returns at once with its seq and turn, or \
              serve's refusal.",
             object(
                 json!({
@@ -460,17 +464,59 @@ fn later_tools() -> Vec<Value> {
             "Refill from a held meditation as it stands (the `refill-anyway` command).",
             none(),
         ),
+    ]
+}
+
+/// A phase's two keys (#788, #790): the operator's proposal, the operator's
+/// move alone, and a ruling on the model's.
+fn phase_tools() -> Vec<Value> {
+    vec![
         tool(
-            "ratify_phase",
-            "Answer the model's proposed phase move (the `ratify-phase` command).",
+            "propose_phase",
+            "Propose a move to another phase as the operator (the `propose-phase` command, \
+             #788): the model is asked on its next ask, and accepts or declines. With meditate \
+             (true unless set false) an accepted move goes through a meditation.",
             object(
                 json!({
-                    "call": string("The proposal's call id."),
-                    "choice": {"type": "string", "enum": ["meditation", "keep", "stay"]}
+                    "to": string("The phase to move to."),
+                    "meditate": {"type": "boolean", "description": "Meditate on the move; true when omitted."}
                 }),
-                &["call", "choice"],
+                &["to"],
             ),
         ),
+        tool(
+            "move_phase",
+            "Move to another phase as the operator alone (the `move-phase` command, #788), \
+             asking the model nothing; refused `not-unilateral` when the regimen sets \
+             `operator_unilateral = false`. With meditate (false unless set true) the move goes \
+             through a meditation.",
+            object(
+                json!({
+                    "to": string("The phase to move to."),
+                    "meditate": {"type": "boolean", "description": "Meditate on the move; false when omitted."}
+                }),
+                &["to"],
+            ),
+        ),
+        tool(
+            "rule_phase",
+            "Rule on the model's pending phase proposal (the `ratify-phase` command, #788): \
+             `meditation` meditates and moves, the suggested choice; `keep` moves without \
+             meditating; `stay` stays. Weigh the evidence `status` shows on the proposal.",
+            object(
+                json!({
+                    "choice": {"type": "string", "enum": ["meditation", "keep", "stay"]},
+                    "call": string("The proposal's call id; the pending one when omitted.")
+                }),
+                &["choice"],
+            ),
+        ),
+    ]
+}
+
+/// Tangents, and the log.
+fn last_tools() -> Vec<Value> {
+    vec![
         tool(
             "open_tangent",
             "Open a tangent (the `open-tangent` command).",
@@ -573,6 +619,110 @@ fn ask_body(args: &Args<'_>) -> Result<Value, String> {
     Ok(body)
 }
 
+/// The log kinds that say how the session's phase stands (#790).
+const PHASE_KINDS: &[&str] = &[
+    "session.start",
+    "phase.started",
+    "phase.proposed",
+    "phase.answered",
+    "phase.ruled",
+];
+
+/// The phase the session is in and the proposal pending, if any, from its
+/// log lines (#790, after #788's two keys): the opening phase, then each
+/// `phase.started` and each ruling that moved; a `phase.proposed` not yet
+/// ruled on -- or, the operator's, answered -- is pending, with the evidence
+/// it carries.
+fn phase_of(lines: &[Value]) -> Value {
+    let mut current = Value::Null;
+    let mut pending: Option<Value> = None;
+    for line in lines {
+        match line.get("kind").and_then(Value::as_str).unwrap_or_default() {
+            "session.start" => {
+                if let Some(opening) = line.get("opening_phase") {
+                    current = opening.clone();
+                }
+            }
+            "phase.started" => current = line.get("phase").cloned().unwrap_or(Value::Null),
+            "phase.proposed" => pending = Some(line.clone()),
+            "phase.answered" => {
+                // A declined answer ends the operator's proposal; an accepted
+                // one is followed by the ruling that moves.
+                if line.get("accepted").and_then(Value::as_bool) == Some(false) {
+                    pending = None;
+                }
+            }
+            "phase.ruled" => {
+                pending = None;
+                if line.get("choice").and_then(Value::as_str) != Some("stay")
+                    && let Some(to) = line.get("to")
+                {
+                    current = to.clone();
+                }
+            }
+            _ => {}
+        }
+    }
+    json!({"current": current, "pending": pending.unwrap_or(Value::Null)})
+}
+
+/// `status` (#790): `/state`, with the phase and a pending proposal and its
+/// evidence -- which `/state` does not carry -- read from the log.
+fn status(serve: &Serve) -> Result<Value, String> {
+    let state = serve.get("/state")?;
+    let kinds: Vec<String> = PHASE_KINDS.iter().map(|kind| (*kind).to_owned()).collect();
+    let lines = serve.events(None, &kinds, u64::MAX)?;
+    let lines = lines["events"].as_array().cloned().unwrap_or_default();
+    let mut answered = state.json();
+    answered["phase"] = phase_of(&lines);
+    Ok(answered)
+}
+
+/// `propose_phase`, `move_phase` or `rule_phase` (#790): the operator's
+/// proposal, the operator's move alone, or a ruling on the model's -- the
+/// pending one when no call is named.
+fn phase_command(serve: &Serve, name: &str, args: &Args<'_>) -> Result<Answer, String> {
+    if name == "propose_phase" || name == "move_phase" {
+        let kind = if name == "move_phase" {
+            "move-phase"
+        } else {
+            "propose-phase"
+        };
+        let mut body = json!({"kind": kind, "to": args.string("to")?});
+        if let Some(meditate) = args.optional_bool("meditate")? {
+            body["meditate"] = Value::Bool(meditate);
+        }
+        return serve.command(&body);
+    }
+    let call = match args.optional_string("call")? {
+        Some(call) => call.to_owned(),
+        None => {
+            pending_model_proposal(serve)?.ok_or("no proposal of the model's awaits a ruling")?
+        }
+    };
+    serve.command(&json!({
+        "kind": "ratify-phase",
+        "call": call,
+        "choice": args.string("choice")?
+    }))
+}
+
+/// The call of the model's proposal awaiting the operator's ruling.
+fn pending_model_proposal(serve: &Serve) -> Result<Option<String>, String> {
+    let kinds: Vec<String> = PHASE_KINDS.iter().map(|kind| (*kind).to_owned()).collect();
+    let lines = serve.events(None, &kinds, u64::MAX)?;
+    let lines = lines["events"].as_array().cloned().unwrap_or_default();
+    let pending = &phase_of(&lines)["pending"];
+    Ok((pending.get("by").and_then(Value::as_str) == Some("model"))
+        .then(|| {
+            pending
+                .get("call")
+                .and_then(Value::as_str)
+                .map(str::to_owned)
+        })
+        .flatten())
+}
+
 /// Tool `name` called with `arguments` against `serve`: its result as JSON
 /// text, or why it could not be called.
 ///
@@ -582,7 +732,7 @@ fn ask_body(args: &Args<'_>) -> Result<Value, String> {
 pub fn call(serve: &Serve, name: &str, arguments: &Map<String, Value>) -> Result<Value, String> {
     let args = Args(arguments);
     let answer = match name {
-        "status" => serve.get("/state")?,
+        "status" => return status(serve),
         "wait" => {
             let mut path = format!("/wait?until={}", query(args.string("until")?));
             if let Some(after) = args.optional_count("after")? {
@@ -640,11 +790,7 @@ pub fn call(serve: &Serve, name: &str, arguments: &Map<String, Value>) -> Result
             serve.command(&body)?
         }
         "refill_anyway" => serve.command(&json!({"kind": "refill-anyway"}))?,
-        "ratify_phase" => serve.command(&json!({
-            "kind": "ratify-phase",
-            "call": args.string("call")?,
-            "choice": args.string("choice")?
-        }))?,
+        "propose_phase" | "move_phase" | "rule_phase" => phase_command(serve, name, &args)?,
         "open_tangent" => {
             serve.command(&json!({"kind": "open-tangent", "id": args.string("id")?}))?
         }
@@ -718,6 +864,8 @@ fn digest(lines: &[Value]) -> Value {
     let mut meditations = Vec::new();
     let mut refusals = Vec::new();
     let mut settled = Vec::new();
+    let mut phase = Vec::new();
+    let mut proposal = Value::Null;
     for line in lines {
         let seq = line.get("seq").and_then(Value::as_u64);
         match kind(line).as_str() {
@@ -772,6 +920,17 @@ fn digest(lines: &[Value]) -> Value {
                 meditations.push(kept);
             }
             "refused" => refusals.push(line.clone()),
+            // The phase's two keys (#788, #790): every proposal, answer,
+            // ruling and start, and the model's proposal itself -- which ends
+            // its turn and waits on the operator.
+            "phase.proposed" | "phase.answered" | "phase.ruled" | "phase.started" => {
+                if kind(line) == "phase.proposed"
+                    && line.get("by").and_then(Value::as_str) == Some("model")
+                {
+                    proposal = line.clone();
+                }
+                phase.push(line.clone());
+            }
             "turn.settled" => {
                 settled.push(json!({"turn": text(line, "turn"), "reason": text(line, "reason")}));
             }
@@ -785,6 +944,8 @@ fn digest(lines: &[Value]) -> Value {
         "meditations": meditations,
         "refusals": refusals,
         "settled": settled,
+        "phase": phase,
+        "proposal": proposal,
     })
 }
 
@@ -833,12 +994,20 @@ fn ask_and_wait(
     };
     let lines = serve.events(Some(seq.saturating_sub(1)), &[], u64::MAX)?;
     let lines = lines["events"].as_array().cloned().unwrap_or_default();
+    let digest = digest(&lines);
+    // The model proposed a phase move, which ends its turn (#788): the turn
+    // waits on the operator's ruling, and says so (#790).
+    let returned = if returned == "idle" && !digest["proposal"].is_null() {
+        "proposal"
+    } else {
+        returned
+    };
     Ok(json!({
         "asked": asked.body,
         "returned": returned,
         "timed_out": returned == "timed_out",
         "state": state,
-        "digest": digest(&lines),
+        "digest": digest,
     }))
 }
 
@@ -1010,7 +1179,17 @@ impl Driver {
     ) -> Result<Value, String> {
         let args = Args(arguments);
         match name {
-            "start" => self.start(args.string("profile")?),
+            "start" => {
+                let mut started = self.start(args.string("profile")?)?;
+                // The phase it starts in (#790, #788's `start-phase`), before
+                // any ask.
+                if let (Some(phase), Some(serve)) = (args.optional_string("phase")?, &self.serve) {
+                    started["phase"] = serve
+                        .command(&json!({"kind": "start-phase", "phase": phase}))?
+                        .json();
+                }
+                Ok(started)
+            }
             "stop" => self.stop(),
             // `ask` waits for its turn unless told not to (#772).
             "ask" if args.optional_bool("wait")? != Some(false) => match &self.serve {
@@ -1052,7 +1231,10 @@ fn lifecycle_tools() -> Vec<Value> {
              NAME` launched, and this server attached to the address it prints. Returns what \
              serve announced, or why it refused to start.",
             object(
-                json!({"profile": string("The profile's name.")}),
+                json!({
+                    "profile": string("The profile's name."),
+                    "phase": string("The phase to start in (`start-phase`), before any ask; the regimen's starting phase when omitted.")
+                }),
                 &["profile"],
             ),
         ),
@@ -1244,7 +1426,9 @@ mod tests {
                 "flag",
                 "declare_meditation",
                 "refill_anyway",
-                "ratify_phase",
+                "propose_phase",
+                "move_phase",
+                "rule_phase",
                 "open_tangent",
                 "close_tangent",
                 "events"
