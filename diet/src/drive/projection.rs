@@ -1089,6 +1089,10 @@ impl<'a> Walk<'a> {
             | Line::PhaseProposed { .. }
             | Line::PhaseAnswered { .. }
             | Line::PhaseStarted { .. }
+            // The trunk held to the pool beside its forks: the request's
+            // row names its cap.
+            | Line::TrunkClamped { .. }
+            | Line::TrunkWaited { .. }
             // The operator's flag, and a model patch refused over the
             // operator's entry (#150): the meditation row names what was carried.
             | Line::Flag { .. }

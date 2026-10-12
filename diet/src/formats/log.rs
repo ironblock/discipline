@@ -269,6 +269,12 @@ vocabulary! {
         ForkSkipped => "fork.skipped",
         /// A phase's ground rules, as a note on an ask (v8, #787).
         PhaseNoted => "phase.noted",
+        /// A trunk request's output cap cut below what the window alone
+        /// gives it, to what the forks in flight leave of the pool (v8).
+        TrunkClamped => "trunk.clamped",
+        /// A trunk request held until the forks in flight settled: even its
+        /// prompt and the clamp's floor did not fit beside them (v8).
+        TrunkWaited => "trunk.waited",
     }
 }
 
@@ -1644,6 +1650,34 @@ pub enum Event {
         accepted: bool,
         /// Why, in the model's words.
         reason: Option<String>,
+    },
+    /// A trunk request's output cap cut to what the forks in flight leave
+    /// of the pool (v8): below what the window alone gives it. Every job is
+    /// counted as the engine holds it, in whole chunks and one more.
+    TrunkClamped {
+        /// The turn.
+        turn: u32,
+        /// The cap the window alone gives the request.
+        window_cap: u64,
+        /// The cap it is sent with.
+        cap: u64,
+        /// The forks in flight beside it, `f/<seq>`.
+        forks: Vec<String>,
+    },
+    /// A trunk request held until the forks in flight settled (v8): its
+    /// prompt and the clamp's floor did not fit beside them. Logged before
+    /// the request, once it fits.
+    TrunkWaited {
+        /// The turn.
+        turn: u32,
+        /// The forks it waited on, `f/<seq>`.
+        forks: Vec<String>,
+        /// How long it waited, in milliseconds.
+        wait_ms: u64,
+        /// The cap the window alone gives the request.
+        window_cap: u64,
+        /// The cap it is sent with.
+        cap: u64,
     },
     /// The starting phase the operator chose before the first ask (v8,
     /// #788).
@@ -3739,6 +3773,23 @@ fn from_object(object: &BTreeMap<String, Value>) -> Result<Line, String> {
             phase: fields.string("phase")?,
             phase_document: fields.optional_phase_document("phase_document")?,
         },
+        Kind::TrunkClamped => Event::TrunkClamped {
+            turn: fields.turn("turn")?,
+            window_cap: fields.count("window_cap")?,
+            cap: fields.count("cap")?,
+            forks: fields
+                .optional_strings("forks")?
+                .ok_or_else(|| "no `forks`".to_owned())?,
+        },
+        Kind::TrunkWaited => Event::TrunkWaited {
+            turn: fields.turn("turn")?,
+            forks: fields
+                .optional_strings("forks")?
+                .ok_or_else(|| "no `forks`".to_owned())?,
+            wait_ms: fields.count("wait_ms")?,
+            window_cap: fields.count("window_cap")?,
+            cap: fields.count("cap")?,
+        },
         Kind::PhaseRuled => Event::PhaseRuled {
             call: fields.optional_string("call")?,
             by: match fields.optional_string("by")?.as_deref() {
@@ -4906,7 +4957,12 @@ pub fn introduced(kind: Kind) -> i64 {
         | Kind::Notice
         | Kind::TimeoutNear
         | Kind::ForkSkipped => 7,
-        Kind::PhaseNoted | Kind::PhaseProposed | Kind::PhaseAnswered | Kind::PhaseStarted => 8,
+        Kind::PhaseNoted
+        | Kind::PhaseProposed
+        | Kind::PhaseAnswered
+        | Kind::PhaseStarted
+        | Kind::TrunkClamped
+        | Kind::TrunkWaited => 8,
         _ => 0,
     }
 }
@@ -5415,6 +5471,25 @@ pub fn schema(kind: Kind) -> &'static [Field] {
             const F: &[Field] = &[
                 must_v8("phase", Text),
                 may_v8("phase_document", Holds::PhaseDocument),
+            ];
+            F
+        }
+        Kind::TrunkClamped => {
+            const F: &[Field] = &[
+                must_v8("turn", Count),
+                must_v8("window_cap", Count),
+                must_v8("cap", Count),
+                must_v8("forks", Holds::Strings),
+            ];
+            F
+        }
+        Kind::TrunkWaited => {
+            const F: &[Field] = &[
+                must_v8("turn", Count),
+                must_v8("forks", Holds::Strings),
+                must_v8("wait_ms", Count),
+                must_v8("window_cap", Count),
+                must_v8("cap", Count),
             ];
             F
         }
@@ -6788,6 +6863,38 @@ fn to_value(line: &Line) -> Value {
                 put("phase_document", phase_document_value(document));
             }
             Kind::PhaseStarted
+        }
+        Event::TrunkClamped {
+            turn,
+            window_cap,
+            cap,
+            forks,
+        } => {
+            put("turn", count(u64::from(*turn)));
+            put("window_cap", count(*window_cap));
+            put("cap", count(*cap));
+            put(
+                "forks",
+                Value::Array(forks.iter().map(|fork| text(fork)).collect()),
+            );
+            Kind::TrunkClamped
+        }
+        Event::TrunkWaited {
+            turn,
+            forks,
+            wait_ms,
+            window_cap,
+            cap,
+        } => {
+            put("turn", count(u64::from(*turn)));
+            put(
+                "forks",
+                Value::Array(forks.iter().map(|fork| text(fork)).collect()),
+            );
+            put("wait_ms", count(*wait_ms));
+            put("window_cap", count(*window_cap));
+            put("cap", count(*cap));
+            Kind::TrunkWaited
         }
         Event::PhaseRuled {
             call,
@@ -8396,6 +8503,19 @@ mod tests {
                 phase: "plan".to_owned(),
                 phase_document: None,
             },
+            Event::TrunkClamped {
+                turn: 5,
+                window_cap: 23_781,
+                cap: 6_144,
+                forks: vec!["f/12".to_owned()],
+            },
+            Event::TrunkWaited {
+                turn: 5,
+                forks: vec!["f/12".to_owned()],
+                wait_ms: 41_200,
+                window_cap: 13_480,
+                cap: 13_480,
+            },
             Event::PhaseStarted {
                 phase: "build".to_owned(),
                 phase_document: Some(PhaseDocument {
@@ -9732,7 +9852,7 @@ mod tests {
             tags(Kind::ALL.iter().map(|it| it.tag()).collect()),
             "session.start ask settlement request refused delta stop.asked response \
              cancelled request.failed turn.settled idle.gap progress tool_call fork \
-             fork.settled patch meditation delivered recalled flag meditation.held patch.refused pruned phase.ruled phase.proposed phase.answered phase.started tangent.open tangent.close capture reminded background.ended notice timeout.near fork.skipped phase.noted"
+             fork.settled patch meditation delivered recalled flag meditation.held patch.refused pruned phase.ruled phase.proposed phase.answered phase.started tangent.open tangent.close capture reminded background.ended notice timeout.near fork.skipped phase.noted trunk.clamped trunk.waited"
         );
         assert_eq!(
             tags(FailReason::ALL.iter().map(|it| it.tag()).collect()),

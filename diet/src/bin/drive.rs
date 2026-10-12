@@ -1229,6 +1229,14 @@ fn serving_interview(
     );
     // #822: the forks cut during the turn that may wait for a slot.
     let fork_backlog = session::fork_backlog(&read).map_err(|why| format!("{path}: {why}"))?;
+    // The chunk the trunk's server allocates its pool in, each job counted
+    // in whole chunks and one more.
+    let pool_chunk =
+        diet::drive::registry::identity(diet::drive::registry::REGISTRY, &regime.substrates[0].id)
+            .ok()
+            .and_then(|identity| identity.served.get("chunk_size")?.parse::<u64>().ok())
+            .filter(|chunk| *chunk > 0)
+            .unwrap_or(session::POOL_CHUNK_DEFAULT);
     // #783: the warrants that look at what a step produced.
     let step = session::step_warrants(&read, &rules).map_err(|why| format!("{path}: {why}"))?;
     // #788: whether the operator may move the phase alone.
@@ -1322,6 +1330,7 @@ fn serving_interview(
             fork_slots,
             fork_backlog,
             prefix_pages,
+            pool_chunk,
             step,
             operator_unilateral,
         }),
