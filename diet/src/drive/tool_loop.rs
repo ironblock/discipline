@@ -2045,39 +2045,181 @@ pub struct Counts {
     pub declined: u64,
 }
 
-/// `git status --porcelain` on each of `policy`'s writable directories that
-/// is a git checkout, keyed as the regimen wrote it (#301 5981929426: the
-/// reference checkout's `reference_modified`). Run with git's programs off.
+/// What each writable directory holding no repository held at the
+/// session's start (#830): every file under it, by its path relative to the
+/// directory, with its length and modification time -- what
+/// [`reference_modified`] compares it with at the end. A directory too large
+/// to list, or unreadable, has none, and is reported as not judged.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct Baseline(BTreeMap<String, Option<Listing>>);
+
+/// A directory's files: each relative path, its length and its mtime.
+type Listing = BTreeMap<String, (u64, Option<std::time::SystemTime>)>;
+
+/// The most files a baseline lists before it gives up on a directory.
+const BASELINE_FILES: usize = 200_000;
+
+/// How deep under a writable directory a repository is looked for.
+const REPOSITORY_DEPTH: usize = 3;
+
+/// The baseline of `policy`'s writable directories (#830), taken when the
+/// session opens: a listing of each that is no repository and holds none.
 #[must_use]
-pub fn reference_modified(policy: &Policy) -> BTreeMap<String, String> {
+pub fn reference_baseline(policy: &Policy) -> Baseline {
+    Baseline(
+        policy
+            .writable
+            .iter()
+            .filter_map(|dir| {
+                let path = crate::isolation::policy::home_expanded(dir);
+                (path.is_dir() && repositories(&path).is_empty())
+                    .then(|| (dir.clone(), listing(&path)))
+            })
+            .collect(),
+    )
+}
+
+/// The git repositories at or under `path`, at most [`REPOSITORY_DEPTH`]
+/// directories down, in path order; none is looked into.
+fn repositories(path: &Path) -> Vec<PathBuf> {
+    fn walk(dir: &Path, depth: usize, out: &mut Vec<PathBuf>) {
+        if dir.join(".git").exists() {
+            out.push(dir.to_path_buf());
+            return;
+        }
+        if depth == 0 {
+            return;
+        }
+        let Ok(entries) = std::fs::read_dir(dir) else {
+            return;
+        };
+        let mut children: Vec<PathBuf> = entries
+            .filter_map(Result::ok)
+            .filter(|entry| entry.file_type().is_ok_and(|kind| kind.is_dir()))
+            .map(|entry| entry.path())
+            .filter(|child| child.file_name().is_some_and(|name| name != "node_modules"))
+            .collect();
+        children.sort();
+        for child in children {
+            walk(&child, depth - 1, out);
+        }
+    }
+    let mut out = Vec::new();
+    walk(path, REPOSITORY_DEPTH, &mut out);
+    out
+}
+
+/// Every file under `path`, or `None` past [`BASELINE_FILES`] or when it
+/// cannot be read.
+fn listing(path: &Path) -> Option<Listing> {
+    let mut out = Listing::new();
+    let mut pending = vec![path.to_path_buf()];
+    while let Some(dir) = pending.pop() {
+        for entry in std::fs::read_dir(&dir).ok()?.filter_map(Result::ok) {
+            let kind = entry.file_type().ok()?;
+            let at = entry.path();
+            if kind.is_dir() {
+                pending.push(at);
+            } else {
+                let meta = entry.metadata().ok()?;
+                let relative = at.strip_prefix(path).ok()?.to_string_lossy().into_owned();
+                out.insert(relative, (meta.len(), meta.modified().ok()));
+                if out.len() > BASELINE_FILES {
+                    return None;
+                }
+            }
+        }
+    }
+    Some(out)
+}
+
+/// `git status --porcelain` in `repo`, with git's programs off.
+fn porcelain(repo: &Path) -> String {
+    let mut command = Command::new("git");
+    command.env_clear();
+    for key in ["PATH", "HOME"] {
+        if let Some(value) = std::env::var_os(key) {
+            command.env(key, value);
+        }
+    }
+    let status = command
+        .args(GIT_FREE_CONFIG)
+        .args(["status", "--porcelain"])
+        .current_dir(repo)
+        .stdin(Stdio::null())
+        .output();
+    match status {
+        Ok(output) if output.status.success() => {
+            String::from_utf8_lossy(&output.stdout).into_owned()
+        }
+        Ok(output) => format!(
+            "git status failed: {}",
+            String::from_utf8_lossy(&output.stderr).trim_end()
+        ),
+        Err(why) => format!("git status could not run: {why}"),
+    }
+}
+
+/// `then` against `now`, in git's porcelain letters: each file deleted
+/// (` D`), then modified (` M`), then added (`??`), in path order.
+fn compared(then: &Listing, now: &Listing) -> String {
+    let mut out = String::new();
+    for path in then.keys().filter(|path| !now.contains_key(*path)) {
+        let _ = writeln!(out, " D {path}");
+    }
+    for (path, was) in then {
+        if now.get(path).is_some_and(|is| is != was) {
+            let _ = writeln!(out, " M {path}");
+        }
+    }
+    for path in now.keys().filter(|path| !then.contains_key(*path)) {
+        let _ = writeln!(out, "?? {path}");
+    }
+    out
+}
+
+/// What became of each of `policy`'s writable directories (#301
+/// 5981929426; #830), keyed as the regimen wrote it:
+/// - a git checkout: its `git status --porcelain`;
+/// - a directory of checkouts (T1's `~/git/reference/Babylon`): each
+///   repository under it, keyed `<dir>/<repository>`, with its own status;
+/// - a directory holding no repository: its files against `baseline`,
+///   their state at the session's start, in the same letters;
+/// - one that cannot be judged: `not judged: <why>`, never left out.
+#[must_use]
+pub fn reference_modified(policy: &Policy, baseline: &Baseline) -> BTreeMap<String, String> {
     let mut out = BTreeMap::new();
     for dir in &policy.writable {
         let path = crate::isolation::policy::home_expanded(dir);
-        if !path.join(".git").exists() {
+        if !path.is_dir() {
+            out.insert(dir.clone(), "not judged: no such directory".to_owned());
             continue;
         }
-        let mut command = Command::new("git");
-        command.env_clear();
-        for key in ["PATH", "HOME"] {
-            if let Some(value) = std::env::var_os(key) {
-                command.env(key, value);
-            }
+        let found = repositories(&path);
+        if found.as_slice() == [path.clone()] {
+            out.insert(dir.clone(), porcelain(&path));
+            continue;
         }
-        let status = command
-            .args(GIT_FREE_CONFIG)
-            .args(["status", "--porcelain"])
-            .current_dir(&path)
-            .stdin(Stdio::null())
-            .output();
-        let said = match status {
-            Ok(output) if output.status.success() => {
-                String::from_utf8_lossy(&output.stdout).into_owned()
+        if !found.is_empty() {
+            for repo in found {
+                let under = repo
+                    .strip_prefix(&path)
+                    .unwrap_or(&repo)
+                    .to_string_lossy()
+                    .into_owned();
+                out.insert(
+                    format!("{}/{under}", dir.trim_end_matches('/')),
+                    porcelain(&repo),
+                );
             }
-            Ok(output) => format!(
-                "git status failed: {}",
-                String::from_utf8_lossy(&output.stderr).trim_end()
-            ),
-            Err(why) => format!("git status could not run: {why}"),
+            continue;
+        }
+        let said = match (baseline.0.get(dir), listing(&path)) {
+            (Some(Some(then)), Some(now)) => compared(then, &now),
+            (Some(None), _) | (_, None) => {
+                format!("not judged: more than {BASELINE_FILES} files, or unreadable")
+            }
+            (None, _) => "not judged: no record of it at the session's start".to_owned(),
         };
         out.insert(dir.clone(), said);
     }
@@ -2155,6 +2297,9 @@ pub fn receipt(
 pub struct Tools {
     /// The confinement, opened at start.
     pub confinement: Confinement,
+    /// What the writable directories held at start, for the receipt's
+    /// `reference_modified` (#830).
+    pub baseline: Baseline,
     /// The policy it was opened for.
     pub policy: Policy,
     /// The worktree, absolute: where commands run.
@@ -3481,33 +3626,123 @@ pub(in crate::drive) mod tests {
         let _ = std::fs::remove_dir_all(&dir);
     }
 
+    /// A scratch git checkout at `dir`, its programs off as the receipt's.
+    fn checkout(dir: &Path) {
+        std::fs::create_dir_all(dir).expect("a checkout's directory");
+        let init = Command::new("git")
+            .args(["init", "-q"])
+            .current_dir(dir)
+            .status()
+            .expect("git runs");
+        assert!(init.success());
+    }
+
     #[test]
     fn a_writable_reference_checkouts_changes_are_its_porcelain_status() {
         let dir = scratch("reference");
         let reference = dir.join("reference");
-        let plain = dir.join("plain");
-        std::fs::create_dir_all(&reference).expect("a reference");
-        std::fs::create_dir_all(&plain).expect("a plain dir");
-        let init = Command::new("git")
-            .args(["init", "-q"])
-            .current_dir(&reference)
-            .status()
-            .expect("git runs");
-        assert!(init.success());
+        checkout(&reference);
         std::fs::write(reference.join("touched.txt"), "x").expect("a change");
         let mut policy = Policy::unconfined();
-        policy.writable = vec![
-            reference.to_string_lossy().into_owned(),
-            plain.to_string_lossy().into_owned(),
-        ];
-        let modified = reference_modified(&policy);
+        policy.writable = vec![reference.to_string_lossy().into_owned()];
+        let baseline = reference_baseline(&policy);
+        let modified = reference_modified(&policy, &baseline);
         assert_eq!(
             modified,
             BTreeMap::from([(
                 reference.to_string_lossy().into_owned(),
                 "?? touched.txt\n".to_owned()
             )]),
-            "only the checkout, and its status as git prints it"
+            "the checkout, and its status as git prints it"
+        );
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// #830, from T1 on the floor: a writable directory holding checkouts --
+    /// `~/git/reference/Babylon`, three repositories side by side -- names
+    /// each repository under it with its own status, a file added and one
+    /// edited during the session; an untouched one is named, clean.
+    #[test]
+    fn a_writable_directory_of_checkouts_names_each_repository_and_its_changes() {
+        let dir = scratch("reference-tree");
+        let tree = dir.join("Babylon");
+        let lite = tree.join("Babylon-Lite");
+        let docs = tree.join("Documentation");
+        checkout(&lite);
+        checkout(&docs);
+        std::fs::write(lite.join("vite.config.ts"), "export default {}\n").expect("a file");
+        let commit = |repo: &Path| {
+            for args in [
+                &["add", "-A"][..],
+                &[
+                    "-c",
+                    "user.name=t",
+                    "-c",
+                    "user.email=t@example.com",
+                    "commit",
+                    "-qm",
+                    "base",
+                ][..],
+            ] {
+                let ran = Command::new("git").args(args).current_dir(repo).status();
+                assert!(ran.expect("git runs").success());
+            }
+        };
+        commit(&lite);
+        let mut policy = Policy::unconfined();
+        policy.writable = vec![tree.to_string_lossy().into_owned()];
+        let baseline = reference_baseline(&policy);
+        std::fs::write(
+            lite.join("vite.config.ts"),
+            "export default { plugins: [] }\n",
+        )
+        .expect("an edit");
+        std::fs::write(lite.join("scene252.ts"), "// new\n").expect("an addition");
+        let modified = reference_modified(&policy, &baseline);
+        let key = |repo: &str| format!("{}/{repo}", tree.to_string_lossy());
+        assert_eq!(
+            modified,
+            BTreeMap::from([
+                (
+                    key("Babylon-Lite"),
+                    " M vite.config.ts\n?? scene252.ts\n".to_owned()
+                ),
+                (key("Documentation"), String::new()),
+            ]),
+            "each repository under the writable path, never {{}}"
+        );
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// #830: a writable directory holding no repository is compared against
+    /// its files at the session's start -- added, modified, deleted, in
+    /// git's porcelain letters -- and one that cannot be judged says so.
+    #[test]
+    fn a_writable_directory_without_a_repository_is_compared_with_its_start() {
+        let dir = scratch("reference-plain");
+        let plain = dir.join("plain");
+        std::fs::create_dir_all(plain.join("lab")).expect("a plain dir");
+        std::fs::write(plain.join("kept.txt"), "same").expect("a file");
+        std::fs::write(plain.join("lab/edited.txt"), "before").expect("a file");
+        std::fs::write(plain.join("gone.txt"), "x").expect("a file");
+        let missing = dir.join("never-made");
+        let mut policy = Policy::unconfined();
+        policy.writable = vec![
+            plain.to_string_lossy().into_owned(),
+            missing.to_string_lossy().into_owned(),
+        ];
+        let baseline = reference_baseline(&policy);
+        std::fs::write(plain.join("lab/edited.txt"), "after, and longer").expect("an edit");
+        std::fs::write(plain.join("added.txt"), "new").expect("an addition");
+        std::fs::remove_file(plain.join("gone.txt")).expect("a deletion");
+        let modified = reference_modified(&policy, &baseline);
+        assert_eq!(
+            modified[&plain.to_string_lossy().into_owned()],
+            " D gone.txt\n M lab/edited.txt\n?? added.txt\n"
+        );
+        assert!(
+            modified[&missing.to_string_lossy().into_owned()].starts_with("not judged:"),
+            "{modified:?}"
         );
         let _ = std::fs::remove_dir_all(&dir);
     }

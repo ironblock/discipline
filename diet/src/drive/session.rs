@@ -4284,7 +4284,7 @@ impl<S: Streaming + 'static> Session<S> {
             let state = self.shared.lock();
             (state.allowed.clone(), state.counts)
         };
-        let reference = tool_loop::reference_modified(&tools.policy);
+        let reference = tool_loop::reference_modified(&tools.policy, &tools.baseline);
         Some(tool_loop::receipt(
             &allowed,
             counts,
@@ -15028,6 +15028,7 @@ pub(in crate::drive) mod tests {
         let allowed = tool_loop::preseeded(&commands, &gate).expect("a pre-seed");
         Tools {
             confinement,
+            baseline: tool_loop::Baseline::default(),
             policy: IsolationPolicy::unconfined(),
             worktree: worktree.to_path_buf(),
             cwd: "~/git/a-worktree".to_owned(),

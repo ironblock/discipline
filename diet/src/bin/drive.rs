@@ -1470,6 +1470,8 @@ fn serving_tools(
     let home = std::env::var_os("HOME").map(std::path::PathBuf::from);
     Ok(Some(Tools {
         confinement,
+        // What the writable directories hold as the session opens (#830).
+        baseline: tool_loop::reference_baseline(&policy),
         policy,
         cwd: tool_loop::cwd_label(&worktree, home.as_deref()),
         worktree,
