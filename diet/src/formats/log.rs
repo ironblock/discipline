@@ -1454,6 +1454,11 @@ pub enum Event {
         trailer: Option<String>,
         /// What a fork refused for the pool did not fit beside (v8, #782).
         pool: Option<PoolRoom>,
+        /// The calls the fork made that ran nothing (v8, #806): every call
+        /// but a record tool's (`update_record`, `resolve_entry`), each on its
+        /// `tool_call` line. A fork runs nothing it calls; absent when it
+        /// made no such call.
+        not_run: Option<u64>,
     },
     /// One entry a fork's answer patched into working memory (v5, #374).
     Patch {
@@ -3504,6 +3509,7 @@ fn from_object(object: &BTreeMap<String, Value>) -> Result<Line, String> {
                 }),
                 _ => None,
             },
+            not_run: fields.optional_count("not_run")?,
         },
         Kind::Patch => {
             let op = fields.tag("op", PatchOp::from_tag)?;
@@ -5130,6 +5136,7 @@ pub fn schema(kind: Kind) -> &'static [Field] {
                 may_v8("trunk_tokens", Count),
                 may_v8("beside_tokens", Count),
                 may_v8("fork_tokens", Count),
+                may_v8("not_run", Count),
             ];
             F
         }
@@ -6153,8 +6160,12 @@ fn to_value(line: &Line) -> Value {
             refused,
             trailer,
             pool,
+            not_run,
         } => {
             put("fork", count(*fork));
+            if let Some(calls) = not_run {
+                put("not_run", count(*calls));
+            }
             if let Some(room) = pool {
                 put("window", count(room.window));
                 put("trunk_tokens", count(room.trunk));
@@ -8041,6 +8052,7 @@ mod tests {
                 wall_ms: Some(480),
                 refused: None,
                 pool: None,
+                not_run: Some(1),
             },
             Event::Patch {
                 fork: Some(fork),
