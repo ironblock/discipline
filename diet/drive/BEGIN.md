@@ -330,3 +330,30 @@ target/debug/diet-drive serve --endpoint http://127.0.0.1:7902/v1/chat/completio
 ```
 
 `serve`'s engine check passes only against the replay: its `GET /props` reports the `build_info` the registry's `canned-replay` entry declares.
+
+## Scenarios: a drive written down
+
+A scenario is a drive written as steps and expectations, one JSON line each (#760). Its format note is [`diet/scenarios/README.md`](../scenarios/README.md), and each one lives under [`diet/scenarios/`](../scenarios/). From the repository root:
+
+```
+target/debug/diet-drive scenario diet/scenarios/levers-run-c.jsonl --out runs/YYYY-MM-DD-<name>
+```
+
+This runs it on the canned scenario substrate:
+- `serve` is started as a child process, answered by the scenario's own replies;
+- it is driven through `/commands`, `/state`, `/wait` and `/memory`;
+- its log is checked against the expectations;
+- when they pass, the outputs go to `scripts/assemble-run.py` (`--no-assemble` keeps the log and the record under `--out` instead).
+
+One JSON line on stdout says how it went:
+- `ok`;
+- `substrate`;
+- `replies_sha256`, on a canned run;
+- `unmet`: the expectations not met;
+- `unmatched`: the requests no reply answered;
+- `failure`: the step that went wrong.
+
+It exits `0` only when all of it passed. `./verify.sh`'s `scenarios` check runs every scenario this way, and fails when there are none.
+
+**Re-firing a run on a model:** add `--endpoint URL --model NAME` (and `--key-file FILE`). It runs under the scenario's `live_regimen` unless `--regimen` names another. The replies are ignored. The assembled README says who drove it: the scenario, re-fired on the regimen's substrate. The endpoint is never written.
+

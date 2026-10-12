@@ -287,6 +287,16 @@ measured_by = "computed by canned::replay_tools_digest() and canned::hardware_fi
 serves = "diet-drive canned"
 acts_sha256 = "7336cc7fed1f2e64c6095c49f73317c9b30be3ba8d22d7cf3bf8fc2bc62c6966"
 
+[equipment.canned-loopback-scenario]
+display_name = "the routed scenario loopback server"
+entry_type = "canned-server"
+hardware_fingerprint = "b6bc80e9e8e4bc2342219f064dab89a8d17c02535600b32b84895fc0b9ba6513"
+role = "diet-drive's own server in the stub's routed mode (#760): each request answered by the scenario's reply whose text its last message holds, else the next in order, and a request none answers refused 500; it has no acts of its own -- each scenario's replies are what it plays, named by the run's replies digest"
+measured = "2026-10-11"
+measured_by = "computed by canned::scenario_digest() and canned::hardware_fingerprint() over canned::scenario_acts(), the empty list; canned::tests::every_registered_canned_digest_is_acts_this_crate_keeps re-derives both"
+serves = "diet-drive canned"
+acts_sha256 = "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+
 [equipment.canned-loopback-replay]
 display_name = "the stream-replay loopback server"
 entry_type = "canned-server"
@@ -1134,6 +1144,21 @@ reproducible_because = "replay the captures and the same bytes play again; exact
 engine_single_digest_suffices = "the digest is of the acts, not of an executable: the server is this repository's own code, and the captures are the whole of what it plays"
 engine_build_info = "canned-7336cc7fed1f2e64c6095c49f73317c9b30be3ba8d22d7cf3bf8fc2bc62c6966"
 engine_build_info_is = "derived, not read from a server: canned::replay_tools_build_info(), \"canned-\" + the acts digest; what `diet-drive replay` reports at GET /props"
+
+[substrate.canned-scenario]
+equipment = "canned-loopback-scenario"
+description = "the scenario substrate (#760): `diet-drive scenario` serves a scenario's own replies on loopback, routed by the text of each request's last message, and GET /props with this entry's literal; rehearsal-only, never a claim substrate -- #767 is what will enforce that -- and every answer is one the scenario wrote"
+pinned = true
+engine_name = "diet-drive scenario"
+engine_identity = "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+engine_identity_is = "the digest of no acts: the routed server is fixed and plays nothing of its own; what a run played is its scenario's replies, whose digest the run names on its output line and in its README"
+weights_kind = "canned"
+weights_acts_sha256 = "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+reproducible_by_config = true
+reproducible_because = "run the same scenario file and the same replies play again; exact match, no band"
+engine_single_digest_suffices = "the server is this repository's own code, and the scenario's replies, digested per run, are the whole of what it plays"
+engine_build_info = "canned-e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+engine_build_info_is = "derived, not read from a server: canned::scenario_build_info(), \"canned-\" + the digest of no acts; what `diet-drive scenario` reports at GET /props"
 
 [substrate.stub-hosted-api]
 equipment = "stub-hosted-api"

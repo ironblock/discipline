@@ -108,6 +108,7 @@ pub mod projection;
 pub mod prune;
 pub mod regimen;
 pub mod registry;
+pub mod scenario;
 pub mod script;
 pub mod serve;
 pub mod served;

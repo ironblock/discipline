@@ -266,6 +266,27 @@ pub fn replay_tools_build_info() -> String {
     format!("canned-{}", replay_tools_digest())
 }
 
+/// The routed scenario server's own acts (#760): none. What it plays is
+/// each scenario's replies, which its run names by their own digest
+/// ([`crate::drive::scenario::Scenario::replies_digest`]); the server
+/// itself is fixed, so substrate `canned-scenario` pins this.
+#[must_use]
+pub fn scenario_acts() -> Vec<Act> {
+    Vec::new()
+}
+
+/// The digest of [`scenario_acts`]: substrate `canned-scenario`.
+#[must_use]
+pub fn scenario_digest() -> String {
+    digest_of(&scenario_acts())
+}
+
+/// What the routed scenario server answers `GET /props` with (#760).
+#[must_use]
+pub fn scenario_build_info() -> String {
+    format!("canned-{}", scenario_digest())
+}
+
 /// The digest of any act list, which is what makes [`acts_digest`] checkable.
 ///
 /// Split out because a digest that ignored its input would move the record and
@@ -398,6 +419,77 @@ pub fn reply_exhausted_in_the_think_block(reasoning: &str) -> String {
     )
 }
 
+/// One call a [`streamed`] reply makes (#760).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct StreamedCall<'a> {
+    /// The call's id.
+    pub id: &'a str,
+    /// The tool it calls.
+    pub name: &'a str,
+    /// Its arguments, as the JSON text the model would write.
+    pub arguments: &'a str,
+}
+
+/// A reply streamed as a llama.cpp server streams one (#760): the HTTP
+/// head, then server-sent events -- the role, `text` as one content delta
+/// when there is any, each of `calls` as one `tool_calls` delta, the finish
+/// (`tool_calls` when there are calls, else `stop`), the usage and timings
+/// [`PROMPT_TOKENS`] counts, and `[DONE]` -- written out and closed. What a
+/// scenario's canned replies are served as, so the session reads them as
+/// it reads a real server's.
+#[must_use]
+pub fn streamed(text: &str, calls: &[StreamedCall<'_>]) -> Vec<u8> {
+    let chunk = |delta: serde_json::Value, finish: Option<&str>| {
+        serde_json::json!({
+            "choices": [{"index": 0, "delta": delta, "finish_reason": finish}],
+            "object": "chat.completion.chunk",
+        })
+    };
+    let mut events = vec![chunk(
+        serde_json::json!({"role": "assistant", "content": null}),
+        None,
+    )];
+    if !text.is_empty() {
+        events.push(chunk(serde_json::json!({"content": text}), None));
+    }
+    for (index, call) in calls.iter().enumerate() {
+        events.push(chunk(
+            serde_json::json!({"tool_calls": [{
+                "index": index,
+                "id": call.id,
+                "type": "function",
+                "function": {"name": call.name, "arguments": call.arguments},
+            }]}),
+            None,
+        ));
+    }
+    let finish = if calls.is_empty() {
+        "stop"
+    } else {
+        "tool_calls"
+    };
+    events.push(chunk(serde_json::json!({}), Some(finish)));
+    events.push(serde_json::json!({
+        "choices": [],
+        "object": "chat.completion.chunk",
+        "usage": {"prompt_tokens": PROMPT_TOKENS, "completion_tokens": 7},
+        "timings": {"cache_n": 0, "prompt_n": PROMPT_TOKENS, "predicted_n": 7},
+    }));
+    let mut body = String::new();
+    for event in events {
+        body.push_str("data: ");
+        body.push_str(&event.to_string());
+        body.push_str("\n\n");
+    }
+    body.push_str("data: [DONE]\n\n");
+    format!(
+        "HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\nContent-Length: {}\r\n\
+         Connection: close\r\n\r\n{body}",
+        body.len()
+    )
+    .into_bytes()
+}
+
 /// One string, as a JSON string literal's interior.
 ///
 /// Four replies here escape the same way. Two of them spelled it out
@@ -503,6 +595,7 @@ mod tests {
             digest_of(&acts_as_first_registered()),
             super::replay_digest(),
             super::replay_tools_digest(),
+            super::scenario_digest(),
         ];
         let mut current_is_registered = false;
         let (mut servers, mut substrates) = (0, 0);

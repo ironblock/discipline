@@ -2204,6 +2204,71 @@ mod tests {
         Instant::now() + Duration::from_secs(10)
     }
 
+    /// #760: a scenario's reply, streamed as llama.cpp streams one, reads
+    /// back as its text and its calls, with the finish reason and timings
+    /// a real server's carries.
+    #[test]
+    fn a_streamed_scenario_reply_reads_back_as_its_text_and_calls() {
+        use crate::drive::canned::{StreamedCall, streamed};
+        let stub = Stub::serving(vec![
+            Act::Raw(streamed("Settled: \"yes\".\nNext.", &[])),
+            Act::Raw(streamed(
+                "Writing it.",
+                &[StreamedCall {
+                    id: "call-w",
+                    name: "write",
+                    arguments: r#"{"path":"a.py","content":"print(1)\n"}"#,
+                }],
+            )),
+        ])
+        .expect("loopback");
+        let transport = HttpStream::new(endpoint(&stub));
+        let read = |transport: &HttpStream| {
+            let mut text = String::new();
+            let mut calls: Vec<(Option<String>, Option<String>, String)> = Vec::new();
+            let ended =
+                transport.stream(
+                    &shape(),
+                    deadline(),
+                    &Cancel::new(),
+                    &mut |piece| match piece {
+                        Piece::Text(t) => text.push_str(t),
+                        Piece::ToolCall {
+                            id,
+                            name,
+                            arguments,
+                            ..
+                        } => calls.push((
+                            id.map(str::to_owned),
+                            name.map(str::to_owned),
+                            arguments.to_owned(),
+                        )),
+                        _ => {}
+                    },
+                );
+            (ended, text, calls)
+        };
+        let (ended, text, calls) = read(&transport);
+        assert!(
+            matches!(&ended, Ok(Ended::Finished { finish_reason: Some(reason), timings })
+                if reason == "stop" && timings.as_ref().is_some_and(|t| t.prompt_n.is_some())),
+            "{ended:?}"
+        );
+        assert_eq!(text, "Settled: \"yes\".\nNext.");
+        assert!(calls.is_empty());
+        let (ended, text, calls) = read(&transport);
+        assert!(
+            matches!(&ended, Ok(Ended::Finished { finish_reason: Some(reason), .. })
+                if reason == "tool_calls"),
+            "{ended:?}"
+        );
+        assert_eq!(text, "Writing it.");
+        let arguments: String = calls.iter().map(|(_, _, a)| a.as_str()).collect();
+        assert_eq!(arguments, r#"{"path":"a.py","content":"print(1)\n"}"#);
+        assert_eq!(calls[0].0.as_deref(), Some("call-w"));
+        assert_eq!(calls[0].1.as_deref(), Some("write"));
+    }
+
     #[test]
     fn the_real_servers_stream_is_read_piece_by_piece() {
         let stub = Stub::serving(vec![Act::Raw(CAPTURED.to_vec())]).expect("loopback");

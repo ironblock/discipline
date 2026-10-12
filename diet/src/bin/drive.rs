@@ -83,6 +83,9 @@ const MCP: &str = "mcp";
 /// The first-run check (#717).
 const CHECK: &str = "check";
 
+/// The scenario runner's subcommand (#760).
+const SCENARIO: &str = "scenario";
+
 /// The port `diet-drive replay` listens on unless told another.
 const REPLAY_PORT: u16 = 7902;
 
@@ -2245,6 +2248,12 @@ fn usage() -> String {
     out.push_str("       (the first-run check; `diet-drive check --help`)\n");
     out.push_str("       diet-drive mcp [--url http://HOST:PORT] [--auth-file FILE]\n");
     out.push_str("       (MCP over stdio, driving a running serve; `diet-drive mcp --help`)\n");
+    out.push_str("       diet-drive scenario FILE --out DIR [--endpoint URL --model NAME\n");
+    out.push_str(
+        "           [--key-file FILE]] [--regimen FILE] [--worktree DIR] [--no-assemble]\n",
+    );
+    out.push_str("       (a scenario, #760: on the canned scenario substrate, or re-fired on\n");
+    out.push_str("       an endpoint; diet/scenarios/README.md)\n");
     out.push_str("       diet-drive replay [--answers] [--port N]\n");
     out.push_str("       (substrate `canned-replay-tools` on loopback: captured llama.cpp\n");
     out.push_str("       replies, a `bash` call and then its answer, for a regimen rehearsed\n");
@@ -2269,6 +2278,69 @@ fn usage() -> String {
     out.push_str("a drive that could not run, 3 when the record could not be filed.\n");
     out.push_str("--help prints this to stdout and exits 0.\n");
     out
+}
+
+/// `diet-drive scenario FILE --out DIR [--endpoint URL --model NAME
+/// [--key-file FILE]] [--regimen FILE] [--worktree DIR] [--no-assemble]`
+/// (#760): a scenario run on the canned substrate, or re-fired on a named
+/// endpoint under the scenario's live regimen; one JSON line on stdout says
+/// how it went, and it exits 0 when every step went as written, every
+/// expectation was met and every request had its reply, else 1.
+fn scenario(args: &[String]) -> ExitCode {
+    use diet::drive::scenario::{RunOptions, run};
+    let usage = || {
+        fail(
+            EXIT_USAGE,
+            "usage: diet-drive scenario FILE --out DIR [--endpoint URL --model NAME \
+             [--key-file FILE]] [--regimen FILE] [--worktree DIR] [--no-assemble]",
+        )
+    };
+    let Some((file, rest)) = args.split_first() else {
+        return usage();
+    };
+    let mut options = RunOptions {
+        file: file.into(),
+        assemble: true,
+        ..RunOptions::default()
+    };
+    let mut out = None;
+    let mut flags = rest.iter();
+    while let Some(flag) = flags.next() {
+        if flag == "--no-assemble" {
+            options.assemble = false;
+            continue;
+        }
+        let Some(value) = flags.next() else {
+            return usage();
+        };
+        match flag.as_str() {
+            "--out" => out = Some(value.into()),
+            "--endpoint" => options.endpoint = Some(value.clone()),
+            "--model" => options.model = Some(value.clone()),
+            "--key-file" => options.key_file = Some(value.clone()),
+            "--regimen" => options.regimen = Some(value.into()),
+            "--worktree" => options.worktree = Some(value.into()),
+            _ => return usage(),
+        }
+    }
+    let Some(out) = out else {
+        return usage();
+    };
+    options.out = out;
+    if options.endpoint.is_some() != options.model.is_some() {
+        return fail(EXIT_USAGE, "--endpoint and --model go together");
+    }
+    let drive = match std::env::current_exe() {
+        Ok(drive) => drive,
+        Err(why) => return fail(EXIT_HALT, &format!("this binary cannot be found: {why}")),
+    };
+    let (said, passed) = run(&drive, &options);
+    println!("{said}");
+    if passed {
+        ExitCode::SUCCESS
+    } else {
+        ExitCode::from(EXIT_INPUT)
+    }
 }
 
 /// `diet-drive replay [--answers] [--port N]`: the stream-replay
@@ -2604,6 +2676,11 @@ fn main() -> ExitCode {
             return ExitCode::SUCCESS;
         }
         return mcp(&args[1..]);
+    }
+    // Nor does the scenario runner: the serve it starts re-executes itself,
+    // and the assembler it hands to runs with the environment it was given.
+    if args.first().map(String::as_str) == Some(SCENARIO) {
+        return scenario(&args[1..]);
     }
     if let Err(refused) = with_profile_flags(&mut args) {
         return refused;
