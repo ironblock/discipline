@@ -97,6 +97,16 @@ An agent drives a served session end to end, and a drive can be run again. The m
 
 **Done when** levers run C's three levers, written as a scenario, pass on the stand-in in CI; and the same scenario, re-fired on the floor through the runner, lands as an assembled run under `runs/`.
 
+**Done:** the scenario passes on the stand-in in CI (`diet/scenarios/levers-run-c.jsonl`, #777), and its re-fire on the floor is [`2026-10-12-levers-run-c-refire-agent-driven`](../runs/2026-10-12-levers-run-c-refire-agent-driven) (#811): every expectation met, assembled and checked. The maintainer approved it on 2026-10-12.
+
+**v0.3.0** (2026-10-12): the milestone's issues, #756–#760, #717, #766, #772, and #780's fix to MCP `events`. It also carries the v0.4.0 work merged so far:
+- phases as documents, two keys, the page and MCP (#787–#790);
+- capture during the turn (#782–#784);
+- what the phased T1 retries found (#797, #806, #813, #814, #821, #822, #826);
+- the kitchen-sink scenario (#798, part 1).
+
+v0.4.0 is not done: its done-when, T1 in phases on the floor reaching step 8, is being driven.
+
 ## v0.4.0 — phased operation
 
 Structure for an autonomous model, enforced classically: Superpowers-like ground rules without its token weight (the maintainer, 2026-10-11). Agent-driven T1 on the floor died at step 4 when one build turn filled the window with working memory empty (the T1 smoke run, 2026-10-11); phases give that turn a checkpoint, and capture during the turn gives the checkpoint something to refill from.
