@@ -1,4 +1,5 @@
-# A starter phase (#787). DRAFT ground rules, awaiting the maintainer's approval.
+# A starter phase (#787). Ground rules approved by the
+# maintainer as a starting point, 2026-10-11.
 name = "test"
 ground_rules = """
 Check the work against the plan: run the tests and anything else the plan named, and read what they report. Fix what fails, or record it with update_record. When everything passes, say what you ran and what it showed.
