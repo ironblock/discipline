@@ -1195,6 +1195,7 @@ mod tests {
             prefill_tokens: Some(record::Count::default()),
             prefill_from: None,
             files: None,
+            phase: None,
         }
     }
 

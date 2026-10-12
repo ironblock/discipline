@@ -42,6 +42,7 @@ export type Kind =
   | "notice"
   | "timeout.near"
   | "fork.skipped"
+  | "phase.noted"
 ;
 
 export type State =
@@ -297,6 +298,18 @@ export interface PhaseMove {
   to: string;
 }
 
+export interface PhaseDocument {
+  name: string;
+  digest: string;
+  transitions: PhaseOption[];
+  ground_rules: string;
+}
+
+export interface PhaseOption {
+  to: string;
+  kind: string;
+}
+
 export interface InstructionFile {
   path: string;
   sha256: string;
@@ -379,6 +392,7 @@ export type SessionStartLine = {
   reasoning_effort_default?: string;
   phases?: string[];
   phase_transitions?: PhaseMove[];
+  phase_document?: PhaseDocument;
   opening_phase?: string;
   instruction_files?: InstructionFile[];
   tool_output?: ToolOutputState;
@@ -594,6 +608,7 @@ export type MeditationLine = {
   tail_tokens?: number;
   carried_tokens?: number;
   phase?: PhaseMove;
+  phase_document?: PhaseDocument;
   tool_outputs?: MeditationToolOutputs;
   outputs?: string;
   carried_outputs?: number;
@@ -683,6 +698,7 @@ export type PhaseRuledLine = {
   choice: string;
   from?: string;
   to: string;
+  phase_document?: PhaseDocument;
 };
 
 export type TangentOpenLine = {
@@ -768,6 +784,14 @@ export type ForkSkippedLine = {
   field: string;
 };
 
+export type PhaseNotedLine = {
+  seq: number;
+  t: number;
+  kind: "phase.noted";
+  turn: number;
+  text: string;
+};
+
 export type LogLine =
   | SessionStartLine
   | AskLine
@@ -802,4 +826,5 @@ export type LogLine =
   | NoticeLine
   | TimeoutNearLine
   | ForkSkippedLine
+  | PhaseNotedLine
 ;

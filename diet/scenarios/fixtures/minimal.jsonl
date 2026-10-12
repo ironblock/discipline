@@ -9,6 +9,7 @@
 {"step":"wait","until":"meditation.held","timeout":60}
 {"step":"ask","text":"go on","refused":"meditation-held"}
 {"step":"refill-anyway"}
+{"step":"rule-phase","call":"call-p","choice":"continue"}
 {"step":"end"}
 {"expect":"fork","name":"fork","where":{"trigger~":"call:","why":"read"},"at_least":2}
 {"expect":"meditation.held","where":{"unaddressed~":"$flagged"},"after":"fork"}

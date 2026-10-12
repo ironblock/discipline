@@ -98,6 +98,7 @@ export function UserMessage({ node }: { readonly node: Folded<UserNode> }) {
       {/* What the operator attached (#372): the screenshot, from its checked bytes, under the words. */}
       {node.files ? <FileResults files={node.files} label="what the operator attached" /> : null}
       {/* What the harness sent after the ask (#574), in the order it did (#619): never the operator's words. */}
+      {node.phaseNoted ? <HarnessNote note="phase" label="harness · phase ground rules" text={node.phaseNoted} /> : null}
       {node.delivered ? <HarnessNote note="delivered" label={`harness · fork delivery · ${node.delivered.framing}`} text={node.delivered.text} /> : null}
       {node.recalled ? <HarnessNote note="recalled" label={`harness · recall · ${node.recalled.recall}`} text={node.recalled.text} /> : null}
       {node.reminded ? <HarnessNote note="reminded" label="harness · self-capture reminder" text={node.reminded} /> : null}

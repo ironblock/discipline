@@ -1,0 +1,13 @@
+# A starter phase (#787). DRAFT ground rules, awaiting the maintainer's approval.
+name = "plan"
+ground_rules = """
+Turn the chosen approach into a plan: the steps, the files each one touches, and how each will be checked. Record the plan and its decisions with update_record. Change no files yet. When the plan is agreed, call for a phase transition with propose_phase_transition.
+"""
+
+[[transitions]]
+to = "build"
+kind = "suggested"
+
+[[transitions]]
+to = "orient"
+kind = "allowed"

@@ -494,6 +494,7 @@ pub fn project_in(
                 levers,
                 bash_timeout_ms,
                 notes_in_the_ask,
+                phase_document,
                 ..
             },
         ..
@@ -522,6 +523,9 @@ pub fn project_in(
         .map(|message| Message::new(role_of(message.role), message.content.clone()))
         .collect();
     walk.trunk.clone_from(&walk.head);
+    // The phase it opened in (#787), which the start row names.
+    walk.phase = phase_document.as_ref().map(phase_named);
+    walk.phase_named.clone_from(&walk.phase);
     for line in &lines[1..] {
         walk.line(line)?;
     }
@@ -536,6 +540,7 @@ pub fn project_in(
         // Each lever's state, as `session.start` names it (#573): the
         // record's start says what the log says.
         levers: levers.clone(),
+        phase: phase_document.as_ref().map(phase_named),
         // #583: the version this crate writes, spelling it `meditation`.
         version: Some(crate::formats::record::VERSION),
     }];
@@ -550,6 +555,14 @@ pub fn project_in(
 }
 
 /// The walk over a log's lines after its first.
+/// A phase document as a record row names it (#787).
+fn phase_named(document: &log::PhaseDocument) -> crate::formats::record::PhaseNamed {
+    crate::formats::record::PhaseNamed {
+        name: document.name.clone(),
+        sha256: document.digest.clone(),
+    }
+}
+
 struct Walk<'a> {
     /// What each request (by `seq`) came to: its response, cancel or failure.
     outcome: BTreeMap<u64, &'a Line>,
@@ -588,6 +601,10 @@ struct Walk<'a> {
     notes: BTreeMap<u32, Vec<String>>,
     /// Whether the log's notes ride in their ask's message (#609).
     notes_in_the_ask: bool,
+    /// The phase the session is in (#787), by its document, and the one
+    /// the record last named: a turn row names its phase when they differ.
+    phase: Option<crate::formats::record::PhaseNamed>,
+    phase_named: Option<crate::formats::record::PhaseNamed>,
     /// The tools the session's requests declared, rebuilt from
     /// `session.start`'s names (#472), or why they cannot be.
     tools: Result<Vec<ToolDefinition>, String>,
@@ -825,6 +842,8 @@ impl<'a> Walk<'a> {
             ask_files: BTreeMap::new(),
             notes: BTreeMap::new(),
             notes_in_the_ask: false,
+            phase: None,
+            phase_named: None,
             tools: Ok(Vec::new()),
             template_kwargs: BTreeMap::new(),
             stepped,
@@ -940,6 +959,18 @@ impl<'a> Walk<'a> {
     // One arm per kind, exhaustive so a new kind cannot pass unhandled.
     #[allow(clippy::too_many_lines)]
     fn line(&mut self, line: &log::Line) -> Result<(), String> {
+        // A move of phase (#787): the next turn's row names where it went.
+        if let Line::PhaseRuled {
+            phase_document: Some(document),
+            ..
+        }
+        | Line::Meditation {
+            phase_document: Some(document),
+            ..
+        } = &line.event
+        {
+            self.phase = Some(phase_named(document));
+        }
         match &line.event {
             // A prune (v7, #612): applied to the trunk by the meditation that
             // lists its call, as the session applies it.
@@ -1029,7 +1060,9 @@ impl<'a> Walk<'a> {
             Line::Delivered { turn, text, .. }
             | Line::Recalled { turn, text, .. }
             | Line::Reminded { turn, text }
-            | Line::Notice { turn, text } => {
+            | Line::Notice { turn, text }
+            // A phase's ground rules (v8, #787), entered with no meditation.
+            | Line::PhaseNoted { turn, text } => {
                 self.notes.entry(*turn).or_default().push(text.clone());
             }
             // Facts the record has no row for at all, named once per kind.
@@ -1268,6 +1301,7 @@ impl<'a> Walk<'a> {
     /// through [`crate::meditation::render::refill`]. The
     /// row is named rather than written when that turn has no row; the
     /// trunk is refilled either way, since the session's was.
+    #[allow(clippy::too_many_lines)]
     fn meditation(&mut self, line: &log::Line) {
         let Line::Meditation {
             at_turn,
@@ -1280,6 +1314,7 @@ impl<'a> Walk<'a> {
             pruned,
             operator_changes,
             unaddressed,
+            phase_document,
             ..
         } = &line.event
         else {
@@ -1338,7 +1373,10 @@ impl<'a> Walk<'a> {
         self.trunk = if self.refilled {
             // Its list of the background commands still running (#614),
             // after the summary.
-            crate::meditation::render::refill_with(&self.head, &sent, background.as_deref())
+            // The phase's ground rules after the system prompt (v8, #787).
+            let head =
+                crate::meditation::render::with_ground_rules(&self.head, phase_document.as_ref());
+            crate::meditation::render::refill_with(&head, &sent, background.as_deref())
         } else {
             crate::meditation::render::refill_in_the_system_message(&self.head, &sent)
         };
@@ -1444,11 +1482,20 @@ impl<'a> Walk<'a> {
             );
         }
         let (prefill_tokens, prefill_from) = counted.ok().unzip();
+        // The phase it ran in, when the session moved since the record last
+        // named one (#787).
+        let phase = (self.phase != self.phase_named)
+            .then(|| self.phase.clone())
+            .flatten();
+        if phase.is_some() {
+            self.phase_named.clone_from(&phase);
+        }
         self.events.push(Event::Turn {
             index: turn,
             prefill_tokens,
             prefill_from,
             files: files.cloned(),
+            phase,
         });
     }
 
@@ -2147,6 +2194,7 @@ mod tests {
 
     fn start() -> Line {
         Line::SessionStart {
+            phase_document: None,
             bash_timeout_ms: None,
             version: VERSION,
             opened: 1_790_000_000_000,
@@ -2457,6 +2505,7 @@ mod tests {
         let mut events = vec![start()];
         events.extend(answered(1, 3, Some(warm()), None));
         events.push(Line::Meditation {
+            phase_document: None,
             newest_turn_tokens: None,
             refilled_anyway: None,
             operator_changes: None,
@@ -2509,6 +2558,7 @@ mod tests {
         let mut events = vec![start()];
         events.extend(answered(1, 3, Some(warm()), None));
         events.push(Line::Meditation {
+            phase_document: None,
             newest_turn_tokens: None,
             refilled_anyway: None,
             operator_changes: None,

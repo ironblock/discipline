@@ -260,6 +260,8 @@ vocabulary! {
         /// A fork the turn's own self-capture already recorded, screened out
         /// of its gap (v7, #611).
         ForkSkipped => "fork.skipped",
+        /// A phase's ground rules, as a note on an ask (v8, #787).
+        PhaseNoted => "phase.noted",
     }
 }
 
@@ -945,6 +947,30 @@ pub struct PhaseMove {
     pub to: String,
 }
 
+/// The phase document a session is in (v8, #787): its name and digest, the
+/// moves it lists, and its ground rules as the model is given them.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PhaseDocument {
+    /// The phase's name.
+    pub name: String,
+    /// The sha256 of the document's bytes.
+    pub digest: String,
+    /// The moves it lists, in the document's order; empty when none.
+    pub transitions: Vec<PhaseOption>,
+    /// Its ground rules.
+    pub ground_rules: String,
+}
+
+/// One move a phase document lists (v8, #787): to which phase, and how it
+/// is presented -- `suggested` or `allowed`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PhaseOption {
+    /// The phase it moves to.
+    pub to: String,
+    /// `suggested` or `allowed`.
+    pub kind: String,
+}
+
 /// One instruction file a session's system prompt carries (v7, #559).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct InstructionFile {
@@ -1083,6 +1109,8 @@ pub enum Event {
         /// because recordings placed in older versions carry a `phase` of
         /// their own on this line.
         opening_phase: Option<String>,
+        /// The opening phase's document (v8, #787).
+        phase_document: Option<PhaseDocument>,
         /// The instruction files the system prompt carries (v7, #559): each
         /// by its path relative to the worktree and its digest. Their text
         /// is in `head`.
@@ -1516,6 +1544,18 @@ pub enum Event {
         from: Option<String>,
         /// The phase proposed.
         to: String,
+        /// The document of the phase the session is in after the ruling
+        /// (v8, #787), on a `meditation` or `continue`.
+        phase_document: Option<PhaseDocument>,
+    },
+    /// A phase's ground rules, as a note on turn `turn`'s ask (v8, #787):
+    /// the session entered the phase with no meditation to carry them in
+    /// the system prompt.
+    PhaseNoted {
+        /// The turn whose request carried it.
+        turn: u32,
+        /// The note as sent.
+        text: String,
     },
     /// A tool result the model pruned (v7, #612), logged when the tool
     /// answered: a later meditation carries `text` in its place.
@@ -1646,6 +1686,10 @@ pub enum Event {
         /// a move the graph allowed; absent when the session stayed in its
         /// phase.
         phase: Option<PhaseMove>,
+        /// The document of the phase the session is in after it (v8, #787):
+        /// its ground rules follow the head's system prompt on the refilled
+        /// trunk.
+        phase_document: Option<PhaseDocument>,
         /// What it carried of the tool outputs it compacted away (v7,
         /// #553). Absent is `evict`.
         tool_outputs: Option<MeditationToolOutputs>,
@@ -3110,6 +3154,7 @@ fn from_object(object: &BTreeMap<String, Value>) -> Result<Line, String> {
                     None => None,
                     Some(_) => Some(fields.string("opening_phase")?),
                 },
+                phase_document: fields.optional_phase_document("phase_document")?,
             }
         }
         Kind::Ask => Event::Ask {
@@ -3433,6 +3478,10 @@ fn from_object(object: &BTreeMap<String, Value>) -> Result<Line, String> {
             turn: fields.turn("turn")?,
             text: fields.string("text")?,
         },
+        Kind::PhaseNoted => Event::PhaseNoted {
+            turn: fields.turn("turn")?,
+            text: fields.string("text")?,
+        },
         Kind::TangentOpen => Event::TangentOpen {
             id: fields.string("id")?,
             at_turn: fields.turn("at_turn")?,
@@ -3476,6 +3525,7 @@ fn from_object(object: &BTreeMap<String, Value>) -> Result<Line, String> {
             },
             from: fields.optional_string("from")?,
             to: fields.string("to")?,
+            phase_document: fields.optional_phase_document("phase_document")?,
         },
         Kind::Pruned => Event::Pruned {
             turn: fields.turn("turn")?,
@@ -3534,6 +3584,7 @@ fn from_object(object: &BTreeMap<String, Value>) -> Result<Line, String> {
                 None => None,
                 Some(_) => Some(fields.phase_move("phase")?),
             },
+            phase_document: fields.optional_phase_document("phase_document")?,
             tool_outputs: fields.optional_tag("tool_outputs", MeditationToolOutputs::from_tag)?,
             outputs: fields.optional_string("outputs")?,
             carried_outputs: fields.optional_count("carried_outputs")?,
@@ -4183,6 +4234,11 @@ pub enum Holds {
     PhaseMove,
     /// A `session.start`'s `phase_transitions` (v7): a list of such objects.
     PhaseMoves,
+    /// A phase document (v8, #787): an object of [`PHASE_DOCUMENT`]'s keys.
+    PhaseDocument,
+    /// A phase document's `transitions` (v8, #787): a list, possibly empty,
+    /// of objects of [`PHASE_OPTION`]'s keys.
+    PhaseOptions,
     /// A `session.start`'s `instruction_files` (v7): a non-empty list of
     /// objects of the keys [`INSTRUCTION_FILE`] declares.
     InstructionFiles,
@@ -4365,6 +4421,17 @@ pub const DELIVERED_LINE: &[Field] = &[
 
 /// The keys of a phase move (v7, #563): both, always.
 pub const PHASE_MOVE: &[Field] = &[must_v7("from", Holds::Text), must_v7("to", Holds::Text)];
+
+/// The keys of a phase document (v8, #787): all, always.
+pub const PHASE_DOCUMENT: &[Field] = &[
+    must_v8("name", Holds::Text),
+    must_v8("digest", Holds::Digest),
+    must_v8("transitions", Holds::PhaseOptions),
+    must_v8("ground_rules", Holds::Text),
+];
+
+/// The keys of each move a phase document lists (v8, #787).
+pub const PHASE_OPTION: &[Field] = &[must_v8("to", Holds::Text), must_v8("kind", Holds::Text)];
 /// The keys of each of a `session.start`'s `instruction_files`. Arrived in
 /// v7.
 pub const INSTRUCTION_FILE: &[Field] = &[
@@ -4420,6 +4487,16 @@ const fn may_v8(key: &'static str, holds: Holds) -> Field {
         key,
         holds,
         required: false,
+        since: 8,
+    }
+}
+
+/// A key that arrived in v8 and is required wherever its object is written.
+const fn must_v8(key: &'static str, holds: Holds) -> Field {
+    Field {
+        key,
+        holds,
+        required: true,
         since: 8,
     }
 }
@@ -4528,6 +4605,8 @@ pub fn object_fields(holds: Holds) -> Option<&'static [Field]> {
         Holds::TemplateKwargs => Some(TEMPLATE_KWARGS),
         Holds::Unsent => Some(UNSENT),
         Holds::PhaseMove | Holds::PhaseMoves => Some(PHASE_MOVE),
+        Holds::PhaseDocument => Some(PHASE_DOCUMENT),
+        Holds::PhaseOptions => Some(PHASE_OPTION),
         Holds::InstructionFiles => Some(INSTRUCTION_FILE),
         Holds::DeliveredLines => Some(DELIVERED_LINE),
         Holds::RecalledItems => Some(RECALLED_ITEM),
@@ -4564,6 +4643,7 @@ pub fn introduced(kind: Kind) -> i64 {
         | Kind::Notice
         | Kind::TimeoutNear
         | Kind::ForkSkipped => 7,
+        Kind::PhaseNoted => 8,
         _ => 0,
     }
 }
@@ -4720,6 +4800,7 @@ pub fn schema(kind: Kind) -> &'static [Field] {
                 may_v7("reasoning_effort_default", Text),
                 may_v7("phases", Holds::Strings),
                 may_v7("phase_transitions", Holds::PhaseMoves),
+                may_v8("phase_document", Holds::PhaseDocument),
                 may_v7("opening_phase", Text),
                 may_v7("instruction_files", Holds::InstructionFiles),
                 may_v7("tool_output", Tag(Tags::ToolOutputState)),
@@ -4943,6 +5024,10 @@ pub fn schema(kind: Kind) -> &'static [Field] {
             const F: &[Field] = &[must_v7("turn", Count), must_v7("text", Text)];
             F
         }
+        Kind::PhaseNoted => {
+            const F: &[Field] = &[must_v8("turn", Count), must_v8("text", Text)];
+            F
+        }
         Kind::TangentOpen => {
             const F: &[Field] = &[
                 must_v7("id", Text),
@@ -4976,6 +5061,7 @@ pub fn schema(kind: Kind) -> &'static [Field] {
                 may_v7("tail_tokens", Count),
                 may_v7("carried_tokens", Count),
                 may_v7("phase", Holds::PhaseMove),
+                may_v8("phase_document", Holds::PhaseDocument),
                 may_v7("tool_outputs", Tag(Tags::MeditationToolOutputs)),
                 may_v7("outputs", Text),
                 may_v7("carried_outputs", Count),
@@ -5004,6 +5090,7 @@ pub fn schema(kind: Kind) -> &'static [Field] {
                 must_v7("choice", Text),
                 may_v7("from", Text),
                 must_v7("to", Text),
+                may_v8("phase_document", Holds::PhaseDocument),
             ];
             F
         }
@@ -5144,6 +5231,8 @@ fn ts_holds(holds: Holds) -> String {
         Holds::Unsent => "Unsent".to_owned(),
         Holds::PhaseMove => "PhaseMove".to_owned(),
         Holds::PhaseMoves => "PhaseMove[]".to_owned(),
+        Holds::PhaseDocument => "PhaseDocument".to_owned(),
+        Holds::PhaseOptions => "PhaseOption[]".to_owned(),
         Holds::InstructionFiles => "InstructionFile[]".to_owned(),
         Holds::DeliveredLines => "NoteLine[]".to_owned(),
         Holds::RecalledItems => "RecalledItem[]".to_owned(),
@@ -5248,6 +5337,8 @@ pub fn typescript() -> String {
         ("TemplateKwargs", TEMPLATE_KWARGS),
         ("Unsent", UNSENT),
         ("PhaseMove", PHASE_MOVE),
+        ("PhaseDocument", PHASE_DOCUMENT),
+        ("PhaseOption", PHASE_OPTION),
         ("InstructionFile", INSTRUCTION_FILE),
         ("NoteLine", DELIVERED_LINE),
         ("RecalledItem", RECALLED_ITEM),
@@ -5367,6 +5458,7 @@ fn to_value(line: &Line) -> Value {
             phases,
             phase_transitions,
             opening_phase,
+            phase_document,
             instruction_files,
         } => {
             put("version", Value::Integer(*version));
@@ -5384,6 +5476,9 @@ fn to_value(line: &Line) -> Value {
             }
             if let Some(phase) = opening_phase {
                 put("opening_phase", text(phase));
+            }
+            if let Some(document) = phase_document {
+                put("phase_document", phase_document_value(document));
             }
             if let Some(asks) = fork_asks {
                 put("fork_asks", text(&asks.name));
@@ -5979,6 +6074,11 @@ fn to_value(line: &Line) -> Value {
             put("text", text(note));
             Kind::Reminded
         }
+        Event::PhaseNoted { turn, text: note } => {
+            put("turn", count(u64::from(*turn)));
+            put("text", text(note));
+            Kind::PhaseNoted
+        }
         Event::TangentOpen {
             id,
             at_turn,
@@ -6020,6 +6120,7 @@ fn to_value(line: &Line) -> Value {
             tail_tokens,
             carried_tokens,
             phase,
+            phase_document,
             tool_outputs,
             outputs,
             carried_outputs,
@@ -6045,6 +6146,9 @@ fn to_value(line: &Line) -> Value {
             }
             if let Some(moved) = phase {
                 put("phase", phase_move_value(moved));
+            }
+            if let Some(document) = phase_document {
+                put("phase_document", phase_document_value(document));
             }
             put("reason", text(reason.tag()));
             put("prefix_hash_before", text(prefix_hash_before));
@@ -6247,7 +6351,11 @@ fn to_value(line: &Line) -> Value {
             choice,
             from,
             to,
+            phase_document,
         } => {
+            if let Some(document) = phase_document {
+                put("phase_document", phase_document_value(document));
+            }
             put("call", text(call));
             put("choice", text(choice));
             if let Some(from) = from {
@@ -6273,6 +6381,31 @@ fn to_value(line: &Line) -> Value {
     };
     put("kind", text(kind.tag()));
     Value::Object(object)
+}
+
+/// A phase document as the log writes it (v8, #787).
+fn phase_document_value(document: &PhaseDocument) -> Value {
+    let text = |text: &str| Value::String(text.to_owned());
+    Value::Object(BTreeMap::from([
+        ("name".to_owned(), text(&document.name)),
+        ("digest".to_owned(), text(&document.digest)),
+        (
+            "transitions".to_owned(),
+            Value::Array(
+                document
+                    .transitions
+                    .iter()
+                    .map(|option| {
+                        Value::Object(BTreeMap::from([
+                            ("to".to_owned(), text(&option.to)),
+                            ("kind".to_owned(), text(&option.kind)),
+                        ]))
+                    })
+                    .collect(),
+            ),
+        ),
+        ("ground_rules".to_owned(), text(&document.ground_rules)),
+    ]))
 }
 
 /// A phase move as the log writes it.
@@ -6919,6 +7052,50 @@ impl Fields<'_> {
         Ok(kwargs)
     }
 
+    /// A phase document (v8, #787), when carried: every key, a digest that
+    /// is one, and each listed move `suggested` or `allowed`.
+    fn optional_phase_document(&self, key: &str) -> Result<Option<PhaseDocument>, String> {
+        if !self.0.contains_key(key) {
+            return Ok(None);
+        }
+        let inner = Fields(self.object(key, PHASE_DOCUMENT)?);
+        let at = |why: String| format!("`{key}`: {why}");
+        let Some(Value::Array(entries)) = inner.0.get("transitions") else {
+            return Err(at("`transitions` is not a list".to_owned()));
+        };
+        let mut transitions = Vec::new();
+        for (index, entry) in entries.iter().enumerate() {
+            let at = |why: String| format!("`{key}.transitions[{index}]`: {why}");
+            let Value::Object(entry) = entry else {
+                return Err(at("is not an object".to_owned()));
+            };
+            let entry = Fields(entry);
+            if let Some(extra) = entry
+                .0
+                .keys()
+                .find(|k| !PHASE_OPTION.iter().any(|f| f.key == k.as_str()))
+            {
+                return Err(at(format!("carries `{extra}`")));
+            }
+            let kind = entry.string("kind").map_err(at)?;
+            if !matches!(kind.as_str(), "suggested" | "allowed") {
+                return Err(at(format!(
+                    "`kind` is `{kind}`, and a move is `suggested` or `allowed`"
+                )));
+            }
+            transitions.push(PhaseOption {
+                to: entry.string("to").map_err(at)?,
+                kind,
+            });
+        }
+        Ok(Some(PhaseDocument {
+            name: inner.string("name").map_err(at)?,
+            digest: inner.digest("digest").map_err(at)?,
+            transitions,
+            ground_rules: inner.string("ground_rules").map_err(at)?,
+        }))
+    }
+
     /// A meditation's `phase` (v7, #563).
     fn phase_move(&self, key: &str) -> Result<PhaseMove, String> {
         Fields(self.object(key, PHASE_MOVE)?)
@@ -7280,6 +7457,7 @@ mod tests {
                 phases: None,
                 phase_transitions: None,
                 opening_phase: None,
+                phase_document: None,
                 fork_asks: Some(ForkAsks {
                     name: "v4".to_owned(),
                     digest: Some("0123456789abcdef".to_owned()),
@@ -7693,16 +7871,30 @@ mod tests {
                 choice: "meditation".to_owned(),
                 from: Some("plan".to_owned()),
                 to: "build".to_owned(),
+                phase_document: Some(PhaseDocument {
+                    name: "build".to_owned(),
+                    digest: "b".repeat(64),
+                    transitions: vec![PhaseOption {
+                        to: "test".to_owned(),
+                        kind: "suggested".to_owned(),
+                    }],
+                    ground_rules: "Make the change.".to_owned(),
+                }),
             },
             Event::PhaseRuled {
                 call: "call-q".to_owned(),
                 choice: "stay".to_owned(),
                 from: None,
                 to: "plan".to_owned(),
+                phase_document: None,
             },
             Event::Reminded {
                 turn: 5,
                 text: "Anything you meant to record?".to_owned(),
+            },
+            Event::PhaseNoted {
+                turn: 5,
+                text: "The session is now in the build phase.".to_owned(),
             },
         ]);
         events
@@ -7729,6 +7921,7 @@ mod tests {
                 | Holds::TemplateKwargs
                 | Holds::Unsent
                 | Holds::PhaseMove
+                | Holds::PhaseDocument
                 | Holds::ToolCallPiece
                 | Holds::Approval
                 | Holds::Entry,
@@ -7745,6 +7938,22 @@ mod tests {
                     .all(|f| !f.required || object.contains_key(f.key))
             }
             (Holds::Text, Value::String(_)) | (Holds::Flag, Value::Boolean(_)) => true,
+            // A phase with no moves lists none: the one list that may be
+            // empty.
+            (Holds::PhaseOptions, Value::Array(entries)) => {
+                entries.iter().all(|entry| match entry {
+                    Value::Object(entry) => {
+                        entry
+                            .keys()
+                            .all(|key| PHASE_OPTION.iter().any(|f| f.key == key))
+                            && PHASE_OPTION.iter().all(|f| entry.contains_key(f.key))
+                            && entry
+                                .values()
+                                .all(|value| matches!(value, Value::String(_)))
+                    }
+                    _ => false,
+                })
+            }
             (Holds::Digest, Value::String(digest)) => is_a_digest(digest),
             (Holds::WorkingDirectory, Value::String(cwd)) => is_a_working_directory(cwd),
             (
@@ -7971,6 +8180,7 @@ mod tests {
             ("unsent", UNSENT),
             ("phase", PHASE_MOVE),
             ("phase_transitions", PHASE_MOVE),
+            ("phase_document", PHASE_DOCUMENT),
             ("instruction_files", INSTRUCTION_FILE),
             ("lines", DELIVERED_LINE),
             ("items", RECALLED_ITEM),
@@ -8954,7 +9164,7 @@ mod tests {
             tags(Kind::ALL.iter().map(|it| it.tag()).collect()),
             "session.start ask settlement request refused delta stop.asked response \
              cancelled request.failed turn.settled idle.gap progress tool_call fork \
-             fork.settled patch meditation delivered recalled flag meditation.held patch.refused pruned phase.ruled tangent.open tangent.close capture reminded background.ended notice timeout.near fork.skipped"
+             fork.settled patch meditation delivered recalled flag meditation.held patch.refused pruned phase.ruled tangent.open tangent.close capture reminded background.ended notice timeout.near fork.skipped phase.noted"
         );
         assert_eq!(
             tags(FailReason::ALL.iter().map(|it| it.tag()).collect()),

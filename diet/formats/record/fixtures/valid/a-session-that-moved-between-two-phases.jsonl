@@ -1,0 +1,8 @@
+{"source":{"kind":"live"},"record":"start","version":2,"regime":{"arm":"baseline","dogma_version":0,"substrates":[{"id":"local","engine":{"name":"a-runtime","version_or_digest":"1.0"},"weights":{"kind":"digest","sha256":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"},"sampler_card":{"seed":7,"temperature":0.7},"reasoning":"on","hardware_fingerprint":"edaec1af6bd2226d6464c29bbbf6d0d139179ddd03bff236351a3ae3e2dad532"}]},"phase":"plan","phase_sha256":"cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"}
+{"record":"turn","index":1,"prefill_tokens":1024}
+{"record":"request","id":"q1","lane":"main","substrate":"local","head_sha256":"85c4ae51186ca1ee36eee21c92ea5dbcece090e3064325d1fab9a70c28412eed"}
+{"record":"response","id":"a1","to_request":"q1","output_tokens":512}
+{"record":"turn","index":2,"prefill_tokens":1024,"phase":"build","phase_sha256":"dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd"}
+{"record":"request","id":"q2","lane":"main","substrate":"local","head_sha256":"85c4ae51186ca1ee36eee21c92ea5dbcece090e3064325d1fab9a70c28412eed"}
+{"record":"response","id":"a2","to_request":"q2","output_tokens":256}
+{"record":"summary","kind":"drive","turns":2,"prefill_tokens_total":2048,"product_sha256":"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"}

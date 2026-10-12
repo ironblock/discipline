@@ -1,0 +1,7 @@
+name = "plan"
+ground_rules = "x"
+
+[[transitions]]
+to = "build"
+kind = "suggested"
+when = "done"

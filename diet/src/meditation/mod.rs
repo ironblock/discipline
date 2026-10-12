@@ -62,6 +62,7 @@
 //! choosing. [`render::one_line`] is the fix, and it is the same escaping the
 //! audit ask needs so that `{n}` and the number of lines agree.
 
+pub mod library;
 pub mod outputs;
 pub mod phase;
 pub mod policy;
@@ -1185,19 +1186,17 @@ mod tests {
     /// Row three: a proposal the graph forbids is recorded, and no meditation fires.
     #[test]
     fn a_transition_the_graph_forbids_is_recorded_and_fires_nothing() {
-        let declared = "phases = [\"brainstorm\", \"plan\", \"implement\"]\n\
-                        [phase_transitions]\n\
-                        brainstorm = [\"plan\"]\n\
-                        plan = [\"implement\"]\n";
+        let declared = "phase_library = \"starter\"\n\
+                        starting_phase = \"orient\"\n";
         let mut object = three_facts();
         let mut controller = Controller::open(policy(declared), &object, Scripted::silent());
 
         controller.begin_turn();
-        let decision = controller.propose("implement");
+        let decision = controller.propose("build");
         assert_eq!(
             decision,
             Decision::Refused(Refusal::NoEdge),
-            "brainstorm reaches plan, and plan reaches implement; nothing skips"
+            "orient reaches plan, and plan reaches build; nothing skips"
         );
         assert!(
             controller
@@ -1210,12 +1209,12 @@ mod tests {
         let proposals = controller.proposals();
         assert_eq!(proposals.len(), 1);
         assert_eq!(proposals[0].at_turn, 1);
-        assert_eq!(proposals[0].from.as_deref(), Some("brainstorm"));
-        assert_eq!(proposals[0].to, "implement");
+        assert_eq!(proposals[0].from.as_deref(), Some("orient"));
+        assert_eq!(proposals[0].to, "build");
         assert_eq!(proposals[0].decision, Decision::Refused(Refusal::NoEdge));
         assert_eq!(
             controller.phase(),
-            Some("brainstorm"),
+            Some("orient"),
             "and the session did not move"
         );
         assert!(controller.meditations().is_empty());
@@ -1223,9 +1222,8 @@ mod tests {
 
     #[test]
     fn a_name_that_is_not_a_phase_is_refused_differently_from_one_that_is() {
-        let declared = "phases = [\"plan\", \"implement\"]\n\
-                        [phase_transitions]\n\
-                        plan = [\"implement\"]\n";
+        let declared = "phase_library = \"starter\"\n\
+                        starting_phase = \"plan\"\n";
         let mut object = three_facts();
         let mut controller = Controller::open(policy(declared), &object, Scripted::silent());
 
@@ -1252,24 +1250,23 @@ mod tests {
 
     #[test]
     fn a_transition_the_graph_allows_fires_a_meditation_whose_reason_is_the_phase() {
-        let declared = "phases = [\"plan\", \"implement\"]\n\
-                        [phase_transitions]\n\
-                        plan = [\"implement\"]\n";
+        let declared = "phase_library = \"starter\"\n\
+                        starting_phase = \"plan\"\n";
         let mut object = three_facts();
         let mut controller = Controller::open(policy(declared), &object, Scripted::silent());
 
         controller.begin_turn();
-        assert_eq!(controller.propose("implement"), Decision::Ratified);
+        assert_eq!(controller.propose("build"), Decision::Ratified);
         let meditation = controller
             .settle(&mut object)
             .expect("the fold applies")
             .expect("a ratified transition fires a meditation");
 
         assert_eq!(meditation.reason, Reason::Phase);
-        assert_eq!(meditation.phase.as_deref(), Some("implement"));
-        assert_eq!(controller.phase(), Some("implement"));
+        assert_eq!(meditation.phase.as_deref(), Some("build"));
+        assert_eq!(controller.phase(), Some("build"));
         assert!(
-            meditation.prefix.contains("phase: implement"),
+            meditation.prefix.contains("phase: build"),
             "and the new prompt is built for the new phase: {}",
             meditation.prefix
         );
@@ -1394,14 +1391,13 @@ mod tests {
     #[test]
     fn a_phase_transition_outranks_a_cadence_that_also_came_round() {
         let declared = "meditation_every_turns = 1\n\
-                        phases = [\"plan\", \"implement\"]\n\
-                        [phase_transitions]\n\
-                        plan = [\"implement\"]\n";
+                        phase_library = \"starter\"\n\
+                        starting_phase = \"plan\"\n";
         let mut object = three_facts();
         let mut controller = Controller::open(policy(declared), &object, Scripted::silent());
 
         controller.begin_turn();
-        assert_eq!(controller.propose("implement"), Decision::Ratified);
+        assert_eq!(controller.propose("build"), Decision::Ratified);
         let meditation = controller
             .settle(&mut object)
             .expect("the fold applies")
@@ -1427,14 +1423,13 @@ mod tests {
         // may refuse it.
         let declared = "meditation_every_turns = 1\n\
                         meditation_at_working_set_bytes = 1\n\
-                        phases = [\"plan\", \"implement\"]\n\
-                        [phase_transitions]\n\
-                        plan = [\"implement\"]\n";
+                        phase_library = \"starter\"\n\
+                        starting_phase = \"plan\"\n";
         let mut object = three_facts();
         let mut controller = Controller::open(policy(declared), &object, Scripted::silent());
 
         controller.begin_turn();
-        assert_eq!(controller.propose("implement"), Decision::Ratified);
+        assert_eq!(controller.propose("build"), Decision::Ratified);
         controller.operator_declares_a_boundary();
         let meditation = controller
             .settle(&mut object)
@@ -1449,7 +1444,7 @@ mod tests {
         );
         assert_eq!(
             controller.phase(),
-            Some("implement"),
+            Some("build"),
             "a transition the graph already allowed is not discarded because a \
              stronger trigger fired in the same turn"
         );
@@ -1623,15 +1618,14 @@ mod tests {
         // no meditation -- with the prefix still rendering the phase the session had
         // left. That is the failure the byte-identity design exists to
         // prevent, produced by the controller itself.
-        let declared = "phases = [\"plan\", \"implement\"]\n\
-                        [phase_transitions]\n\
-                        plan = [\"implement\"]\n";
+        let declared = "phase_library = \"starter\"\n\
+                        starting_phase = \"plan\"\n";
         let mut object = three_facts();
         let mut controller = Controller::open(policy(declared), &object, Refused);
         let opening = controller.prefix().to_owned();
 
         controller.begin_turn();
-        assert_eq!(controller.propose("implement"), Decision::Ratified);
+        assert_eq!(controller.propose("build"), Decision::Ratified);
         controller.operator_declares_a_boundary();
         let refused = controller
             .settle(&mut object)
@@ -1657,14 +1651,14 @@ mod tests {
         let mut object = three_facts();
         let mut controller = Controller::open(policy(declared), &object, Scripted::silent());
         controller.begin_turn();
-        assert_eq!(controller.propose("implement"), Decision::Ratified);
+        assert_eq!(controller.propose("build"), Decision::Ratified);
         controller.operator_declares_a_boundary();
         let meditation = controller
             .settle(&mut object)
             .expect("this ratifier's answer applies")
             .expect("the declared boundary still fires");
         assert_eq!(meditation.reason, Reason::Operator);
-        assert_eq!(controller.phase(), Some("implement"));
+        assert_eq!(controller.phase(), Some("build"));
     }
 
     #[test]
@@ -1706,13 +1700,12 @@ mod tests {
         // The module's argument is that borrowing an ask puts a sentence in
         // the prompt that is not true. It was asserted for the budget and the
         // operator and not for the phase -- the trigger #27 names first.
-        let declared = "phases = [\"plan\", \"implement\"]\n\
-                        [phase_transitions]\n\
-                        plan = [\"implement\"]\n";
+        let declared = "phase_library = \"starter\"\n\
+                        starting_phase = \"plan\"\n";
         let mut object = three_facts();
         let mut controller = Controller::open(policy(declared), &object, Scripted::silent());
         controller.begin_turn();
-        assert_eq!(controller.propose("implement"), Decision::Ratified);
+        assert_eq!(controller.propose("build"), Decision::Ratified);
         controller.settle(&mut object).expect("the fold applies");
 
         let seen = &controller.ratifier().seen;
@@ -1845,7 +1838,7 @@ mod tests {
         );
         controller.begin_turn();
         assert_eq!(
-            controller.propose("implement"),
+            controller.propose("build"),
             Decision::Refused(Refusal::NoGraph)
         );
         assert!(
@@ -1977,19 +1970,19 @@ mod tests {
         let full = read(
             "meditation_every_turns = 3\n\
              meditation_at_working_set_bytes = 4096\n\
-             phases = [\"plan\", \"implement\"]\n\
-             [phase_transitions]\n\
-             plan = [\"implement\"]\n",
+             phase_library = \"starter\"\n\
+             starting_phase = \"plan\"\n",
         )
         .expect("a policy");
         assert_eq!(full.every_turns, Some(3));
         assert_eq!(full.at_working_set_bytes, Some(4096));
         assert_eq!(
             full.phases.phases(),
-            ["plan".to_owned(), "implement".to_owned()]
+            ["plan", "build", "orient", "quick", "test"].map(str::to_owned),
+            "#787: the starting phase first, then the library's others by name"
         );
         assert_eq!(
-            full.phases.decide(Some("plan"), "implement"),
+            full.phases.decide(Some("plan"), "build"),
             Decision::Ratified
         );
 
@@ -2003,26 +1996,36 @@ mod tests {
             read("meditation_every_turns = \"three\"\n"),
             Err(PolicyError::NotAnInteger("meditation_every_turns"))
         );
+        for replaced in ["phases", "phase_transitions"] {
+            assert_eq!(
+                read(&format!("{replaced} = \"plan\"\n")),
+                Err(PolicyError::Replaced(replaced)),
+                "#787: the old keys are refused, naming the library that replaced them"
+            );
+        }
         assert_eq!(
-            read("phases = \"plan\"\n"),
-            Err(PolicyError::NotAListOfNames("phases".to_owned()))
+            read("phase_library = \"starter\"\n"),
+            Err(PolicyError::HalfAPhaseStart)
         );
         assert_eq!(
-            read("phases = [\"plan\", \"plan\"]\n"),
-            Err(PolicyError::DuplicatePhase("plan".to_owned())),
-            "two phases with one name make an edge's target ambiguous"
+            read("starting_phase = \"plan\"\n"),
+            Err(PolicyError::HalfAPhaseStart)
         );
         assert_eq!(
-            read("phases = [\"plan\"]\n[phase_transitions]\nplan = [\"ship\"]\n"),
-            Err(PolicyError::UnknownPhase {
-                named: "ship".to_owned(),
-                under: "plan".to_owned(),
-            }),
-            "an edge to a phase that does not exist is a rule nothing can take"
+            read("phase_library = 3\nstarting_phase = \"plan\"\n"),
+            Err(PolicyError::NotAWord("phase_library"))
         );
         assert_eq!(
-            read("[phase_transitions]\nplan = [\"implement\"]\n"),
-            Err(PolicyError::TransitionsWithoutPhases)
+            read("phase_library = \"starter\"\nstarting_phase = \"ship\"\n"),
+            Err(PolicyError::NotInTheLibrary("ship".to_owned())),
+            "a start in a phase the library has no document for is refused"
+        );
+        assert!(
+            matches!(
+                read("phase_library = \"/nowhere/at/all\"\nstarting_phase = \"plan\"\n"),
+                Err(PolicyError::PhaseLibrary(_))
+            ),
+            "a library that cannot be read is refused, not taken as no phases"
         );
     }
 
@@ -2041,7 +2044,7 @@ mod tests {
         );
         assert_ne!(
             render::render(&object, Some("plan")),
-            render::render(&object, Some("implement"))
+            render::render(&object, Some("build"))
         );
         assert_ne!(
             render::render(&object, None),

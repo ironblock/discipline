@@ -1,0 +1,219 @@
+{
+  "events": [
+    {
+      "head": [
+        {
+          "content": "you are the trunk",
+          "role": "system"
+        }
+      ],
+      "kind": "session.start",
+      "model": "a-model",
+      "notes_in_the_ask": true,
+      "opened": 1790000000000,
+      "opening_phase": "plan",
+      "phase_document": {
+        "digest": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+        "ground_rules": "Settle the approach before any change.",
+        "name": "plan",
+        "transitions": [
+          {
+            "kind": "suggested",
+            "to": "build"
+          }
+        ]
+      },
+      "phase_transitions": [
+        {
+          "from": "plan",
+          "to": "build"
+        }
+      ],
+      "phases": [
+        "plan",
+        "build"
+      ],
+      "seq": 0,
+      "t": 0,
+      "version": 8
+    },
+    {
+      "kind": "ask",
+      "scoping": true,
+      "seq": 1,
+      "t": 5,
+      "text": "what are we building",
+      "turn": 1
+    },
+    {
+      "from": "awaiting",
+      "kind": "settlement",
+      "seq": 2,
+      "t": 10,
+      "to": "turn"
+    },
+    {
+      "kind": "phase.noted",
+      "seq": 3,
+      "t": 15,
+      "text": "The session is now in the plan phase. Its ground rules:\n\nSettle the approach before any change.",
+      "turn": 1
+    },
+    {
+      "kind": "request",
+      "lane": "trunk",
+      "seq": 4,
+      "t": 20,
+      "turn": 1
+    },
+    {
+      "kind": "response",
+      "seq": 5,
+      "t": 25,
+      "text": "a tracker for the team's bugs",
+      "to_request": 4
+    },
+    {
+      "kind": "turn.settled",
+      "reason": "final",
+      "seq": 6,
+      "t": 30,
+      "turn": 1
+    },
+    {
+      "from": "turn",
+      "kind": "settlement",
+      "seq": 7,
+      "t": 35,
+      "to": "awaiting"
+    },
+    {
+      "at": 4,
+      "kind": "fork",
+      "lane": "interview",
+      "of_turn": 1,
+      "question": "what did the operator decide",
+      "seq": 8,
+      "t": 40,
+      "why": "scoping"
+    },
+    {
+      "fork": 8,
+      "kind": "request",
+      "lane": "interview",
+      "seq": 9,
+      "t": 45,
+      "turn": 1
+    },
+    {
+      "kind": "response",
+      "seq": 10,
+      "t": 50,
+      "text": "{\"decisions\":[\"a tracker\"]}",
+      "to_request": 9
+    },
+    {
+      "fork": 8,
+      "kind": "fork.settled",
+      "outcome": "value",
+      "seq": 11,
+      "t": 55
+    },
+    {
+      "entry": {
+        "id": "d1",
+        "text": "a tracker"
+      },
+      "fork": 8,
+      "kind": "patch",
+      "op": "add",
+      "seq": 12,
+      "t": 60
+    },
+    {
+      "call": "call-p",
+      "choice": "continue",
+      "from": "plan",
+      "kind": "phase.ruled",
+      "phase_document": {
+        "digest": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+        "ground_rules": "Make the change the plan settled.",
+        "name": "build",
+        "transitions": []
+      },
+      "seq": 13,
+      "t": 65,
+      "to": "build"
+    },
+    {
+      "kind": "ask",
+      "seq": 14,
+      "t": 70,
+      "text": "build it",
+      "turn": 2
+    },
+    {
+      "from": "awaiting",
+      "kind": "settlement",
+      "seq": 15,
+      "t": 75,
+      "to": "turn"
+    },
+    {
+      "kind": "phase.noted",
+      "seq": 16,
+      "t": 80,
+      "text": "The session is now in the build phase. Its ground rules:\n\nMake the change the plan settled.",
+      "turn": 2
+    },
+    {
+      "kind": "request",
+      "lane": "trunk",
+      "seq": 17,
+      "t": 85,
+      "turn": 2
+    },
+    {
+      "kind": "response",
+      "seq": 18,
+      "t": 90,
+      "text": "started on the schema",
+      "to_request": 17
+    },
+    {
+      "kind": "turn.settled",
+      "reason": "final",
+      "seq": 19,
+      "t": 95,
+      "turn": 2
+    },
+    {
+      "from": "turn",
+      "kind": "settlement",
+      "seq": 20,
+      "t": 100,
+      "to": "awaiting"
+    },
+    {
+      "at_turn": 2,
+      "carried_entries": 1,
+      "carried_turns": 0,
+      "frame": "placeholder",
+      "kind": "meditation",
+      "phase_document": {
+        "digest": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+        "ground_rules": "Make the change the plan settled.",
+        "name": "build",
+        "transitions": []
+      },
+      "placement": "message",
+      "prefix_hash_after": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+      "prefix_hash_before": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "reason": "operator",
+      "render": "# regime\narm: diet\nsubstrate: a-substrate\ndogma_version: 1\nphase: build\nframe_version: placeholder\n\n# working set\nd1\ta tracker\n",
+      "seq": 21,
+      "t": 105
+    }
+  ],
+  "torn": 0
+}

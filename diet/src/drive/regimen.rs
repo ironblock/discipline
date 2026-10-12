@@ -604,13 +604,20 @@ pub fn top_level_max_steps(regimen: &Regimen) -> Option<u32> {
 /// exists in docs/program.md §2, and this run cannot describe where it sat.
 pub const UNDECLARED: &str = "undeclared";
 /// The phase graph a served session moves on (#563), as the start row names
-/// it beside `meditation_trigger`: `none`, or its phases and allowed moves; a graph
-/// serve would refuse is undeclared.
+/// it beside `meditation_trigger`: `none`, or the library and the phase it
+/// starts in (#787), then its phases and allowed moves; a graph serve would
+/// refuse is undeclared.
 fn phase_graph_lever(regimen: &Regimen) -> String {
+    let word = |key: &str| match regimen.get(key) {
+        Some(regimen::Value::String(word)) => word.clone(),
+        _ => String::new(),
+    };
     match crate::meditation::policy::phase_graph(regimen) {
         Ok(graph) if graph.is_empty() => "none".to_owned(),
         Ok(graph) => format!(
-            "phases:{};transitions:{}",
+            "library:{};start:{};phases:{};transitions:{}",
+            word(crate::meditation::policy::PHASE_LIBRARY),
+            word(crate::meditation::policy::STARTING_PHASE),
             graph.phases().join(","),
             graph
                 .transitions()
@@ -1178,6 +1185,22 @@ mod tests {
         assert_eq!(lever("capture_modality = \"tools\"\n"), "off");
     }
 
+    /// #787: the phase graph lever names the library and the starting phase
+    /// before the graph read from it; `none` without one, and undeclared for
+    /// one serve would refuse.
+    #[test]
+    fn the_phase_graph_lever_names_its_library_and_starting_phase() {
+        let lever =
+            |text: &str| super::phase_graph_lever(&regimen::parse(text).expect("a regimen"));
+        assert_eq!(
+            lever("phase_library = \"starter\"\nstarting_phase = \"test\"\n"),
+            "library:starter;start:test;phases:test,build,orient,plan,quick;\
+             transitions:test>build,build>plan,build>test,orient>plan,plan>build,plan>orient"
+        );
+        assert_eq!(lever(""), "none");
+        assert_eq!(lever("phases = [\"plan\"]\n"), super::UNDECLARED);
+    }
+
     /// #124: a regimen that declares phases and turns self-capture on arms
     /// the model's proposal, ratified by the operator; either alone does not.
     #[test]
@@ -1186,7 +1209,7 @@ mod tests {
             serve_levers(&regimen::parse(text).expect("a regimen"), (64, "default"))["meditation_trigger"]
                 .clone()
         };
-        let phased = "phases = [\"plan\", \"build\"]\n[phase_transitions]\nplan = [\"build\"]\n";
+        let phased = "phase_library = \"starter\"\nstarting_phase = \"plan\"\n";
         assert!(levers(&format!("self_capture = true\n{phased}")).contains("model-proposed"));
         assert!(!levers(phased).contains("model-proposed"));
         assert!(!levers("self_capture = true\n").contains("model-proposed"));

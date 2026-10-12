@@ -329,6 +329,8 @@ export type PatchRefused = V0.PatchRefusedLine;
 export type MeditationHeld = V0.MeditationHeldLine;
 /** A background command's end (v7, #614). Folded, not yet drawn. */
 export type BackgroundEnded = V0.BackgroundEndedLine;
+/** A phase's ground rules, a note on an ask (v8, #787): the phase entered with no meditation. */
+export type PhaseNoted = V0.PhaseNotedLine;
 /** Ended background commands' notifications delivered after an ask (v7, #614). */
 export type Notice = V0.NoticeLine;
 /** A running call near its timeout (v7, #613): for the surface's warning, never the model's. */
@@ -371,7 +373,8 @@ export type LogLine =
   | Flag
   | PatchRefused
   | MeditationHeld
-  | PhaseRuled;
+  | PhaseRuled
+  | PhaseNoted;
 
 /** The operator's ruling on the model's phase proposal (log v7, #651): `meditation` (a meditation follows), `continue`, or `stay`. */
 export type PhaseRuled = V0.PhaseRuledLine;

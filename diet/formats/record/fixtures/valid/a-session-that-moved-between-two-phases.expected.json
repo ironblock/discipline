@@ -1,0 +1,21 @@
+{
+  "canonical": "{\"phase\":\"plan\",\"phase_sha256\":\"cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc\",\"record\":\"start\",\"regime\":{\"arm\":\"baseline\",\"dogma_version\":0,\"substrates\":[{\"engine\":{\"name\":\"a-runtime\",\"version_or_digest\":\"1.0\"},\"hardware_fingerprint\":\"edaec1af6bd2226d6464c29bbbf6d0d139179ddd03bff236351a3ae3e2dad532\",\"id\":\"local\",\"reasoning\":\"on\",\"sampler_card\":{\"seed\":7,\"temperature\":0.7},\"weights\":{\"kind\":\"digest\",\"sha256\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\"}}]},\"source\":{\"kind\":\"live\"},\"version\":2}\n{\"index\":1,\"prefill_tokens\":1024,\"record\":\"turn\"}\n{\"head_sha256\":\"85c4ae51186ca1ee36eee21c92ea5dbcece090e3064325d1fab9a70c28412eed\",\"id\":\"q1\",\"lane\":\"main\",\"record\":\"request\",\"substrate\":\"local\"}\n{\"id\":\"a1\",\"output_tokens\":512,\"record\":\"response\",\"to_request\":\"q1\"}\n{\"index\":2,\"phase\":\"build\",\"phase_sha256\":\"dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd\",\"prefill_tokens\":1024,\"record\":\"turn\"}\n{\"head_sha256\":\"85c4ae51186ca1ee36eee21c92ea5dbcece090e3064325d1fab9a70c28412eed\",\"id\":\"q2\",\"lane\":\"main\",\"record\":\"request\",\"substrate\":\"local\"}\n{\"id\":\"a2\",\"output_tokens\":256,\"record\":\"response\",\"to_request\":\"q2\"}\n{\"kind\":\"drive\",\"prefill_tokens_total\":2048,\"product_sha256\":\"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\",\"record\":\"summary\",\"turns\":2}\n",
+  "kinds": [
+    "start",
+    "turn",
+    "request",
+    "response",
+    "summary"
+  ],
+  "regime": {
+    "arm": "baseline",
+    "dogma_version": 0,
+    "hosted_substrates": [],
+    "substrates": [
+      "local"
+    ]
+  },
+  "source": {
+    "kind": "live"
+  }
+}

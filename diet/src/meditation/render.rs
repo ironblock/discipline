@@ -302,11 +302,13 @@ pub fn entries(object: &WorkingObject) -> String {
 /// to make the model believe it is continuing the session. Each meditation hands it
 /// a better starting point, built from working memory alone.
 ///
-/// The system message is never changed (#597, the maintainer: "System
-/// prompt mutation is forbidden"): after a meditation it is byte-identical to the
-/// session's first. The session and the record's projection both rebuild
-/// the trunk through this one function, so the projection's head check
-/// holds the session to it.
+/// This function never changes the system message (#597). The one change
+/// the program allows is the caller's: a meditation, which misses the cache
+/// anyway, passes a `head` carrying the current phase's ground rules
+/// ([`with_ground_rules`], #787; the maintainer, 2026-10-11: "only allowed
+/// during an event that will cause a cache miss anyways"). The session and
+/// the record's projection both rebuild the trunk through this one
+/// function, so the projection's head check holds the session to it.
 #[must_use]
 pub fn refill(head: &[Message], render: &str) -> Vec<Message> {
     let mut trunk = head.to_vec();
@@ -325,6 +327,43 @@ pub fn refill_with(head: &[Message], render: &str, after: Option<&str>) -> Vec<M
         message.content.push_str(after);
     }
     trunk
+}
+
+/// `head` with a phase's ground rules, when it is in one, after its system message (#787,
+/// refining #597): what a meditation's refill opens with while the session
+/// is in a phase. The head's own text is unchanged, the rules following it
+/// after a blank line; a head with no system message is returned as it is,
+/// and its rules ride as a note instead ([`phase_note`]).
+#[must_use]
+pub fn with_ground_rules(
+    head: &[Message],
+    document: Option<&crate::formats::log::PhaseDocument>,
+) -> Vec<Message> {
+    let mut head = head.to_vec();
+    if let (Some(document), Some(first)) = (
+        document,
+        head.first_mut().filter(|first| first.role == Role::System),
+    ) {
+        let _ = write!(
+            first.content,
+            "\n\nGround rules for the {} phase:\n\n{}",
+            document.name, document.ground_rules
+        );
+    }
+    head
+}
+
+/// Whether [`with_ground_rules`] carries a phase's rules on `head`.
+#[must_use]
+pub fn carries_ground_rules(head: &[Message]) -> bool {
+    head.first().is_some_and(|first| first.role == Role::System)
+}
+
+/// The note a phase's ground rules ride in on the next ask when the session
+/// entered it with no meditation (#787): at its start, or on a `continue`.
+#[must_use]
+pub fn phase_note(name: &str, ground_rules: &str) -> String {
+    format!("The session is now in the {name} phase. Its ground rules:\n\n{ground_rules}")
 }
 
 /// The message a meditation's refill rides in (#597), shaped as Pi and `OpenCode`

@@ -1,0 +1,14 @@
+{
+  "ground_rules": "Turn the chosen approach into a plan.\nChange no files yet.",
+  "name": "plan",
+  "transitions": [
+    {
+      "kind": "suggested",
+      "to": "build"
+    },
+    {
+      "kind": "allowed",
+      "to": "orient"
+    }
+  ]
+}

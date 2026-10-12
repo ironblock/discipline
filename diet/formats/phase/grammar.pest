@@ -1,0 +1,43 @@
+// A phase document (#787): one phase of a session's phase library, TOML in
+// shape and a strict subset of it. Normative; `diet/src/formats/phase.rs` is
+// its one implementation.
+//
+//     name = "orient"
+//     ground_rules = """
+//     Discuss the user's intent ...
+//     """
+//
+//     [[transitions]]
+//     to = "plan"
+//     kind = "suggested"
+//
+// Keys are bare; values are a basic string or a multi-line basic string, no
+// escapes in either. `[[transitions]]` opens one transition, whose keys
+// follow it. What each key means, and which are required, is the reader's.
+
+file        =  { SOI ~ item* ~ EOI }
+
+item        = _{ blank | transitions | statement | last_comment | trailing }
+blank       = _{ sp* ~ comment? ~ nl }
+statement   = _{ sp* ~ pair ~ sp* ~ comment? ~ (nl | &EOI) }
+last_comment = _{ sp* ~ comment ~ &EOI }
+trailing    = _{ sp+ ~ &EOI }
+
+transitions =  { sp* ~ "[[" ~ sp* ~ "transitions" ~ sp* ~ "]]" ~ sp* ~ comment? ~ (nl | &EOI) }
+
+pair        =  { key ~ sp* ~ "=" ~ sp* ~ (multiline | string) }
+key         =  { (ASCII_ALPHANUMERIC | "_" | "-")+ }
+
+multiline   =  { "\"\"\"" ~ nl? ~ ml_inner ~ "\"\"\"" }
+ml_inner    =  { (!"\"\"\"" ~ !"\\" ~ ml_char)* }
+ml_char     = _{ nl | !control ~ ANY }
+
+string      =  { "\"" ~ inner ~ "\"" }
+inner       =  { char* }
+char        = _{ !("\"" | "\\" | control) ~ ANY }
+control     = _{ '\u{0000}'..'\u{0008}' | '\u{000A}'..'\u{001F}' | "\u{007F}" }
+
+comment     =  { "#" ~ (!(nl | control) ~ ANY)* }
+
+nl          = _{ "\r\n" | "\n" }
+sp          = _{ " " | "\t" }

@@ -42,6 +42,7 @@ The format has no grammar of its own, so it has no directory under `diet/formats
 | `edit` | `pick`, `text`, `as`? | edits it; the operator's new entry is bound |
 | `declare-meditation` | | |
 | `refill-anyway` | | |
+| `rule-phase` | `call`, `choice` | rules on the model's phase proposal that call `call` made: `meditation`, `continue` or `stay` |
 | `wait` | `until`, `timeout`? | `GET /wait` for `idle` or a line's kind, after the last command |
 | `end` | | |
 

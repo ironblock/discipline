@@ -31,6 +31,7 @@ const VERBS: &[(&str, &str)] = &[
     ("check-operating-points", "operating_points"),
     ("check-record", "record"),
     ("check-regimen", "regimen"),
+    ("check-phase", "phase"),
     ("parse-shell", "shell"),
     ("parse-verdict", "verdict"),
     ("parse-audit", "audit"),

@@ -1884,6 +1884,7 @@ mod tests {
             prefill_tokens: Some(Count::new(10).expect("a small count")),
             prefill_from: None,
             files: None,
+            phase: None,
         };
         assert!(matches!(
             apply(&turn, 0, saw()),
@@ -2350,6 +2351,7 @@ mod tests {
             prefill_tokens: Some(Count::new(1).expect("a small count")),
             prefill_from: None,
             files: None,
+            phase: None,
         }
     }
 

@@ -82,6 +82,8 @@ export interface UserNode extends Provenance {
   readonly pruned?: readonly { readonly call: string; readonly bytes: number; readonly text: string }[];
   /** Self-capture's reminder after this ask (log v7's `reminded`, #619): a note the model was sent, the harness's words. */
   readonly reminded?: string;
+  /** A phase's ground rules on this ask (log v8's `phase.noted`, #787): the phase entered with no meditation, first among the notes. */
+  readonly phaseNoted?: string;
   /** The files the operator attached to the ask (log v5's `ask.files`, #372): read by digest, never by path. */
   readonly files?: readonly FileRef[];
   /** The operator marked it the scope answer (the `ask` line's `scoping`, log v5, #453): its turn warrants the interview fork. */
@@ -618,6 +620,7 @@ export function fold(written: readonly LogLine[]): Session {
   // The calls whose output a meditation replaced by its pointer (#630): every meditation's `pruned`.
   const replacedByMeditation = new Set<string>();
   const reminders = new Map<number, LineOf<'reminded'>>();
+  const phaseNotes = new Map<number, LineOf<'phase.noted'>>();
   // Self-capture's outcomes, by the call they belong to: `<request>/<call id>`.
   const captures = new Map<string, LineOf<'capture'>>();
   const firstRequestOfTurn = new Map<number, number>();
@@ -882,6 +885,9 @@ export function fold(written: readonly LogLine[]): Session {
       case 'reminded':
         reminders.set(e.turn, e);
         break;
+      case 'phase.noted':
+        phaseNotes.set(e.turn, e);
+        break;
       case 'capture':
         captures.set(`${e.request}/${e.call}`, e);
         // The model's phase proposal (#651): the latest one waits on the operator until a ruling names its call.
@@ -1048,6 +1054,7 @@ export function fold(written: readonly LogLine[]): Session {
               ? { pruned: prunes.get(slot.turn)!.map(({ call, bytes, text }) => ({ call, bytes, text })) }
               : {}),
             ...(reminders.has(slot.turn) ? { reminded: reminders.get(slot.turn)!.text } : {}),
+            ...(phaseNotes.has(slot.turn) ? { phaseNoted: phaseNotes.get(slot.turn)!.text } : {}),
             ...provenance(ask, first?.response),
           });
         }
