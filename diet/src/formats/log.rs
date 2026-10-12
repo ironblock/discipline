@@ -1653,7 +1653,7 @@ pub enum Event {
     },
     /// A trunk request's output cap cut to what the forks in flight leave
     /// of the pool (v8): below what the window alone gives it. Every job is
-    /// counted as the engine holds it, in whole chunks and one more.
+    /// counted as the engine holds it, in whole chunks and two more.
     TrunkClamped {
         /// The turn.
         turn: u32,
