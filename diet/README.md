@@ -43,7 +43,7 @@ It's primarily a library, but exists primarily to apply a `regimen` - a fixed co
   - The model is asked in a note on its next ask, the pinned `PHASE_OPERATOR_PROPOSAL`, logged as a `notice`. It answers through the tool with `accept`.
   - A `phase.answered` line records the answer. If the model accepts, a `phase.ruled` line says `by: model` and the move follows the operator's choice: kept at once, or through a meditation once the turn has ended (with nothing to refill from, kept).
   - Refused `proposal-pending` while the model's own proposal waits.
-- **The operator moves alone** with `{"kind":"move-phase","to":"<phase>","meditate":true|false}`, unless the regimen sets `operator_unilateral = false` (true by default), when it is refused `not-unilateral`. A `phase.ruled` line with no `call` says `by: operator`.
+- **The operator moves alone** with `{"kind":"move-phase","to":"<phase>","meditate":true|false}`, unless the regimen sets `operator_unilateral = false` (true by default), when it is refused `not-unilateral`; the start row's `operator_unilateral` lever says `on` or `off`. A `phase.ruled` line with no `call` says `by: operator`.
 - **The starting phase:** `{"kind":"start-phase","phase":"<phase>"}` chooses it before the first ask, logged `phase.started`; it is refused `already-asked` after.
 
 A `phase.ruled` line records every ruling and move.
