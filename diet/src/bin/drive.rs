@@ -722,9 +722,17 @@ fn serve(args: &[String]) -> ExitCode {
         Ok(listener) => listener,
         Err(refused) => return refused,
     };
+    // A substrate whose served configuration takes no images (#815): an
+    // ask carrying one is refused rather than dropped by the engine.
+    let blind = substrate
+        .filter(|id| {
+            diet::drive::registry::identity(diet::drive::registry::REGISTRY, id)
+                .is_ok_and(|identity| !diet::drive::served::takes_images(&identity))
+        })
+        .map(str::to_owned);
     let session = served_session(
         (transport, seat),
-        (shape, dialect),
+        (shape, dialect, blind),
         tools,
         (
             claim,
@@ -936,7 +944,7 @@ fn outputs(
 /// how many streams the server serves.
 fn served_session(
     (transport, seat): (HttpStream, Option<session::Offboard<HttpStream>>),
-    (mut shape, dialect): (RequestShape, Dialect),
+    (mut shape, dialect, blind): (RequestShape, Dialect, Option<String>),
     tools: Option<Tools>,
     declared: session::Declared,
 ) -> std::sync::Arc<Session<HttpStream>> {
@@ -972,6 +980,10 @@ fn served_session(
     // A hosted fork's own lifetimes (#556), when they differ.
     let session = match forks {
         Some(forks) => session.forking_through(forks),
+        None => session,
+    };
+    let session = match blind {
+        Some(substrate) => session.without_vision(&substrate),
         None => session,
     };
     std::sync::Arc::new(match seat {

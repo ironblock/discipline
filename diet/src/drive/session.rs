@@ -187,6 +187,10 @@ vocabulary! {
         /// The operator's proposal while the model's waits on a ruling
         /// (#788): rule on the model's first.
         ProposalPending => "proposal-pending",
+        /// An ask carrying an image to a substrate whose served
+        /// configuration takes none (#815): the engine would drop it
+        /// silently.
+        NoVision => "no-vision",
     }
 }
 
@@ -2220,6 +2224,9 @@ struct State {
     captures_this_turn: u32,
     /// The reminder due at the next ask, when the cadence fired.
     reminder_due: Option<String>,
+    /// The substrate an ask's images cannot reach (#815): its served
+    /// configuration takes none. `None` sends them.
+    blind: Option<String>,
     /// A phase's ground rules due as a note at the next ask (#787): the
     /// session opened in the phase, or moved to it with no meditation.
     phase_note_due: Option<String>,
@@ -2433,6 +2440,7 @@ impl State {
             recorded_this_turn: false,
             captures_this_turn: 0,
             reminder_due: None,
+            blind: None,
             phase_note_due: None,
             undelivered: Vec::new(),
             archive: super::archive::Archive::default(),
@@ -3166,6 +3174,22 @@ impl<S: Streaming + 'static> Session<S> {
         self
     }
 
+    /// This session, on `substrate`, whose served configuration takes no
+    /// images (#815): an ask carrying one is refused `no-vision` rather
+    /// than sent to an engine that would drop it silently.
+    #[must_use]
+    pub fn without_vision(self, substrate: &str) -> Self {
+        self.shared.lock().blind = Some(substrate.to_owned());
+        self
+    }
+
+    /// The substrate an ask's images cannot reach, when serve opened the
+    /// session on one (#815).
+    #[must_use]
+    pub fn blind(&self) -> Option<String> {
+        self.shared.lock().blind.clone()
+    }
+
     /// Send an ask to the trunk. Returns the sequence number of its
     /// [`Event::Asked`] and the turn it begins; the answer arrives in the log.
     ///
@@ -3235,6 +3259,12 @@ impl<S: Streaming + 'static> Session<S> {
             // The trunk a held meditation did not refill (#150's gate).
             Settlement::Awaiting if state.held.is_some() => {
                 let refused = state.refuse(CommandKind::Ask, Refusal::MeditationHeld);
+                self.shared.changed.notify_all();
+                return Err(Rejected::Refused(refused));
+            }
+            // An image the engine could not see (#815).
+            Settlement::Awaiting if !message.images.is_empty() && state.blind.is_some() => {
+                let refused = state.refuse(CommandKind::Ask, Refusal::NoVision);
                 self.shared.changed.notify_all();
                 return Err(Rejected::Refused(refused));
             }
@@ -5366,6 +5396,7 @@ fn refusal_of(refusal: Refusal) -> log::Refusal {
         Refusal::MeditationHeld => log::Refusal::MeditationHeld,
         Refusal::NothingHeld => log::Refusal::NothingHeld,
         Refusal::Restates => log::Refusal::Restates,
+        Refusal::NoVision => log::Refusal::NoVision,
         Refusal::NotUnilateral => log::Refusal::NotUnilateral,
         Refusal::AlreadyAsked => log::Refusal::AlreadyAsked,
         Refusal::ProposalPending => log::Refusal::ProposalPending,
@@ -12142,6 +12173,62 @@ pub(in crate::drive) mod tests {
         );
     }
 
+    /// #815: a session serve opened on a substrate that takes no images
+    /// refuses an ask carrying one, `no-vision`, logged; its words alone
+    /// still go, and a session that takes images sends the picture.
+    #[test]
+    fn an_image_ask_to_a_substrate_without_vision_is_refused_no_vision() {
+        let bytes = b"\x89PNG\r\n\x1a\na picture".to_vec();
+        let sha256 = crate::digest::sha256_hex(&bytes);
+        let file = log::RecordedFile {
+            path: format!("files/{sha256}"),
+            sha256,
+            media_type: "image/png".to_owned(),
+            bytes: bytes.len() as u64,
+        };
+        let pictured = || super::super::attach::Attached {
+            message: crate::client::shape::attach(
+                Message::new(Role::User, "what is in it?"),
+                &file,
+                &bytes,
+            )
+            .expect("attached"),
+            files: vec![file.clone()],
+        };
+        let blind = Session::open_with(
+            Canned::new([deltas(&["just the words"])]),
+            template(),
+            None,
+            None,
+            None,
+            None,
+        )
+        .without_vision("a-text-only-substrate");
+        assert!(matches!(
+            blind.ask_attached(pictured(), None, false),
+            Err(Rejected::Refused(Refusal::NoVision))
+        ));
+        assert!(blind.events_from(0).iter().any(|logged| matches!(
+            logged.event,
+            Event::Refused {
+                because: Refusal::NoVision,
+                ..
+            }
+        )));
+        blind.ask("what is in it?", None).expect("words alone go");
+        let seeing = Session::open_with(
+            Canned::new([deltas(&["a picture"])]),
+            template(),
+            None,
+            None,
+            None,
+            None,
+        );
+        seeing
+            .ask_attached(pictured(), None, false)
+            .expect("a session that takes images sends one");
+    }
+
     /// #562, from the meditation smoke run: a pair whose replacement is itself a
     /// live entry's id retires the cited entry in favour of it, writing no
     /// new text -- the id never becomes an entry's text.
@@ -14456,7 +14543,7 @@ pub(in crate::drive) mod tests {
         assert_eq!(
             tags(&Refusal::ALL.iter().map(|it| it.tag()).collect::<Vec<_>>()),
             "in-flight ended nothing-in-flight nothing-to-meditate no-phase-graph not-a-phase \
-             already-in-phase no-phase-edge stale tangent-open no-tangent bad-tangent not-the-scope nothing-running no-proposal unknown-entry not-live empty meditation-held nothing-held restates not-unilateral already-asked proposal-pending"
+             already-in-phase no-phase-edge stale tangent-open no-tangent bad-tangent not-the-scope nothing-running no-proposal unknown-entry not-live empty meditation-held nothing-held restates not-unilateral already-asked proposal-pending no-vision"
         );
         assert_eq!(
             tags(

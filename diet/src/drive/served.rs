@@ -269,6 +269,17 @@ pub fn corroborated(
     Ok(fields)
 }
 
+/// Whether the substrate takes images (#815): its entry declares vision
+/// as served -- `TabbyAPI`'s `use_vision`, llama-server's `vision` -- which
+/// [`corroborated`] holds the engine's report to at start. One that
+/// declares nothing takes none.
+#[must_use]
+pub fn takes_images(identity: &Identity) -> bool {
+    ["use_vision", "vision"]
+        .iter()
+        .any(|field| identity.served.get(*field).map(String::as_str) == Some("true"))
+}
+
 /// Whether the entry declares that the engine warms itself.
 #[must_use]
 pub fn warms_itself(identity: &Identity) -> bool {
@@ -364,6 +375,33 @@ pub fn report_of(
 
 #[cfg(test)]
 mod tests {
+
+    /// #815: whether a substrate takes images is what its registry entry
+    /// declares as served -- `TabbyAPI`'s `use_vision`, llama-server's
+    /// `vision` -- and one that declares nothing takes none.
+    #[test]
+    fn a_substrate_takes_images_only_where_its_entry_declares_vision() {
+        let takes = |id: &str| {
+            super::takes_images(
+                &crate::drive::registry::identity(crate::drive::registry::REGISTRY, id)
+                    .expect("a registered substrate"),
+            )
+        };
+        assert!(
+            takes("accel24-tabbyapi-exl3-qwen38-27b-3p00"),
+            "the floor's T1 run takes images"
+        );
+        assert!(
+            !takes("ada48-tabbyapi-exl3-qwen38flashnext-2p05"),
+            "served with use_vision false"
+        );
+        assert!(!takes("canned-scenario"), "declares nothing");
+        assert!(
+            takes("canned-scenario-windowed"),
+            "the kitchen sink attaches a picture"
+        );
+    }
+
     use super::*;
     use crate::drive::registry;
 
