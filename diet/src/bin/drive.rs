@@ -1315,7 +1315,8 @@ fn serving_interview(
             // #612: whether the model may prune its tool results; off unless
             // declared.
             prune: diet::drive::prune::of(&read),
-            // #406: a fork's tail; the output cap unless declared.
+            // #406: a fork's tail; 8,192 or the output cap if less, unless
+            // declared (#826).
             fork_tail: session::fork_tail(&read),
             timing,
             fork_slots,

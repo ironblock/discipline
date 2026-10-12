@@ -5812,6 +5812,12 @@ fn step<S: Streaming + 'static>(
     if let Some(forked) = forked {
         interview(shared, forked);
     }
+    // The turn over, its gap's forks done (#826): the forks cut during it
+    // that waited for room are sent.
+    let mut state = shared.lock();
+    pool_after_the_turn(shared, &mut state);
+    drop(state);
+    shared.changed.notify_all();
     None
 }
 
@@ -5941,6 +5947,7 @@ fn run_calls<S: Streaming + 'static>(
             reason: SettleReason::Final,
         });
         turn_over(&shared.template, &mut state);
+        pool_after_the_turn(shared, &mut state);
         drop(state);
         shared.changed.notify_all();
         return None;
@@ -5969,6 +5976,7 @@ fn run_calls<S: Streaming + 'static>(
         }
         state.push(Event::TurnSettled { turn, reason });
         turn_over(&shared.template, &mut state);
+        pool_after_the_turn(shared, &mut state);
         drop(state);
         shared.changed.notify_all();
         return None;
@@ -9042,8 +9050,25 @@ pub const CLAMP_FLOOR: u64 = 4_000;
 /// is clamped from, in place of the session's.
 pub const FORK_TAIL_TOKENS: &str = "fork_tail_tokens";
 
+/// A fork's output cap unless the regimen declares one (#826): sized for
+/// what an interview answers. Across three agent-driven T1 runs (two on the
+/// floor, one on the 3090 line, 2026-10-11/12), 511 fork answers sent with
+/// the session's 32,768 used at most 7,627 tokens, p99 6,416, reasoning
+/// included; a cap of 32,768 only reserved pool room no answer used. Forks
+/// that settle `truncated` are counted on the record, so the default can be
+/// checked against live runs.
+pub const FORK_TAIL_DEFAULT: u32 = 8_192;
+
+/// A fork's output cap (#406, #826): the regimen's `fork_tail_tokens`,
+/// else [`FORK_TAIL_DEFAULT`], never more than the session's `cap` unless
+/// declared.
+fn fork_ceiling(declared: Option<u32>, cap: u32) -> u32 {
+    declared.unwrap_or_else(|| FORK_TAIL_DEFAULT.min(cap))
+}
+
 /// The fork tail the regimen declares (#406), leniently: a positive whole
-/// number, or else none, the session's output cap.
+/// number, or else none, [`FORK_TAIL_DEFAULT`] or the session's output cap
+/// if less.
 #[must_use]
 pub fn fork_tail(regimen: &Regimen) -> Option<u32> {
     match regimen.get(FORK_TAIL_TOKENS) {
@@ -9116,8 +9141,9 @@ impl<'a> LogRead<'a> {
 struct PoolFork {
     /// Its fork line's `seq`.
     fork: u64,
-    /// Its reservation, in tokens: what it holds of the pool (#797).
-    prompt: u64,
+    /// What it holds of the pool, in tokens: its reservation (#797) and
+    /// its output cap (#826).
+    held: u64,
     /// Its call's stop.
     cancel: Cancel,
 }
@@ -9873,13 +9899,15 @@ fn fire<S>(
             model: seat.model.clone(),
         }
     });
-    // Its tail: the output cap, or the regimen's, clamped as the trunk's is
-    // (#588); refused unsent when its window leaves less than the floor.
-    let ceiling = state
-        .interview
-        .as_ref()
-        .and_then(|interview| interview.fork_tail)
-        .unwrap_or(shared.template.limits.max_output_tokens);
+    // Its tail: the regimen's, or the default (#826), clamped as the trunk's
+    // is (#588); refused unsent when its window leaves less than the floor.
+    let ceiling = fork_ceiling(
+        state
+            .interview
+            .as_ref()
+            .and_then(|interview| interview.fork_tail),
+        shared.template.limits.max_output_tokens,
+    );
     let ForkFit {
         prompt,
         displaces,
@@ -10192,8 +10220,13 @@ fn launch_pool<S: Streaming + 'static>(shared: &Arc<Shared<S>>, state: &mut Stat
         let Some(cut) = state.pool_queue.pop_front() else {
             return;
         };
-        let Some(fired) = fire_cut(shared, state, cut) else {
-            continue;
+        let fired = match fire_cut(shared, state, cut) {
+            Launched::Fired(fired) => fired,
+            Launched::Gone => continue,
+            Launched::Waits(cut) => {
+                state.pool_queue.push_front(cut);
+                return;
+            }
         };
         let (fork, request) = (fired.fork, fired.request);
         let shared = Arc::clone(shared);
@@ -10217,6 +10250,17 @@ fn launch_pool<S: Streaming + 'static>(shared: &Arc<Shared<S>>, state: &mut Stat
     }
 }
 
+/// The turn over (#826): the trunk holds nothing of the pool now, so the
+/// forks that waited for room are sent; and if none is left in flight or
+/// queued -- each refused -- what waited for them runs.
+fn pool_after_the_turn<S: Streaming + 'static>(shared: &Arc<Shared<S>>, state: &mut State) {
+    if state.pool_queue.is_empty() {
+        return;
+    }
+    launch_pool(shared, state);
+    pool_settled(&shared.template, state);
+}
+
 /// The pool a fork of `prompt` would share with the trunk's `trunk` and the
 /// forks' in flight, in a `window` (#782): the four numbers, and whether
 /// they leave less than the clamp's floor (or `ceiling`, if less).
@@ -10226,7 +10270,7 @@ fn pool_room(
     (trunk, prompt): (u64, u64),
     ceiling: u32,
 ) -> (Option<log::PoolRoom>, bool) {
-    let beside: u64 = state.pool.iter().map(|pool| pool.prompt).sum();
+    let beside: u64 = state.pool.iter().map(|pool| pool.held).sum();
     let room = window.map(|window| log::PoolRoom {
         window,
         trunk,
@@ -10260,13 +10304,16 @@ fn reservation(
     }
 }
 
-/// The prompt the trunk holds of the pool while a cut fork is sized
-/// (#782): its latest sized request while the turn runs, else none.
-fn trunk_resident(state: &State) -> u64 {
+/// What the trunk holds of the pool while a cut fork is sized (#782): its
+/// latest sized request's prompt and, since #826, its output cap -- the
+/// room its next request is sized into -- while the turn runs; else none.
+fn trunk_resident(state: &State) -> (u64, u64) {
     if state.settlement == Settlement::Turn {
-        state.last_sized.map_or(0, |(prompt, _, _)| prompt)
+        state
+            .last_sized
+            .map_or((0, 0), |(prompt, cap, _)| (prompt, u64::from(cap)))
     } else {
-        0
+        (0, 0)
     }
 }
 
@@ -10280,13 +10327,74 @@ fn cut_terms(state: &State, template: &RequestShape) -> (Role, Option<ForkView>,
             (
                 interview.role,
                 interview.view,
-                interview
-                    .fork_tail
-                    .unwrap_or(template.limits.max_output_tokens),
+                fork_ceiling(interview.fork_tail, template.limits.max_output_tokens),
                 interview.prefix_pages == PrefixPages::Shared,
             )
         },
     )
+}
+
+/// Where a cut fork stands in the pool (#826).
+struct Fit {
+    /// The pool's numbers.
+    room: Option<log::PoolRoom>,
+    /// Whether it leaves less than the clamp's floor now.
+    short: bool,
+    /// Whether it could never fit, the pool empty.
+    never: bool,
+    /// Its output cap, within what the pool leaves it.
+    ceiling: u32,
+}
+
+/// A cut fork of `reserved` tokens (`prompt` in full) beside the trunk's
+/// `held` -- its prompt and output cap -- and the forks in flight, in a
+/// `window` (#826): never more on the server than its pool holds. Short of
+/// room now, it waits; it is refused only when it could never fit; sent, its
+/// cap is what the pool leaves it, up to `ceiling`.
+fn fit_beside(
+    state: &State,
+    window: Option<u64>,
+    (held, reserved, prompt): (u64, u64, u64),
+    ceiling: u32,
+) -> Fit {
+    let (room, short) = pool_room(state, window, (held, reserved), ceiling);
+    let never = window
+        .is_some_and(|window| window.saturating_sub(prompt) < u64::from(ceiling).min(CLAMP_FLOOR));
+    let ceiling = room.map_or(ceiling, |room| {
+        let left = room
+            .window
+            .saturating_sub(room.trunk + room.beside + room.prompt);
+        ceiling.min(u32::try_from(left).unwrap_or(u32::MAX))
+    });
+    Fit {
+        room,
+        short,
+        never,
+        ceiling,
+    }
+}
+
+/// A cut fork's `shape` put on its server (#782): an offboard seat's model
+/// and window, when there is one; its prompt -- on the trunk's server its
+/// prefix is the trunk's, sized as the trunk's is; offboard, its estimate is
+/// all there is -- and what the trunk holds of that server's pool.
+fn seated<S>(
+    shared: &Shared<S>,
+    state: &State,
+    shape: &mut RequestShape,
+) -> (Option<log::ForkSeat>, u64, (u64, u64)) {
+    match shared.seat.as_ref() {
+        Some(seat) => {
+            shape.model.clone_from(&seat.model);
+            shape.limits.context_window = seat.context_window;
+            let at = log::ForkSeat {
+                substrate: seat.substrate.clone(),
+                model: seat.model.clone(),
+            };
+            (Some(at), estimate_of(shape), (0, 0))
+        }
+        None => (None, state.prompt_of(shape), trunk_resident(state)),
+    }
 }
 
 /// One cut fork, fired (#782): the trunk as it stood after its step's
@@ -10294,55 +10402,46 @@ fn cut_terms(state: &State, template: &RequestShape) -> (Role, Option<ForkView>,
 /// prefix -- the view it overrode named on its line. Refused unsent when the
 /// trunk's prompt, the forks' in flight and its own [`reservation`] leave
 /// the pool less than the clamp's floor, the numbers on its `fork.settled`.
-fn fire_cut<S>(shared: &Shared<S>, state: &mut State, cut: Cut) -> Option<Fired> {
+fn fire_cut<S>(shared: &Shared<S>, state: &mut State, cut: Cut) -> Launched {
+    let (role, declared, ceiling, sharing) = cut_terms(state, &shared.template);
+    let mut shape = shared.template.clone();
+    shape.messages.clone_from(&cut.messages);
+    // The cut, sized as the fork's prompt is: the prefix it holds in
+    // common with the trunk's (#797).
+    let prefix = state.prompt_of(&shape);
+    shape
+        .messages
+        .push(Message::new(role, cut.firing.question.clone()));
+    let (seat, prompt, (trunk, trunk_cap)) = seated(shared, state, &mut shape);
+    let (reserved, counted_shared) = reservation(prompt, (prefix, trunk), ForkView::Trunk, sharing);
+    let Fit {
+        room,
+        short,
+        never,
+        ceiling,
+    } = fit_beside(
+        state,
+        shape.limits.context_window,
+        (trunk + trunk_cap, reserved, prompt),
+        ceiling,
+    );
+    if short && !never {
+        return Launched::Waits(cut);
+    }
     let Cut {
         turn,
         at,
         line,
-        firing,
-        messages,
+        firing:
+            Firing {
+                why,
+                ask,
+                pinned,
+                question,
+                trigger,
+            },
+        ..
     } = cut;
-    let Firing {
-        why,
-        ask,
-        pinned,
-        question,
-        trigger,
-    } = firing;
-    let (role, declared, ceiling, sharing) = cut_terms(state, &shared.template);
-    let mut shape = shared.template.clone();
-    shape.messages = messages;
-    // The cut, sized as the fork's prompt is: the prefix it holds in
-    // common with the trunk's (#797).
-    let prefix = state.prompt_of(&shape);
-    shape.messages.push(Message::new(role, question.clone()));
-    let seat = shared.seat.as_ref().map(|seat| {
-        shape.model.clone_from(&seat.model);
-        shape.limits.context_window = seat.context_window;
-        log::ForkSeat {
-            substrate: seat.substrate.clone(),
-            model: seat.model.clone(),
-        }
-    });
-    // On the trunk's server its prefix is the trunk's, sized as the trunk's
-    // is; offboard, its estimate is all there is.
-    let prompt = if seat.is_some() {
-        estimate_of(&shape)
-    } else {
-        state.prompt_of(&shape)
-    };
-    let trunk = if seat.is_some() {
-        0
-    } else {
-        trunk_resident(state)
-    };
-    let (reserved, counted_shared) = reservation(prompt, (prefix, trunk), ForkView::Trunk, sharing);
-    let (room, refused) = pool_room(
-        state,
-        shape.limits.context_window,
-        (trunk, reserved),
-        ceiling,
-    );
     let fork = state.push(Event::Forked {
         of_turn: turn,
         at,
@@ -10360,7 +10459,7 @@ fn fire_cut<S>(shared: &Shared<S>, state: &mut State, cut: Cut) -> Option<Fired>
         view_overridden: declared.filter(|view| *view != ForkView::Trunk),
         reserved: Some((reserved, counted_shared)),
     });
-    if refused {
+    if short {
         state.push(Event::ForkSettled {
             trailer: None,
             fork,
@@ -10371,7 +10470,7 @@ fn fire_cut<S>(shared: &Shared<S>, state: &mut State, cut: Cut) -> Option<Fired>
             pool: room,
             not_run: None,
         });
-        return None;
+        return Launched::Gone;
     }
     let max_tokens = state.aside_sizing(|state| state.sized_at(&mut shape, ceiling, prompt));
     let request = state.push(Event::Requested {
@@ -10385,16 +10484,26 @@ fn fire_cut<S>(shared: &Shared<S>, state: &mut State, cut: Cut) -> Option<Fired>
     let cancel = Cancel::new();
     state.pool.push(PoolFork {
         fork,
-        prompt: reserved,
+        held: reserved + u64::from(max_tokens),
         cancel: cancel.clone(),
     });
-    Some(Fired {
+    Launched::Fired(Fired {
         turn,
         fork,
         request,
         shape,
         cancel,
     })
+}
+
+/// What became of a queued cut fork (#826).
+enum Launched {
+    /// Sent.
+    Fired(Fired),
+    /// Refused for the pool, logged: it could never fit.
+    Gone,
+    /// Short of room now: back at the queue's head, to wait.
+    Waits(Cut),
 }
 
 /// A cut fork, on its own thread (#782): its call streamed beside the
@@ -19015,21 +19124,25 @@ pub(in crate::drive) mod tests {
         forks: Vec<Vec<Step>>,
         slots: u32,
     ) -> Session<Canned> {
-        during_turn_in(tree, (trunk, forks), slots, (None, false))
+        during_turn_in(tree, (trunk, forks), slots, (None, false, None))
     }
 
     /// [`during_turn`], its pool `window` tokens when given, on a server
-    /// that shares a prefix's pages when `shared` (#797).
+    /// that shares a prefix's pages when `shared` (#797), the trunk's
+    /// output `cap` when given (#826).
     fn during_turn_in(
         tree: &Path,
         (trunk, forks): (Vec<Vec<Step>>, Vec<Vec<Step>>),
         slots: u32,
-        (window, shared): (Option<u64>, bool),
+        (window, shared, cap): (Option<u64>, bool, Option<u32>),
     ) -> Session<Canned> {
         std::fs::write(tree.join("notes.md"), "a note\n").expect("a note");
         std::fs::write(tree.join("lib.rs"), "pub fn f() {}\n").expect("a source");
         let mut shape = looping();
         shape.limits.context_window = window;
+        if let Some(cap) = cap {
+            shape.limits.max_output_tokens = cap;
+        }
         Session::open_with(
             Canned::new(trunk),
             shape,
@@ -19418,7 +19531,7 @@ pub(in crate::drive) mod tests {
                 Vec::new(),
             ),
             1,
-            (Some(window), false),
+            (Some(window), false, None),
         );
         session.ask("look around", None).expect("accepted");
         let log = wait_until(&session, "the turn", settled);
@@ -19454,6 +19567,16 @@ pub(in crate::drive) mod tests {
     /// prefix's pages when `shared`. Its log and its forks' outcomes, once
     /// the turn and the fork have settled.
     fn beside_a_100k_trunk(name: &str, shared: bool) -> (Vec<Logged>, Vec<log::ForkOutcome>) {
+        beside_a_100k_trunk_capped(name, shared, (None, None))
+    }
+
+    /// [`beside_a_100k_trunk`], the trunk's output cap and the forks' tail
+    /// when given (#826).
+    fn beside_a_100k_trunk_capped(
+        name: &str,
+        shared: bool,
+        (cap, fork_tail): (Option<u32>, Option<u32>),
+    ) -> (Vec<Logged>, Vec<log::ForkOutcome>) {
         let tree = scratch(name);
         let session = during_turn_in(
             &tree,
@@ -19462,8 +19585,17 @@ pub(in crate::drive) mod tests {
                 vec![deltas(&["LEARNED: a long note\n"])],
             ),
             1,
-            (Some(FLOOR_POOL), shared),
+            (Some(FLOOR_POOL), shared, cap),
         );
+        if fork_tail.is_some() {
+            session
+                .shared
+                .lock()
+                .interview
+                .as_mut()
+                .expect("an interview")
+                .fork_tail = fork_tail;
+        }
         // ~100k tokens at the estimate's four characters to one.
         session
             .ask(&"look around, ".repeat(31_000), None)
@@ -19503,29 +19635,77 @@ pub(in crate::drive) mod tests {
         );
     }
 
-    /// #797: without the declaration, the same fork is refused for the
-    /// pool, as #782 counts it: a second full copy of the trunk.
+    /// Whether a fork's request went out while the trunk's turn was still
+    /// running: before the turn settled.
+    fn a_fork_sent_beside_the_trunk(log: &[Logged]) -> bool {
+        let settled_at = turn_settled_at(log).expect("the turn settled");
+        log.iter().any(|logged| {
+            matches!(
+                logged.event,
+                Event::Requested {
+                    lane: Lane::Interview,
+                    ..
+                }
+            ) && logged.seq < settled_at
+        })
+    }
+
+    /// #797, since #826: without the declaration the same fork counts a
+    /// second full copy of the trunk, so it does not go beside it; it waits
+    /// in the queue and runs once the turn is over, counted in full.
     #[test]
-    fn without_the_declaration_the_same_fork_is_refused_for_the_pool() {
+    fn without_the_declaration_the_same_fork_waits_for_the_turn_to_end() {
         let (log, outcomes) = beside_a_100k_trunk("during-turn-unshared", false);
-        assert_eq!(outcomes, [log::ForkOutcome::Refused], "{log:#?}");
+        assert_eq!(outcomes, [log::ForkOutcome::Value], "{log:#?}");
+        assert!(!a_fork_sent_beside_the_trunk(&log), "it waited for room");
         let [Some((reserved, false))] = reservations(&log)[..] else {
             panic!("one cut fork, counted in full: {:?}", reservations(&log));
         };
         assert!(reserved > 100_000, "the whole prompt: {reserved}");
-        let rooms: Vec<log::PoolRoom> = log
-            .iter()
-            .filter_map(|logged| match &logged.event {
-                Event::ForkSettled { pool, .. } => *pool,
-                _ => None,
-            })
-            .collect();
-        let [room] = rooms[..] else {
-            panic!("one refusal's numbers: {rooms:?}");
+    }
+
+    /// #826: never more on the server than its pool holds. A fork beside
+    /// a ~100k-token trunk whose output cap is 60,000 -- the room its next
+    /// request is sized into -- is sent with what the pool leaves it, not
+    /// the 32,768 its regimen declares: the trunk's prompt and cap, the
+    /// fork's new tokens and its cap, together within the window.
+    #[test]
+    fn a_fork_beside_the_trunk_is_capped_to_what_the_pool_leaves() {
+        let (log, outcomes) =
+            beside_a_100k_trunk_capped("during-turn-trunk-cap", true, (Some(60_000), Some(32_768)));
+        assert_eq!(outcomes, [log::ForkOutcome::Value], "{log:#?}");
+        assert!(a_fork_sent_beside_the_trunk(&log), "room enough beside it");
+        let caps = |lane: Lane| -> Vec<u32> {
+            log.iter()
+                .filter_map(|logged| match &logged.event {
+                    Event::Requested {
+                        lane: at,
+                        max_tokens,
+                        ..
+                    } if *at == lane => Some(*max_tokens),
+                    _ => None,
+                })
+                .collect()
         };
-        assert!(room.trunk > 100_000, "the trunk holds ~100k: {room:?}");
-        assert_eq!(room.prompt, reserved, "{room:?}");
-        assert!(room.trunk + room.prompt > FLOOR_POOL, "{room:?}");
+        let trunk = *caps(Lane::Trunk).iter().max().expect("a trunk request");
+        let [fork] = caps(Lane::Interview)[..] else {
+            panic!("one fork request: {:?}", caps(Lane::Interview));
+        };
+        assert!(fork < 32_768, "cut to the room left: {fork}");
+        // The trunk's prompt is over 100,000 tokens.
+        assert!(
+            100_000 + u64::from(trunk) + u64::from(fork) <= FLOOR_POOL,
+            "trunk cap {trunk}, fork cap {fork}"
+        );
+    }
+
+    /// #826: a fork's tail is 8,192 unless the regimen declares one, and
+    /// never more than the session's output cap unless declared.
+    #[test]
+    fn a_forks_tail_is_the_default_unless_declared() {
+        assert_eq!(fork_ceiling(None, 32_768), FORK_TAIL_DEFAULT);
+        assert_eq!(fork_ceiling(None, 512), 512);
+        assert_eq!(fork_ceiling(Some(32_768), 512), 32_768);
     }
 
     /// #797: a fork that does not see the trunk shares no prefix with it,
