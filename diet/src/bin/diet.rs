@@ -82,6 +82,7 @@ const COMMANDS: &[(&str, Operation)] = &[
         Operation::Format("operating_points"),
     ),
     ("check-regimen", Operation::Format("regimen")),
+    ("check-phase", Operation::Format("phase")),
     ("parse-shell", Operation::Format("shell")),
     ("parse-verdict", Operation::Format("verdict")),
     ("parse-audit", Operation::Format("audit")),

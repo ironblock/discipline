@@ -25,6 +25,7 @@ pub mod interview;
 pub mod log;
 pub mod log_query;
 pub mod operating_points;
+pub mod phase;
 pub mod record;
 pub mod regimen;
 pub mod shell;
@@ -74,6 +75,12 @@ pub const FORMATS: &[Format] = &[
         name: "decline",
         case_extension: "txt",
         project: decline::project,
+        decode: std::str::from_utf8,
+    },
+    Format {
+        name: "phase",
+        case_extension: "toml",
+        project: phase::project,
         decode: std::str::from_utf8,
     },
     Format {
