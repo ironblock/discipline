@@ -27,6 +27,9 @@ pub struct Scenario {
     /// How a prompt waiting on the operator is answered: a `POST /approve`
     /// scope. Absent, a prompt fails the run.
     pub approvals: Option<String>,
+    /// Files the runner copies into the fresh worktree before serve starts:
+    /// each path in the worktree, and its source beside the scenario.
+    pub seed: BTreeMap<String, String>,
     /// The canned substrate's replies, in the file's order.
     pub replies: Vec<Reply>,
     /// What the runner drives, in order.
@@ -81,6 +84,20 @@ pub enum Step {
         scoping: bool,
         /// The refusal it must be answered with, when it must be refused.
         refused: Option<String>,
+        /// Worktree files uploaded through `POST /files` and attached to
+        /// the ask by their digests (#372).
+        attach: Vec<String>,
+    },
+    /// The operator opens a tangent (#22).
+    OpenTangent {
+        /// Its id.
+        id: String,
+    },
+    /// The operator closes the open tangent, ruling `each` -- `keep`,
+    /// `drop` or `park` -- on every live entry born under it.
+    CloseTangent {
+        /// The ruling on each entry.
+        each: String,
     },
     /// The operator flags an entry, bound to `bind` when named.
     Flag {
@@ -104,8 +121,9 @@ pub enum Step {
     DeclareMeditation,
     /// The operator refills a held meditation anyway.
     RefillAnyway,
-    /// The operator rules on the model's phase proposal (#787): the
-    /// proposal's call, and `meditation`, `continue` or `stay`.
+    /// The operator rules on the model's phase proposal (#787, #788): the
+    /// proposal's call, and `meditation`, `keep` (read too as `continue`)
+    /// or `stay`, posted as written.
     RulePhase {
         /// The `propose_phase_transition` call.
         call: String,
@@ -292,6 +310,19 @@ fn header(mut fields: Fields) -> Result<Scenario, ScenarioError> {
     let head = fields.text("head")?;
     let live_regimen = fields.maybe_text("live_regimen")?;
     let approvals = fields.maybe_text("approvals")?;
+    let seed = match fields.take("seed") {
+        None => BTreeMap::new(),
+        Some(Value::Object(seed)) => seed
+            .into_iter()
+            .map(|(path, source)| match source {
+                Value::String(source) if is_relative(&path) && is_relative(&source) => {
+                    Ok((path, source))
+                }
+                _ => Err(fields.wrong("`seed` mapping relative worktree paths to relative files")),
+            })
+            .collect::<Result<_, _>>()?,
+        Some(_) => return Err(fields.wrong("`seed` an object")),
+    };
     if let Some(scope) = &approvals
         && !crate::drive::tool_loop::Decision::ALL
             .iter()
@@ -306,10 +337,20 @@ fn header(mut fields: Fields) -> Result<Scenario, ScenarioError> {
         live_regimen,
         head,
         approvals,
+        seed,
         replies: Vec::new(),
         steps: Vec::new(),
         expects: Vec::new(),
     })
+}
+
+/// A path that stays where it is put: relative, with no `..`.
+fn is_relative(path: &str) -> bool {
+    let path = std::path::Path::new(path);
+    !path.as_os_str().is_empty()
+        && path
+            .components()
+            .all(|part| matches!(part, std::path::Component::Normal(_)))
 }
 
 fn reply_of(mut fields: Fields) -> Result<Reply, ScenarioError> {
@@ -351,6 +392,26 @@ fn step_of(mut fields: Fields) -> Result<Step, ScenarioError> {
             text: fields.text("text")?,
             scoping: fields.maybe_bool("scoping")?.unwrap_or(false),
             refused: fields.maybe_text("refused")?,
+            attach: match fields.take("attach") {
+                None => Vec::new(),
+                Some(Value::Array(paths)) => paths
+                    .into_iter()
+                    .map(|path| match path {
+                        Value::String(path) if is_relative(&path) => Ok(path),
+                        _ => Err(fields.wrong("each of `attach` a relative worktree path")),
+                    })
+                    .collect::<Result<_, _>>()?,
+                Some(_) => return Err(fields.wrong("`attach` a list")),
+            },
+        },
+        "open-tangent" => Step::OpenTangent {
+            id: fields.text("id")?,
+        },
+        "close-tangent" => Step::CloseTangent {
+            each: match fields.text("each")?.as_str() {
+                word @ ("keep" | "drop" | "park") => word.to_owned(),
+                _ => return Err(fields.wrong("`each` keep, drop or park")),
+            },
         },
         "flag" => Step::Flag {
             pick: fields.pick()?,
@@ -504,6 +565,8 @@ impl Fields {
 pub struct Driver {
     address: String,
     authorization: Option<String>,
+    /// Where the model's commands run: what an ask's `attach` reads from.
+    worktree: Option<std::path::PathBuf>,
 }
 
 /// Why a drive stopped short of its last step, or a run failed.
@@ -531,7 +594,15 @@ impl Driver {
             address: address.to_owned(),
             authorization: user_password
                 .map(|pair| format!("Basic {}", crate::drive::serve::base64(pair.as_bytes()))),
+            worktree: None,
         }
+    }
+
+    /// This driver, reading an ask's attachments from `worktree`.
+    #[must_use]
+    pub fn in_worktree(mut self, worktree: std::path::PathBuf) -> Self {
+        self.worktree = Some(worktree);
+        self
     }
 
     /// One request, answered with a close: its status and its body.
@@ -541,6 +612,20 @@ impl Driver {
         path: &str,
         body: Option<&str>,
     ) -> Result<(u16, String), Failure> {
+        self.sent(
+            method,
+            path,
+            body.map(|body| ("application/json", body.as_bytes())),
+        )
+    }
+
+    /// One request whose body is `body`'s bytes, of its media type.
+    fn sent(
+        &self,
+        method: &str,
+        path: &str,
+        body: Option<(&str, &[u8])>,
+    ) -> Result<(u16, String), Failure> {
         use std::io::{Read as _, Write as _};
         let failed = |why: std::io::Error| Failure(format!("{method} {path}: {why}"));
         let mut stream = std::net::TcpStream::connect(&self.address).map_err(failed)?;
@@ -548,16 +633,17 @@ impl Driver {
         if let Some(authorization) = &self.authorization {
             let _ = write!(head, "Authorization: {authorization}\r\n");
         }
-        if let Some(body) = body {
+        if let Some((media_type, body)) = body {
             let _ = write!(
                 head,
-                "Content-Type: application/json\r\nContent-Length: {}\r\n",
+                "Content-Type: {media_type}\r\nContent-Length: {}\r\n",
                 body.len()
             );
         }
         head.push_str("\r\n");
-        head.push_str(body.unwrap_or(""));
-        stream.write_all(head.as_bytes()).map_err(failed)?;
+        let mut bytes = head.into_bytes();
+        bytes.extend_from_slice(body.map_or(&[][..], |(_, body)| body));
+        stream.write_all(&bytes).map_err(failed)?;
         let mut reply = String::new();
         stream.read_to_string(&mut reply).map_err(failed)?;
         let status = reply
@@ -629,6 +715,77 @@ impl Driver {
         }
     }
 
+    /// The digest `POST /files` answers for the worktree file `path`.
+    fn uploaded(&self, path: &str) -> Result<String, Failure> {
+        let worktree = self.worktree.as_ref().ok_or_else(|| {
+            Failure(format!(
+                "`{path}` is attached and nothing runs in a worktree"
+            ))
+        })?;
+        let bytes = std::fs::read(worktree.join(path))
+            .map_err(|why| Failure(format!("`{path}` cannot be read from the worktree: {why}")))?;
+        match self.sent("POST", "/files", Some(("image/png", &bytes)))? {
+            (200, body) => serde_json::from_str::<serde_json::Value>(&body)
+                .ok()
+                .and_then(|reply| reply["sha256"].as_str().map(str::to_owned))
+                .ok_or_else(|| Failure(format!("POST /files answered {body}"))),
+            (status, body) => Err(Failure(format!(
+                "POST /files for `{path}`: {status} {body}"
+            ))),
+        }
+    }
+
+    /// Close the tangent `id` (#22), ruling `each` on every live entry born
+    /// under it, read from `GET /memory`.
+    fn closed(&self, id: &str, each: &str) -> Result<(), Failure> {
+        let memory = self.get("/memory")?;
+        let dispositions: serde_json::Map<String, serde_json::Value> = memory["entries"]
+            .as_array()
+            .into_iter()
+            .flatten()
+            .filter(|entry| entry["provenances"][0]["tangent"] == id)
+            .filter_map(|entry| entry["id"].as_str().map(str::to_owned))
+            .map(|entry| (entry, serde_json::Value::String(each.to_owned())))
+            .collect();
+        self.command(&serde_json::json!({"kind": "close-tangent", "dispositions": dispositions}))
+    }
+
+    /// Post an ask -- `text`, its scoping mark, and the worktree files it
+    /// attaches -- and wait until the session is idle; or, with `refused`,
+    /// see it refused with that tag.
+    fn asked(
+        &self,
+        (text, scoping, attach): (&str, bool, &[String]),
+        refused: Option<&str>,
+        approvals: Option<&str>,
+    ) -> Result<(), Failure> {
+        let mut ask = serde_json::json!({"kind": "ask", "text": text});
+        if scoping {
+            ask["scoping"] = serde_json::Value::Bool(true);
+        }
+        if !attach.is_empty() {
+            let files = attach
+                .iter()
+                .map(|path| self.uploaded(path))
+                .collect::<Result<Vec<_>, _>>()?;
+            ask["files"] = serde_json::json!(files);
+        }
+        let Some(refused) = refused else {
+            self.command(&ask)?;
+            return self.settle(approvals).map(|_| ());
+        };
+        let (status, body) = self.post("/commands", &ask)?;
+        let tag = serde_json::from_str::<serde_json::Value>(&body)
+            .ok()
+            .and_then(|reply| reply["refused"].as_str().map(str::to_owned));
+        if status != 409 || tag.as_deref() != Some(refused) {
+            return Err(Failure(format!(
+                "the ask was to be refused `{refused}` and was answered {status} {body}"
+            )));
+        }
+        Ok(())
+    }
+
     /// The live entry `pick` names, from `GET /memory`.
     fn picked(&self, pick: &Pick) -> Result<String, Failure> {
         let memory = self.get("/memory")?;
@@ -675,6 +832,7 @@ pub fn drive(scenario: &Scenario, driver: &Driver) -> Result<Bindings, Failure> 
     let approvals = scenario.approvals.as_deref();
     let mut bound = Bindings::new();
     let mut mark = driver.last_seq()?;
+    let mut tangent: Option<&str> = None;
     for (at, step) in scenario.steps.iter().enumerate() {
         let failed = |why: Failure| Failure(format!("step {}: {why}", at + 1));
         match step {
@@ -682,26 +840,12 @@ pub fn drive(scenario: &Scenario, driver: &Driver) -> Result<Bindings, Failure> 
                 text,
                 scoping,
                 refused,
+                attach,
             } => {
                 mark = driver.last_seq().map_err(failed)?;
-                let mut ask = serde_json::json!({"kind": "ask", "text": text});
-                if *scoping {
-                    ask["scoping"] = serde_json::Value::Bool(true);
-                }
-                if let Some(refused) = refused {
-                    let (status, body) = driver.post("/commands", &ask).map_err(failed)?;
-                    let tag = serde_json::from_str::<serde_json::Value>(&body)
-                        .ok()
-                        .and_then(|reply| reply["refused"].as_str().map(str::to_owned));
-                    if status != 409 || tag.as_deref() != Some(refused.as_str()) {
-                        return Err(failed(Failure(format!(
-                            "the ask was to be refused `{refused}` and was answered {status} {body}"
-                        ))));
-                    }
-                } else {
-                    driver.command(&ask).map_err(failed)?;
-                    driver.settle(approvals).map_err(failed)?;
-                }
+                driver
+                    .asked((text, *scoping, attach), refused.as_deref(), approvals)
+                    .map_err(failed)?;
             }
             Step::Flag { pick, note, bind } => {
                 let id = driver.picked(pick).map_err(failed)?;
@@ -744,6 +888,18 @@ pub fn drive(scenario: &Scenario, driver: &Driver) -> Result<Bindings, Failure> 
                     }))
                     .map_err(failed)?;
                 driver.settle(approvals).map_err(failed)?;
+            }
+            Step::OpenTangent { id } => {
+                driver
+                    .command(&serde_json::json!({"kind": "open-tangent", "id": id}))
+                    .map_err(failed)?;
+                tangent = Some(id);
+            }
+            Step::CloseTangent { each } => {
+                let id = tangent
+                    .take()
+                    .ok_or_else(|| failed(Failure("no tangent is open to close".to_owned())))?;
+                driver.closed(id, each).map_err(failed)?;
             }
             Step::Wait { until, timeout } => {
                 let seconds = timeout.unwrap_or(300);
@@ -880,6 +1036,25 @@ fn beside(file: &std::path::Path, named: &str) -> std::path::PathBuf {
         .join(named)
 }
 
+/// Copy each of `seed`'s files, beside the scenario `file`, into `worktree`
+/// at its path there.
+fn seeded(
+    worktree: &std::path::Path,
+    file: &std::path::Path,
+    seed: &BTreeMap<String, String>,
+) -> Result<(), Failure> {
+    for (path, source) in seed {
+        let to = worktree.join(path);
+        if let Some(parent) = to.parent() {
+            std::fs::create_dir_all(parent)
+                .map_err(|why| Failure(format!("{} cannot be made: {why}", parent.display())))?;
+        }
+        std::fs::copy(beside(file, source), &to)
+            .map_err(|why| Failure(format!("the seed `{source}` cannot be copied: {why}")))?;
+    }
+    Ok(())
+}
+
 /// A directory no other run uses, under the system's temporary one.
 fn fresh(what: &str) -> Result<std::path::PathBuf, Failure> {
     let stamp = std::time::SystemTime::now()
@@ -996,12 +1171,19 @@ fn running(
     if let Some(key_file) = &options.key_file {
         serve.arg("--key-file").arg(key_file);
     }
+    let mut worktree = None;
     if runs_commands {
-        let worktree = match &options.worktree {
+        let dir = match &options.worktree {
             Some(worktree) => worktree.clone(),
             None => fresh("worktree")?,
         };
-        serve.arg("--worktree").arg(worktree);
+        seeded(&dir, &options.file, &scenario.seed)?;
+        serve.arg("--worktree").arg(&dir);
+        worktree = Some(dir);
+    } else if !scenario.seed.is_empty() {
+        return Err(Failure(
+            "the scenario seeds a worktree and its regimen runs no commands".to_owned(),
+        ));
     }
     let mut child = serve
         .spawn()
@@ -1018,7 +1200,10 @@ fn running(
         let _ = std::fs::remove_dir_all(&secrets);
         return Err(Failure(format!("serve did not start: {first}")));
     };
-    let driver = Driver::new(listening, Some(&user_password));
+    let mut driver = Driver::new(listening, Some(&user_password));
+    if let Some(worktree) = worktree {
+        driver = driver.in_worktree(worktree);
+    }
     let outcome = self::drive(&scenario, &driver);
     if outcome.is_err() {
         let _ = driver.command(&serde_json::json!({"kind": "end"}));
@@ -1104,6 +1289,7 @@ mod tests {
     const MINIMAL: &str = include_str!("../../scenarios/fixtures/minimal.jsonl");
 
     #[test]
+    #[allow(clippy::too_many_lines)]
     fn the_minimal_fixture_reads_line_for_line() {
         let read = parse(MINIMAL).expect("it reads");
         assert_eq!(read.name, "minimal");
@@ -1111,6 +1297,10 @@ mod tests {
         assert_eq!(read.live_regimen.as_deref(), Some("../drive/floor.toml"));
         assert_eq!(read.head, "../drive/heads/floor.md");
         assert_eq!(read.approvals.as_deref(), Some("session"));
+        assert_eq!(
+            read.seed,
+            BTreeMap::from([("AGENTS.md".to_owned(), "minimal.agents.md".to_owned())])
+        );
         assert_eq!(
             read.replies,
             [
@@ -1145,6 +1335,19 @@ mod tests {
                     text: "write a.py".to_owned(),
                     scoping: true,
                     refused: None,
+                    attach: Vec::new(),
+                },
+                Step::Ask {
+                    text: "what is in shot.png".to_owned(),
+                    scoping: false,
+                    refused: None,
+                    attach: vec!["shot.png".to_owned()],
+                },
+                Step::OpenTangent {
+                    id: "t/1".to_owned(),
+                },
+                Step::CloseTangent {
+                    each: "keep".to_owned(),
                 },
                 Step::Flag {
                     pick: Pick::Index(0),
@@ -1165,11 +1368,12 @@ mod tests {
                     text: "go on".to_owned(),
                     scoping: false,
                     refused: Some("meditation-held".to_owned()),
+                    attach: Vec::new(),
                 },
                 Step::RefillAnyway,
                 Step::RulePhase {
                     call: "call-p".to_owned(),
-                    choice: "continue".to_owned(),
+                    choice: "keep".to_owned(),
                 },
                 Step::End,
             ]

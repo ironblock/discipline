@@ -417,7 +417,54 @@ fn routed(routes: &mut Routes, read: &io::Result<(String, String)>) -> Result<Ac
         .as_ref()
         .map(|(_, body)| last_message(body))
         .unwrap_or_default();
-    routes.take(&last).ok_or(last)
+    let act = routes.take(&last).ok_or(last)?;
+    let job = read.as_ref().ok().and_then(|(_, body)| last_job(body));
+    Ok(match job {
+        Some(job) => with_job(act, &job),
+        None => act,
+    })
+}
+
+/// The last background job id in `body` (#798): `bg_` and eight hex
+/// digits, as `diet::drive::background::new_id` makes them.
+fn last_job(body: &str) -> Option<String> {
+    body.match_indices("bg_")
+        .filter_map(|(at, _)| body.get(at..at + 11))
+        .filter(|id| id[3..].bytes().all(|byte| byte.is_ascii_hexdigit()))
+        .last()
+        .map(str::to_owned)
+}
+
+/// `act` with each `$job` in what it sends replaced by `job`.
+fn with_job(act: Act, job: &str) -> Act {
+    let named = |text: String| text.replace("$job", job);
+    match act {
+        Act::Answer(text) => Act::Answer(named(text)),
+        // A canned reply's head declares its body's length: counted again.
+        Act::Raw(bytes) => Act::Raw(match String::from_utf8(bytes) {
+            Ok(text) => match text.split_once("\r\n\r\n") {
+                Some((head, body)) if body.contains("$job") => {
+                    let body = named(body.to_owned());
+                    let head = head
+                        .lines()
+                        .map(|line| {
+                            if line.to_ascii_lowercase().starts_with("content-length:") {
+                                format!("Content-Length: {}", body.len())
+                            } else {
+                                line.to_owned()
+                            }
+                        })
+                        .collect::<Vec<_>>()
+                        .join("\r\n");
+                    format!("{head}\r\n\r\n{body}").into_bytes()
+                }
+                _ => text.into_bytes(),
+            },
+            Err(unread) => unread.into_bytes(),
+        }),
+        Act::Trickle(gap, pieces) => Act::Trickle(gap, pieces.into_iter().map(named).collect()),
+        other => other,
+    }
 }
 
 /// A routed stub's request no reply is left for (#760): named in
@@ -787,6 +834,52 @@ mod tests {
             .map_or("", |(_, b)| b)
             .to_owned();
         (status, body)
+    }
+
+    /// #798: a routed reply's `$job` is the last background job id the
+    /// request carries -- the id `task_stop` needs, which no script can know
+    /// ahead of the run -- and stays `$job` when it carries none.
+    #[test]
+    fn a_routed_reply_names_the_last_background_job_its_request_carries() {
+        let stub = Stub::routing(
+            vec![
+                Route::when("started", Act::Answer("stop $job".to_owned())),
+                Route::ordered(Act::Answer("stop $job".to_owned())),
+            ],
+            "build",
+            0,
+        )
+        .expect("loopback");
+        assert_eq!(
+            ask(&stub, "bg_00000000 ended; bg_0123abcd started"),
+            (200, "stop bg_0123abcd".to_owned())
+        );
+        assert_eq!(ask(&stub, "nothing running"), (200, "stop $job".to_owned()));
+        // A canned reply streamed whole: its declared length is the body's.
+        let canned = Stub::routing(
+            vec![Route::ordered(Act::Raw(crate::drive::canned::streamed(
+                "stop $job",
+                &[],
+            )))],
+            "build",
+            0,
+        )
+        .expect("loopback");
+        let (status, body) = ask(&canned, "bg_0123abcd started");
+        assert_eq!(status, 200);
+        assert!(body.contains("stop bg_0123abcd"), "{body}");
+        let Act::Raw(sent) = with_job(
+            Act::Raw(crate::drive::canned::streamed("stop $job", &[])),
+            "bg_0123abcd",
+        ) else {
+            unreachable!("raw stays raw");
+        };
+        let sent = String::from_utf8(sent).expect("text");
+        let (head, body) = sent.split_once("\r\n\r\n").expect("a head");
+        assert!(
+            head.contains(&format!("Content-Length: {}", body.len())),
+            "the declared length is the body's: {head}"
+        );
     }
 
     /// #760: a routed stub answers a request whose last message holds a
