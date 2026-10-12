@@ -47,6 +47,9 @@ The format has no grammar of its own, so it has no directory under `diet/formats
 | `declare-meditation` | | |
 | `refill-anyway` | | |
 | `rule-phase` | `call`, `choice` | rules on the model's phase proposal that call `call` made: `meditation`, `keep` (`continue` is read too) or `stay`, posted as written |
+| `start-phase` | `phase` | picks the phase the session starts in, before the first ask |
+| `propose-phase` | `to`, `meditate`? | proposes a phase move the model accepts or declines; `meditate` absent is serve's default |
+| `move-phase` | `to`, `meditate`? | moves the phase on the operator's word alone |
 | `open-tangent` | `id` | opens a tangent |
 | `close-tangent` | `each` | closes the open tangent, ruling `keep`, `drop` or `park` on every live entry born under it |
 | `wait` | `until`, `timeout`? | `GET /wait` for `idle` or a line's kind, after the last command |

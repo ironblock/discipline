@@ -30,13 +30,17 @@
 {"reply":{"when":"count-three","text":"Four.","calls":[{"id":"call-c4","name":"bash","arguments":"{\"command\": \"echo count-four\"}"}],"delay_ms":300}}
 {"reply":{"when":"Tidy up","text":"Checking first.","calls":[{"id":"call-t1","name":"bash","arguments":"{\"command\": \"echo tidy-check\"}"}],"delay_ms":300}}
 {"reply":{"when":"tidy-check","text":"Now the tidier.","calls":[{"id":"call-t2","name":"tidy_everything","arguments":"{}"}],"delay_ms":300}}
-{"reply":{"when":"Is the scope done","text":"It is.","calls":[{"id":"call-v1","name":"resolve_entry","arguments":"{\"entry\": \"r4/call-r1/decision\", \"verdict\": \"done\"}"}],"delay_ms":300}}
+{"reply":{"when":"Is the scope done","text":"It is.","calls":[{"id":"call-v1","name":"resolve_entry","arguments":"{\"entry\": \"r5/call-r1/decision\", \"verdict\": \"done\"}"}],"delay_ms":300}}
 {"reply":{"when":"resolved","text":"Marked the scope done.","delay_ms":300}}
 {"reply":{"when":"Change of scope","text":"Noted: notes.md becomes a Markdown list of decisions.","delay_ms":400}}
 {"reply":{"when":"Oriented enough","text":"Proposing the plan phase.","calls":[{"id":"call-p1","name":"propose_phase_transition","arguments":"{\"to\": \"plan\", \"reason\": \"the scope is settled\"}"}],"delay_ms":400}}
-{"reply":{"when":"proposed","text":"Waiting on your ruling.","delay_ms":300}}
 {"reply":{"when":"Ready to build","text":"Proposing the build phase.","calls":[{"id":"call-p2","name":"propose_phase_transition","arguments":"{\"to\": \"build\", \"reason\": \"the plan has its steps\"}"}],"delay_ms":400}}
-{"reply":{"when":"proposed","text":"Waiting on your ruling.","delay_ms":300}}
+{"reply":{"when":"Build now","text":"Proposing the build phase again.","calls":[{"id":"call-p3","name":"propose_phase_transition","arguments":"{\"to\": \"build\", \"reason\": \"the steps are written down\"}"}],"delay_ms":400}}
+{"reply":{"when":"Build the list","text":"Building the list.","delay_ms":400}}
+{"reply":{"when":"The operator proposes moving from phase build to phase test","text":"Agreed.","calls":[{"id":"call-a1","name":"propose_phase_transition","arguments":"{\"to\": \"test\", \"reason\": \"the list is built\", \"accept\": true}"}],"delay_ms":400}}
+{"reply":{"when":"accepted","text":"Moving to test.","delay_ms":300}}
+{"reply":{"when":"The operator proposes moving from phase test to phase build","text":"Not yet.","calls":[{"id":"call-a2","name":"propose_phase_transition","arguments":"{\"to\": \"build\", \"reason\": \"the list is not tested yet\", \"accept\": false}"}],"delay_ms":400}}
+{"reply":{"when":"declined","text":"Staying in test until the list is tested.","delay_ms":300}}
 {"reply":{"when":"Side question","text":"Writing the side note.","calls":[{"id":"call-w2","name":"write","arguments":"{\"path\": \"side.md\", \"content\": \"side: the list could be sorted\\n\"}"}],"delay_ms":400}}
 {"reply":{"when":"Successfully created and wrote to new file: side.md","text":"Side note written.","delay_ms":300}}
 {"reply":{"when":"Back to the list","text":"Back to the list: notes.md first.","delay_ms":400}}
@@ -64,6 +68,8 @@
 {"reply":{"when":"What did this turn establish","text":"LEARNED: NONE\nEVIDENCE: NONE\nSTUCK: NONE"}}
 {"reply":{"when":"What did this turn establish","text":"LEARNED: NONE\nEVIDENCE: NONE\nSTUCK: NONE"}}
 {"reply":{"when":"What did this turn establish","text":"LEARNED: NONE\nEVIDENCE: NONE\nSTUCK: NONE"}}
+{"reply":{"when":"What did this turn establish","text":"LEARNED: NONE\nEVIDENCE: NONE\nSTUCK: NONE"}}
+{"reply":{"when":"What did this turn establish","text":"LEARNED: NONE\nEVIDENCE: NONE\nSTUCK: NONE"}}
 {"reply":{"when":"You just changed something","text":"LEARNED: NONE\nEVIDENCE: NONE\nSTUCK: NONE"}}
 {"reply":{"when":"You just changed something","text":"LEARNED: NONE\nEVIDENCE: NONE\nSTUCK: NONE"}}
 {"reply":{"when":"You just read a document","text":"LEARNED: NONE\nEVIDENCE: NONE\nSTUCK: NONE"}}
@@ -80,6 +86,7 @@
 {"reply":{"when":"learn of or commit to any constraint","text":"NONE"}}
 {"reply":{"when":"learn of or commit to any constraint","text":"NONE"}}
 {"reply":{"when":"learn of or commit to any constraint","text":"NONE"}}
+{"step":"start-phase","phase":"orient"}
 {"step":"ask","text":"Scope: a notes file, notes.md, holding one line per decision; read it back after each write.","scoping":true}
 {"step":"ask","text":"Write notes.md with the first decision, tighten it, then read it back."}
 {"step":"ask","text":"Make a tiny PNG with bash, then read it."}
@@ -98,6 +105,14 @@
 {"step":"rule-phase","call":"call-p1","choice":"meditation"}
 {"step":"ask","text":"Ready to build? Say if we should move on."}
 {"step":"rule-phase","call":"call-p2","choice":"stay"}
+{"step":"ask","text":"Build now? Say if we should move on."}
+{"step":"rule-phase","call":"call-p3","choice":"keep"}
+{"step":"ask","text":"Build the list in notes.md."}
+{"step":"propose-phase","to":"test","meditate":false}
+{"step":"ask","text":"Test the list."}
+{"step":"propose-phase","to":"build","meditate":false}
+{"step":"ask","text":"Test it once more."}
+{"step":"move-phase","to":"build","meditate":false}
 {"step":"edit","pick":"Markdown list","text":"decision: notes.md holds the decisions as a sorted Markdown list","as":"edited"}
 {"step":"open-tangent","id":"side"}
 {"step":"ask","text":"Side question: write side.md with a note on sorting."}
@@ -108,13 +123,24 @@
 {"step":"ask","text":"go on","refused":"meditation-held"}
 {"step":"refill-anyway"}
 {"step":"end"}
-{"expect":"session.start","where":{"instruction_files~":"AGENTS.md","tool_output":"capped","tool_output_max_lines":"20","fork_delivery":"advisory","opening_phase":"orient","phase_document.name":"orient"}}
-{"expect":"phase.noted","where":{"turn":"1","text~":"now in the orient phase"}}
-{"expect":"capture","where":{"tool":"propose_phase_transition","outcome":"proposed","to":"plan"},"name":"proposed"}
-{"expect":"phase.ruled","where":{"choice":"meditation","from":"orient","to":"plan","phase_document.name":"plan"},"name":"ruled","after":"proposed"}
+{"expect":"session.start","where":{"instruction_files~":"AGENTS.md","tool_output":"capped","tool_output_max_lines":"20","fork_delivery":"advisory","opening_phase":"plan","phase_document.name":"plan"}}
+{"expect":"phase.started","where":{"phase":"orient","phase_document.name":"orient"},"name":"started"}
+{"expect":"phase.noted","where":{"turn":"1","text~":"now in the orient phase"},"after":"started"}
+{"expect":"phase.proposed","where":{"by":"model","call":"call-p1","from":"orient","to":"plan"},"name":"proposed"}
+{"expect":"phase.ruled","where":{"choice":"meditation","call":"call-p1","to":"plan","phase_document.name":"plan"},"name":"ruled","after":"proposed"}
 {"expect":"meditation","where":{"reason":"phase","phase_document.name":"plan"},"after":"ruled"}
-{"expect":"capture","where":{"tool":"propose_phase_transition","outcome":"proposed","to":"build"},"name":"proposed-build"}
-{"expect":"phase.ruled","where":{"choice":"stay","from":"plan","to":"build"},"after":"proposed-build"}
+{"expect":"phase.proposed","where":{"by":"model","call":"call-p2","to":"build"},"name":"proposed-build"}
+{"expect":"phase.ruled","where":{"choice":"stay","call":"call-p2"},"after":"proposed-build"}
+{"expect":"phase.proposed","where":{"by":"model","call":"call-p3","to":"build"},"name":"proposed-again"}
+{"expect":"phase.ruled","where":{"choice":"keep","call":"call-p3","phase_document.name":"build"},"name":"kept","after":"proposed-again"}
+{"expect":"phase.noted","where":{"text~":"now in the build phase"},"after":"kept"}
+{"expect":"phase.proposed","where":{"by":"operator","to":"test","meditate":"false"},"name":"operator-test"}
+{"expect":"notice","where":{"text~":"The operator proposes moving from phase build to phase test"},"after":"operator-test"}
+{"expect":"phase.answered","where":{"call":"call-a1","accepted":"true"},"name":"accepted","after":"operator-test"}
+{"expect":"phase.ruled","where":{"by":"model","choice":"keep","to":"test"},"after":"accepted"}
+{"expect":"phase.proposed","where":{"by":"operator","to":"build","meditate":"false"},"name":"operator-build"}
+{"expect":"phase.answered","where":{"call":"call-a2","accepted":"false"},"after":"operator-build"}
+{"expect":"phase.ruled","where":{"by":"operator","choice":"keep","from":"test","to":"build"},"after":"operator-build"}
 {"expect":"patch","where":{"lane":"mechanical","entry.id":"mechanical/notes.md"}}
 {"expect":"fork","where":{"timing":"during_turn","trigger~":"call:edit:call-w1","view_overridden":"last_turn"}}
 {"expect":"request","where":{"lane":"trunk","beside":"1"}}

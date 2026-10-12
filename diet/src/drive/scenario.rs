@@ -88,6 +88,27 @@ pub enum Step {
         /// the ask by their digests (#372).
         attach: Vec<String>,
     },
+    /// The operator picks the phase the session starts in, before the first
+    /// ask (#788).
+    StartPhase {
+        /// The phase.
+        phase: String,
+    },
+    /// The operator proposes a phase move for the model to accept or
+    /// decline (#788): `meditate`, absent, is serve's default.
+    ProposePhase {
+        /// The phase proposed.
+        to: String,
+        /// Whether an accepted move goes through a meditation.
+        meditate: Option<bool>,
+    },
+    /// The operator moves the phase alone (#788).
+    MovePhase {
+        /// The phase moved to.
+        to: String,
+        /// Whether the move goes through a meditation.
+        meditate: Option<bool>,
+    },
     /// The operator opens a tangent (#22).
     OpenTangent {
         /// Its id.
@@ -139,6 +160,33 @@ pub enum Step {
     },
     /// End the session.
     End,
+}
+
+impl Step {
+    /// The `POST /commands` body of a step that is one command and waits
+    /// for the session to settle after it.
+    fn command(&self) -> serde_json::Value {
+        let move_to = |kind: &str, to: &str, meditate: Option<bool>| {
+            let mut command = serde_json::json!({"kind": kind, "to": to});
+            if let Some(meditate) = meditate {
+                command["meditate"] = serde_json::Value::Bool(meditate);
+            }
+            command
+        };
+        match self {
+            Self::DeclareMeditation => serde_json::json!({"kind": "declare-meditation"}),
+            Self::RefillAnyway => serde_json::json!({"kind": "refill-anyway"}),
+            Self::RulePhase { call, choice } => {
+                serde_json::json!({"kind": "ratify-phase", "call": call, "choice": choice})
+            }
+            Self::StartPhase { phase } => {
+                serde_json::json!({"kind": "start-phase", "phase": phase})
+            }
+            Self::ProposePhase { to, meditate } => move_to("propose-phase", to, *meditate),
+            Self::MovePhase { to, meditate } => move_to("move-phase", to, *meditate),
+            _ => unreachable!("a step of its own"),
+        }
+    }
 }
 
 /// What one log line must show: its `kind` and fields, at least `at_least`
@@ -403,6 +451,17 @@ fn step_of(mut fields: Fields) -> Result<Step, ScenarioError> {
                     .collect::<Result<_, _>>()?,
                 Some(_) => return Err(fields.wrong("`attach` a list")),
             },
+        },
+        "start-phase" => Step::StartPhase {
+            phase: fields.text("phase")?,
+        },
+        "propose-phase" => Step::ProposePhase {
+            to: fields.text("to")?,
+            meditate: fields.maybe_bool("meditate")?,
+        },
+        "move-phase" => Step::MovePhase {
+            to: fields.text("to")?,
+            meditate: fields.maybe_bool("meditate")?,
         },
         "open-tangent" => Step::OpenTangent {
             id: fields.text("id")?,
@@ -866,27 +925,14 @@ pub fn drive(scenario: &Scenario, driver: &Driver) -> Result<Bindings, Failure> 
                     bound.insert(name.clone(), theirs);
                 }
             }
-            Step::DeclareMeditation | Step::RefillAnyway => {
+            Step::DeclareMeditation
+            | Step::RefillAnyway
+            | Step::RulePhase { .. }
+            | Step::StartPhase { .. }
+            | Step::ProposePhase { .. }
+            | Step::MovePhase { .. } => {
                 mark = driver.last_seq().map_err(failed)?;
-                let kind = if *step == Step::DeclareMeditation {
-                    "declare-meditation"
-                } else {
-                    "refill-anyway"
-                };
-                driver
-                    .command(&serde_json::json!({"kind": kind}))
-                    .map_err(failed)?;
-                driver.settle(approvals).map_err(failed)?;
-            }
-            Step::RulePhase { call, choice } => {
-                mark = driver.last_seq().map_err(failed)?;
-                driver
-                    .command(&serde_json::json!({
-                        "kind": "ratify-phase",
-                        "call": call,
-                        "choice": choice,
-                    }))
-                    .map_err(failed)?;
+                driver.command(&step.command()).map_err(failed)?;
                 driver.settle(approvals).map_err(failed)?;
             }
             Step::OpenTangent { id } => {
@@ -1331,6 +1377,9 @@ mod tests {
         assert_eq!(
             read.steps,
             [
+                Step::StartPhase {
+                    phase: "orient".to_owned(),
+                },
                 Step::Ask {
                     text: "write a.py".to_owned(),
                     scoping: true,
@@ -1374,6 +1423,14 @@ mod tests {
                 Step::RulePhase {
                     call: "call-p".to_owned(),
                     choice: "keep".to_owned(),
+                },
+                Step::ProposePhase {
+                    to: "build".to_owned(),
+                    meditate: Some(false),
+                },
+                Step::MovePhase {
+                    to: "plan".to_owned(),
+                    meditate: None,
                 },
                 Step::End,
             ]
