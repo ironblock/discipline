@@ -46,6 +46,8 @@ export type Kind =
   | "timeout.near"
   | "fork.skipped"
   | "phase.noted"
+  | "trunk.clamped"
+  | "trunk.waited"
 ;
 
 export type State =
@@ -846,6 +848,27 @@ export type PhaseNotedLine = {
   text: string;
 };
 
+export type TrunkClampedLine = {
+  seq: number;
+  t: number;
+  kind: "trunk.clamped";
+  turn: number;
+  window_cap: number;
+  cap: number;
+  forks: string[];
+};
+
+export type TrunkWaitedLine = {
+  seq: number;
+  t: number;
+  kind: "trunk.waited";
+  turn: number;
+  forks: string[];
+  wait_ms: number;
+  window_cap: number;
+  cap: number;
+};
+
 export type LogLine =
   | SessionStartLine
   | AskLine
@@ -884,4 +907,6 @@ export type LogLine =
   | TimeoutNearLine
   | ForkSkippedLine
   | PhaseNotedLine
+  | TrunkClampedLine
+  | TrunkWaitedLine
 ;

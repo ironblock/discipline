@@ -920,6 +920,32 @@ pub enum Event {
         /// The field that call recorded under.
         field: String,
     },
+    /// A trunk request's output cap cut to what the forks in flight leave
+    /// of the pool, below what the window alone gives it.
+    TrunkClamped {
+        /// The turn.
+        turn: u32,
+        /// The cap the window alone gives it.
+        window_cap: u64,
+        /// The cap it is sent with.
+        cap: u64,
+        /// The forks in flight beside it, by their fork line's `seq`.
+        forks: Vec<u64>,
+    },
+    /// A trunk request held until the forks in flight settled: its prompt
+    /// and the clamp's floor did not fit beside them.
+    TrunkWaited {
+        /// The turn.
+        turn: u32,
+        /// The forks it waited on, by their fork line's `seq`.
+        forks: Vec<u64>,
+        /// How long it waited.
+        wait_ms: u64,
+        /// The cap the window alone gives it.
+        window_cap: u64,
+        /// The cap it is sent with.
+        cap: u64,
+    },
     /// A fork cut during the turn and dropped from its queue unsent
     /// (#822): the queue past its bound, or a declared meditation that
     /// waits only for the forks in flight.
@@ -1232,6 +1258,10 @@ pub struct Interview {
     /// concurrent requests (#797): its entry's `served_prefix_shared`.
     /// [`crate::drive::registry::served_prefix_shared`] reads it at start.
     pub prefix_pages: PrefixPages,
+    /// The chunk the trunk's server allocates its pool in: its entry's
+    /// `served_chunk_size`, else [`POOL_CHUNK_DEFAULT`]. Every job on it is
+    /// counted rounded up to whole chunks, and one more ([`footprint`]).
+    pub pool_chunk: u64,
     /// The warrants that look at what a step produced, and their numbers
     /// (#783).
     pub step: crate::drive::warrants::StepWarrants,
@@ -2373,6 +2403,10 @@ struct State {
     /// were in flight (#822), and the phase it moves to: run once they
     /// settle and the turn is over.
     declared_after_pool: Option<DeclaredMeditation>,
+    /// Since when a trunk request waits for the forks in flight to settle:
+    /// no queued fork is sent meanwhile, or it would take the room the trunk
+    /// waits for.
+    trunk_waiting: Option<Instant>,
     /// The note that puts the operator's proposal to the model, due at the
     /// next ask (#788).
     operator_note_due: Option<String>,
@@ -2507,6 +2541,7 @@ impl State {
             operator_proposal: None,
             move_after_turn: None,
             declared_after_pool: None,
+            trunk_waiting: None,
             operator_note_due: None,
             proposal_ends_turn: None,
             phase_entered: 0,
@@ -5182,6 +5217,30 @@ pub fn line_of(logged: &Logged) -> log::Line {
             reason: None,
             cut: None,
         },
+        Event::TrunkClamped {
+            turn,
+            window_cap,
+            cap,
+            forks,
+        } => log::Event::TrunkClamped {
+            turn: *turn,
+            window_cap: *window_cap,
+            cap: *cap,
+            forks: forks.iter().map(|fork| format!("f/{fork}")).collect(),
+        },
+        Event::TrunkWaited {
+            turn,
+            forks,
+            wait_ms,
+            window_cap,
+            cap,
+        } => log::Event::TrunkWaited {
+            turn: *turn,
+            forks: forks.iter().map(|fork| format!("f/{fork}")).collect(),
+            wait_ms: *wait_ms,
+            window_cap: *window_cap,
+            cap: *cap,
+        },
         Event::Backlogged {
             of_turn,
             trigger,
@@ -5992,7 +6051,9 @@ fn run_calls<S: Streaming + 'static>(
     shape.messages.extend(results);
     // The automatic meditation (#617), between the turn's steps too.
     window_meditation(&shared.template, &mut state, shape, false);
-    let max_tokens = state.sized(shape, shared.template.limits.max_output_tokens);
+    // Never more on the server than its pool holds: the forks in flight
+    // leave it its cap, or it waits for them.
+    let (mut state, max_tokens) = trunk_sized(shared, state, shape, (turn, cancel));
     let beside = state.trunk_beside();
     let next = state.push(Event::Requested {
         turn,
@@ -6005,6 +6066,8 @@ fn run_calls<S: Streaming + 'static>(
     if let Some(flight) = state.flight.as_mut() {
         flight.request = next;
     }
+    // A fork held back while the trunk waited goes now, beside it.
+    launch_pool(shared, &mut state);
     drop(state);
     shared.changed.notify_all();
     Some(next)
@@ -8699,7 +8762,24 @@ fn retried(
         return None;
     }
     state.overflow_retried = Some(turn);
-    let max_tokens = state.sized(shape, template.limits.max_output_tokens);
+    // Its cap within what the forks in flight leave; with no room even for
+    // the floor, the turn fails as it would have -- this path cannot wait.
+    let prompt = state.prompt_of(shape);
+    let window_cap = clamped(
+        template.limits.max_output_tokens,
+        shape.limits.context_window,
+        prompt,
+    );
+    let cap = match state.trunk_room(shape.limits.context_window, prompt, window_cap) {
+        TrunkRoom::Free => window_cap,
+        TrunkRoom::Clamped(cap) => {
+            let line = trunk_clamped(state, turn, window_cap, cap);
+            state.push(line);
+            cap
+        }
+        TrunkRoom::Waits => return None,
+    };
+    let max_tokens = state.sized_at(shape, cap, prompt);
     let beside = state.trunk_beside();
     let next = state.push(Event::Requested {
         turn,
@@ -9936,9 +10016,10 @@ fn fire<S>(
     });
     // Beside the forks cut during the turn still in flight (#782), each
     // prompt holds its own part of the pool.
-    let (room, crowded) = pool_room(state, shape.limits.context_window, (0, prompt), ceiling);
+    let (room, cap, crowded) = pool_room(state, shape.limits.context_window, (0, prompt), ceiling);
     let room = room.filter(|room| room.beside > 0);
     let crowded = crowded && room.is_some();
+    let ceiling = capped_to(ceiling, cap.filter(|_| room.is_some()));
     if refused || crowded {
         state.push(Event::ForkSettled {
             trailer: None,
@@ -10216,6 +10297,9 @@ fn backlogged(state: &mut State, dropped: impl IntoIterator<Item = Cut>) {
 /// Send queued cut forks while a slot is free (#782), each on a thread of
 /// its own; one refused for the pool settles at once and the next is tried.
 fn launch_pool<S: Streaming + 'static>(shared: &Arc<Shared<S>>, state: &mut State) {
+    if state.trunk_waiting.is_some() {
+        return;
+    }
     let slots = state
         .interview
         .as_ref()
@@ -10265,28 +10349,173 @@ fn pool_after_the_turn<S: Streaming + 'static>(shared: &Arc<Shared<S>>, state: &
     pool_settled(&shared.template, state);
 }
 
+/// The output allocation unit a pool is counted in unless the trunk's
+/// server declares its own (`served_chunk_size`): `TabbyAPI`'s default
+/// `chunk_size`, the floor's.
+pub const POOL_CHUNK_DEFAULT: u64 = 2_048;
+
+/// The pool's tokens a job of `tokens` -- its prompt and output cap -- holds
+/// as the engine allocates it: rounded up to a whole `chunk`, and one chunk
+/// more. `TabbyAPI` reserves a job's prompt and one output chunk a round, and
+/// `ExLlamaV3` aligns each round to the chunk boundary with draft headroom;
+/// past the pool by one page, the engine's generator fails and every job on
+/// the server is cancelled, the trunk's with it (measured on the floor,
+/// 2026-10-12). 0 for no job.
+fn footprint(tokens: u64, chunk: u64) -> u64 {
+    if tokens == 0 {
+        0
+    } else {
+        tokens.div_ceil(chunk) * chunk + chunk
+    }
+}
+
+/// `ceiling`, no more than the pool's `cap` when there is one (#826).
+fn capped_to(ceiling: u32, cap: Option<u64>) -> u32 {
+    cap.map_or(ceiling, |cap| {
+        ceiling.min(u32::try_from(cap).unwrap_or(u32::MAX))
+    })
+}
+
+/// The chunk the trunk's server allocates in (#826): its entry's
+/// `served_chunk_size`, else [`POOL_CHUNK_DEFAULT`].
+fn pool_chunk(state: &State) -> u64 {
+    state
+        .interview
+        .as_ref()
+        .map_or(POOL_CHUNK_DEFAULT, |interview| interview.pool_chunk)
+        .max(1)
+}
+
+/// What the forks in flight leave a trunk request: the whole of what the
+/// window gives it, a cap cut to the pool, or not even the clamp's floor.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum TrunkRoom {
+    Free,
+    Clamped(u32),
+    Waits,
+}
+
+impl State {
+    /// What the forks in flight leave a trunk request of `prompt` in a
+    /// `window`, the window alone giving it `window_cap`: each fork and the
+    /// trunk counted as the engine holds them ([`footprint`]). A request
+    /// whose prompt grew past its last one's prompt and cap -- its tool
+    /// results -- is counted as it is now.
+    fn trunk_room(&self, window: Option<u64>, prompt: u64, window_cap: u32) -> TrunkRoom {
+        let Some(window) = window.filter(|_| !self.pool.is_empty()) else {
+            return TrunkRoom::Free;
+        };
+        let chunk = pool_chunk(self);
+        let forks: u64 = self
+            .pool
+            .iter()
+            .map(|pool| footprint(pool.held, chunk))
+            .sum();
+        let left = window.saturating_sub(forks);
+        let cap = (left.saturating_sub(chunk) / chunk * chunk).saturating_sub(prompt);
+        let cap = u32::try_from(cap).unwrap_or(u32::MAX);
+        if cap >= window_cap {
+            TrunkRoom::Free
+        } else if u64::from(cap) >= u64::from(window_cap).min(CLAMP_FLOOR) {
+            TrunkRoom::Clamped(cap)
+        } else {
+            TrunkRoom::Waits
+        }
+    }
+}
+
+/// The line for a trunk request clamped to the pool.
+fn trunk_clamped(state: &State, turn: u32, window_cap: u32, cap: u32) -> Event {
+    Event::TrunkClamped {
+        turn,
+        window_cap: u64::from(window_cap),
+        cap: u64::from(cap),
+        forks: state.pool.iter().map(|pool| pool.fork).collect(),
+    }
+}
+
+/// A trunk request's output cap, sized against the window and then the
+/// pool beside the forks in flight: clamped to what they leave it, logged;
+/// or, when even its prompt and the clamp's floor do not fit, held -- the
+/// lock released, no queued fork sent meanwhile -- until they settle, the
+/// wait logged. A stop or the session's end ends the wait.
+fn trunk_sized<'a, S>(
+    shared: &'a Shared<S>,
+    mut state: std::sync::MutexGuard<'a, State>,
+    shape: &mut RequestShape,
+    (turn, cancel): (u32, &Cancel),
+) -> (std::sync::MutexGuard<'a, State>, u32) {
+    let prompt = state.prompt_of(shape);
+    let window = shape.limits.context_window;
+    let window_cap = clamped(shared.template.limits.max_output_tokens, window, prompt);
+    let mut waited_on: Option<Vec<u64>> = None;
+    let room = loop {
+        match state.trunk_room(window, prompt, window_cap) {
+            TrunkRoom::Waits if !cancel.is_asked() && !state.ending => {
+                if waited_on.is_none() {
+                    waited_on = Some(state.pool.iter().map(|pool| pool.fork).collect());
+                    state.trunk_waiting = Some(Instant::now());
+                }
+                state = shared
+                    .changed
+                    .wait(state)
+                    .unwrap_or_else(PoisonError::into_inner);
+            }
+            room => break room,
+        }
+    };
+    let since = state.trunk_waiting.take();
+    let cap = match room {
+        TrunkRoom::Clamped(cap) => cap,
+        TrunkRoom::Free | TrunkRoom::Waits => window_cap,
+    };
+    if let (Some(forks), Some(since)) = (waited_on, since) {
+        state.push(Event::TrunkWaited {
+            turn,
+            forks,
+            wait_ms: u64::try_from(since.elapsed().as_millis()).unwrap_or(u64::MAX),
+            window_cap: u64::from(window_cap),
+            cap: u64::from(cap),
+        });
+    } else if cap < window_cap {
+        let line = trunk_clamped(&state, turn, window_cap, cap);
+        state.push(line);
+    }
+    let max_tokens = state.sized_at(shape, cap, prompt);
+    (state, max_tokens)
+}
+
 /// The pool a fork of `prompt` would share with the trunk's `trunk` and the
-/// forks' in flight, in a `window` (#782): the four numbers, and whether
-/// they leave less than the clamp's floor (or `ceiling`, if less).
+/// forks' in flight, in a `window` (#782): the four numbers -- the trunk's
+/// and the forks' as the engine holds them ([`footprint`]) -- and the output
+/// cap the room left gives the fork, whole chunks only; and whether that is
+/// less than the clamp's floor (or `ceiling`, if less).
 fn pool_room(
     state: &State,
     window: Option<u64>,
     (trunk, prompt): (u64, u64),
     ceiling: u32,
-) -> (Option<log::PoolRoom>, bool) {
-    let beside: u64 = state.pool.iter().map(|pool| pool.held).sum();
+) -> (Option<log::PoolRoom>, Option<u64>, bool) {
+    let chunk = pool_chunk(state);
+    let beside: u64 = state
+        .pool
+        .iter()
+        .map(|pool| footprint(pool.held, chunk))
+        .sum();
     let room = window.map(|window| log::PoolRoom {
         window,
-        trunk,
+        trunk: footprint(trunk, chunk),
         beside,
         prompt,
     });
-    let short = room.is_some_and(|room| {
-        room.window
-            .saturating_sub(room.trunk + room.beside + room.prompt)
-            < u64::from(ceiling).min(CLAMP_FLOOR)
+    // What the fork's own job may hold, less its chunk of headroom, in
+    // whole chunks, less its prompt: its cap.
+    let cap = room.map(|room| {
+        let left = room.window.saturating_sub(room.trunk + room.beside);
+        (left.saturating_sub(chunk) / chunk * chunk).saturating_sub(room.prompt)
     });
-    (room, short)
+    let short = cap.is_some_and(|cap| cap < u64::from(ceiling).min(CLAMP_FLOOR));
+    (room, cap, short)
 }
 
 /// What a fork of `prompt` reserves of the pool (#797), and whether its
@@ -10361,15 +10590,10 @@ fn fit_beside(
     (held, reserved, prompt): (u64, u64, u64),
     ceiling: u32,
 ) -> Fit {
-    let (room, short) = pool_room(state, window, (held, reserved), ceiling);
+    let (room, cap, short) = pool_room(state, window, (held, reserved), ceiling);
     let never = window
         .is_some_and(|window| window.saturating_sub(prompt) < u64::from(ceiling).min(CLAMP_FLOOR));
-    let ceiling = room.map_or(ceiling, |room| {
-        let left = room
-            .window
-            .saturating_sub(room.trunk + room.beside + room.prompt);
-        ceiling.min(u32::try_from(left).unwrap_or(u32::MAX))
-    });
+    let ceiling = capped_to(ceiling, cap);
     Fit {
         room,
         short,
@@ -13962,6 +14186,19 @@ pub(in crate::drive) mod tests {
                 ask: "finding".to_owned(),
                 cut: 9,
             },
+            Event::TrunkClamped {
+                turn: 2,
+                window_cap: 11_480,
+                cap: 9_052,
+                forks: vec![12],
+            },
+            Event::TrunkWaited {
+                turn: 2,
+                forks: vec![12],
+                wait_ms: 4_100,
+                window_cap: 4_540,
+                cap: 4_540,
+            },
         ];
         let mut kinds = std::collections::BTreeSet::new();
         for event in &events {
@@ -14011,9 +14248,11 @@ pub(in crate::drive) mod tests {
                 Event::PhaseAnswered { .. } => 42,
                 Event::PhaseStarted { .. } => 43,
                 Event::Backlogged { .. } => 44,
+                Event::TrunkClamped { .. } => 45,
+                Event::TrunkWaited { .. } => 46,
             });
         }
-        assert_eq!(kinds.len(), 45, "a variant has no sample");
+        assert_eq!(kinds.len(), 47, "a variant has no sample");
         events
             .into_iter()
             .enumerate()
@@ -14499,6 +14738,19 @@ pub(in crate::drive) mod tests {
                 field: None,
                 reason: Some(log::SKIPPED_BACKLOG.to_owned()),
                 cut: Some(9),
+            },
+            log::Event::TrunkClamped {
+                turn: 2,
+                window_cap: 11_480,
+                cap: 9_052,
+                forks: vec!["f/12".to_owned()],
+            },
+            log::Event::TrunkWaited {
+                turn: 2,
+                forks: vec!["f/12".to_owned()],
+                wait_ms: 4_100,
+                window_cap: 4_540,
+                cap: 4_540,
             },
         ]
     }
@@ -17293,6 +17545,7 @@ pub(in crate::drive) mod tests {
             fork_slots: 0,
             fork_backlog: FORK_BACKLOG_DEFAULT,
             prefix_pages: PrefixPages::Counted,
+            pool_chunk: POOL_CHUNK_DEFAULT,
             timing: Timing::Gap,
             step: crate::drive::warrants::StepWarrants::DEFAULTS,
             operator_unilateral: true,
@@ -19701,6 +19954,331 @@ pub(in crate::drive) mod tests {
         assert!(
             100_000 + u64::from(trunk) + u64::from(fork) <= FLOOR_POOL,
             "trunk cap {trunk}, fork cap {fork}"
+        );
+    }
+
+    /// The pool's tokens a job holds as the floor's engine allocates them
+    /// (Track 6's measurement, 2026-10-12): `TabbyAPI` reserves the prompt and
+    /// a 2,048-token output chunk per round, and `ExLlamaV3` aligns each round
+    /// to the 2,048-token boundary with draft headroom -- so a job's
+    /// `tokens`, rounded up to a whole chunk, and one chunk more.
+    fn engine_footprint(tokens: u64) -> u64 {
+        tokens.div_ceil(2_048) * 2_048 + 2_048
+    }
+
+    /// A trunk on the floor's pool asked `ask` tokens, its output cap
+    /// 20,000, one slot for a fork held by `gate`: step one reads a small
+    /// note -- the fork is cut there, on the trunk's prefix -- and step two
+    /// reads `files` files of ~12,500 tokens each, then it answers. The
+    /// trunk's third request is sized with the fork in flight.
+    fn trunk_beside_a_held_fork(
+        name: &str,
+        ask: usize,
+        files: usize,
+        gate: &Gate,
+    ) -> (Session<Canned>, std::path::PathBuf) {
+        let tree = scratch(name);
+        let reads: Vec<Step> = (0..files)
+            .map(|n| {
+                Step::call(
+                    u64::try_from(n).expect("a small index"),
+                    &format!("call-b{n}"),
+                    "bash",
+                    &format!(r#"{{"command":"cat big{n}.md"}}"#),
+                )
+            })
+            .collect();
+        let session = during_turn_in(
+            &tree,
+            (
+                vec![
+                    vec![bash("call-1", "cat notes.md")],
+                    reads,
+                    deltas(&["Done."]),
+                ],
+                vec![vec![
+                    Step::Hold(gate.clone()),
+                    Step::Delta("LEARNED: a note\n".to_owned()),
+                ]],
+            ),
+            1,
+            (Some(FLOOR_POOL), true, Some(20_000)),
+        );
+        for n in 0..files {
+            std::fs::write(
+                tree.join(format!("big{n}.md")),
+                "a long line ".repeat(4_000),
+            )
+            .expect("a big file");
+        }
+        // `ask` tokens at the estimate's four characters to one; each
+        // request is sized on the estimate and its pad, the canned server
+        // reporting no prompt.
+        session
+            .ask(&"look ".repeat(ask * 4 / 5), None)
+            .expect("accepted");
+        (session, tree)
+    }
+
+    /// Each job on the pool as the engine holds it, at the trunk's last
+    /// sized request with the fork that was in flight beside it.
+    fn pool_held(session: &Session<Canned>, log: &[Logged]) -> u64 {
+        let (prompt, cap, _) = session.shared.lock().last_sized.expect("a trunk request");
+        let reserved = log
+            .iter()
+            .find_map(|logged| match &logged.event {
+                Event::Forked {
+                    reserved: Some((reserved, _)),
+                    ..
+                } => Some(*reserved),
+                _ => None,
+            })
+            .expect("a cut fork");
+        let fork_cap = log
+            .iter()
+            .find_map(|logged| match &logged.event {
+                Event::Requested {
+                    lane: Lane::Interview,
+                    max_tokens,
+                    ..
+                } => Some(*max_tokens),
+                _ => None,
+            })
+            .expect("the fork's request");
+        engine_footprint(prompt + u64::from(cap)) + engine_footprint(reserved + u64::from(fork_cap))
+    }
+
+    /// A trunk wait's forks and how long it took.
+    type Wait = (Vec<u64>, u64);
+
+    /// The trunk's lines held to the pool: clamped, then waited.
+    fn trunk_held(log: &[Logged]) -> (Vec<(u64, u64)>, Vec<Wait>) {
+        let mut clamped = Vec::new();
+        let mut waited = Vec::new();
+        for logged in log {
+            match &logged.event {
+                Event::TrunkClamped {
+                    window_cap, cap, ..
+                } => clamped.push((*window_cap, *cap)),
+                Event::TrunkWaited { forks, wait_ms, .. } => waited.push((forks.clone(), *wait_ms)),
+                _ => {}
+            }
+        }
+        (clamped, waited)
+    }
+
+    /// A trunk request sized while a fork is in flight is cut to what the
+    /// fork leaves of the pool as the engine holds it: below what the window
+    /// alone gives it, the line saying so -- and the two together fit.
+    #[test]
+    fn a_trunk_request_beside_a_fork_in_flight_is_clamped_to_the_pool() {
+        let gate = Gate::new();
+        // 95k and the pad, then ~24k more after two reads: the window
+        // alone gives the third request ~15k, which the fork beside it does
+        // not leave.
+        let (session, tree) = trunk_beside_a_held_fork("trunk-clamped", 95_000, 2, &gate);
+        assert!(gate.wait_for_a_waiter(Duration::from_secs(10)));
+        let log = wait_until(&session, "the turn to settle", |log| {
+            turn_settled_at(log).is_some()
+        });
+        let held = pool_held(&session, &log);
+        let (clamped, waited) = trunk_held(&log);
+        gate.open();
+        wait_until(&session, "the fork", settled);
+        assert!(held <= FLOOR_POOL, "{held} of {FLOOR_POOL}");
+        assert!(waited.is_empty(), "{waited:?}");
+        let [(window_cap, cap)] = clamped[..] else {
+            panic!("one clamp: {clamped:?}");
+        };
+        assert!(
+            cap < window_cap && cap >= CLAMP_FLOOR,
+            "{window_cap} to {cap}"
+        );
+        reads_whole(&session);
+        tidy(&[&tree]);
+    }
+
+    /// A trunk request whose prompt and the clamp's floor do not fit beside
+    /// the fork in flight -- its tool results grew it past the room the
+    /// fork was admitted beside -- waits for the fork to settle, then goes,
+    /// the line naming the fork it waited on and how long.
+    #[test]
+    fn a_trunk_request_that_cannot_fit_beside_a_fork_waits_for_it() {
+        let gate = Gate::new();
+        // 75k and the pad, then ~60k more after five reads: no 4,000 left
+        // beside the fork.
+        let (session, tree) = trunk_beside_a_held_fork("trunk-waited", 75_000, 5, &gate);
+        assert!(gate.wait_for_a_waiter(Duration::from_secs(10)));
+        let trunk_requests = |log: &[Logged]| {
+            log.iter()
+                .filter(|logged| {
+                    matches!(
+                        logged.event,
+                        Event::Requested {
+                            lane: Lane::Trunk,
+                            ..
+                        }
+                    )
+                })
+                .count()
+        };
+        // The third request is held: the trunk waits on the fork, which the
+        // gate holds -- read off the session, not off a clock.
+        let deadline = Instant::now() + Duration::from_secs(10);
+        while session.shared.lock().trunk_waiting.is_none() {
+            assert!(
+                Instant::now() < deadline,
+                "the trunk never waited on the held fork: {:#?}",
+                session.events_from(0)
+            );
+            std::thread::sleep(Duration::from_millis(5));
+        }
+        let log = session.events_from(0);
+        assert_eq!(
+            trunk_requests(&log),
+            2,
+            "while the trunk waits, its third request is not sent"
+        );
+        gate.open();
+        let log = wait_until(&session, "the turn", settled);
+        let (_, waited) = trunk_held(&log);
+        let at = |what: &str, found: Option<usize>| {
+            found.unwrap_or_else(|| panic!("no {what} in {log:#?}"))
+        };
+        let fork = log
+            .iter()
+            .find(|logged| matches!(logged.event, Event::Forked { .. }))
+            .expect("a fork")
+            .seq;
+        let [(forks, _)] = &waited[..] else {
+            panic!("one trunk.waited line, not {waited:?}");
+        };
+        assert_eq!(forks, &[fork], "the wait names the fork it waited on");
+        // In order: the fork settles, the wait is logged, the request goes.
+        let settled_at = at(
+            "fork.settled",
+            log.iter()
+                .position(|logged| matches!(logged.event, Event::ForkSettled { .. })),
+        );
+        let waited_at = at(
+            "trunk.waited",
+            log.iter()
+                .position(|logged| matches!(logged.event, Event::TrunkWaited { .. })),
+        );
+        let third_at = at(
+            "the third trunk request",
+            log.iter()
+                .enumerate()
+                .filter(|(_, logged)| {
+                    matches!(
+                        logged.event,
+                        Event::Requested {
+                            lane: Lane::Trunk,
+                            ..
+                        }
+                    )
+                })
+                .nth(2)
+                .map(|(at, _)| at),
+        );
+        assert!(
+            settled_at < waited_at && waited_at < third_at,
+            "the fork settles ({settled_at}), then the wait ({waited_at}), then the request \
+             ({third_at})"
+        );
+        reads_whole(&session);
+        tidy(&[&tree]);
+    }
+
+    /// The floor's numbers (Track 6): a fork cut beside a trunk of 110,000,
+    /// 120,000 or 130,059 tokens, and the trunk's next request at 140,360 --
+    /// grown past its last prompt and cap. Beside 130,059 the fork is not
+    /// admitted at all; beside the smaller ones it is, and the next request
+    /// is cut to what it leaves, or waits. Every way, what is on the server
+    /// fits the pool as the engine holds it.
+    #[test]
+    fn the_floors_next_trunk_request_fits_beside_the_fork_admitted_at_the_last() {
+        const POOL: u64 = 163_840;
+        // The floor's trunk output cap.
+        const CAP: u32 = 32_768;
+        let next = 140_360;
+        let mut admitted = 0;
+        for first in [110_000, 120_000, 130_059] {
+            let mut state = State::opening(Vec::new(), None, None, None);
+            state.settlement = Settlement::Turn;
+            state.last_sized = Some((first, clamped(CAP, Some(POOL), first), Some(POOL)));
+            let (trunk, trunk_cap) = trunk_resident(&state);
+            let reserved = 200;
+            let fit = fit_beside(
+                &state,
+                Some(POOL),
+                (trunk + trunk_cap, reserved, first + reserved),
+                FORK_TAIL_DEFAULT,
+            );
+            if fit.short {
+                assert_eq!(first, 130_059, "only the last leaves no room");
+                continue;
+            }
+            admitted += 1;
+            let fork_held = reserved + u64::from(fit.ceiling);
+            assert!(
+                engine_footprint(trunk + trunk_cap) + engine_footprint(fork_held) <= POOL,
+                "admitted beside {first}"
+            );
+            state.pool.push(PoolFork {
+                fork: 12,
+                held: fork_held,
+                cancel: Cancel::new(),
+            });
+            let window_cap = clamped(CAP, Some(POOL), next);
+            match state.trunk_room(Some(POOL), next, window_cap) {
+                TrunkRoom::Free => panic!("beside {first}: the window's cap does not fit"),
+                TrunkRoom::Clamped(cap) => assert!(
+                    engine_footprint(next + u64::from(cap)) + engine_footprint(fork_held) <= POOL,
+                    "beside {first}: trunk {next} + {cap}, fork {fork_held}"
+                ),
+                // Sent once the fork has settled, alone in the pool.
+                TrunkRoom::Waits => {
+                    assert!(engine_footprint(next + u64::from(window_cap)) <= POOL);
+                }
+            }
+        }
+        assert_eq!(admitted, 2);
+    }
+
+    /// The floor's edge (Track 6): a trunk of 130,059 tokens sized against
+    /// the window -- its cap the window less the prompt and the 10,000
+    /// margin -- and a fork cut beside it. An admitted fork, with the cap
+    /// serve gives it, must fit the pool as the engine allocates it: each
+    /// job rounded up to a whole chunk and one more. A job past the pool
+    /// does not just fail; it takes down every job on the server.
+    #[test]
+    fn a_fork_admitted_beside_the_trunk_fits_the_pool_as_the_engine_allocates_it() {
+        const POOL: u64 = 163_840;
+        let mut state = State::opening(Vec::new(), None, None, None);
+        state.settlement = Settlement::Turn;
+        let prompt = 130_059;
+        let cap = clamped(64_000, Some(POOL), prompt);
+        state.last_sized = Some((prompt, cap, Some(POOL)));
+        let (trunk, trunk_cap) = trunk_resident(&state);
+        // The fork's own share: its question beside the shared prefix.
+        let reserved = 200;
+        let fit = fit_beside(
+            &state,
+            Some(POOL),
+            (trunk + trunk_cap, reserved, prompt + reserved),
+            FORK_TAIL_DEFAULT,
+        );
+        assert!(
+            fit.short
+                || engine_footprint(trunk + trunk_cap)
+                    + engine_footprint(reserved + u64::from(fit.ceiling))
+                    <= POOL,
+            "admitted with a cap of {} beside a trunk holding {}: {} of {POOL}",
+            fit.ceiling,
+            trunk + trunk_cap,
+            engine_footprint(trunk + trunk_cap)
+                + engine_footprint(reserved + u64::from(fit.ceiling))
         );
     }
 
