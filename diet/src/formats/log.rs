@@ -555,6 +555,13 @@ vocabulary! {
         /// A meditation (v7, #504): its audit, on the `audit` lane. Never a
         /// regimen's interview warrant.
         Meditation => "meditation",
+        /// A step's large output (v8, #783): the EVIDENCE ask.
+        Evidence => "evidence",
+        /// A step's error, or a surprise in what the model said (v8, #783):
+        /// the `GOTCHAS`, `DECISIONS` and `CONSTRAINTS` asks.
+        Trouble => "trouble",
+        /// Every so many steps (v8, #783): the `OPEN_NEXT` ask.
+        Open => "open",
     }
 }
 
@@ -4566,6 +4573,13 @@ pub fn introduced(kind: Kind) -> i64 {
 #[must_use]
 pub fn tag_introduced(tags: Tags, tag: &str) -> i64 {
     if tags == Tags::Refusal && Refusal::from_tag(tag) == Some(Refusal::Restates) {
+        return 8;
+    }
+    if tags == Tags::Warrant
+        && Warrant::from_tag(tag).is_some_and(|warrant| {
+            [Warrant::Evidence, Warrant::Trouble, Warrant::Open].contains(&warrant)
+        })
+    {
         return 8;
     }
     let refused_in_v4 = tags == Tags::ToolRefusal
@@ -8977,7 +8991,7 @@ mod tests {
         );
         assert_eq!(
             tags(Warrant::ALL.iter().map(|it| it.tag()).collect()),
-            "read scoping meditation"
+            "read scoping meditation evidence trouble open"
         );
         assert_eq!(
             tags(ForkOutcome::ALL.iter().map(|it| it.tag()).collect()),

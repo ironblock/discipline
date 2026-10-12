@@ -563,6 +563,9 @@ pub enum Event {
         seat: Option<log::ForkSeat>,
         /// Which ask of its set it sent (#595).
         ask: AskKind,
+        /// The pinned dogma template it asked instead (#783), named on its
+        /// line as its `ask`.
+        pinned: Option<crate::dogma::Template>,
         /// Whether it is sent to the trunk's own server with a prompt that
         /// is not the trunk's prefix, and so may displace the trunk's cached
         /// prefix there (#406).
@@ -1122,6 +1125,9 @@ pub struct Interview {
     /// server's slots less the trunk's own, or an offboard seat's; 0 under
     /// the gap. [`fork_slots`] reads it at start.
     pub fork_slots: u32,
+    /// The warrants that look at what a step produced, and their numbers
+    /// (#783).
+    pub step: crate::drive::warrants::StepWarrants,
 }
 
 /// The interview cadence (#564): when the capture gap's forks fire, and on
@@ -1187,6 +1193,56 @@ impl Timing {
 /// The regimen key for the interview timing (#782).
 pub const INTERVIEW_TIMING: &str = "interview_timing";
 
+/// The regimen key for the shown output, in characters, an `evidence` fork
+/// needs (#783).
+pub const EVIDENCE_MIN_CHARS: &str = "evidence_min_chars";
+/// The regimen key for the `evidence` forks one step fires at most (#783).
+pub const EVIDENCE_PER_STEP: &str = "evidence_per_step";
+/// The regimen key for the steps the surprise path waits after the trio
+/// (#783).
+pub const TROUBLE_COOLDOWN_STEPS: &str = "trouble_cooldown_steps";
+/// The regimen key for the steps between `open` forks (#783).
+pub const OPEN_EVERY_STEPS: &str = "open_every_steps";
+
+/// The step warrants among `rules`, with the numbers the regimen declares,
+/// each the predecessor's default when it declares none (#783).
+///
+/// # Errors
+///
+/// A number that is not a positive whole number, naming its key.
+pub fn step_warrants(
+    regimen: &Regimen,
+    rules: &[log::Warrant],
+) -> Result<crate::drive::warrants::StepWarrants, String> {
+    let defaults = crate::drive::warrants::StepWarrants::DEFAULTS;
+    let count = |key: &str, default: u64| -> Result<u64, String> {
+        match regimen.get(key) {
+            None => Ok(default),
+            Some(crate::formats::regimen::Value::Integer(n)) if *n > 0 => {
+                u64::try_from(*n).map_err(|_| format!("`{key}` is too large"))
+            }
+            Some(_) => Err(format!("`{key}` is not a positive whole number")),
+        }
+    };
+    let small = |key: &str, default: u32| -> Result<u32, String> {
+        count(key, u64::from(default))
+            .and_then(|n| u32::try_from(n).map_err(|_| format!("`{key}` is too large")))
+    };
+    Ok(crate::drive::warrants::StepWarrants {
+        evidence: rules.contains(&log::Warrant::Evidence),
+        trouble: rules.contains(&log::Warrant::Trouble),
+        open: rules.contains(&log::Warrant::Open),
+        evidence_min_chars: count(EVIDENCE_MIN_CHARS, defaults.evidence_min_chars)?,
+        evidence_per_step: usize::try_from(small(
+            EVIDENCE_PER_STEP,
+            u32::try_from(defaults.evidence_per_step).unwrap_or(u32::MAX),
+        )?)
+        .unwrap_or(usize::MAX),
+        trouble_cooldown_steps: small(TROUBLE_COOLDOWN_STEPS, defaults.trouble_cooldown_steps)?,
+        open_every_steps: small(OPEN_EVERY_STEPS, defaults.open_every_steps)?,
+    })
+}
+
 /// The forks a session runs at once during the turn (#782), from the
 /// registry's `serving_slots`: the trunk's server's slots less the trunk's
 /// own, or, when forks run on an offboard seat (`seat` is `Some`), the
@@ -1240,18 +1296,20 @@ pub fn timing_and_slots(
 ) -> Result<(Timing, u32), String> {
     let timing = interview_timing(regimen)?;
     if timing == Timing::DuringTurn {
-        let reads =
-            interview_warrant(regimen).is_ok_and(|rules| rules.contains(&log::Warrant::Read));
-        if !reads
-            || !matches!(
+        let rules = interview_warrant(regimen).unwrap_or_default();
+        let per_call = rules.contains(&log::Warrant::Read)
+            && matches!(
                 interview_cadence(regimen),
                 Cadence::PerClass | Cadence::PerCall
-            )
-        {
+            );
+        // Or a warrant that looks at what a step produced (#783).
+        let content = step_warrants(regimen, &rules).is_ok_and(|warrants| warrants.any());
+        if !per_call && !content {
             return Err(format!(
                 "`{INTERVIEW_TIMING} = \"during_turn\"` cuts the forks a step warrants, and \
                  nothing here warrants one at a step: it needs the `read` warrant and \
-                 `{INTERVIEW_CADENCE} = \"per_class\"` or `\"per_call\"`"
+                 `{INTERVIEW_CADENCE} = \"per_class\"` or `\"per_call\"`, or a step warrant: \
+                 `evidence`, `trouble` or `open`"
             ));
         }
     }
@@ -1577,8 +1635,12 @@ struct Firing {
     why: log::Warrant,
     /// Which ask of the session's set it sends (#595).
     ask: AskKind,
+    /// The pinned dogma template it asks instead (#783), for a warrant
+    /// that looks at what a step produced.
+    pinned: Option<crate::dogma::Template>,
     question: String,
-    /// `turn_end`, or `call:<class>:<id>`.
+    /// `turn_end`, `call:<class>:<id>`, or the step warrant and what fired
+    /// it (#783).
     trigger: String,
 }
 
@@ -1675,6 +1737,7 @@ fn firings_over(
         Firing {
             why: log::Warrant::Scoping,
             ask: kind,
+            pinned: None,
             question,
             trigger: TURN_END.to_owned(),
         }
@@ -1695,6 +1758,7 @@ fn firings_over(
         Firing {
             why: log::Warrant::Read,
             ask: kind,
+            pinned: None,
             question,
             trigger: format!("call:{}:{}", call.class.tag(), call.id),
         }
@@ -2132,6 +2196,12 @@ struct State {
     /// What waits for the last fork cut during the turn (#782): the turn's
     /// end, or a move to `awaiting`.
     deferred: Option<Deferred>,
+    /// What the step warrants carry from step to step (#783).
+    step_counters: crate::drive::warrants::Counters,
+    /// The forks the step warrants fired this turn that run in its gap
+    /// (#783): every step's under the gap timing, the final answer's under
+    /// either.
+    gap_firings: Vec<Firing>,
 }
 
 impl State {
@@ -2245,6 +2315,8 @@ impl State {
             pool: Vec::new(),
             pool_queue: std::collections::VecDeque::new(),
             deferred: None,
+            step_counters: crate::drive::warrants::Counters::default(),
+            gap_firings: Vec::new(),
             jobs: BTreeMap::new(),
             notices: Vec::new(),
             promotable: None,
@@ -3009,6 +3081,10 @@ impl<S: Streaming + 'static> Session<S> {
         }
         state.admit()?;
         state.turns += 1;
+        // A new turn's outputs are its own to cover, and its gap's forks
+        // its own (#783).
+        state.step_counters.covered.clear();
+        state.gap_firings.clear();
         let turn = state.turns;
         let seq = state.push(Event::Asked {
             turn,
@@ -4465,6 +4541,7 @@ pub fn line_of(logged: &Logged) -> log::Line {
             role,
             seat,
             ask,
+            pinned,
             displaces,
             cut,
             timing,
@@ -4487,7 +4564,9 @@ pub fn line_of(logged: &Logged) -> log::Line {
             // Absent is `user` (#599): a user-role fork's line is as before.
             role: (*role != Role::User).then(|| role.tag().to_owned()),
             seat: seat.clone(),
-            ask: Some(ask.tag().to_owned()),
+            // A pinned template by its dogma name, lower case, as an
+            // audit's is (#783).
+            ask: Some(pinned.map_or_else(|| ask.tag().to_owned(), |t| t.name().to_lowercase())),
             hazard: displaces.then(|| DISPLACES_TRUNK_CACHE.to_owned()),
         },
         Event::Audited {
@@ -5053,6 +5132,27 @@ fn step<S: Streaming + 'static>(
                 (partial, reasoning),
                 (finish_reason, timings, hosted),
             ) {
+                // The final answer is a step too (#783): its gates count, and
+                // its forks run in the gap, cut at the answer.
+                let answered = state
+                    .log
+                    .iter()
+                    .rev()
+                    .find_map(|logged| match &logged.event {
+                        Event::Answered {
+                            request: to,
+                            text,
+                            reasoning,
+                            ..
+                        } if *to == request => Some((text.clone(), reasoning.clone())),
+                        _ => None,
+                    });
+                if let Some((text, reasoning)) = answered {
+                    let mut said = Message::new(Role::Assistant, text);
+                    said.reasoning = reasoning;
+                    let content = content_firings(&mut state, (turn, request), &said, &[]);
+                    state.gap_firings.extend(content);
+                }
                 forked = gap(shared, &mut state, turn, request);
             }
         }
@@ -8554,6 +8654,11 @@ fn gap<S>(shared: &Shared<S>, state: &mut State, turn: u32, at: u64) -> Option<F
     for skip in std::mem::take(&mut skipped) {
         state.push(skip);
     }
+    // Then what the turn's steps warranted by their output (#783).
+    let content = std::mem::take(&mut state.gap_firings);
+    if !state.ending {
+        fired.extend(content);
+    }
     let Some(first) = fired.pop_front() else {
         turn_over(&shared.template, state);
         return None;
@@ -8591,6 +8696,7 @@ fn fire<S>(
     let Firing {
         why,
         ask,
+        pinned,
         question,
         trigger,
     } = firing;
@@ -8640,6 +8746,7 @@ fn fire<S>(
         view,
         trigger,
         ask,
+        pinned,
         role,
         seat,
         displaces,
@@ -8719,19 +8826,145 @@ fn cut_step<S: Streaming + 'static>(
     settled: Option<SettleReason>,
 ) {
     // A cancelled step warrants none.
-    if settled == Some(SettleReason::Cancelled)
-        || !state
-            .interview
-            .as_ref()
-            .is_some_and(|interview| interview.timing == Timing::DuringTurn)
+    if settled == Some(SettleReason::Cancelled) {
+        return;
+    }
+    let ids: Vec<String> = calls.iter().map(|call| call.id.clone()).collect();
+    // What the step produced (#783): every step's gates count, either timing.
+    let content = content_firings(state, (at.0, at.1), said, &ids);
+    if !state
+        .interview
+        .as_ref()
+        .is_some_and(|interview| interview.timing == Timing::DuringTurn)
     {
+        state.gap_firings.extend(content);
         return;
     }
     let mut cut = shape.messages.clone();
     cut.push(said.clone());
     cut.extend(results.iter().cloned());
-    let ids: Vec<String> = calls.iter().map(|call| call.id.clone()).collect();
-    cut_forks(shared, state, at, &cut, (&said.content, &ids));
+    cut_forks(shared, state, at, &cut, ((&said.content, &ids), content));
+}
+
+/// The forks a trunk step's own output warrants (#783): the step's gates,
+/// read off what it said -- its reasoning, a line break, then its text --
+/// and its calls' lines of request `request`, each fired as its pinned
+/// template asks it. `ids` are the step's calls; none for a final answer.
+fn content_firings(
+    state: &mut State,
+    (turn, request): (u32, u64),
+    said: &Message,
+    ids: &[String],
+) -> Vec<Firing> {
+    use crate::drive::warrants::{Step, StepCall, gates, ident};
+    let Some(warrants) = state
+        .interview
+        .as_ref()
+        .map(|interview| interview.step)
+        .filter(crate::drive::warrants::StepWarrants::any)
+    else {
+        return Vec::new();
+    };
+    let listings: Vec<String> = routed(&state.log, turn)
+        .into_iter()
+        .filter(|call| call.class == Class::DirectoryListing)
+        .map(|call| call.id)
+        .collect();
+    let calls = state
+        .log
+        .iter()
+        .filter_map(|logged| match &logged.event {
+            Event::ToolCalled(line) if line.request == request && ids.contains(&line.id) => {
+                Some(line.as_ref())
+            }
+            _ => None,
+        })
+        .map(|line| StepCall {
+            id: line.id.clone(),
+            tool: line.name.clone(),
+            ident: ident(&line.name, &line.arguments),
+            shown: line.shown.clone().unwrap_or_default(),
+            errored: line.outcome == log::ToolOutcome::Ran
+                && (line.exit.is_some_and(|exit| exit != 0) || line.timeout_ms.is_some()),
+            excluded: matches!(
+                line.outcome,
+                log::ToolOutcome::Refused | log::ToolOutcome::Cancelled
+            ),
+            listing: listings.contains(&line.id),
+        })
+        .collect();
+    let step = Step {
+        said: format!(
+            "{}\n{}",
+            said.reasoning.as_deref().unwrap_or_default(),
+            said.content
+        ),
+        calls,
+    };
+    let mut counters = std::mem::take(&mut state.step_counters);
+    let fired = gates(&warrants, &mut counters, &step);
+    state.step_counters = counters;
+    pinned_firings(fired, request)
+}
+
+/// The forks the step gates `fired` for the trunk step of request
+/// `request` (#783), each asking its pinned template.
+fn pinned_firings(fired: Vec<crate::drive::warrants::Gate>, request: u64) -> Vec<Firing> {
+    use crate::dogma::{Hole, Template};
+    use crate::drive::warrants::Gate;
+    let pinned =
+        |why: log::Warrant, template: Template, question: String, trigger: String| Firing {
+            why,
+            ask: AskKind::Generic,
+            pinned: Some(template),
+            question,
+            trigger,
+        };
+    let mut out = Vec::new();
+    for gate in fired {
+        match gate {
+            Gate::Evidence { id, source, size } => {
+                let size = size.to_string();
+                if let Ok(question) =
+                    Template::Evidence.fill(&[(Hole::Source, &source), (Hole::Size, &size)])
+                {
+                    out.push(pinned(
+                        log::Warrant::Evidence,
+                        Template::Evidence,
+                        question,
+                        format!("evidence:{id}"),
+                    ));
+                }
+            }
+            Gate::Trouble => {
+                for template in [
+                    Template::Gotchas,
+                    Template::Decisions,
+                    Template::Constraints,
+                ] {
+                    if let Ok(question) = template.fill(&[]) {
+                        out.push(pinned(
+                            log::Warrant::Trouble,
+                            template,
+                            question,
+                            format!("trouble:{request}"),
+                        ));
+                    }
+                }
+            }
+            Gate::Open => {
+                if let Ok(question) = Template::OpenNext.fill(&[]) {
+                    out.push(pinned(
+                        log::Warrant::Open,
+                        Template::OpenNext,
+                        question,
+                        format!("open:{request}"),
+                    ));
+                }
+            }
+        }
+    }
+    out
 }
 
 /// The forks a step warranted during the turn (#782), cut as the trunk
@@ -8744,7 +8977,7 @@ fn cut_forks<S: Streaming + 'static>(
     state: &mut State,
     (turn, at, cut): (u32, u64, u64),
     messages: &[Message],
-    (said, ids): (&str, &[String]),
+    ((said, ids), content): ((&str, &[String]), Vec<Firing>),
 ) {
     let Some(interview) = state.interview.as_ref().filter(|_| !state.ending) else {
         return;
@@ -8758,7 +8991,8 @@ fn cut_forks<S: Streaming + 'static>(
     for skip in skips {
         state.push(skip);
     }
-    for firing in kept {
+    // The calls' forks, then what the step's output warrants (#783).
+    for firing in kept.into_iter().chain(content) {
         state.pool_queue.push_back(Cut {
             turn,
             at,
@@ -8856,6 +9090,7 @@ fn fire_cut<S>(shared: &Shared<S>, state: &mut State, cut: Cut) -> Option<Fired>
     let Firing {
         why,
         ask,
+        pinned,
         question,
         trigger,
     } = firing;
@@ -8903,6 +9138,7 @@ fn fire_cut<S>(shared: &Shared<S>, state: &mut State, cut: Cut) -> Option<Fired>
         view: ForkView::Trunk,
         trigger,
         ask,
+        pinned,
         role,
         seat,
         displaces: false,
@@ -11786,6 +12022,7 @@ pub(in crate::drive) mod tests {
                     model: "small".to_owned(),
                 }),
                 ask: AskKind::Judgment,
+                pinned: None,
                 displaces: false,
                 cut: None,
                 timing: Timing::Gap,
@@ -15224,6 +15461,7 @@ pub(in crate::drive) mod tests {
             fork_tail: None,
             fork_slots: 0,
             timing: Timing::Gap,
+            step: crate::drive::warrants::StepWarrants::DEFAULTS,
         }
     }
 
@@ -16755,6 +16993,131 @@ pub(in crate::drive) mod tests {
                 _ => None,
             })
             .collect()
+    }
+
+    // -----------------------------------------------------------------------
+    // warrants by what a step produced (#783)
+    // -----------------------------------------------------------------------
+
+    /// #783 in the gap: a step that read 3000 characters warrants the
+    /// EVIDENCE ask, filled with what it read and how much; a step whose
+    /// command failed warrants the trio, GOTCHAS, DECISIONS and CONSTRAINTS;
+    /// each fork names its warrant, its pinned ask and the step that fired
+    /// it, they run after the turn in step order, and the log reads.
+    #[test]
+    #[allow(clippy::too_many_lines)]
+    fn a_large_read_warrants_evidence_and_a_failed_command_the_trio() {
+        let tree = scratch("step-warrants");
+        std::fs::write(tree.join("big.txt"), "x".repeat(3000)).expect("a large file");
+        let replies = vec![
+            vec![bash("call-1", "cat big.txt")],
+            vec![bash("call-2", "cat missing.txt")],
+            deltas(&["Done."]),
+            deltas(&["EXCERPT: xxx\n"]),
+            deltas(&["GOTCHA: missing.txt is absent — IMPLICATION: create it first\n"]),
+            deltas(&["NONE"]),
+            deltas(&["NONE"]),
+        ];
+        let session = Session::open_with(
+            Canned::new(replies),
+            looping(),
+            None,
+            Some(tools(
+                Confinement::Unconfined,
+                &tree,
+                &["cat"],
+                None,
+                Decider::Decline,
+            )),
+            None,
+            Some(Interview {
+                step: crate::drive::warrants::StepWarrants {
+                    evidence: true,
+                    trouble: true,
+                    ..crate::drive::warrants::StepWarrants::DEFAULTS
+                },
+                ..interviewing(&[log::Warrant::Evidence, log::Warrant::Trouble])
+            }),
+        );
+        session.ask("look", None).expect("accepted");
+        let log = wait_until(&session, "the gap's forks", |log| {
+            settled(log) && fork_outcomes(log).len() == 4
+        });
+        let forked: Vec<(log::Warrant, Option<String>, String)> = session
+            .events_from(0)
+            .iter()
+            .filter_map(|logged| match line_of(logged).event {
+                log::Event::Fork {
+                    why, ask, trigger, ..
+                } => Some((why, ask, trigger.unwrap_or_default())),
+                _ => None,
+            })
+            .collect();
+        let request_of = |id: &str| {
+            log.iter()
+                .find_map(|logged| match &logged.event {
+                    Event::ToolCalled(line) if line.id == id => Some(line.request),
+                    _ => None,
+                })
+                .expect("the call")
+        };
+        let trouble = format!("trouble:{}", request_of("call-2"));
+        assert_eq!(
+            forked,
+            [
+                (
+                    log::Warrant::Evidence,
+                    Some("evidence".to_owned()),
+                    "evidence:call-1".to_owned()
+                ),
+                (
+                    log::Warrant::Trouble,
+                    Some("gotchas".to_owned()),
+                    trouble.clone()
+                ),
+                (
+                    log::Warrant::Trouble,
+                    Some("decisions".to_owned()),
+                    trouble.clone()
+                ),
+                (
+                    log::Warrant::Trouble,
+                    Some("constraints".to_owned()),
+                    trouble
+                ),
+            ]
+        );
+        let questions: Vec<String> = forks(&log).into_iter().map(|fork| fork.4).collect();
+        // Its size is what the model was shown, counted in characters.
+        let shown = log
+            .iter()
+            .find_map(|logged| match &logged.event {
+                Event::ToolCalled(line) if line.id == "call-1" => line.shown.clone(),
+                _ => None,
+            })
+            .expect("what call-1 showed");
+        assert!(
+            questions[0].contains(&format!(
+                "(bash of cat big.txt, roughly {} characters)",
+                shown.chars().count()
+            )),
+            "{}",
+            questions[0]
+        );
+        assert_eq!(
+            questions[1],
+            crate::dogma::Template::Gotchas.fill(&[]).expect("the ask")
+        );
+        assert!(
+            live_entries(&session)
+                .iter()
+                .any(|(_, content)| content.contains("missing.txt is absent")),
+            "{:?}",
+            live_entries(&session)
+        );
+        reads_whole(&session);
+        every_head_rebuilds(&log);
+        tidy(&[&tree]);
     }
 
     // -----------------------------------------------------------------------
