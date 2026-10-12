@@ -136,3 +136,34 @@ export const DuringATurn: Story = {
     await expect(within(canvasElement).getByRole('button', { name: 'Propose plan to the model' })).toBeDisabled();
   },
 };
+
+/** Before the operator's key is wired (#788): the moves are listed, and nothing offers to take one. */
+export const NoOperatorKey: Story = {
+  name: 'phases · without the operator’s key, the moves are only listed',
+  render: (args) => {
+    const rest = { ...args };
+    delete rest.onPropose;
+    delete rest.onMove;
+    return <Phases {...rest} />;
+  },
+  play: async ({ canvasElement }) => {
+    const page = within(canvasElement);
+    await expect(page.getByRole('list', { name: 'moves from orient' })).toBeVisible();
+    await expect(page.queryByRole('button', { name: 'Propose plan to the model' })).toBeNull();
+    await expect(page.queryByRole('button', { name: 'Meditate and move to plan' })).toBeNull();
+    await expect(page.queryByRole('region', { name: 'move from orient' })).toBeNull();
+  },
+};
+
+/** Nothing to refill from (#685): meditate-and-move is not offered, and the control says why, as serve would refuse it. */
+export const NothingToRefill: Story = {
+  name: 'phases · no meditation to move through, and why',
+  args: { proposal: { from: 'orient', to: 'plan' }, noMeditation: 'working memory holds nothing yet' },
+  play: async ({ canvasElement, args }) => {
+    const ruling = within(canvasElement).getByRole('region', { name: 'the model proposes orient → plan' });
+    await expect(within(ruling).getByRole('button', { name: 'Meditate and move to plan' })).toBeDisabled();
+    await expect(ruling).toHaveTextContent('no meditation: working memory holds nothing yet');
+    await userEvent.click(within(ruling).getByRole('button', { name: 'Keep, move to plan' }));
+    await expect(args.onRule).toHaveBeenCalledWith('keep');
+  },
+};
