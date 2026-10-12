@@ -475,8 +475,8 @@ mod tests {
     }
 
     /// #797: the floor declares its prefix shared, measured by #796, and the
-    /// Flash-Next TabbyAPI entry since its own measurement (2026-10-12); the
-    /// llama.cpp entry on the same box, unmeasured, does not; a value that is
+    /// Flash-Next `TabbyAPI` entry since its own measurement (2026-10-12); the
+    /// `llama.cpp` entry on the same box, unmeasured, does not; a value that is
     /// neither word is refused.
     #[test]
     fn a_substrates_served_prefix_shared_is_declared_or_false() {
