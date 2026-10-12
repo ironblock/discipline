@@ -1081,7 +1081,10 @@ pub struct Interview {
     /// skipped (#611); off, the default.
     pub skip_self_recorded: bool,
     /// Whether each settled tool call's touches are patched into working
-    /// memory by the mechanical lane (#784); off, the default.
+    /// memory by the mechanical lane (#784); off, the default. On, it opens
+    /// working memory by itself, warrant or none: a refill holding only
+    /// `files:` entries beats a session dead of its window -- the model can
+    /// re-read what they list, and archive recall covers the rest.
     pub mechanical_capture: bool,
     /// Self-capture (#609): the contract's tools offered from the first
     /// request, and the cadence of silent turns its reminder fires after;
@@ -5457,25 +5460,40 @@ fn mechanically_captured<S>(
                 (format!("{MECHANICAL_ID}{shown}"), format!("files: {shown}"))
             }
         };
-        let Ok(id) = crate::object::EntryId::new(&id) else {
-            continue;
-        };
-        let holds_live = interview
-            .object
-            .entry(&id)
-            .map(|entry| entry.state.is_live());
-        match (kind, holds_live) {
-            (TouchKind::Deleted, Some(true)) => patches.push(Patch::Retire {
-                target: id,
+        // The path's live entry, under whichever id it was born: `<id>`,
+        // or `<id>#2`, `#3` for a file deleted and touched again.
+        let object = &interview.object;
+        let held = object.live().find(|entry| entry.content == content);
+        match (kind, held) {
+            (TouchKind::Deleted, Some(entry)) => patches.push(Patch::Retire {
+                target: entry.id.clone(),
                 provenance: provenance.clone(),
             }),
-            // Nothing held to retire, or a retired entry not to restate.
-            (TouchKind::Deleted, _) | (_, Some(false)) => {}
-            _ => patches.push(Patch::Add {
-                id,
+            (TouchKind::Deleted, None) => {}
+            (_, Some(entry)) => patches.push(Patch::Add {
+                id: entry.id.clone(),
                 content,
                 provenance: provenance.clone(),
             }),
+            (_, None) => {
+                let fresh = (1..=u32::MAX)
+                    .map(|n| {
+                        if n == 1 {
+                            id.clone()
+                        } else {
+                            format!("{id}#{n}")
+                        }
+                    })
+                    .filter_map(|id| crate::object::EntryId::new(&id).ok())
+                    .find(|id| object.entry(id).is_none());
+                if let Some(id) = fresh {
+                    patches.push(Patch::Add {
+                        id,
+                        content,
+                        provenance: provenance.clone(),
+                    });
+                }
+            }
         }
     }
     let (kept, mut lines) = guarded(&patches, &interview.object, None);
@@ -15151,6 +15169,68 @@ pub(in crate::drive) mod tests {
             .collect();
         assert_eq!(ops, [log::PatchOp::Add, log::PatchOp::Retire]);
         reads_whole(&session);
+        tidy(&[&tree]);
+    }
+
+    /// #784: a file deleted and then written again -- the model regenerating
+    /// it -- is back in working memory: a fresh entry under a fresh id, the
+    /// retired one left as it was.
+    #[test]
+    fn mechanical_capture_brings_back_a_file_deleted_and_written_again() {
+        let tree = scratch("mechanical-reborn");
+        std::fs::write(tree.join("gen.txt"), "x\n").expect("a file");
+        let mut tools = tools(
+            Confinement::Unconfined,
+            &tree,
+            &["cat", "rm", "echo"],
+            None,
+            Decider::Decline,
+        );
+        tools.approvals_off = true;
+        let mut interview = interviewing(&[log::Warrant::Scoping]);
+        interview.mechanical_capture = true;
+        let session = Session::open_with(
+            Canned::new([
+                vec![bash("c1", "cat gen.txt")],
+                vec![bash("c2", "rm gen.txt")],
+                vec![bash("c3", "echo y > gen.txt")],
+                vec![bash("c4", "cat gen.txt")],
+                vec![bash("c5", "rm gen.txt")],
+                vec![bash("c6", "echo z > gen.txt")],
+                deltas(&["done"]),
+            ]),
+            looping(),
+            None,
+            Some(tools),
+            None,
+            Some(interview),
+        );
+        session.ask("regenerate it", None).expect("accepted");
+        let log = wait_until(&session, "the turn", settled);
+        assert_eq!(
+            live_entries(&session),
+            [(
+                "mechanical/gen.txt#3".to_owned(),
+                "files: gen.txt".to_owned()
+            )]
+        );
+        let patches: Vec<(log::PatchOp, String)> = mechanical_patches(&log)
+            .into_iter()
+            .map(|(op, id, _)| (op, id))
+            .collect();
+        assert_eq!(
+            patches,
+            [
+                (log::PatchOp::Add, "mechanical/gen.txt".to_owned()),
+                (log::PatchOp::Retire, "mechanical/gen.txt".to_owned()),
+                (log::PatchOp::Add, "mechanical/gen.txt#2".to_owned()),
+                (log::PatchOp::Add, "mechanical/gen.txt#2".to_owned()),
+                (log::PatchOp::Retire, "mechanical/gen.txt#2".to_owned()),
+                (log::PatchOp::Add, "mechanical/gen.txt#3".to_owned()),
+            ]
+        );
+        reads_whole(&session);
+        every_head_rebuilds(&log);
         tidy(&[&tree]);
     }
 
