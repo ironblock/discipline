@@ -1,0 +1,23 @@
+{"fork_asks":"v3","fork_asks_digest":"49c0f8c081a24a9a","fork_delivery":"meditation","head":[{"content":"you are the trunk","role":"system"}],"kind":"session.start","model":"a-model","notes_in_the_ask":true,"opened":1791775828800,"seq":0,"t":0,"tool_output":"capped","tool_output_max_bytes":51200,"tool_output_max_lines":2000,"tools":["bash"],"version":8}
+{"kind":"ask","seq":1,"t":0,"text":"look around","turn":1}
+{"from":"awaiting","kind":"settlement","seq":2,"t":0,"to":"turn"}
+{"beside":0,"head_sha256":"59e4fe4b48a744c8264a74506ec4524de9a11046da25932995617c7cb29fab34","kind":"request","lane":"trunk","max_tokens":64,"seq":3,"t":0,"turn":1}
+{"kind":"delta","request":3,"seq":4,"t":0,"tool_call":{"arguments":"{\"command\":\"cat notes.md\"}","id":"call-1","index":0,"name":"bash"}}
+{"kind":"delta","request":3,"seq":5,"t":0,"tool_call":{"arguments":"{\"command\":\"cat lib.rs\"}","id":"call-2","index":1,"name":"bash"}}
+{"finish_reason":"stop","kind":"response","seq":6,"t":0,"text":"","to_request":3}
+{"approval":{"scope":"preseeded"},"arguments":"{\"command\":\"cat notes.md\"}","argv":["bash","-c","cat notes.md"],"confined":["bash","-c","cat notes.md"],"cwd":"~/git/a-worktree","exit":0,"id":"call-1","isolation":"none","kind":"tool_call","name":"bash","network":"host","outcome":"ran","request":3,"seq":7,"shown":"a note\n","stderr":"","stderr_bytes":0,"stdout":"a note\n","stdout_bytes":7,"t":15,"turn":1}
+{"approval":{"scope":"preseeded"},"arguments":"{\"command\":\"cat lib.rs\"}","argv":["bash","-c","cat lib.rs"],"confined":["bash","-c","cat lib.rs"],"cwd":"~/git/a-worktree","exit":0,"id":"call-2","isolation":"none","kind":"tool_call","name":"bash","network":"host","outcome":"ran","request":3,"seq":8,"shown":"pub fn f() {}\n","stderr":"","stderr_bytes":0,"stdout":"pub fn f() {}\n","stdout_bytes":14,"t":16,"turn":1}
+{"ask":"finding","at":3,"cut":8,"kind":"fork","lane":"interview","of_turn":1,"question":"Answer from this turn alone.\nYou just read a document. Answer with the fields LEARNED, EVIDENCE and STUCK.\n","seq":9,"t":16,"timing":"during_turn","trigger":"call:document-read:call-1","view_overridden":"last_turn","why":"read"}
+{"fork":9,"head_sha256":"7c8ed42760e0b4c2d303d216ae94759ad28684091e153236bda8b6c874491506","kind":"request","lane":"interview","max_tokens":64,"seq":10,"t":16,"turn":1}
+{"ask":"finding","at":3,"cut":8,"kind":"fork","lane":"interview","of_turn":1,"question":"Answer from this turn alone.\nYou just read source. Answer with the fields LEARNED, EVIDENCE and STUCK.\n","seq":11,"t":16,"timing":"during_turn","trigger":"call:source-read:call-2","view_overridden":"last_turn","why":"read"}
+{"beside_tokens":620,"fork":11,"fork_tokens":640,"kind":"fork.settled","outcome":"refused","refused":"pool","seq":12,"t":16,"trunk_tokens":600,"window":4500}
+{"beside":1,"head_sha256":"e2327562ecefac231d562167480e71cbe91865c6533bca24fa247fb8263c0ad2","kind":"request","lane":"trunk","max_tokens":64,"seq":13,"t":16,"turn":1}
+{"kind":"delta","request":10,"seq":14,"t":16,"text":"LEARNED: notes.md holds a note\n"}
+{"finish_reason":"stop","kind":"response","seq":15,"t":16,"text":"LEARNED: notes.md holds a note\n","to_request":10}
+{"fork":9,"kind":"fork.settled","outcome":"value","seq":16,"t":17}
+{"entry":{"id":"interview-t1-0","text":"learned: notes.md holds a note"},"fork":9,"kind":"patch","op":"add","seq":17,"t":17}
+{"kind":"delta","request":13,"seq":18,"t":17,"text":"Done."}
+{"finish_reason":"stop","kind":"response","seq":19,"t":17,"text":"Done.","to_request":13}
+{"kind":"turn.settled","reason":"final","seq":20,"t":17,"turn":1}
+{"from":"turn","kind":"settlement","seq":21,"t":17,"to":"capture"}
+{"from":"capture","kind":"settlement","seq":22,"t":17,"to":"awaiting"}

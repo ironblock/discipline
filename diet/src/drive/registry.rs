@@ -115,6 +115,19 @@ pub fn tables(document: &str) -> BTreeMap<String, Table> {
 /// or the key is missing, or the value is not a whole number.
 #[must_use]
 pub fn serving_context(document: &str, id: &str) -> Option<u64> {
+    substrate_count(document, id, "serving_context")
+}
+
+/// A substrate's `serving_slots` (#782): the requests its server runs at
+/// once, read from its own `[substrate.<id>]` table. `None` when the table
+/// or the key is missing, or the value is not a whole number.
+#[must_use]
+pub fn serving_slots(document: &str, id: &str) -> Option<u32> {
+    substrate_count(document, id, "serving_slots").and_then(|n| u32::try_from(n).ok())
+}
+
+/// A whole number `key` in the substrate's own table, not a sub-table's.
+fn substrate_count(document: &str, id: &str, key: &str) -> Option<u64> {
     let header = format!("[substrate.{id}]");
     let quoted = format!("[substrate.\"{id}\"]");
     let mut inside = false;
@@ -125,7 +138,9 @@ pub fn serving_context(document: &str, id: &str) -> Option<u64> {
             inside = header_only == header || header_only == quoted;
             continue;
         }
-        if let Some(value) = trimmed.strip_prefix("serving_context = ")
+        if let Some(value) = trimmed
+            .strip_prefix(key)
+            .and_then(|rest| rest.strip_prefix(" = "))
             && inside
         {
             return value.trim().parse().ok();
@@ -412,6 +427,26 @@ mod tests {
         );
         assert_eq!(serving_context(doc, "b.c"), Some(4096));
         assert_eq!(serving_context(doc, "d"), None);
+    }
+
+    /// #782: a substrate's `serving_slots`, from its own table only.
+    #[test]
+    fn a_substrates_serving_slots_are_read_from_its_own_table_only() {
+        assert_eq!(
+            serving_slots(REGISTRY, "accel24-beellama-qwen27b-q4kxl"),
+            Some(2)
+        );
+        assert_eq!(serving_slots(REGISTRY, "canned"), None);
+        assert_eq!(serving_slots(REGISTRY, "no-such-substrate"), None);
+        let doc = "[substrate.a]\nserving_context = 9\n[substrate.a.instance]\nserving_slots = 4\n\
+                   [substrate.b]\nserving_slots = 4\n[substrate.d]\nserving_slots = many\n";
+        assert_eq!(
+            serving_slots(doc, "a"),
+            None,
+            "a sub-table's key is not the substrate's"
+        );
+        assert_eq!(serving_slots(doc, "b"), Some(4));
+        assert_eq!(serving_slots(doc, "d"), None);
     }
 
     #[test]

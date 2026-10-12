@@ -45,6 +45,9 @@ pub struct Reply {
     pub text: String,
     /// The calls it makes.
     pub calls: Vec<Call>,
+    /// How long it holds its answer back, in milliseconds (#782): what
+    /// orders a canned trunk's answer after a fork beside it.
+    pub delay_ms: Option<u64>,
 }
 
 /// One call a reply makes.
@@ -144,7 +147,7 @@ impl Scenario {
     #[must_use]
     pub fn routes(&self) -> Vec<crate::client::stub::Route> {
         use crate::client::stub::{Act, Route};
-        use crate::drive::canned::{StreamedCall, streamed};
+        use crate::drive::canned::{StreamedCall, streamed, streamed_events};
         self.replies
             .iter()
             .map(|reply| {
@@ -157,7 +160,15 @@ impl Scenario {
                         arguments: &call.arguments,
                     })
                     .collect();
-                let act = Act::Raw(streamed(&reply.text, &calls));
+                // Held back: the same events, chunked, the first after the
+                // delay (#782).
+                let act = match reply.delay_ms {
+                    Some(ms) => Act::Trickle(
+                        std::time::Duration::from_millis(ms),
+                        vec![streamed_events(&reply.text, &calls)],
+                    ),
+                    None => Act::Raw(streamed(&reply.text, &calls)),
+                };
                 match &reply.when {
                     Some(text) => Route::when(text, act),
                     None => Route::ordered(act),
@@ -192,6 +203,12 @@ impl Scenario {
                     })
                     .collect();
                 members.insert("calls".to_owned(), Value::Array(calls));
+            }
+            if let Some(ms) = reply.delay_ms {
+                members.insert(
+                    "delay_ms".to_owned(),
+                    Value::Integer(i64::try_from(ms).unwrap_or(i64::MAX)),
+                );
             }
             json::render(&Value::Object(members), &mut out);
             out.push('\n');
@@ -310,8 +327,14 @@ fn reply_of(mut fields: Fields) -> Result<Reply, ScenarioError> {
             .collect::<Result<_, _>>()?,
         Some(_) => return Err(fields.wrong("`calls` a list")),
     };
+    let delay_ms = fields.maybe_count("delay_ms")?;
     fields.done()?;
-    Ok(Reply { when, text, calls })
+    Ok(Reply {
+        when,
+        text,
+        calls,
+        delay_ms,
+    })
 }
 
 fn step_of(mut fields: Fields) -> Result<Step, ScenarioError> {
@@ -1072,6 +1095,7 @@ mod tests {
                     when: Some("Record the decisions".to_owned()),
                     text: "DECISION: a tracker".to_owned(),
                     calls: Vec::new(),
+                    delay_ms: None,
                 },
                 Reply {
                     when: None,
@@ -1081,11 +1105,13 @@ mod tests {
                         name: "write".to_owned(),
                         arguments: r#"{"path":"a.py","content":"x"}"#.to_owned(),
                     }],
+                    delay_ms: None,
                 },
                 Reply {
                     when: None,
                     text: "Done.".to_owned(),
                     calls: Vec::new(),
+                    delay_ms: Some(250),
                 },
             ]
         );

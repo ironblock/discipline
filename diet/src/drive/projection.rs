@@ -2240,6 +2240,7 @@ mod tests {
                 head_sha256: Some(head()),
                 fork: None,
                 max_tokens: None,
+                beside: None,
             },
             Line::Delta {
                 request,
@@ -2627,6 +2628,7 @@ mod tests {
                     head_sha256: Some(head()),
                     fork: None,
                     max_tokens: None,
+                    beside: None,
                 },
                 outcome,
             ]);
@@ -2637,6 +2639,7 @@ mod tests {
             head_sha256: Some(head()),
             fork: None,
             max_tokens: None,
+            beside: None,
         });
         let events_len = events.len();
         let projection = project(
@@ -2694,6 +2697,7 @@ mod tests {
             head_sha256: None,
             fork: None,
             max_tokens: None,
+            beside: None,
         };
         events.extend(turn);
         let refused = project(
@@ -3246,6 +3250,9 @@ mod tests {
             seat: None,
             ask: None,
             hazard: None,
+            cut: None,
+            timing: None,
+            view_overridden: None,
         };
         let call = |turn: u32, fork: u64| {
             [
@@ -3257,6 +3264,7 @@ mod tests {
                     head_sha256: Some(format!("{fork:064x}")),
                     fork: Some(fork),
                     max_tokens: None,
+                    beside: None,
                 },
                 Line::Response {
                     reasoning_signature: None,
@@ -3294,6 +3302,7 @@ mod tests {
             prompt_tokens: None,
             wall_ms: None,
             refused: None,
+            pool: None,
         });
         events.extend(["d1", "d2", "d3"].map(|id| patch(8, id)));
         events.extend(answered(2, 17, Some(warm()), None));
@@ -3307,6 +3316,7 @@ mod tests {
             prompt_tokens: None,
             wall_ms: None,
             refused: None,
+            pool: None,
         });
         let lines = numbered(events);
         let document: String = lines.iter().map(|line| log::render(line) + "\n").collect();
