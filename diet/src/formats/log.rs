@@ -817,6 +817,22 @@ pub struct ForkSeat {
     pub model: String,
 }
 
+/// What a fork refused for the pool did not fit beside (v8, #782): the
+/// window it was sized against, the trunk's prompt in it, the prompts of
+/// the forks in flight beside it, and its own prompt, in tokens. Its four
+/// keys come together or not at all.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct PoolRoom {
+    /// The pool's window.
+    pub window: u64,
+    /// The trunk's prompt, resident in it; 0 offboard.
+    pub trunk: u64,
+    /// The prompts of the forks in flight beside it.
+    pub beside: u64,
+    /// The fork's own prompt.
+    pub prompt: u64,
+}
+
 /// The fork ask set a session asks in (v7, #595), by name and digest.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ForkAsks {
@@ -1108,6 +1124,10 @@ pub enum Event {
         /// The `max_tokens` it was sent with, after the output cap was
         /// clamped to the room left in the context window (v7, #588).
         max_tokens: Option<u64>,
+        /// How many forks were in flight beside it, on a trunk request of a
+        /// session whose forks run during the turn (v8, #782): what its
+        /// `timings` are read against for the decode penalty.
+        beside: Option<u64>,
     },
     /// A command was refused.
     Refused {
@@ -1332,6 +1352,15 @@ pub enum Event {
         /// It names the latest meditation; absent, the fork is cut from its turn's
         /// warm trunk.
         after_meditation: Option<u64>,
+        /// The `seq` of the step's last `tool_call` it was cut at, during the
+        /// turn (v8, #782): the trunk as it stood after that result.
+        cut: Option<u64>,
+        /// When it ran (v8, #782): `during_turn`; absent is the gap.
+        timing: Option<String>,
+        /// The `fork_view` the regimen declared that a cut during the turn
+        /// overrode (v8, #782): such a fork sees the whole trunk at the cut,
+        /// its warm prefix.
+        view_overridden: Option<String>,
     },
     /// How a fork ended (v5, #374).
     ForkSettled {
@@ -1353,6 +1382,8 @@ pub enum Event {
         /// line (v7, levers run A): read and recorded as no entry, and kept
         /// here so it is seen.
         trailer: Option<String>,
+        /// What a fork refused for the pool did not fit beside (v8, #782).
+        pool: Option<PoolRoom>,
     },
     /// One entry a fork's answer patched into working memory (v5, #374).
     Patch {
@@ -2323,6 +2354,12 @@ struct Forks {
     /// The latest meditation's `seq`: what an audit cut from its refill names
     /// (v7, `after_meditation`).
     last_meditation: Option<u64>,
+    /// Each `tool_call` line's `seq`, to its turn: where a fork is cut
+    /// during the turn (v8, #782).
+    tool_calls: BTreeMap<u64, u32>,
+    /// The forks cut during the turn (v8, #782): each runs beside the trunk
+    /// and the others, never one after another.
+    cut: BTreeSet<u64>,
 }
 
 impl Forks {
@@ -2331,14 +2368,44 @@ impl Forks {
     /// trunk request, and the only fork in its gap -- or, carrying the
     /// `trigger` the interview cadence fired it on (v7, #564), one of the
     /// gap's forks, each opened after the one before it settled.
+    ///
+    /// A fork cut during the turn (v8, #782) is of the latest turn, settled
+    /// or not, cut at a `tool_call` of that turn after the answered trunk
+    /// `request` whose step it is, on `interview` with its `trigger`; it runs
+    /// beside the trunk and the other forks, and the gap's own forks wait
+    /// only for the gap's.
     fn fork(
         &mut self,
         seq: u64,
         (lane, of_turn, at, triggered): (Lane, u32, u64, bool),
-        after_meditation: Option<u64>,
+        (after_meditation, cut): (Option<u64>, Option<u64>),
         turns: u32,
         trunk: &BTreeMap<u32, u64>,
     ) -> Result<(), String> {
+        if let Some(cut) = cut {
+            if lane != Lane::Interview || !triggered || after_meditation.is_some() {
+                return Err(format!(
+                    "a fork cut at {cut} that is not an `interview` fork with its `trigger`: only \
+                     a step's fork is cut during the turn"
+                ));
+            }
+            if of_turn != turns || !self.answered.contains(&at) {
+                return Err(format!(
+                    "a fork of turn {of_turn} cut at {cut} from request {at}: a fork cut during \
+                     the turn is of the latest turn (here {turns}), from its answered trunk \
+                     `request`"
+                ));
+            }
+            if self.tool_calls.get(&cut) != Some(&of_turn) || cut < at {
+                return Err(format!(
+                    "a fork cut at {cut}, which is not a `tool_call` of turn {of_turn} after \
+                     request {at}"
+                ));
+            }
+            self.cut.insert(seq);
+            self.of_turn.insert(seq, of_turn);
+            return Ok(());
+        }
         if lane == Lane::Trunk {
             return Err(format!(
                 "a fork on the `{}` lane: a fork's call is made on `interview`, or a meditation's \
@@ -2391,7 +2458,7 @@ impl Forks {
         let earlier: Vec<u64> = self
             .of_turn
             .iter()
-            .filter(|(_, turn)| **turn == of_turn)
+            .filter(|(fork, turn)| **turn == of_turn && !self.cut.contains(fork))
             .map(|(fork, _)| *fork)
             .collect();
         if !earlier.is_empty() && !triggered {
@@ -2813,12 +2880,13 @@ fn check(lines: &[Line]) -> Result<(), LogError> {
                 at: forked_at,
                 trigger,
                 after_meditation,
+                cut,
                 ..
             } => forks
                 .fork(
                     line.seq,
                     (*lane, *of_turn, *forked_at, trigger.is_some()),
-                    *after_meditation,
+                    (*after_meditation, *cut),
                     turns,
                     &trunk,
                 )
@@ -2885,6 +2953,7 @@ fn check(lines: &[Line]) -> Result<(), LogError> {
                 called_from(*request, &requests).map_err(|why| at(index, why))?;
                 called_once(*request, *turn, id, &request_turns, &mut calls)
                     .map_err(|why| at(index, why))?;
+                forks.tool_calls.insert(line.seq, *turn);
             }
             _ => {}
         }
@@ -3061,6 +3130,7 @@ fn from_object(object: &BTreeMap<String, Value>) -> Result<Line, String> {
             head_sha256: fields.optional_digest("head_sha256")?,
             fork: fields.optional_count("fork")?,
             max_tokens: fields.optional_count("max_tokens")?,
+            beside: fields.optional_count("beside")?,
         },
         Kind::Refused => Event::Refused {
             command: fields.tag("command", Command::from_tag)?,
@@ -3254,6 +3324,9 @@ fn from_object(object: &BTreeMap<String, Value>) -> Result<Line, String> {
             ask: fields.optional_string("ask")?,
             hazard: fields.optional_string("hazard")?,
             after_meditation: fields.optional_count("after_meditation")?,
+            cut: fields.optional_count("cut")?,
+            timing: fields.optional_string("timing")?,
+            view_overridden: fields.optional_string("view_overridden")?,
         },
         Kind::ForkSettled => Event::ForkSettled {
             fork: fields.count("fork")?,
@@ -3278,6 +3351,21 @@ fn from_object(object: &BTreeMap<String, Value>) -> Result<Line, String> {
                 refused
             },
             trailer: fields.optional_string("trailer")?,
+            // Built only when its four keys are carried ([`all_or_none`]).
+            pool: match (
+                fields.optional_count("window")?,
+                fields.optional_count("trunk_tokens")?,
+                fields.optional_count("beside_tokens")?,
+                fields.optional_count("fork_tokens")?,
+            ) {
+                (Some(window), Some(trunk), Some(beside), Some(prompt)) => Some(PoolRoom {
+                    window,
+                    trunk,
+                    beside,
+                    prompt,
+                }),
+                _ => None,
+            },
         },
         Kind::Patch => {
             let op = fields.tag("op", PatchOp::from_tag)?;
@@ -4647,6 +4735,7 @@ pub fn schema(kind: Kind) -> &'static [Field] {
                 may_v2("head_sha256", Holds::Digest),
                 may_v5("fork", Count),
                 may_v7("max_tokens", Count),
+                may_v8("beside", Count),
             ];
             F
         }
@@ -4776,6 +4865,9 @@ pub fn schema(kind: Kind) -> &'static [Field] {
                 may_v7("ask", Text),
                 may_v7("hazard", Text),
                 may_v7("after_meditation", Count),
+                may_v8("cut", Count),
+                may_v8("timing", Text),
+                may_v8("view_overridden", Text),
             ];
             F
         }
@@ -4787,6 +4879,10 @@ pub fn schema(kind: Kind) -> &'static [Field] {
                 may_v7("wall_ms", Count),
                 may_v7("refused", Text),
                 may_v7("trailer", Text),
+                may_v8("window", Count),
+                may_v8("trunk_tokens", Count),
+                may_v8("beside_tokens", Count),
+                may_v8("fork_tokens", Count),
             ];
             F
         }
@@ -4992,6 +5088,8 @@ pub fn all_or_none(kind: Kind) -> &'static [&'static str] {
         // A context overflow's sizes (v7, #616).
         Kind::RequestFailed => &["prompt_tokens", "window", "inferred"],
         Kind::Fork => &["substrate", "model"],
+        // What a fork refused for the pool did not fit beside (v8, #782).
+        Kind::ForkSettled => &["window", "trunk_tokens", "beside_tokens", "fork_tokens"],
         _ => &[],
     }
 }
@@ -5429,8 +5527,12 @@ fn to_value(line: &Line) -> Value {
             head_sha256,
             fork,
             max_tokens,
+            beside,
         } => {
             put("turn", count(u64::from(*turn)));
+            if let Some(beside) = beside {
+                put("beside", count(*beside));
+            }
             put("lane", text(lane.tag()));
             if let Some(digest) = head_sha256 {
                 put("head_sha256", text(digest));
@@ -5707,6 +5809,9 @@ fn to_value(line: &Line) -> Value {
             ask,
             hazard,
             after_meditation,
+            cut,
+            timing,
+            view_overridden,
         } => {
             put("lane", text(lane.tag()));
             put("of_turn", count(u64::from(*of_turn)));
@@ -5735,6 +5840,15 @@ fn to_value(line: &Line) -> Value {
             if let Some(meditation) = after_meditation {
                 put("after_meditation", count(*meditation));
             }
+            if let Some(cut) = cut {
+                put("cut", count(*cut));
+            }
+            if let Some(timing) = timing {
+                put("timing", text(timing));
+            }
+            if let Some(view) = view_overridden {
+                put("view_overridden", text(view));
+            }
             Kind::Fork
         }
         Event::ForkSettled {
@@ -5744,8 +5858,15 @@ fn to_value(line: &Line) -> Value {
             wall_ms,
             refused,
             trailer,
+            pool,
         } => {
             put("fork", count(*fork));
+            if let Some(room) = pool {
+                put("window", count(room.window));
+                put("trunk_tokens", count(room.trunk));
+                put("beside_tokens", count(room.beside));
+                put("fork_tokens", count(room.prompt));
+            }
             put("outcome", text(outcome.tag()));
             if let Some(why) = refused {
                 put("refused", text(why));
@@ -7177,6 +7298,7 @@ mod tests {
                 head_sha256: None,
                 fork: None,
                 max_tokens: None,
+                beside: None,
             },
             Event::Delta {
                 request: 3,
@@ -7221,6 +7343,7 @@ mod tests {
                 head_sha256: None,
                 fork: None,
                 max_tokens: None,
+                beside: None,
             },
             Event::RequestFailed {
                 request: 13,
@@ -7263,6 +7386,7 @@ mod tests {
                 head_sha256: None,
                 fork: None,
                 max_tokens: None,
+                beside: None,
             },
             Event::Progress {
                 request: 20,
@@ -7325,6 +7449,7 @@ mod tests {
                 head_sha256: None,
                 fork: None,
                 max_tokens: None,
+                beside: None,
             },
             Event::RequestFailed {
                 request: 29,
@@ -7408,6 +7533,7 @@ mod tests {
                 head_sha256: None,
                 fork: None,
                 max_tokens: None,
+                beside: None,
             },
             Event::Response {
                 reasoning_signature: None,
@@ -7444,6 +7570,9 @@ mod tests {
                 }),
                 ask: Some("judgment".to_owned()),
                 hazard: None,
+                cut: None,
+                timing: None,
+                view_overridden: None,
             },
             Event::Request {
                 turn: 5,
@@ -7451,6 +7580,7 @@ mod tests {
                 head_sha256: None,
                 fork: Some(fork),
                 max_tokens: Some(4000),
+                beside: None,
             },
             Event::Response {
                 reasoning_signature: None,
@@ -7470,6 +7600,7 @@ mod tests {
                 prompt_tokens: Some(281),
                 wall_ms: Some(480),
                 refused: None,
+                pool: None,
             },
             Event::Patch {
                 fork: Some(fork),

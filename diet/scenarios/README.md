@@ -30,6 +30,7 @@ The format has no grammar of its own, so it has no directory under `diet/formats
 - Each reply is used once.
 - A request no reply is left for is refused `500` and fails the run, naming its last message.
 - `calls` are the tool calls the reply makes; `arguments` is the JSON text the model would write.
+- `delay_ms` (optional) holds the reply back that long, its events trickled after the delay (#782). The stub answers each request on its own thread, so a held reply orders a trunk's answer after a fork beside it.
 - A re-fire on an endpoint ignores every reply.
 
 ## `step`: what the runner drives

@@ -1138,6 +1138,7 @@ fn served_dialect(id: &str) -> Result<Dialect, String> {
 /// it lists no rule, or there is no regimen: then no fork and no derived
 /// meditation ever fires, and a regimen that declares a meditation trigger anyway is
 /// refused.
+#[allow(clippy::too_many_lines)]
 fn serving_interview(
     regimen: Option<&str>,
     regime: Option<&Regime>,
@@ -1156,6 +1157,12 @@ fn serving_interview(
     let meditations = diet::meditation::policy::Served::from_regimen(&read, window)
         .map_err(|why| format!("{path}: {why}"))?;
     let delivery = session::fork_delivery(&read).map_err(|why| format!("{path}: {why}"))?;
+    // #782: when a step's forks run, and how many at once beside the trunk.
+    let (timing, fork_slots) = session::timing_and_slots(
+        &read,
+        (diet::drive::registry::REGISTRY, &regime.substrates[0].id),
+    )
+    .map_err(|why| format!("{path}: {why}"))?;
     // The phase graph, by the scripted drive's own reader (#563).
     let phases =
         diet::meditation::policy::phase_graph(&read).map_err(|why| format!("{path}: {why}"))?;
@@ -1258,6 +1265,8 @@ fn serving_interview(
             prune: diet::drive::prune::of(&read),
             // #406: a fork's tail; the output cap unless declared.
             fork_tail: session::fork_tail(&read),
+            timing,
+            fork_slots,
         }),
     )
 }

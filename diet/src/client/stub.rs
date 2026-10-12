@@ -420,6 +420,33 @@ fn routed(routes: &mut Routes, read: &io::Result<(String, String)>) -> Result<Ac
     routes.take(&last).ok_or(last)
 }
 
+/// A routed stub's request no reply is left for (#760): named in
+/// `unmatched` and among the heads and bodies, and refused `500`.
+fn unanswered(
+    stream: &mut TcpStream,
+    (read, last): (&io::Result<(String, String)>, &str),
+    (heads, unmatched): (&Mutex<Vec<String>>, &Mutex<Vec<String>>),
+    asked: &mut Vec<String>,
+) {
+    unmatched
+        .lock()
+        .unwrap_or_else(PoisonError::into_inner)
+        .push(last.to_owned());
+    if let Ok((head, body)) = read {
+        heads
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .push(head.clone());
+        asked.push(body.clone());
+    }
+    write_reply(
+        stream,
+        500,
+        &format!("no scripted reply for: {last}"),
+        Closing::Yes,
+    );
+}
+
 /// Serve every act, and collect what was asked.
 fn serve(
     listener: &TcpListener,
@@ -464,23 +491,7 @@ fn serve(
         let picked = if by_content {
             let picked = routed(&mut routes, &read);
             if let Err(last) = &picked {
-                unmatched
-                    .lock()
-                    .unwrap_or_else(PoisonError::into_inner)
-                    .push(last.clone());
-                if let Ok((head, body)) = &read {
-                    heads
-                        .lock()
-                        .unwrap_or_else(PoisonError::into_inner)
-                        .push(head.clone());
-                    asked.push(body.clone());
-                }
-                write_reply(
-                    &mut stream,
-                    500,
-                    &format!("no scripted reply for: {last}"),
-                    Closing::Yes,
-                );
+                unanswered(&mut stream, (&read, last), (heads, unmatched), &mut asked);
                 continue;
             }
             picked.ok()
@@ -529,6 +540,12 @@ fn serve(
                     .push(unread.clone());
                 asked.push(unread);
             }
+        }
+        // A routed stub answers each request on its own thread (#782): a
+        // reply held back never holds back the next request's.
+        if by_content {
+            thread::spawn(move || act_on(&mut stream, &act));
+            continue;
         }
         if let Some(hung_up) = act_on(&mut stream, &act) {
             hangups
@@ -803,6 +820,40 @@ mod tests {
             (200, "audited twice".to_owned())
         );
         assert!(stub.unmatched().is_empty());
+        // #782: a reply held back does not hold back the next request's.
+        let slow = Stub::routing(
+            vec![
+                Route::when(
+                    "the trunk",
+                    Act::Trickle(Duration::from_millis(1500), vec!["late".to_owned()]),
+                ),
+                Route::when("the fork", Act::Answer("at once".to_owned())),
+            ],
+            "build",
+            0,
+        )
+        .expect("loopback");
+        let address = slow.address();
+        let held = thread::spawn(move || {
+            let stub = Stub {
+                address,
+                stop: Arc::new(AtomicBool::new(false)),
+                hangups: Arc::new(Mutex::new(Vec::new())),
+                heads: Arc::new(Mutex::new(Vec::new())),
+                unmatched: Arc::new(Mutex::new(Vec::new())),
+                worker: None,
+            };
+            ask(&stub, "the trunk")
+        });
+        thread::sleep(Duration::from_millis(200));
+        let began = Instant::now();
+        assert_eq!(ask(&slow, "the fork"), (200, "at once".to_owned()));
+        assert!(
+            began.elapsed() < Duration::from_millis(1000),
+            "the fork waited {:?} behind the trunk's held reply",
+            began.elapsed()
+        );
+        assert_eq!(held.join().expect("the trunk").0, 200);
         let (status, _) = ask(&stub, "the fork's ask, a second time");
         assert_eq!(status, 500);
         assert_eq!(

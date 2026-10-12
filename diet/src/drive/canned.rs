@@ -439,6 +439,19 @@ pub struct StreamedCall<'a> {
 /// it reads a real server's.
 #[must_use]
 pub fn streamed(text: &str, calls: &[StreamedCall<'_>]) -> Vec<u8> {
+    let body = streamed_events(text, calls);
+    format!(
+        "HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\nContent-Length: {}\r\n\
+         Connection: close\r\n\r\n{body}",
+        body.len()
+    )
+    .into_bytes()
+}
+
+/// [`streamed`]'s server-sent events alone, without the HTTP head (#782):
+/// what a held-back reply trickles.
+#[must_use]
+pub fn streamed_events(text: &str, calls: &[StreamedCall<'_>]) -> String {
     let chunk = |delta: serde_json::Value, finish: Option<&str>| {
         serde_json::json!({
             "choices": [{"index": 0, "delta": delta, "finish_reason": finish}],
@@ -482,12 +495,7 @@ pub fn streamed(text: &str, calls: &[StreamedCall<'_>]) -> Vec<u8> {
         body.push_str("\n\n");
     }
     body.push_str("data: [DONE]\n\n");
-    format!(
-        "HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\nContent-Length: {}\r\n\
-         Connection: close\r\n\r\n{body}",
-        body.len()
-    )
-    .into_bytes()
+    body
 }
 
 /// One string, as a JSON string literal's interior.
