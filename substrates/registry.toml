@@ -1182,6 +1182,25 @@ engine_single_digest_suffices = "the server is this repository's own code, and t
 engine_build_info = "canned-e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
 engine_build_info_is = "derived, not read from a server: canned::scenario_build_info(), \"canned-\" + the digest of no acts; what `diet-drive scenario` reports at GET /props"
 
+
+[substrate.canned-scenario-windowed]
+equipment = "canned-loopback-scenario"
+description = "the scenario substrate with a declared context window (#798): what `canned-scenario` is, and a `serving_context` so serve sizes against a window -- the budget and window meditations can fire -- which every other scenario's logs never do. Only the kitchen sink runs on it. As `canned-scenario`: `diet-drive scenario` serves a scenario's own replies on loopback, routed by the text of each request's last message, and GET /props with this entry's literal; rehearsal-only, never a claim substrate -- #767 is what will enforce that -- and every answer is one the scenario wrote"
+pinned = true
+engine_name = "diet-drive scenario"
+serving_slots = 2
+serving_context = 24000
+serving_context_is = "declared, not a server's: small enough that one large tool result crosses the window's line (24000 less the 20000-token reserve), so the kitchen sink's window meditation fires inside a turn; canned weights take it as the API path does (#798)"
+serving_slots_is = "the routed stub answers each request on its own thread (#782), so a fork's call beside the trunk's is answered at once; 2, the floor's count, so a scenario runs forks during the turn as the floor would"
+engine_identity = "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+engine_identity_is = "the digest of no acts: the routed server is fixed and plays nothing of its own; what a run played is its scenario's replies, whose digest the run names on its output line and in its README"
+weights_kind = "canned"
+weights_acts_sha256 = "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+reproducible_by_config = true
+reproducible_because = "run the same scenario file and the same replies play again; exact match, no band"
+engine_single_digest_suffices = "the server is this repository's own code, and the scenario's replies, digested per run, are the whole of what it plays"
+engine_build_info = "canned-e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+engine_build_info_is = "derived, not read from a server: canned::scenario_build_info(), \"canned-\" + the digest of no acts; what `diet-drive scenario` reports at GET /props"
 [substrate.stub-hosted-api]
 equipment = "stub-hosted-api"
 description = "the hosted-API rehearsal substrate (#555): this crate's loopback stub playing constructed Anthropic Messages events, never a provider's model; a rehearsal substrate for a hosted session's wiring when no live call is allowed, and never a claim substrate: every answer is a constructed one"

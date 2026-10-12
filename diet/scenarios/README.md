@@ -2,6 +2,8 @@
 
 A scenario (#760) is a drive written down as steps and expectations. `diet-drive scenario` runs it. Every `*.jsonl` here runs in `./verify.sh`'s `scenarios` check on the canned scenario substrate.
 
+`kitchen-sink.jsonl` (#798) is one session showing every lever that writes a line to the log, each with an `expect`; its log is the page's `kitchen-sink` example. It runs on `canned-scenario-windowed`, the scenario substrate with a declared 24000-token window, so its budget meditation fires at a turn's end and its window meditation inside a later turn. `meditation_at_working_set_bytes` is not shown: serve refuses it (`NotServed`), and only the scripted drive takes it. Its replies are routed by `when` and provisioned one per request, so a request nobody wrote a reply for fails the run rather than taking another's.
+
 The format has no grammar of its own, so it has no directory under `diet/formats/`. It is JSON Lines in the record's value space, read by the record's reader (`diet/formats/record/grammar.pest`, `json::objects`):
 - one object per line;
 - no `null`;
@@ -19,6 +21,7 @@ The format has no grammar of its own, so it has no directory under `diet/formats
 | `live_regimen` | optional | the regimen a re-fire on an endpoint runs under |
 | `head` | required | the trunk's head, relative to the file |
 | `approvals` | optional | the `POST /approve` scope (`once`, `session`, `workspace`, `decline`) that answers each prompt; absent, a prompt fails the run |
+| `seed` | optional | `{worktree path: file}`: each file, relative to the scenario, copied into the fresh worktree before serve starts (an `AGENTS.md`, say). The regimen must run commands. |
 
 ## `reply`: what the canned substrate answers
 
@@ -30,6 +33,8 @@ The format has no grammar of its own, so it has no directory under `diet/formats
 - Each reply is used once.
 - A request no reply is left for is refused `500` and fails the run, naming its last message.
 - `calls` are the tool calls the reply makes; `arguments` is the JSON text the model would write.
+- A `$job` anywhere in a reply is the last background job id (`bg_` and eight hex digits) the request carries: what `task_stop` names, which no script can know ahead of the run.
+- `prompt_tokens` (optional) is the prompt the reply's usage reports, in tokens; absent, the canned server's 600. A trunk that large is what a budget meditation measures.
 - `delay_ms` (optional) holds the reply back that long, its events trickled after the delay (#782). The stub answers each request on its own thread, so a held reply orders a trunk's answer after a fork beside it.
 - A re-fire on an endpoint ignores every reply.
 
@@ -37,12 +42,17 @@ The format has no grammar of its own, so it has no directory under `diet/formats
 
 | step | keys | |
 |---|---|---|
-| `ask` | `text`, `scoping`?, `refused`? | posted; with `refused`, it must be refused with that tag |
+| `ask` | `text`, `scoping`?, `refused`?, `attach`? | posted; with `refused`, it must be refused with that tag; each `attach` path, a PNG in the worktree, is uploaded through `POST /files` and attached by its digest |
 | `flag` | `pick`, `note`, `as`? | flags the entry `pick` names and binds it to the name `as` |
 | `edit` | `pick`, `text`, `as`? | edits it; the operator's new entry is bound |
 | `declare-meditation` | | |
 | `refill-anyway` | | |
-| `rule-phase` | `call`, `choice` | rules on the model's phase proposal that call `call` made: `meditation`, `continue` or `stay` |
+| `rule-phase` | `call`, `choice` | rules on the model's phase proposal that call `call` made: `meditation`, `keep` (`continue` is read too) or `stay`, posted as written |
+| `start-phase` | `phase` | picks the phase the session starts in, before the first ask |
+| `propose-phase` | `to`, `meditate`? | proposes a phase move the model accepts or declines; `meditate` absent is serve's default |
+| `move-phase` | `to`, `meditate`? | moves the phase on the operator's word alone |
+| `open-tangent` | `id` | opens a tangent |
+| `close-tangent` | `each` | closes the open tangent, ruling `keep`, `drop` or `park` on every live entry born under it |
 | `wait` | `until`, `timeout`? | `GET /wait` for `idle` or a line's kind, after the last command |
 | `end` | | |
 

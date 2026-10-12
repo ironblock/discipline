@@ -439,7 +439,15 @@ pub struct StreamedCall<'a> {
 /// it reads a real server's.
 #[must_use]
 pub fn streamed(text: &str, calls: &[StreamedCall<'_>]) -> Vec<u8> {
-    let body = streamed_events(text, calls);
+    streamed_reporting(text, calls, PROMPT_TOKENS)
+}
+
+/// [`streamed`], its usage and timings reporting a prompt of
+/// `prompt_tokens` (#798): how a scenario's reply makes the session measure
+/// a trunk large enough for its budget.
+#[must_use]
+pub fn streamed_reporting(text: &str, calls: &[StreamedCall<'_>], prompt_tokens: u64) -> Vec<u8> {
+    let body = streamed_events_reporting(text, calls, prompt_tokens);
     format!(
         "HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\nContent-Length: {}\r\n\
          Connection: close\r\n\r\n{body}",
@@ -452,6 +460,16 @@ pub fn streamed(text: &str, calls: &[StreamedCall<'_>]) -> Vec<u8> {
 /// what a held-back reply trickles.
 #[must_use]
 pub fn streamed_events(text: &str, calls: &[StreamedCall<'_>]) -> String {
+    streamed_events_reporting(text, calls, PROMPT_TOKENS)
+}
+
+/// [`streamed_events`], reporting a prompt of `prompt_tokens` (#798).
+#[must_use]
+pub fn streamed_events_reporting(
+    text: &str,
+    calls: &[StreamedCall<'_>],
+    prompt_tokens: u64,
+) -> String {
     let chunk = |delta: serde_json::Value, finish: Option<&str>| {
         serde_json::json!({
             "choices": [{"index": 0, "delta": delta, "finish_reason": finish}],
@@ -485,8 +503,8 @@ pub fn streamed_events(text: &str, calls: &[StreamedCall<'_>]) -> String {
     events.push(serde_json::json!({
         "choices": [],
         "object": "chat.completion.chunk",
-        "usage": {"prompt_tokens": PROMPT_TOKENS, "completion_tokens": 7},
-        "timings": {"cache_n": 0, "prompt_n": PROMPT_TOKENS, "predicted_n": 7},
+        "usage": {"prompt_tokens": prompt_tokens, "completion_tokens": 7},
+        "timings": {"cache_n": 0, "prompt_n": prompt_tokens, "predicted_n": 7},
     }));
     let mut body = String::new();
     for event in events {

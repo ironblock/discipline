@@ -1,0 +1,189 @@
+{"scenario":"kitchen-sink","regimen":"kitchen-sink.toml","head":"../drive/heads/floor.md","seed":{"AGENTS.md":"kitchen-sink.agents.md"}}
+{"reply":{"when":"Scope: a notes file","text":"Scoped: notes.md holds one line per decision, read back after each write.","calls":[{"id":"call-r1","name":"update_record","arguments":"{\"field\": \"decision\", \"content\": \"notes.md holds one line per decision\"}"}],"delay_ms":400}}
+{"reply":{"when":"recorded: ","text":"Recorded the scope.","delay_ms":300}}
+{"reply":{"when":"Write notes.md","text":"Writing the first decision.","calls":[{"id":"call-w1","name":"write","arguments":"{\"path\": \"notes.md\", \"content\": \"decision: one line per decision\\n\"}"}],"delay_ms":600}}
+{"reply":{"when":"Successfully created and wrote to new file: notes.md","text":"Tightening the wording.","calls":[{"id":"call-e1","name":"edit","arguments":"{\"file_path\": \"notes.md\", \"old_string\": \"one line per decision\", \"new_string\": \"one line for each decision\"}"}],"delay_ms":300}}
+{"reply":{"when":"has been updated","text":"Reading it back.","calls":[{"id":"call-rd1","name":"read","arguments":"{\"path\": \"notes.md\"}"}],"delay_ms":300}}
+{"reply":{"when":"decision: one line for each decision","text":"notes.md reads back as edited.","delay_ms":300}}
+{"reply":{"when":"Make a tiny PNG","text":"Making a small PNG.","calls":[{"id":"call-b1","name":"bash","arguments":"{\"command\": \"printf '\\\\211PNG\\\\r\\\\n\\\\032\\\\n0000' > shot.png && ls shot.png\"}"}],"delay_ms":500}}
+{"reply":{"when":"shot.png\n","text":"Reading the picture.","calls":[{"id":"call-rd2","name":"read","arguments":"{\"path\": \"shot.png\"}"}],"delay_ms":300}}
+{"reply":{"text":"shot.png is a PNG signature and four bytes: no picture to speak of.","delay_ms":300}}
+{"reply":{"when":"What is in the picture","text":"The picture you attached is the same eight-byte PNG signature: nothing drawn.","delay_ms":700,"prompt_tokens":5000}}
+{"reply":{"when":"Find the decisions","text":"Searching.","calls":[{"id":"call-g1","name":"grep","arguments":"{\"pattern\": \"decision\", \"path\": \".\"}"}],"delay_ms":400}}
+{"reply":{"when":"Found 1 match for pattern","text":"Listing the Markdown files.","calls":[{"id":"call-g2","name":"glob","arguments":"{\"pattern\": \"*.md\"}"}],"delay_ms":300}}
+{"reply":{"when":"Found 2 file(s) matching","text":"Two Markdown files; notes.md holds the one decision.","delay_ms":300}}
+{"reply":{"when":"Show missing.txt","text":"Showing it.","calls":[{"id":"call-b4","name":"bash","arguments":"{\"command\": \"cat missing.txt\"}"}],"delay_ms":400}}
+{"reply":{"when":"No such file","text":"missing.txt does not exist; nothing to show.","delay_ms":300}}
+{"reply":{"when":"Build in the background","text":"Starting the build.","calls":[{"id":"call-b5","name":"bash","arguments":"{\"command\": \"sleep 1; echo built\", \"is_background\": true}"}],"delay_ms":400}}
+{"reply":{"when":"Background shell started","text":"And a long watcher.","calls":[{"id":"call-b6","name":"bash","arguments":"{\"command\": \"sleep 60\", \"is_background\": true}"}],"delay_ms":300}}
+{"reply":{"when":"Background shell started","text":"Stopping the watcher.","calls":[{"id":"call-s1","name":"task_stop","arguments":"{\"task_id\": \"$job\"}"}],"delay_ms":300}}
+{"reply":{"when":"Cancellation requested","text":"The build runs on; the watcher is stopped.","delay_ms":300}}
+{"reply":{"when":"Print a long line","text":"Printing it.","calls":[{"id":"call-b2","name":"bash","arguments":"{\"command\": \"python3 -c \\\"print('x' * 20000)\\\"\"}"}],"delay_ms":500}}
+{"reply":{"when":"xxxxxxxxxx","text":"Now a long listing.","calls":[{"id":"call-b3","name":"bash","arguments":"{\"command\": \"seq 1 2000\"}"}],"delay_ms":300}}
+{"reply":{"when":"Tool output was too large","text":"The listing was capped at 20 lines.","delay_ms":300}}
+{"reply":{"when":"Is notes.md still","text":"notes.md still holds the one decision.","delay_ms":400}}
+{"reply":{"when":"Wait for the server","text":"Waiting.","calls":[{"id":"call-b7","name":"bash","arguments":"{\"command\": \"sleep 30\", \"timeout\": 16000}"}],"delay_ms":300}}
+{"reply":{"when":"timed out","text":"It timed out after 16 s; the server never came up.","delay_ms":300}}
+{"reply":{"when":"Count to four","text":"One.","calls":[{"id":"call-c1","name":"bash","arguments":"{\"command\": \"echo count-one\"}"}],"delay_ms":300}}
+{"reply":{"when":"count-one","text":"Two.","calls":[{"id":"call-c2","name":"bash","arguments":"{\"command\": \"echo count-two\"}"}],"delay_ms":300}}
+{"reply":{"when":"count-two","text":"Three.","calls":[{"id":"call-c3","name":"bash","arguments":"{\"command\": \"echo count-three\"}"}],"delay_ms":300}}
+{"reply":{"when":"count-three","text":"Four.","calls":[{"id":"call-c4","name":"bash","arguments":"{\"command\": \"echo count-four\"}"}],"delay_ms":300}}
+{"reply":{"when":"Tidy up","text":"Checking first.","calls":[{"id":"call-t1","name":"bash","arguments":"{\"command\": \"echo tidy-check\"}"}],"delay_ms":300}}
+{"reply":{"when":"tidy-check","text":"Now the tidier.","calls":[{"id":"call-t2","name":"tidy_everything","arguments":"{}"}],"delay_ms":300}}
+{"reply":{"when":"Is the scope done","text":"It is.","calls":[{"id":"call-v1","name":"resolve_entry","arguments":"{\"entry\": \"r5/call-r1/decision\", \"verdict\": \"done\"}"}],"delay_ms":300}}
+{"reply":{"when":"resolved","text":"Marked the scope done.","delay_ms":300}}
+{"reply":{"when":"Change of scope","text":"Noted: notes.md becomes a Markdown list of decisions.","delay_ms":400}}
+{"reply":{"when":"Oriented enough","text":"Proposing the plan phase.","calls":[{"id":"call-p1","name":"propose_phase_transition","arguments":"{\"to\": \"plan\", \"reason\": \"the scope is settled\"}"}],"delay_ms":400}}
+{"reply":{"when":"Ready to build","text":"Proposing the build phase.","calls":[{"id":"call-p2","name":"propose_phase_transition","arguments":"{\"to\": \"build\", \"reason\": \"the plan has its steps\"}"}],"delay_ms":400}}
+{"reply":{"when":"Build now","text":"Proposing the build phase again.","calls":[{"id":"call-p3","name":"propose_phase_transition","arguments":"{\"to\": \"build\", \"reason\": \"the steps are written down\"}"}],"delay_ms":400}}
+{"reply":{"when":"Build the list","text":"Building the list.","delay_ms":400}}
+{"reply":{"when":"The operator proposes moving from phase build to phase test","text":"Agreed.","calls":[{"id":"call-a1","name":"propose_phase_transition","arguments":"{\"to\": \"test\", \"reason\": \"the list is built\", \"accept\": true}"}],"delay_ms":400}}
+{"reply":{"when":"accepted","text":"Moving to test.","delay_ms":300}}
+{"reply":{"when":"The operator proposes moving from phase test to phase build","text":"Not yet.","calls":[{"id":"call-a2","name":"propose_phase_transition","arguments":"{\"to\": \"build\", \"reason\": \"the list is not tested yet\", \"accept\": false}"}],"delay_ms":400}}
+{"reply":{"when":"declined","text":"Staying in test until the list is tested.","delay_ms":300}}
+{"reply":{"when":"Side question","text":"Writing the side note.","calls":[{"id":"call-w2","name":"write","arguments":"{\"path\": \"side.md\", \"content\": \"side: the list could be sorted\\n\"}"}],"delay_ms":400}}
+{"reply":{"when":"Successfully created and wrote to new file: side.md","text":"Side note written.","delay_ms":300}}
+{"reply":{"when":"Back to the list","text":"Back to the list: notes.md first.","delay_ms":400}}
+{"reply":{"text":"."}}
+{"reply":{"text":"."}}
+{"reply":{"text":"."}}
+{"reply":{"text":"."}}
+{"reply":{"text":"."}}
+{"reply":{"text":"."}}
+{"reply":{"when":"Output 15 lines and nothing else","text":"1. KEEP\n2. KEEP\n3. KEEP\n4. KEEP\n5. KEEP\n6. KEEP\n7. KEEP\n8. KEEP\n9. KEEP\n10. KEEP\n11. KEEP\n12. KEEP\n13. KEEP\n14. KEEP\n15. KEEP\n"}}
+{"reply":{"when":"Output 15 lines and nothing else","text":"1. KEEP\n2. KEEP\n3. KEEP\n4. KEEP\n5. KEEP\n6. KEEP\n7. KEEP\n8. KEEP\n9. KEEP\n10. KEEP\n11. KEEP\n12. KEEP\n13. KEEP\n14. KEEP\n15. KEEP\n"}}
+{"reply":{"when":"Output 16 lines and nothing else","text":"1. KEEP\n2. KEEP\n3. KEEP\n4. KEEP\n5. KEEP\n6. KEEP\n7. KEEP\n8. KEEP\n9. KEEP\n10. KEEP\n11. KEEP\n12. KEEP\n13. KEEP\n14. KEEP\n15. KEEP\n16. KEEP\n"}}
+{"reply":{"when":"Output 16 lines and nothing else","text":"1. KEEP\n2. KEEP\n3. KEEP\n4. KEEP\n5. KEEP\n6. KEEP\n7. KEEP\n8. KEEP\n9. KEEP\n10. KEEP\n11. KEEP\n12. KEEP\n13. KEEP\n14. KEEP\n15. KEEP\n16. KEEP\n"}}
+{"reply":{"when":"Output 1 lines and nothing else","text":"1. KEEP\n"}}
+{"reply":{"when":"The turn has ended","text":"DECISION: notes.md holds one line per decision\nPLAN: write it, then read it back\nSUPERSEDE: NONE"}}
+{"reply":{"when":"The turn has ended","text":"DECISION: NONE\nPLAN: NONE\nSUPERSEDE: interview-t1-0 decision: notes.md holds the decisions as a Markdown list"}}
+{"reply":{"when":"You just changed something","text":"LEARNED: notes.md now holds the first decision\nEVIDENCE: the write of notes.md\nSTUCK: NONE"}}
+{"reply":{"when":"You just read a document","text":"LEARNED: notes.md reads back as written\nEVIDENCE: decision: one line per decision\nSTUCK: NONE"}}
+{"reply":{"when":"You just ingested a large piece","text":"EXCERPT: xxxxxxxxxx\nPOINTER: the long line is 9000 x's (the output of call-b2)"}}
+{"reply":{"when":"did anything behave differently","text":"GOTCHA: missing.txt does not exist — IMPLICATION: create it before showing it"}}
+{"reply":{"when":"Did you make, confirm, or change any decision","text":"NONE"}}
+{"reply":{"when":"learn of or commit to any constraint","text":"NONE"}}
+{"reply":{"when":"Two questions about where you are right now","text":"OPEN: whether the build in the background finished\nNEXT: read its output"}}
+{"reply":{"when":"What did this turn establish","text":"LEARNED: NONE\nEVIDENCE: NONE\nSTUCK: NONE"}}
+{"reply":{"when":"What did this turn establish","text":"LEARNED: NONE\nEVIDENCE: NONE\nSTUCK: NONE"}}
+{"reply":{"when":"What did this turn establish","text":"LEARNED: NONE\nEVIDENCE: NONE\nSTUCK: NONE"}}
+{"reply":{"when":"What did this turn establish","text":"LEARNED: NONE\nEVIDENCE: NONE\nSTUCK: NONE"}}
+{"reply":{"when":"What did this turn establish","text":"LEARNED: NONE\nEVIDENCE: NONE\nSTUCK: NONE"}}
+{"reply":{"when":"What did this turn establish","text":"LEARNED: NONE\nEVIDENCE: NONE\nSTUCK: NONE"}}
+{"reply":{"when":"What did this turn establish","text":"LEARNED: NONE\nEVIDENCE: NONE\nSTUCK: NONE"}}
+{"reply":{"when":"What did this turn establish","text":"LEARNED: NONE\nEVIDENCE: NONE\nSTUCK: NONE"}}
+{"reply":{"when":"You just changed something","text":"LEARNED: NONE\nEVIDENCE: NONE\nSTUCK: NONE"}}
+{"reply":{"when":"You just changed something","text":"LEARNED: NONE\nEVIDENCE: NONE\nSTUCK: NONE"}}
+{"reply":{"when":"You just read a document","text":"LEARNED: NONE\nEVIDENCE: NONE\nSTUCK: NONE"}}
+{"reply":{"when":"You just read source","text":"API_SURFACE: NONE\nLEARNED: NONE\nSTUCK: NONE"}}
+{"reply":{"when":"Two questions about where you are right now","text":"OPEN: NONE\nNEXT: NONE"}}
+{"reply":{"when":"Two questions about where you are right now","text":"OPEN: NONE\nNEXT: NONE"}}
+{"reply":{"when":"Two questions about where you are right now","text":"OPEN: NONE\nNEXT: NONE"}}
+{"reply":{"when":"did anything behave differently","text":"NONE"}}
+{"reply":{"when":"did anything behave differently","text":"NONE"}}
+{"reply":{"when":"did anything behave differently","text":"NONE"}}
+{"reply":{"when":"Did you make, confirm, or change any decision","text":"NONE"}}
+{"reply":{"when":"Did you make, confirm, or change any decision","text":"NONE"}}
+{"reply":{"when":"Did you make, confirm, or change any decision","text":"NONE"}}
+{"reply":{"when":"learn of or commit to any constraint","text":"NONE"}}
+{"reply":{"when":"learn of or commit to any constraint","text":"NONE"}}
+{"reply":{"when":"learn of or commit to any constraint","text":"NONE"}}
+{"step":"start-phase","phase":"orient"}
+{"step":"ask","text":"Scope: a notes file, notes.md, holding one line per decision; read it back after each write.","scoping":true}
+{"step":"ask","text":"Write notes.md with the first decision, tighten it, then read it back."}
+{"step":"ask","text":"Make a tiny PNG with bash, then read it."}
+{"step":"ask","text":"What is in the picture I attached?","attach":["shot.png"]}
+{"step":"ask","text":"Find the decisions in the Markdown files."}
+{"step":"ask","text":"Show missing.txt."}
+{"step":"ask","text":"Build in the background, and start a watcher you then stop."}
+{"step":"ask","text":"Print a long line with python3, then a long listing."}
+{"step":"ask","text":"Is notes.md still as written?"}
+{"step":"ask","text":"Wait for the server to come up."}
+{"step":"ask","text":"Count to four, one command per number."}
+{"step":"ask","text":"Tidy up the worktree."}
+{"step":"ask","text":"Is the scope done?"}
+{"step":"ask","text":"Change of scope: notes.md holds the decisions as a Markdown list.","scoping":true}
+{"step":"ask","text":"Oriented enough? Say if we should move on."}
+{"step":"rule-phase","call":"call-p1","choice":"meditation"}
+{"step":"edit","pick":"Markdown list","text":"decision: notes.md holds the decisions as a sorted Markdown list","as":"edited"}
+{"step":"open-tangent","id":"side"}
+{"step":"ask","text":"Side question: write side.md with a note on sorting."}
+{"step":"close-tangent","each":"keep"}
+{"step":"ask","text":"Back to the list."}
+{"step":"ask","text":"Ready to build? Say if we should move on."}
+{"step":"rule-phase","call":"call-p2","choice":"stay"}
+{"step":"ask","text":"Build now? Say if we should move on."}
+{"step":"rule-phase","call":"call-p3","choice":"keep"}
+{"step":"ask","text":"Build the list in notes.md."}
+{"step":"propose-phase","to":"test","meditate":false}
+{"step":"ask","text":"Test the list."}
+{"step":"propose-phase","to":"build","meditate":false}
+{"step":"ask","text":"Test it once more."}
+{"step":"move-phase","to":"build","meditate":false}
+{"step":"flag","pick":"sorted","note":"still sorted?","as":"flagged"}
+{"step":"declare-meditation"}
+{"step":"ask","text":"go on","refused":"meditation-held"}
+{"step":"refill-anyway"}
+{"step":"end"}
+{"expect":"session.start","where":{"instruction_files~":"AGENTS.md","tool_output":"capped","tool_output_max_lines":"20","fork_delivery":"advisory","opening_phase":"plan","phase_document.name":"plan"}}
+{"expect":"phase.started","where":{"phase":"orient","phase_document.name":"orient"},"name":"started"}
+{"expect":"phase.noted","where":{"turn":"1","text~":"now in the orient phase"},"after":"started"}
+{"expect":"phase.proposed","where":{"by":"model","call":"call-p1","from":"orient","to":"plan"},"name":"proposed"}
+{"expect":"phase.ruled","where":{"choice":"meditation","call":"call-p1","to":"plan","phase_document.name":"plan"},"name":"ruled","after":"proposed"}
+{"expect":"meditation","where":{"reason":"phase","phase_document.name":"plan"},"after":"ruled"}
+{"expect":"phase.proposed","where":{"by":"model","call":"call-p2","to":"build"},"name":"proposed-build"}
+{"expect":"phase.ruled","where":{"choice":"stay","call":"call-p2"},"after":"proposed-build"}
+{"expect":"phase.proposed","where":{"by":"model","call":"call-p3","to":"build"},"name":"proposed-again"}
+{"expect":"phase.ruled","where":{"choice":"keep","call":"call-p3","phase_document.name":"build"},"name":"kept","after":"proposed-again"}
+{"expect":"phase.noted","where":{"text~":"now in the build phase"},"after":"kept"}
+{"expect":"phase.proposed","where":{"by":"operator","to":"test","meditate":"false"},"name":"operator-test"}
+{"expect":"notice","where":{"text~":"The operator proposes moving from phase build to phase test"},"after":"operator-test"}
+{"expect":"phase.answered","where":{"call":"call-a1","accepted":"true"},"name":"accepted","after":"operator-test"}
+{"expect":"phase.ruled","where":{"by":"model","choice":"keep","to":"test"},"after":"accepted"}
+{"expect":"phase.proposed","where":{"by":"operator","to":"build","meditate":"false"},"name":"operator-build"}
+{"expect":"phase.answered","where":{"call":"call-a2","accepted":"false"},"after":"operator-build"}
+{"expect":"phase.ruled","where":{"by":"operator","choice":"keep","from":"test","to":"build"},"after":"operator-build"}
+{"expect":"patch","where":{"lane":"mechanical","entry.id":"mechanical/notes.md"}}
+{"expect":"fork","where":{"timing":"during_turn","trigger~":"call:edit:call-w1","view_overridden":"last_turn"}}
+{"expect":"request","where":{"lane":"trunk","beside":"1"}}
+{"expect":"fork","where":{"why":"evidence","trigger":"evidence:call-b2"}}
+{"expect":"fork","where":{"why":"trouble","ask":"gotchas"}}
+{"expect":"fork","where":{"why":"trouble","ask":"decisions"}}
+{"expect":"fork","where":{"why":"trouble","ask":"constraints"}}
+{"expect":"fork","where":{"why":"open"}}
+{"expect":"fork","where":{"why":"scoping","trigger":"turn_end","view":"last_turn"},"at_least":2}
+{"expect":"delivered","where":{"framing":"advisory","text~":"may be affected by this step"}}
+{"expect":"capture","where":{"tool":"update_record","outcome":"recorded"}}
+{"expect":"capture","where":{"tool":"resolve_entry","outcome":"resolved"}}
+{"expect":"reminded","where":{"text~":"Anything you meant to record?"}}
+{"expect":"meditation","where":{"reason":"budget","at_turn":"4"}}
+{"expect":"meditation","where":{"reason":"window","at_turn":"8","window":"24000","tail_tokens":"400","carried_turns":"0","newest_turn_tokens~":""}}
+{"expect":"meditation","where":{"reason":"cadence","tool_outputs":"reference","outputs~":"# tool outputs","render_budget_tokens":"120","warm.prompt_n":"600"}}
+{"expect":"fork","where":{"lane":"audit","why":"meditation"},"at_least":3}
+{"expect":"recalled","where":{"recall":"literal"}}
+{"expect":"patch","where":{"lane":"operator","op":"supersede","entry.id":"$edited"}}
+{"expect":"tangent.open","where":{"id":"side"},"name":"tangent"}
+{"expect":"tangent.close","where":{"id":"side","kept~":"mechanical/side.md"},"after":"tangent"}
+{"expect":"flag","where":{"entry":"$flagged"},"name":"flag"}
+{"expect":"meditation.held","where":{"reason":"operator","unaddressed~":"$flagged"},"name":"held","after":"flag"}
+{"expect":"refused","where":{"because":"meditation-held"},"after":"held"}
+{"expect":"meditation","where":{"reason":"operator","refilled_anyway":"true","unaddressed~":"$flagged"},"after":"held"}
+{"expect":"tool_call","where":{"name":"read","outcome":"ran"}}
+{"expect":"tool_call","where":{"name":"write","outcome":"ran"}}
+{"expect":"tool_call","where":{"name":"edit","outcome":"ran"}}
+{"expect":"tool_call","where":{"name":"grep","outcome":"ran"}}
+{"expect":"tool_call","where":{"name":"glob","outcome":"ran"}}
+{"expect":"tool_call","where":{"name":"bash","outcome":"ran"}}
+{"expect":"tool_call","where":{"name":"task_stop","outcome":"ran"}}
+{"expect":"tool_call","where":{"name":"read","files~":"image/png"}}
+{"expect":"tool_call","where":{"name":"bash","background~":"bg_"}}
+{"expect":"background.ended","where":{"status":"completed"}}
+{"expect":"background.ended","where":{"status":"cancelled"}}
+{"expect":"notice","where":{"text~":"task-notification"}}
+{"expect":"timeout.near","where":{"call":"call-b7","timeout_ms":"16000"}}
+{"expect":"tool_call","where":{"name":"bash","shown~":"Tool output was too large"}}
+{"expect":"tool_call","where":{"outcome":"refused","reason":"max_steps"}}
+{"expect":"turn.settled","where":{"reason":"max_steps"}}
+{"expect":"tool_call","where":{"name":"tidy_everything","outcome":"refused","reason":"unknown_tool"}}
+{"expect":"turn.settled","where":{"reason":"failed"}}
+{"expect":"ask","where":{"files~":"image/png"}}

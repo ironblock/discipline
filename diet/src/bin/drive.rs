@@ -1967,10 +1967,14 @@ fn confirmations(
         identity.weights,
         diet::formats::record::Weights::Canned { .. }
     ) {
+        // A canned substrate's window is the one its registry entry
+        // declares, as an API substrate's is (#798): none, mostly.
+        let window = diet::drive::registry::serving_context(diet::drive::registry::REGISTRY, id)
+            .map(|tokens| (tokens, "declared"));
         return Ok(Confirmed {
             fields: Vec::new(),
             warmed: Warmed::NotApplicable,
-            window: None,
+            window,
             template: None,
         });
     }
