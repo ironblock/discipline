@@ -392,7 +392,11 @@ mod tests {
             "the floor's T1 run takes images"
         );
         assert!(
-            !takes("ada48-tabbyapi-exl3-qwen38flashnext-2p05"),
+            takes("ada48-tabbyapi-exl3-qwen38flashnext-2p05"),
+            "Flash-Next serves vision from instance 2026-10-12"
+        );
+        assert!(
+            !super::takes_images(&identity("served_use_vision = \"false\"\n")),
             "served with use_vision false"
         );
         assert!(!takes("canned-scenario"), "declares nothing");
