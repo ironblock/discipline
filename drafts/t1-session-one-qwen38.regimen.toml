@@ -15,18 +15,18 @@ substrate_hardware = "e6489f9c1815a0c4540a0c6663acaa3c62b1b66e03806479475c264534
 isolation = "sandbox"
 network = "host"
 sandbox_reads = "all"
-# The reference is writable like the worktree; the receipt's `reference_modified` covers the whole tree.
-sandbox_writable = ["~/git/reference/Babylon"]
+# The reference is read-only: no `sandbox_writable` entry, so Seatbelt confines writes to the worktree (the
+# maintainer, 2026-10-12; docs/trajectories/t1.md). The receipt's `reference_modified` still checks it.
 
 # T1 runs bash with approvals off (the maintainer, 2026-10-09; #544): every command runs with no
 # gate and no prompt, and the log says approvals were off. Seatbelt is unchanged: writes stay
-# confined to the worktree and the reference.
+# confined to the worktree.
 approval = "none"
 
 # Names only: the values are set by whoever starts `serve`, inside the worktree.
 env_passthrough = ["npm_config_cache", "pnpm_config_store_dir"]
 
-approval_policy = "approvals are off: every command runs without a gate decision or a prompt; Seatbelt confines writes to the worktree and the reference"
+approval_policy = "approvals are off: every command runs without a gate decision or a prompt; Seatbelt confines writes to the worktree"
 
 interview_warrant = ["scoping"]
 
