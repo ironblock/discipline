@@ -127,6 +127,8 @@
       "render": "# regime\narm: diet\nsubstrate: a-substrate\ndogma_version: 1\nphase: -\nframe_version: placeholder\n\n# working set\nd1\ta tracker\n",
       "seq": 14,
       "t": 70,
+      "turn_steps_compacted": 0,
+      "turn_steps_kept": 1,
       "window": 163840
     },
     {

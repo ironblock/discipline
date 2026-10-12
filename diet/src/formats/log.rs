@@ -1841,7 +1841,20 @@ pub enum Event {
         /// The operator refilled this meditation over the changes it was held for
         /// (v7, #150's gate): `true`, or absent.
         refilled_anyway: Option<bool>,
+        /// A `window` meditation under a running turn (v8, #813): its steps
+        /// kept after its ask, and those compacted with the turns before
+        /// it. `turn_steps_kept` and `turn_steps_compacted`, both or neither.
+        turn_steps: Option<TurnSteps>,
     },
+}
+
+/// The running turn a `window` meditation split (v8, #813).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct TurnSteps {
+    /// Its most recent whole steps, kept after its ask.
+    pub kept: u64,
+    /// Its earlier steps, compacted.
+    pub compacted: u64,
 }
 
 /// What fired a `window` meditation (v7, #617).
@@ -3767,6 +3780,14 @@ fn from_object(object: &BTreeMap<String, Value>) -> Result<Line, String> {
             unaddressed: fields.optional_strings("unaddressed")?,
             newest_turn_tokens: fields.optional_count("newest_turn_tokens")?,
             refilled_anyway: fields.optional_flag("refilled_anyway")?,
+            // Built only when its two keys are carried ([`all_or_none`]).
+            turn_steps: match (
+                fields.optional_count("turn_steps_kept")?,
+                fields.optional_count("turn_steps_compacted")?,
+            ) {
+                (Some(kept), Some(compacted)) => Some(TurnSteps { kept, compacted }),
+                _ => None,
+            },
             render_budget: match fields.optional_count("render_budget_tokens")? {
                 None => None,
                 Some(tokens) => Some(RenderBudget {
@@ -5277,6 +5298,8 @@ pub fn schema(kind: Kind) -> &'static [Field] {
                 may_v7("newest_turn_tokens", Count),
                 may_v7("refilled_anyway", Holds::Flag),
                 may_v7("warm", Holds::Timings),
+                may_v8("turn_steps_kept", Count),
+                may_v8("turn_steps_compacted", Count),
             ];
             F
         }
@@ -5418,6 +5441,8 @@ pub fn all_or_none(kind: Kind) -> &'static [&'static str] {
         // A context overflow's sizes (v7, #616).
         Kind::RequestFailed => &["prompt_tokens", "window", "inferred"],
         Kind::Fork => &["substrate", "model"],
+        // The running turn a window meditation split (v8, #813).
+        Kind::Meditation => &["turn_steps_kept", "turn_steps_compacted"],
         // What a fork refused for the pool did not fit beside (v8, #782).
         Kind::ForkSettled => &["window", "trunk_tokens", "beside_tokens", "fork_tokens"],
         _ => &[],
@@ -6380,8 +6405,13 @@ fn to_value(line: &Line) -> Value {
             newest_turn_tokens,
             refilled_anyway,
             warm,
+            turn_steps,
         } => {
             put("at_turn", count(u64::from(*at_turn)));
+            if let Some(steps) = turn_steps {
+                put("turn_steps_kept", count(steps.kept));
+                put("turn_steps_compacted", count(steps.compacted));
+            }
             if let Some(warm) = warm {
                 put("warm", timings_value(warm));
             }

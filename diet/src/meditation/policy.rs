@@ -49,6 +49,24 @@ pub const MEDITATION_WINDOW: &str = "meditation_window";
 /// `OpenCode` 2's `DEFAULT_BUFFER`, or the output cap when that is larger
 /// (`oc:packages/core/src/session/compaction.ts:12,236-240`).
 pub const WINDOW_RESERVE: u64 = 20_000;
+/// The running turn's recent steps a window meditation under it keeps
+/// (#813): a quarter of the usable window -- the window less the reserve --
+/// within these bounds, `OpenCode` 2's `preserveRecentBudget`
+/// (`oc:packages/opencode/src/session/compaction.ts:32-33,115-120`). Pi keeps
+/// a flat 20,000 (`pi:packages/coding-agent/src/core/settings-defaults.ts:11`,
+/// `keepRecentTokens`); Qwen Code keeps no tail at all, only a pending call's
+/// pair (`qc:packages/core/src/services/chatCompressionService.ts:535-539`),
+/// so the tie goes to the smaller, `OpenCode` 2's.
+pub const KEEP_RECENT_MIN: u64 = 2_000;
+/// [`KEEP_RECENT_MIN`]'s upper bound.
+pub const KEEP_RECENT_MAX: u64 = 15_000;
+
+/// The tokens of the running turn's recent steps a window meditation keeps
+/// in a `window` with `reserve` kept for output (#813).
+#[must_use]
+pub fn keep_recent_budget(window: u64, reserve: u64) -> u64 {
+    (window.saturating_sub(reserve) / 4).clamp(KEEP_RECENT_MIN, KEEP_RECENT_MAX)
+}
 /// A meditation's audit (#504): `"on"` (or `true`) puts the dogma's pinned audit
 /// ask over working memory before the refill and folds its answer; off by
 /// default.

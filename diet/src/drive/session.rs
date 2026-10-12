@@ -691,6 +691,9 @@ pub enum Event {
         /// The pre-warm's timings (#504), when the refilled trunk was sent
         /// once and the call finished.
         warm: Option<Timings>,
+        /// Under a running turn (#813): its steps kept after its ask, and
+        /// those compacted with the turns before it.
+        turn_steps: Option<(u64, u64)>,
     },
     /// Forks' patches delivered at the tail of a trunk request, after its
     /// ask (the fork delivery lever): the note stays on the trunk.
@@ -5135,7 +5138,9 @@ pub fn line_of(logged: &Logged) -> log::Line {
             newest_turn_tokens,
             refilled_anyway,
             warm,
+            turn_steps,
         } => log::Event::Meditation {
+            turn_steps: turn_steps.map(|(kept, compacted)| log::TurnSteps { kept, compacted }),
             fired: *fired,
             warm: warm.as_ref().map(timings_line),
             phase: phase.clone(),
@@ -7290,7 +7295,7 @@ fn refill_trunk(
     meditation: (crate::meditation::Reason, Option<log::MeditationFired>),
     to: Option<String>,
 ) {
-    let meditated = refilled(template, state, meditation, to);
+    let meditated = refilled(template, state, meditation, to, (&[], &[]));
     state.push(meditated);
 }
 
@@ -7302,6 +7307,7 @@ fn refilled(
     state: &mut State,
     (reason, fired): (crate::meditation::Reason, Option<log::MeditationFired>),
     to: Option<String>,
+    (steps, riding): (&[Message], &[Message]),
 ) -> Event {
     // The move the graph allowed, made before the render, so the refill
     // names the phase the session is now in (#563).
@@ -7350,7 +7356,10 @@ fn refilled(
         .trunk
         .get(template.messages.len() + usize::from(state.refilled)..)
         .unwrap_or_default();
-    let on_trunk = prunes_on(&state.pruned, turns);
+    // A running turn's steps it drops (#813) are compacted with the turns
+    // before it: archived, their outputs carried, their prunes applied.
+    let mut on_trunk = prunes_on(&state.pruned, turns);
+    on_trunk.extend(prunes_on(&state.pruned, steps));
     let kept = crate::meditation::render::tail(turns, tail_tokens).to_vec();
     let (carried_turns, newest_turn_tokens) = tail_kept(&kept, turns, tail_tokens);
     let carried_tokens = kept
@@ -7360,7 +7369,12 @@ fn refilled(
     // What the refill carries of the outputs it compacts away (#553): those
     // before the kept tail, which stays as it sat.
     let tool_outputs = interview.meditations.outputs;
-    let compacted = &turns[..turns.len() - kept.len()];
+    let compacted: Vec<Message> = turns[..turns.len() - kept.len()]
+        .iter()
+        .chain(steps)
+        .cloned()
+        .collect();
+    let compacted = compacted.as_slice();
     let mut kept = kept;
     replaced_in_tail(&mut kept, &state.pruned);
     // The archive (#566): what this meditation drops from the trunk, and every
@@ -7384,9 +7398,12 @@ fn refilled(
     // The refill fits the window (#814): sized past its line, the render is
     // elided, oldest first, to the room the rest leaves -- whatever the
     // regimen's budget says, unless that is smaller.
+    // What rides after the refill counts too (#813): a running turn's ask
+    // and the steps it keeps.
     let around = head
         .iter()
         .chain(&kept)
+        .chain(riding)
         .map(crate::meditation::render::estimated_tokens)
         .sum::<u64>()
         + estimated_chars(
@@ -7464,6 +7481,7 @@ fn refilled(
         newest_turn_tokens,
         refilled_anyway: None,
         warm: None,
+        turn_steps: None,
     }
 }
 
@@ -7796,7 +7814,7 @@ fn meditation_work<S: Streaming>(shared: &Shared<S>) {
             return;
         }
     }
-    let mut meditated = refilled(&shared.template, &mut state, (reason, None), to);
+    let mut meditated = refilled(&shared.template, &mut state, (reason, None), to, (&[], &[]));
     if let Event::Meditated {
         refilled_anyway, ..
     } = &mut meditated
@@ -8353,19 +8371,31 @@ fn window_meditation(
         .trunk
         .get(template.messages.len() + usize::from(state.refilled)..)
         .unwrap_or_default();
+    let reserve =
+        u64::from(template.limits.max_output_tokens).max(crate::meditation::policy::WINDOW_RESERVE);
+    let (ask, steps, keep_from) = split_turn(
+        &shape.messages[state.trunk.len()..],
+        crate::meditation::policy::keep_recent_budget(window, reserve),
+    );
+    // Nothing to drop: no turn before this one past the tail, and none of
+    // this turn's steps past its budget (#813).
     if crate::meditation::render::tail(turns, interview.meditations.tail_tokens).len()
         == turns.len()
+        && keep_from <= ask
     {
         return false;
     }
     let prompt = state.prompt_of(shape);
-    let reserve =
-        u64::from(template.limits.max_output_tokens).max(crate::meditation::policy::WINDOW_RESERVE);
     if !forced && prompt <= window.saturating_sub(reserve) {
         return false;
     }
-    let own = shape.messages.split_off(state.trunk.len());
-    refill_trunk(
+    let mut own = shape.messages.split_off(state.trunk.len());
+    // The running turn split (#813): its ask, then its most recent whole
+    // steps within the budget; the steps before them are compacted.
+    let kept = own.split_off(keep_from);
+    let dropped = own.split_off(ask);
+    let riding: Vec<Message> = own.iter().chain(&kept).cloned().collect();
+    let mut meditated = refilled(
         template,
         state,
         (
@@ -8376,10 +8406,49 @@ fn window_meditation(
             }),
         ),
         None,
+        (&dropped, &riding),
     );
+    if let Event::Meditated { turn_steps, .. } = &mut meditated {
+        *turn_steps = (steps > 0).then(|| {
+            let compacted = dropped
+                .iter()
+                .filter(|message| message.role == Role::Assistant)
+                .count() as u64;
+            (steps - compacted, compacted)
+        });
+    }
+    state.push(meditated);
     shape.messages.clone_from(&state.trunk);
     shape.messages.extend(own);
+    shape.messages.extend(kept);
     true
+}
+
+/// Where the running turn's own messages `own` -- its ask, then its steps,
+/// each an assistant message and what follows it up to the next -- split
+/// (#813): the ask's length, the step count, and the index the kept steps
+/// start at: the most recent whole steps within `budget` tokens, the last
+/// always kept. A call is never parted from its result.
+fn split_turn(own: &[Message], budget: u64) -> (usize, u64, usize) {
+    let starts: Vec<usize> = own
+        .iter()
+        .enumerate()
+        .filter(|(_, message)| message.role == Role::Assistant)
+        .map(|(at, _)| at)
+        .collect();
+    let ask = starts.first().copied().unwrap_or(own.len());
+    let mut keep_from = own.len();
+    for (nth, start) in starts.iter().rev().enumerate() {
+        let tokens: u64 = own[*start..]
+            .iter()
+            .map(crate::meditation::render::estimated_tokens)
+            .sum();
+        if nth > 0 && tokens > budget {
+            break;
+        }
+        keep_from = *start;
+    }
+    (ask, starts.len() as u64, keep_from)
 }
 
 /// After a trunk request that overflowed the window (#616), the automatic
@@ -13252,6 +13321,7 @@ pub(in crate::drive) mod tests {
                 fired: None,
                 pruned: None,
                 warm: None,
+                turn_steps: None,
             },
             Event::Recalled {
                 turn: 2,
@@ -13764,6 +13834,7 @@ pub(in crate::drive) mod tests {
                 fired: None,
                 pruned: None,
                 warm: None,
+                turn_steps: None,
             },
             log::Event::Recalled {
                 turn: 2,
@@ -20338,6 +20409,231 @@ pub(in crate::drive) mod tests {
         );
     }
 
+    /// #813: one turn of `steps` steps, each ~6k tokens of the model's words
+    /// and a fact it records from them, then its answer.
+    fn one_long_turn(steps: usize) -> Vec<Vec<Step>> {
+        let mut acts: Vec<Vec<Step>> = (0..steps)
+            .map(|step| {
+                let said = format!("Step {step} found the parser's rule number {step}.");
+                vec![
+                    Step::Delta(format!("{said} {}", "filler ".repeat(3_400))),
+                    record(&format!("call-{step}"), "fact", &said),
+                ]
+            })
+            .collect();
+        acts.push(deltas(&["The build is done."]));
+        acts
+    }
+
+    /// The meditation lines' kept and compacted steps of the running turn.
+    fn turn_steps(log: &[Logged]) -> Vec<Option<(u64, u64)>> {
+        log.iter()
+            .filter_map(|logged| match &logged.event {
+                Event::Meditated { turn_steps, .. } => Some(*turn_steps),
+                _ => None,
+            })
+            .collect()
+    }
+
+    /// #813: a turn whose own steps outgrow the window -- here its first
+    /// one, with nothing before it on the trunk to drop -- is split by the
+    /// window meditation: the refill, the turn's ask, then only its most
+    /// recent whole steps within the budget (`OpenCode` 2's: a quarter of
+    /// the usable window, at most 15,000 tokens). The turn goes on and
+    /// settles; the meditation line names the steps kept and compacted.
+    #[test]
+    fn a_turn_whose_steps_outgrow_the_window_keeps_only_its_recent_steps_and_settles() {
+        const STEPS: usize = 18;
+        let session = windowed(
+            one_long_turn(STEPS),
+            100_000,
+            crate::meditation::policy::Served::default(),
+        );
+        session.ask("build it", None).expect("accepted");
+        let log = wait_until(&session, "the turn", settled);
+        assert!(
+            log.iter().any(|logged| matches!(
+                logged.event,
+                Event::TurnSettled {
+                    reason: SettleReason::Final,
+                    ..
+                }
+            )),
+            "{log:#?}"
+        );
+        let meditations = window_meditations(&log);
+        assert!(
+            !meditations.is_empty(),
+            "a window meditation under the turn"
+        );
+        let split = turn_steps(&log);
+        let Some((kept, compacted)) = split[0] else {
+            panic!("the first meditation splits the turn: {split:?}");
+        };
+        assert_eq!(kept, 2, "two ~6k steps fit 15,000 tokens: {split:?}");
+        assert!(compacted >= 5, "{split:?}");
+        // The request after it: the refill, the ask, then the kept steps --
+        // the turn's first step is gone, its fact in working memory.
+        let sent = session.shared.transport.sent();
+        let last = &sent.last().expect("a request").messages;
+        assert!(last.iter().any(|message| message.content == "build it"));
+        assert!(
+            !last
+                .iter()
+                .any(|message| message.content.starts_with("Step 0 found")),
+            "{:#?}",
+            last.iter()
+                .map(|m| m.content.chars().take(40).collect::<String>())
+                .collect::<Vec<_>>()
+        );
+        let held = session.shared.lock();
+        let object = &held.interview.as_ref().expect("working memory").object;
+        assert!(
+            object
+                .live()
+                .any(|entry| entry.content.contains("rule number 0")),
+            "the first step's fact is kept in working memory"
+        );
+        drop(held);
+        reads_whole(&session);
+    }
+
+    /// #813 with #814: a window meditation under a running turn, over a
+    /// working memory too large for the window, elides the render to fit
+    /// the window's line counting what rides after the refill -- the turn's
+    /// ask and its kept steps -- so the request after it stays inside the
+    /// line.
+    #[test]
+    fn a_mid_turn_window_meditation_over_a_large_memory_fits_the_line_with_its_kept_steps() {
+        const LINE: u64 = 8_000;
+        let session = windowed(
+            one_long_turn(10)
+                .into_iter()
+                .map(|act| {
+                    // ~1,500 tokens a step: one kept within 2,000.
+                    act.into_iter()
+                        .map(|step| match step {
+                            Step::Delta(text) => Step::Delta(text.chars().take(6_000).collect()),
+                            other => other,
+                        })
+                        .collect()
+                })
+                .collect(),
+            crate::meditation::policy::WINDOW_RESERVE + LINE,
+            crate::meditation::policy::Served::default(),
+        );
+        {
+            let mut state = session.shared.lock();
+            let object = &mut state.interview.as_mut().expect("memory").object;
+            for n in 0..200_u32 {
+                object
+                    .apply(&Patch::Add {
+                        id: crate::object::EntryId::new(&format!("bulk-{n:03}")).expect("an id"),
+                        content: format!("decision: {} {n}", "the long form of a fact ".repeat(8)),
+                        provenance: crate::object::Provenance {
+                            turn: 0,
+                            lane: "interview".to_owned(),
+                            fork: None,
+                            tangent: None,
+                            index: n,
+                        },
+                    })
+                    .expect("an entry");
+            }
+        }
+        session.ask("build it", None).expect("accepted");
+        let log = wait_until(&session, "the turn", settled);
+        let at = log
+            .iter()
+            .position(|logged| {
+                matches!(
+                    &logged.event,
+                    Event::Meditated {
+                        turn_steps: Some(_),
+                        ..
+                    }
+                )
+            })
+            .unwrap_or_else(|| panic!("a split under the turn: {:?}", turn_steps(&log)));
+        let Event::Meditated { render_budget, .. } = &log[at].event else {
+            unreachable!()
+        };
+        let budget = render_budget.clone().expect("fitted to the window");
+        assert_eq!(budget.window_line, Some(LINE), "{budget:?}");
+        assert!(budget.reduced > 0, "{budget:?}");
+        // The trunk request after it, by its place among the trunk's.
+        let nth = log[..at]
+            .iter()
+            .filter(|logged| {
+                matches!(
+                    logged.event,
+                    Event::Requested {
+                        lane: Lane::Trunk,
+                        ..
+                    }
+                )
+            })
+            .count();
+        let sent = session.shared.transport.sent();
+        let after: u64 = sent[nth]
+            .messages
+            .iter()
+            .map(crate::meditation::render::estimated_tokens)
+            .sum();
+        assert!(
+            after <= LINE,
+            "the request after the refill is {after} tokens"
+        );
+        assert!(
+            sent[nth]
+                .messages
+                .iter()
+                .any(|message| message.content == "build it")
+        );
+        reads_whole(&session);
+    }
+
+    /// #813: the budget is `OpenCode` 2's -- a quarter of the usable window,
+    /// within 2,000 and 15,000 -- and the split keeps whole steps, the last
+    /// always, never parting a call from its result.
+    #[test]
+    fn the_running_turn_splits_at_whole_steps_within_opencodes_budget() {
+        use crate::meditation::policy::keep_recent_budget;
+        assert_eq!(keep_recent_budget(163_840, 20_000), 15_000);
+        assert_eq!(keep_recent_budget(32_768, 20_000), 3_192);
+        assert_eq!(keep_recent_budget(8_192, 20_000), 2_000);
+        let words = |n: usize| "word ".repeat(n);
+        let call = |id: &str| {
+            let mut message = Message::new(Role::Assistant, words(400));
+            message.tool_calls.push(ToolCall {
+                id: id.to_owned(),
+                name: "bash".to_owned(),
+                arguments: "{}".to_owned(),
+            });
+            message
+        };
+        let result = |id: &str| {
+            let mut message = Message::new(Role::Tool, words(400));
+            message.tool_call_id = Some(id.to_owned());
+            message
+        };
+        // The ask, then three steps of a call and its result, ~1,000 tokens
+        // each.
+        let own = vec![
+            Message::new(Role::User, "build it".to_owned()),
+            call("a"),
+            result("a"),
+            call("b"),
+            result("b"),
+            call("c"),
+            result("c"),
+        ];
+        assert_eq!(split_turn(&own, 2_200), (1, 3, 3), "the last two steps");
+        assert_eq!(split_turn(&own, 10_000), (1, 3, 1), "every step fits");
+        assert_eq!(split_turn(&own, 10), (1, 3, 5), "the last step, always");
+        assert_eq!(split_turn(&own[..1], 10), (1, 0, 1), "no step yet");
+    }
+
     /// #617: a request the engine refuses as an overflow is meditated once
     /// and sent again on the refilled trunk -- the refusal logged, then the
     /// meditation, then the same turn's request again -- and the turn goes on. A
@@ -23749,6 +24045,7 @@ pub(in crate::drive) mod tests {
                 fired: None,
                 pruned: None,
                 warm: None,
+                turn_steps: None,
             }
         );
 

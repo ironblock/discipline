@@ -1187,7 +1187,7 @@ engine_build_info_is = "derived, not read from a server: canned::scenario_build_
 
 [substrate.canned-scenario-windowed]
 equipment = "canned-loopback-scenario"
-description = "the scenario substrate with a declared context window (#798): what `canned-scenario` is, and a `serving_context` so serve sizes against a window -- the budget and window meditations can fire -- which every other scenario's logs never do. Only the kitchen sink runs on it. As `canned-scenario`: `diet-drive scenario` serves a scenario's own replies on loopback, routed by the text of each request's last message, and GET /props with this entry's literal; rehearsal-only, never a claim substrate -- #767 is what will enforce that -- and every answer is one the scenario wrote"
+description = "the scenario substrate with a declared context window (#798): what `canned-scenario` is, and a `serving_context` so serve sizes against a window -- the budget and window meditations can fire -- which every other scenario's logs never do. The kitchen sink and split-turn (#813) run on it. As `canned-scenario`: `diet-drive scenario` serves a scenario's own replies on loopback, routed by the text of each request's last message, and GET /props with this entry's literal; rehearsal-only, never a claim substrate -- #767 is what will enforce that -- and every answer is one the scenario wrote"
 pinned = true
 engine_name = "diet-drive scenario"
 serving_slots = 2

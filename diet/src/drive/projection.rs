@@ -2545,6 +2545,7 @@ mod tests {
             fired: None,
             pruned: None,
             warm: None,
+            turn_steps: None,
         });
         let projection = project(
             &numbered(events),
@@ -2598,6 +2599,7 @@ mod tests {
             fired: None,
             pruned: None,
             warm: None,
+            turn_steps: None,
         });
         let projection = project(
             &numbered(events),
