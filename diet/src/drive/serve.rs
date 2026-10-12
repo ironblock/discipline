@@ -962,6 +962,21 @@ impl<S: Streaming + 'static> Serving<S> {
                 Ok(()) => (200, BTreeMap::new()),
                 Err(rejection) => rejected(rejection),
             },
+            // The operator's phase commands (#788).
+            Command::StartPhase(phase) => match self.session.start_phase(&phase) {
+                Ok(()) => (200, BTreeMap::new()),
+                Err(rejection) => rejected(rejection),
+            },
+            Command::ProposePhase(to, meditate) => {
+                match self.session.propose_phase(&to, meditate) {
+                    Ok(()) => (200, BTreeMap::new()),
+                    Err(rejection) => rejected(rejection),
+                }
+            }
+            Command::MovePhase(to, meditate) => match self.session.move_phase(&to, meditate) {
+                Ok(()) => (200, BTreeMap::new()),
+                Err(rejection) => rejected(rejection),
+            },
             // The operator's refill over a held meditation (#150's gate).
             Command::RefillAnyway => match self.session.refill_anyway() {
                 Ok(()) => (200, BTreeMap::new()),
@@ -1010,6 +1025,13 @@ enum Command {
     FlagEntry(String, String),
     /// Refill the held meditation anyway (#150's gate).
     RefillAnyway,
+    /// Choose the starting phase, before the first ask (#788).
+    StartPhase(String),
+    /// Propose a phase move to the model (#788), and whether an accepted
+    /// move meditates.
+    ProposePhase(String, bool),
+    /// Move the phase alone, through a meditation or not (#788).
+    MovePhase(String, bool),
 }
 
 /// A command's word as a client written before #583's rename may send it,
@@ -1019,13 +1041,50 @@ fn current(word: &str) -> &str {
     match word {
         "declare-seam" => "declare-meditation",
         "seam" => "meditation",
+        // A phase ruling's move without a meditation, v7's word (#788).
+        "continue" => "keep",
         other => other,
     }
 }
 
 impl Command {
+    /// The operator's phase commands (#788), from their bodies.
+    fn phase_command(kind: CommandKind, object: &BTreeMap<String, Value>) -> Option<Self> {
+        match (
+            kind,
+            object.get("phase"),
+            object.get("to"),
+            object.get("meditate"),
+        ) {
+            (CommandKind::StartPhase, Some(Value::String(phase)), _, _) => {
+                Some(Self::StartPhase(phase.clone()))
+            }
+            // Meditate-and-move, the suggested option, unless it says not.
+            (CommandKind::ProposePhase, _, Some(Value::String(to)), None) => {
+                Some(Self::ProposePhase(to.clone(), true))
+            }
+            (
+                CommandKind::ProposePhase,
+                _,
+                Some(Value::String(to)),
+                Some(Value::Boolean(meditate)),
+            ) => Some(Self::ProposePhase(to.clone(), *meditate)),
+            (CommandKind::MovePhase, _, Some(Value::String(to)), None) => {
+                Some(Self::MovePhase(to.clone(), false))
+            }
+            (
+                CommandKind::MovePhase,
+                _,
+                Some(Value::String(to)),
+                Some(Value::Boolean(meditate)),
+            ) => Some(Self::MovePhase(to.clone(), *meditate)),
+            _ => None,
+        }
+    }
+
     /// A command from its body: `kind` names it, and every other key must be
     /// one that kind takes.
+    #[allow(clippy::too_many_lines)]
     fn from_object(object: &BTreeMap<String, Value>) -> Option<Posted> {
         let Some(Value::String(kind)) = object.get("kind") else {
             return None;
@@ -1054,6 +1113,9 @@ impl Command {
             // ends no idle gap.
             CommandKind::EditEntry => &["kind", "id", "content"],
             CommandKind::FlagEntry => &["kind", "id", "note"],
+            // #788: the operator's phase commands; none ends an idle gap.
+            CommandKind::StartPhase => &["kind", "phase"],
+            CommandKind::ProposePhase | CommandKind::MovePhase => &["kind", "to", "meditate"],
         };
         if object.keys().any(|key| !takes.contains(&key.as_str())) {
             return None;
@@ -1125,6 +1187,9 @@ impl Command {
             },
             CommandKind::EditEntry => {
                 entry_and(object, "content").map(|(id, text)| Self::EditEntry(id, text))
+            }
+            CommandKind::StartPhase | CommandKind::ProposePhase | CommandKind::MovePhase => {
+                Self::phase_command(kind, object)
             }
             CommandKind::FlagEntry => {
                 entry_and(object, "note").map(|(id, text)| Self::FlagEntry(id, text))
@@ -1709,6 +1774,44 @@ mod tests {
     /// #124: `ratify-phase` takes the proposal's call and a choice --
     /// `meditation`, `continue` or `stay`; anything else, or an idle gap, is no
     /// command.
+    /// #788: the operator's phase commands read their phase, their move
+    /// and, for a move alone, whether it meditates; nothing else.
+    #[test]
+    fn the_operators_phase_commands_read_their_moves_and_nothing_else() {
+        let read = |body: &str| {
+            let object = crate::formats::record::json::line(body).expect("an object");
+            Command::from_object(&object).map(|posted| posted.command)
+        };
+        assert!(matches!(
+            read(r#"{"kind":"start-phase","phase":"plan"}"#),
+            Some(Command::StartPhase(phase)) if phase == "plan"
+        ));
+        assert!(matches!(
+            read(r#"{"kind":"propose-phase","to":"build"}"#),
+            Some(Command::ProposePhase(to, true)) if to == "build"
+        ));
+        assert!(matches!(
+            read(r#"{"kind":"propose-phase","to":"build","meditate":false}"#),
+            Some(Command::ProposePhase(to, false)) if to == "build"
+        ));
+        assert!(matches!(
+            read(r#"{"kind":"move-phase","to":"build","meditate":true}"#),
+            Some(Command::MovePhase(to, true)) if to == "build"
+        ));
+        assert!(matches!(
+            read(r#"{"kind":"move-phase","to":"build"}"#),
+            Some(Command::MovePhase(to, false)) if to == "build"
+        ));
+        for refused in [
+            r#"{"kind":"start-phase"}"#,
+            r#"{"kind":"propose-phase","to":"build","meditate":"yes"}"#,
+            r#"{"kind":"move-phase","to":"build","meditate":"yes"}"#,
+            r#"{"kind":"move-phase","to":7}"#,
+        ] {
+            assert!(read(refused).is_none(), "{refused}");
+        }
+    }
+
     #[test]
     fn the_phase_ruling_reads_its_call_and_choice_and_nothing_else() {
         use crate::drive::session::PhaseChoice;
@@ -1718,7 +1821,9 @@ mod tests {
         };
         for (word, choice) in [
             ("meditation", PhaseChoice::Meditation),
-            ("continue", PhaseChoice::Continue),
+            ("keep", PhaseChoice::Keep),
+            // #788: v7's word, read as `keep`.
+            ("continue", PhaseChoice::Keep),
             ("stay", PhaseChoice::Stay),
         ] {
             assert!(matches!(

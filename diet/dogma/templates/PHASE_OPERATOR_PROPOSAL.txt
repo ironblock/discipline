@@ -1,0 +1,1 @@
+The operator proposes moving from phase {from} to phase {to}. Before anything else, answer with propose_phase_transition: to = "{to}" and accept = true to agree, or accept = false and your reason to decline.

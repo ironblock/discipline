@@ -1,6 +1,6 @@
 # Two phases of the starter library (#787) on the canned scenario substrate:
-# the session opens in `plan`, the model proposes `build`, the operator rules
-# `continue`, and a meditation later carries `build`'s ground rules in the
+# the session opens in `plan`, the model proposes `build` (its turn ends
+# there, #788), the operator rules `keep`, and a meditation later carries `build`'s ground rules in the
 # system prompt. Self-capture is on, declared, as every regimen with phases
 # declares it: it is how the model proposes a move.
 arm = "rehearsal"

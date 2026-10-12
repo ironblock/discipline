@@ -466,7 +466,7 @@ fn later_tools() -> Vec<Value> {
             object(
                 json!({
                     "call": string("The proposal's call id."),
-                    "choice": {"type": "string", "enum": ["meditation", "continue", "stay"]}
+                    "choice": {"type": "string", "enum": ["meditation", "keep", "stay"]}
                 }),
                 &["call", "choice"],
             ),

@@ -935,6 +935,9 @@ impl<'a> Walk<'a> {
             Line::Refused { .. } => log::Kind::Refused,
             Line::Capture { .. } => log::Kind::Capture,
             Line::PhaseRuled { .. } => log::Kind::PhaseRuled,
+            Line::PhaseProposed { .. } => log::Kind::PhaseProposed,
+            Line::PhaseAnswered { .. } => log::Kind::PhaseAnswered,
+            Line::PhaseStarted { .. } => log::Kind::PhaseStarted,
             Line::BackgroundEnded { .. } => log::Kind::BackgroundEnded,
             Line::TimeoutNear { .. } => log::Kind::TimeoutNear,
             Line::ForkSkipped { .. } => log::Kind::ForkSkipped,
@@ -965,6 +968,11 @@ impl<'a> Walk<'a> {
             ..
         }
         | Line::Meditation {
+            phase_document: Some(document),
+            ..
+        }
+        // The starting phase the operator chose (#788).
+        | Line::PhaseStarted {
             phase_document: Some(document),
             ..
         } = &line.event
@@ -1076,6 +1084,11 @@ impl<'a> Walk<'a> {
             // The operator's ruling on a phase proposal (#124): a meditation it
             // declares has its own row.
             | Line::PhaseRuled { .. }
+            // A phase proposal, the model's answer to the operator's, and the
+            // starting phase chosen (#788): the turn's rows name the phase.
+            | Line::PhaseProposed { .. }
+            | Line::PhaseAnswered { .. }
+            | Line::PhaseStarted { .. }
             // The operator's flag, and a model patch refused over the
             // operator's entry (#150): the meditation row names what was carried.
             | Line::Flag { .. }

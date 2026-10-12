@@ -114,7 +114,14 @@ pub mod vocabulary;
 ///   maintainer's approval of the drafted wording. The record names the
 ///   priming by the set's digest. No template and no set already pinned
 ///   changed.
-pub const VERSION: u32 = 10;
+/// * 11, 2026-10-12: the phase tool's own pins (#788, the maintainer's
+///   approval of the drafted wording, W1-W3): `PHASE_TOOL`, its description,
+///   now offered whenever phases are active rather than in a self-capture
+///   set; `PHASE_PROPOSED`, what the model is shown when its own proposal
+///   ends its turn; and `PHASE_OPERATOR_PROPOSAL`, the note that puts the
+///   operator's proposal to it. `propose_phase_transition` left the `c1`
+///   and `c2` contracts, so both sets' contract pins moved.
+pub const VERSION: u32 = 11;
 
 /// The digest of `diet/dogma/MANIFEST.tsv` that [`VERSION`] was declared
 /// against.
@@ -124,7 +131,7 @@ pub const VERSION: u32 = 10;
 /// that recomputes it fails until both lines are edited together. Without it
 /// the manifest could be regenerated after an edit and the version left at
 /// what it was, which is a bump that never happened.
-pub const MANIFEST_DIGEST: &str = "7846bdf8e0f45035";
+pub const MANIFEST_DIGEST: &str = "74bfe97e1444a9c5";
 
 /// The per-model operating points, as TOML text, exactly as pinned.
 ///
@@ -244,6 +251,10 @@ pub enum Hole {
     NewQuote,
     /// A working-memory entry's text, for a fork's note on the trunk.
     Entry,
+    /// The phase a move starts from (#788).
+    From,
+    /// The phase a move goes to (#788).
+    To,
 }
 
 impl Hole {
@@ -260,6 +271,8 @@ impl Hole {
         Self::OldEntry,
         Self::NewQuote,
         Self::Entry,
+        Self::From,
+        Self::To,
     ];
 
     /// The tag written between the braces in a template file.
@@ -277,6 +290,8 @@ impl Hole {
             Self::OldEntry => "old_entry",
             Self::NewQuote => "new_quote",
             Self::Entry => "entry",
+            Self::From => "from",
+            Self::To => "to",
         }
     }
 
@@ -345,6 +360,13 @@ pub enum Template {
     ForkNoteAdvisory,
     /// The same, as an instruction: (b′)'s imperative.
     ForkNoteImperative,
+    /// The phase tool's description (#788).
+    PhaseTool,
+    /// What the model is shown when its own phase proposal is pending
+    /// (#788): its turn ends.
+    PhaseProposed,
+    /// The note that puts the operator's phase proposal to the model (#788).
+    PhaseOperatorProposal,
 }
 
 impl Template {
@@ -375,6 +397,9 @@ impl Template {
         Self::NativeGenerate,
         Self::ForkNoteAdvisory,
         Self::ForkNoteImperative,
+        Self::PhaseTool,
+        Self::PhaseProposed,
+        Self::PhaseOperatorProposal,
     ];
 
     /// The name the manifest pins this template under, and the stem of its
@@ -407,6 +432,9 @@ impl Template {
             Self::NativeGenerate => "NATIVE_GENERATE_PROMPT",
             Self::ForkNoteAdvisory => "FORK_NOTE_ADVISORY",
             Self::ForkNoteImperative => "FORK_NOTE_IMPERATIVE",
+            Self::PhaseTool => "PHASE_TOOL",
+            Self::PhaseProposed => "PHASE_PROPOSED",
+            Self::PhaseOperatorProposal => "PHASE_OPERATOR_PROPOSAL",
         }
     }
 
@@ -456,6 +484,11 @@ impl Template {
             Self::ForkNoteImperative => {
                 include_str!("../../dogma/templates/FORK_NOTE_IMPERATIVE.txt")
             }
+            Self::PhaseTool => include_str!("../../dogma/templates/PHASE_TOOL.txt"),
+            Self::PhaseProposed => include_str!("../../dogma/templates/PHASE_PROPOSED.txt"),
+            Self::PhaseOperatorProposal => {
+                include_str!("../../dogma/templates/PHASE_OPERATOR_PROPOSAL.txt")
+            }
         }
     }
 
@@ -464,7 +497,11 @@ impl Template {
     pub fn site(self) -> Site {
         match self {
             Self::NativeGenerate => Site::Compaction,
-            Self::ForkNoteAdvisory | Self::ForkNoteImperative => Site::Trunk,
+            Self::ForkNoteAdvisory
+            | Self::ForkNoteImperative
+            | Self::PhaseTool
+            | Self::PhaseProposed
+            | Self::PhaseOperatorProposal => Site::Trunk,
             Self::ApiSurface
             | Self::Doctrine
             | Self::DocRead
@@ -505,6 +542,8 @@ impl Template {
             Self::ExtractMinimal => &[Hole::Source],
             Self::Supersede => &[Hole::OldEntry, Hole::NewQuote],
             Self::ForkNoteAdvisory | Self::ForkNoteImperative => &[Hole::Entry],
+            Self::PhaseProposed => &[Hole::To],
+            Self::PhaseOperatorProposal => &[Hole::From, Hole::To],
             Self::AuditQ
             | Self::AuditQCadence
             | Self::AuditQHuman
@@ -521,7 +560,8 @@ impl Template {
             | Self::AuditGoalNote
             | Self::AuditOpenNote
             | Self::AddQ
-            | Self::NativeGenerate => &[],
+            | Self::NativeGenerate
+            | Self::PhaseTool => &[],
         }
     }
 

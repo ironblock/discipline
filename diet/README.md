@@ -29,12 +29,24 @@ It's primarily a library, but exists primarily to apply a `regimen` - a fixed co
   - If any change is still left, the meditation is held and logs `meditation.held` naming those entries. An ask is refused `meditation-held`.
   - The operator edits and declares the meditation again, or posts `{"kind":"refill-anyway"}`. That refills, carrying them unaddressed, and marks the meditation line `refilled_anyway`. With no meditation held it is refused `nothing-held`.
 
-**The model can propose a phase move, and the operator rules on it** (#124). With self-capture on and phases declared, the model's `propose_phase_transition` call is ruled by the phase graph at once. A refused move is a `capture` line with outcome `refused` and why the graph's word, and the model is shown that word. An allowed move is the session's one pending proposal, and nothing moves until the operator rules. `{"kind":"ratify-phase","call":"<the call's id>","choice":"meditation"|"continue"|"stay"}` rules on it:
-- `meditation` declares the meditation that moves to the proposed phase.
-- `continue` moves the phase and keeps the trunk.
-- `stay` declines.
+**Phase moves take two keys** (#124, #788): the model or the operator proposes, and the other accepts.
 
-A `phase.ruled` line records the ruling. The proposal's `capture` line carries `from` and `to`, and the start row's `meditation_trigger` names `model-proposed`.
+- **The phase tool:** whenever phases are declared, `propose_phase_transition` is offered, self-capture or not, described by the pinned `PHASE_TOOL` (dogma v11).
+  - Arguments: `to`, `reason`, and `accept` (a boolean) when answering the operator.
+  - A move outside the phase's suggested and allowed transitions is refused in the graph's word, and the model is shown that word.
+- **The model proposes.** An allowed proposal is the session's one pending proposal.
+  - It ends the model's turn: the model is shown the pinned `PHASE_PROPOSED`, and the turn settles `final` after the call.
+  - A `phase.proposed` line records it with its evidence: the phase's `phase_steps` and `phase_tokens`, the `tokens_since_meditation`, and whether the operator `meditated_by_hand` with no turn since.
+  - Rule on it with `{"kind":"ratify-phase","call":"<the call's id>","choice":"meditation"|"keep"|"stay"}`: `meditation` declares the meditation that moves to the proposed phase; `keep` moves the phase and keeps the trunk (v7's `continue` is read as `keep`); `stay` declines.
+- **The operator proposes** with `{"kind":"propose-phase","to":"<phase>","meditate":true|false}`. `meditate` defaults to true, meditate-and-move being the suggested option.
+  - A `phase.proposed` line records it with the same evidence and its `meditate`.
+  - The model is asked in a note on its next ask, the pinned `PHASE_OPERATOR_PROPOSAL`, logged as a `notice`. It answers through the tool with `accept`.
+  - A `phase.answered` line records the answer. If the model accepts, a `phase.ruled` line says `by: model` and the move follows the operator's choice: kept at once, or through a meditation once the turn has ended (with nothing to refill from, kept).
+  - Refused `proposal-pending` while the model's own proposal waits.
+- **The operator moves alone** with `{"kind":"move-phase","to":"<phase>","meditate":true|false}`, unless the regimen sets `operator_unilateral = false` (true by default), when it is refused `not-unilateral`. A `phase.ruled` line with no `call` says `by: operator`.
+- **The starting phase:** `{"kind":"start-phase","phase":"<phase>"}` chooses it before the first ask, logged `phase.started`; it is refused `already-asked` after.
+
+A `phase.ruled` line records every ruling and move.
 
 **A meditation can carry the tool outputs it compacts away** (#553): a regimen's `meditation_tool_outputs` says what the refill carries of the outputs in the turns before the kept tail, in a section after the rendered working memory, one entry per call in call order. `evict`, the default, carries nothing. `keep` carries each output as the trunk had it, after the cap. `reference` carries a line naming the tool, its arguments, and the output's size and sha256, with the whole saved by digest in the recording's `files/`. `salient` carries the verbatim excerpts the read fork quoted from each output. The kept tail's outputs are untouched. The meditation line names the state, logs the section as sent with how many outputs and bytes it carried, and the start row names the state beside the cap.
 
