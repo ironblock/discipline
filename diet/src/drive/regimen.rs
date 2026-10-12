@@ -711,6 +711,14 @@ pub fn serve_levers(regimen: &Regimen, output_cap: (u32, &str)) -> BTreeMap<Stri
         ),
         ("reconcile_gate".to_owned(), reconcile_gate_lever(regimen)),
         ("phase_graph".to_owned(), phase_graph_lever(regimen)),
+        // #788: whether the operator may move the phase alone.
+        (
+            "operator_unilateral".to_owned(),
+            crate::drive::session::operator_unilateral(regimen).map_or_else(
+                |_| undeclared(),
+                |on| if on { "on" } else { "off" }.to_owned(),
+            ),
+        ),
         (
             "archive_recall".to_owned(),
             crate::drive::archive::Recall::lever(regimen),
@@ -1349,6 +1357,35 @@ mod tests {
             "off"
         );
         assert_eq!(lever(""), UNDECLARED);
+    }
+
+    /// Whether the operator may move the phase alone (#788): `on` unless
+    /// the regimen says `operator_unilateral = false`, and undeclared for a
+    /// value serve refuses at start.
+    #[test]
+    fn the_operator_unilateral_lever_is_on_unless_turned_off() {
+        let lever = |text: &str| {
+            serve_levers(&regimen::parse(text).expect("a regimen"), (8192, "default"))
+                .get("operator_unilateral")
+                .cloned()
+                .unwrap_or_default()
+        };
+        assert_eq!(lever(""), "on");
+        assert_eq!(
+            lever(
+                "operator_unilateral = true
+"
+            ),
+            "on"
+        );
+        assert_eq!(
+            lever(
+                "operator_unilateral = false
+"
+            ),
+            "off"
+        );
+        assert_eq!(lever("operator_unilateral = \"yes\"\n"), UNDECLARED);
     }
 
     /// The default timeout (#613): 120000 ms unless the regimen says, 0
