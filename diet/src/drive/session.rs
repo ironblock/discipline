@@ -1260,7 +1260,7 @@ pub struct Interview {
     pub prefix_pages: PrefixPages,
     /// The chunk the trunk's server allocates its pool in: its entry's
     /// `served_chunk_size`, else [`POOL_CHUNK_DEFAULT`]. Every job on it is
-    /// counted rounded up to whole chunks, and one more ([`footprint`]).
+    /// counted rounded up to whole chunks, and two more ([`footprint`]).
     pub pool_chunk: u64,
     /// The warrants that look at what a step produced, and their numbers
     /// (#783).
@@ -10383,18 +10383,29 @@ fn pool_after_the_turn<S: Streaming + 'static>(shared: &Arc<Shared<S>>, state: &
 pub const POOL_CHUNK_DEFAULT: u64 = 2_048;
 
 /// The pool's tokens a job of `tokens` -- its prompt and output cap -- holds
-/// as the engine allocates it: rounded up to a whole `chunk`, and one chunk
-/// more. `TabbyAPI` reserves a job's prompt and one output chunk a round, and
-/// `ExLlamaV3` aligns each round to the chunk boundary with draft headroom;
-/// past the pool by one page, the engine's generator fails and every job on
-/// the server is cancelled, the trunk's with it (measured on the floor,
-/// 2026-10-12). 0 for no job.
+/// as the engine allocates it: rounded up to a whole `chunk`, and two chunks
+/// more. `TabbyAPI` admits a round when `ceil((P - 1 + B) / B) * B` fits,
+/// P the prompt and output so far and B the 2,048-token recurrent checkpoint
+/// interval -- the entry's `served_chunk_size` stands in for it, equal on
+/// both `TabbyAPI` lines -- and `ExLlamaV3` reserves that and its draft
+/// tokens in 256-token pages (Track 6, #839, from `common/errors.py` at
+/// be74bf0 and `job.py` at 1.5.4). Two chunks cover the round's alignment
+/// and the draft's page, whatever the draft count: one job alone fits
+/// exactly when its tokens are at most the pool less two chunks, Track 6's
+/// bound. Past the pool by one page, the engine's generator fails and every
+/// job on the server is cancelled, the trunk's with it. 0 for no job.
 fn footprint(tokens: u64, chunk: u64) -> u64 {
     if tokens == 0 {
         0
     } else {
-        tokens.div_ceil(chunk) * chunk + chunk
+        tokens.div_ceil(chunk) * chunk + 2 * chunk
     }
+}
+
+/// The most tokens one job may hold, prompt and cap, in `left` of the pool:
+/// whole chunks, less [`footprint`]'s two chunks of headroom.
+fn job_room(left: u64, chunk: u64) -> u64 {
+    left.saturating_sub(2 * chunk) / chunk * chunk
 }
 
 /// `ceiling`, no more than the pool's `cap` when there is one (#826).
@@ -10440,7 +10451,7 @@ impl State {
             .map(|pool| footprint(pool.holding(self.refills), chunk))
             .sum();
         let left = window.saturating_sub(forks);
-        let cap = (left.saturating_sub(chunk) / chunk * chunk).saturating_sub(prompt);
+        let cap = job_room(left, chunk).saturating_sub(prompt);
         let cap = u32::try_from(cap).unwrap_or(u32::MAX);
         if cap >= window_cap {
             TrunkRoom::Free
@@ -10541,11 +10552,11 @@ fn pool_room(
         beside,
         prompt,
     });
-    // What the fork's own job may hold, less its chunk of headroom, in
+    // What the fork's own job may hold, less its two chunks of headroom, in
     // whole chunks, less its prompt: its cap.
     let cap = room.map(|room| {
         let left = room.window.saturating_sub(room.trunk + room.beside);
-        (left.saturating_sub(chunk) / chunk * chunk).saturating_sub(room.prompt)
+        job_room(left, chunk).saturating_sub(room.prompt)
     });
     let short = cap.is_some_and(|cap| cap < u64::from(ceiling).min(CLAMP_FLOOR));
     (room, cap, short)
@@ -19961,14 +19972,14 @@ pub(in crate::drive) mod tests {
     }
 
     /// #826: never more on the server than its pool holds. A fork beside
-    /// a ~100k-token trunk whose output cap is 60,000 -- the room its next
+    /// a ~100k-token trunk whose output cap is 20,000 -- the room its next
     /// request is sized into -- is sent with what the pool leaves it, not
     /// the 32,768 its regimen declares: the trunk's prompt and cap, the
     /// fork's new tokens and its cap, together within the window.
     #[test]
     fn a_fork_beside_the_trunk_is_capped_to_what_the_pool_leaves() {
         let (log, outcomes) =
-            beside_a_100k_trunk_capped("during-turn-trunk-cap", true, (Some(60_000), Some(32_768)));
+            beside_a_100k_trunk_capped("during-turn-trunk-cap", true, (Some(20_000), Some(32_768)));
         assert_eq!(outcomes, [log::ForkOutcome::Value], "{log:#?}");
         assert!(a_fork_sent_beside_the_trunk(&log), "room enough beside it");
         let caps = |lane: Lane| -> Vec<u32> {
@@ -19995,13 +20006,46 @@ pub(in crate::drive) mod tests {
         );
     }
 
-    /// The pool's tokens a job holds as the floor's engine allocates them
-    /// (Track 6's measurement, 2026-10-12): `TabbyAPI` reserves the prompt and
-    /// a 2,048-token output chunk per round, and `ExLlamaV3` aligns each round
-    /// to the 2,048-token boundary with draft headroom -- so a job's
-    /// `tokens`, rounded up to a whole chunk, and one chunk more.
+    /// The pool's tokens a job of `tokens` -- its prompt and output, at its
+    /// last round -- needs free on the floor's engine, read by Track 6 from
+    /// both sources (#839): `TabbyAPI` admits a round when
+    /// `ceil((P - 1 + B) / B) * B` fits the cache (`common/errors.py`,
+    /// `validate_context_requirements`, be74bf0), B its 2,048-token
+    /// `recurrent_checkpoint_interval`; `ExLlamaV3` reserves that and its draft
+    /// tokens in 256-token pages (`job.py`, `prepare_for_queue`, 1.5.4) --
+    /// 7 drafted on the floor, one page. The tests' independent account,
+    /// against which serve's rule is checked.
     fn engine_footprint(tokens: u64) -> u64 {
-        tokens.div_ceil(2_048) * 2_048 + 2_048
+        (tokens - 1 + 2_048).div_ceil(2_048) * 2_048 + 256
+    }
+
+    /// Track 6's bound (#839): one job alone fits the floor's 163,840-token
+    /// pool exactly when its prompt and output cap are at most 159,744 --
+    /// the pool less two chunks. The two observed events are past it: T1
+    /// run 3's 161,282 (refused at admission) and pilot 4's fork at 130,140
+    /// and 32,768 (generator-fatal on a requeued round). Serve's footprint
+    /// agrees with the engine's at every one.
+    #[test]
+    fn the_pool_bound_holds_track_6s_events() {
+        const POOL: u64 = 163_840;
+        for (tokens, fits) in [
+            (159_744, true),
+            (159_745, false),
+            (161_282, false),
+            (130_140 + 32_768, false),
+        ] {
+            assert_eq!(
+                footprint(tokens, 2_048) <= POOL,
+                fits,
+                "serve's footprint of {tokens}: {}",
+                footprint(tokens, 2_048)
+            );
+            assert!(
+                !fits || engine_footprint(tokens) <= POOL,
+                "the engine's account of {tokens}: {}",
+                engine_footprint(tokens)
+            );
+        }
     }
 
     /// A trunk on the floor's pool asked `ask` tokens, its output cap
@@ -20230,8 +20274,9 @@ pub(in crate::drive) mod tests {
 
     /// The floor's numbers (Track 6): a fork cut beside a trunk of 110,000,
     /// 120,000 or 130,059 tokens, and the trunk's next request at 140,360 --
-    /// grown past its last prompt and cap. Beside 130,059 the fork is not
-    /// admitted at all; beside the smaller ones it is, and the next request
+    /// grown past its last prompt and cap. Beside 120,000 and 130,059 the
+    /// fork is not admitted at all, two chunks of headroom a job (#839);
+    /// beside 110,000 it is, and the next request
     /// is cut to what it leaves, or waits. Every way, what is on the server
     /// fits the pool as the engine holds it.
     #[test]
@@ -20254,7 +20299,7 @@ pub(in crate::drive) mod tests {
                 FORK_TAIL_DEFAULT,
             );
             if fit.short {
-                assert_eq!(first, 130_059, "only the last leaves no room");
+                assert!(first >= 120_000, "beside {first} there is room");
                 continue;
             }
             admitted += 1;
@@ -20283,7 +20328,7 @@ pub(in crate::drive) mod tests {
                 }
             }
         }
-        assert_eq!(admitted, 2);
+        assert_eq!(admitted, 1, "beside 110,000 only");
     }
 
     /// A fork cut on a ~131k-token trunk is still in flight when a window
@@ -20327,7 +20372,7 @@ pub(in crate::drive) mod tests {
     /// the window -- its cap the window less the prompt and the 10,000
     /// margin -- and a fork cut beside it. An admitted fork, with the cap
     /// serve gives it, must fit the pool as the engine allocates it: each
-    /// job rounded up to a whole chunk and one more. A job past the pool
+    /// job as the engine accounts it (Track 6, #839). A job past the pool
     /// does not just fail; it takes down every job on the server.
     #[test]
     fn a_fork_admitted_beside_the_trunk_fits_the_pool_as_the_engine_allocates_it() {
