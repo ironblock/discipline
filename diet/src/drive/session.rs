@@ -2407,6 +2407,9 @@ struct State {
     /// no queued fork is sent meanwhile, or it would take the room the trunk
     /// waits for.
     trunk_waiting: Option<Instant>,
+    /// How many times the trunk has been refilled: a fork cut before the
+    /// latest shares no prefix with the trunk now.
+    refills: u64,
     /// The note that puts the operator's proposal to the model, due at the
     /// next ask (#788).
     operator_note_due: Option<String>,
@@ -2542,6 +2545,7 @@ impl State {
             move_after_turn: None,
             declared_after_pool: None,
             trunk_waiting: None,
+            refills: 0,
             operator_note_due: None,
             proposal_ends_turn: None,
             phase_entered: 0,
@@ -7626,6 +7630,7 @@ fn refilled(
         .map_or_else(|| render.clone(), |(text, _)| format!("{render}{text}"));
     let mut refilled = crate::meditation::render::refill_with(&head, &sent, background.as_deref());
     state.refilled = true;
+    state.refills += 1;
     refilled.extend(kept);
     let prefix_hash_after = digest(&refilled);
     state.trunk = refilled;
@@ -9228,8 +9233,27 @@ struct PoolFork {
     /// What it holds of the pool, in tokens: its reservation (#797) and
     /// its output cap (#826).
     held: u64,
+    /// Its whole prompt and output cap: what it holds once the trunk it
+    /// shared a prefix with has been refilled away.
+    whole: u64,
+    /// The refills before it was cut ([`State::refills`]).
+    epoch: u64,
     /// Its call's stop.
     cancel: Cancel,
+}
+
+impl PoolFork {
+    /// What it holds of the pool, the trunk refilled `refills` times: its
+    /// share beside the prefix it was cut from while that is still the
+    /// trunk's; once a refill has replaced it, its whole prompt and cap --
+    /// the engine still holds the old prefix for it, and nothing else does.
+    fn holding(&self, refills: u64) -> u64 {
+        if self.epoch == refills {
+            self.held
+        } else {
+            self.whole
+        }
+    }
 }
 
 /// A fork a step warranted, cut and waiting for a slot (#782).
@@ -9243,6 +9267,9 @@ struct Cut {
     firing: Firing,
     /// The trunk as it stood after the step's results.
     messages: Vec<Message>,
+    /// The refills before it was cut ([`State::refills`]): one since, and
+    /// its prefix is no longer the trunk's.
+    epoch: u64,
 }
 
 /// What waits for the last fork cut during the turn (#782).
@@ -10261,6 +10288,7 @@ fn cut_forks<S: Streaming + 'static>(
             line: cut,
             firing,
             messages: messages.to_vec(),
+            epoch: state.refills,
         });
     }
     launch_pool(shared, state);
@@ -10409,7 +10437,7 @@ impl State {
         let forks: u64 = self
             .pool
             .iter()
-            .map(|pool| footprint(pool.held, chunk))
+            .map(|pool| footprint(pool.holding(self.refills), chunk))
             .sum();
         let left = window.saturating_sub(forks);
         let cap = (left.saturating_sub(chunk) / chunk * chunk).saturating_sub(prompt);
@@ -10438,7 +10466,12 @@ fn trunk_clamped(state: &State, turn: u32, window_cap: u32, cap: u32) -> Event {
 /// pool beside the forks in flight: clamped to what they leave it, logged;
 /// or, when even its prompt and the clamp's floor do not fit, held -- the
 /// lock released, no queued fork sent meanwhile -- until they settle, the
-/// wait logged. A stop or the session's end ends the wait.
+/// wait logged. A stop ends the wait: the request is logged with the
+/// window's cap and never opened, the transport honouring a stop asked
+/// before it connects (`client::stream`'s
+/// `a_stop_asked_before_the_call_opens_no_connection`). An `end` reaches a
+/// running turn only through its stop, and only while a prompt waits, never
+/// while it is sized here.
 fn trunk_sized<'a, S>(
     shared: &'a Shared<S>,
     mut state: std::sync::MutexGuard<'a, State>,
@@ -10451,7 +10484,7 @@ fn trunk_sized<'a, S>(
     let mut waited_on: Option<Vec<u64>> = None;
     let room = loop {
         match state.trunk_room(window, prompt, window_cap) {
-            TrunkRoom::Waits if !cancel.is_asked() && !state.ending => {
+            TrunkRoom::Waits if !cancel.is_asked() => {
                 if waited_on.is_none() {
                     waited_on = Some(state.pool.iter().map(|pool| pool.fork).collect());
                     state.trunk_waiting = Some(Instant::now());
@@ -10500,7 +10533,7 @@ fn pool_room(
     let beside: u64 = state
         .pool
         .iter()
-        .map(|pool| footprint(pool.held, chunk))
+        .map(|pool| footprint(pool.holding(state.refills), chunk))
         .sum();
     let room = window.map(|window| log::PoolRoom {
         window,
@@ -10632,6 +10665,8 @@ fn seated<S>(
 /// the pool less than the clamp's floor, the numbers on its `fork.settled`.
 fn fire_cut<S>(shared: &Shared<S>, state: &mut State, cut: Cut) -> Launched {
     let (role, declared, ceiling, sharing) = cut_terms(state, &shared.template);
+    // Cut before a refill, its prefix is no longer the trunk's.
+    let sharing = sharing && cut.epoch == state.refills;
     let mut shape = shared.template.clone();
     shape.messages.clone_from(&cut.messages);
     // The cut, sized as the fork's prompt is: the prefix it holds in
@@ -10668,6 +10703,7 @@ fn fire_cut<S>(shared: &Shared<S>, state: &mut State, cut: Cut) -> Launched {
                 question,
                 trigger,
             },
+        epoch,
         ..
     } = cut;
     let fork = state.push(Event::Forked {
@@ -10713,6 +10749,8 @@ fn fire_cut<S>(shared: &Shared<S>, state: &mut State, cut: Cut) -> Launched {
     state.pool.push(PoolFork {
         fork,
         held: reserved + u64::from(max_tokens),
+        whole: prompt + u64::from(max_tokens),
+        epoch,
         cancel: cancel.clone(),
     });
     Launched::Fired(Fired {
@@ -20228,6 +20266,8 @@ pub(in crate::drive) mod tests {
             state.pool.push(PoolFork {
                 fork: 12,
                 held: fork_held,
+                whole: first + fork_held,
+                epoch: 0,
                 cancel: Cancel::new(),
             });
             let window_cap = clamped(CAP, Some(POOL), next);
@@ -20244,6 +20284,43 @@ pub(in crate::drive) mod tests {
             }
         }
         assert_eq!(admitted, 2);
+    }
+
+    /// A fork cut on a ~131k-token trunk is still in flight when a window
+    /// meditation refills the trunk mid-turn (#813): the refilled trunk
+    /// shares none of the fork's prefix, and the engine still holds all of
+    /// it. The trunk's next request, ~40k with its 32,768 cap, is sized
+    /// against the fork's whole footprint, not its share of a prefix that is
+    /// gone.
+    #[test]
+    fn a_fork_cut_before_a_refill_counts_its_whole_prefix_beside_the_new_trunk() {
+        const POOL: u64 = 163_840;
+        let mut state = State::opening(Vec::new(), None, None, None);
+        state.settlement = Settlement::Turn;
+        let (old, question, fork_cap) = (131_000, 200, 8_192);
+        state.pool.push(PoolFork {
+            fork: 12,
+            held: question + fork_cap,
+            whole: old + question + fork_cap,
+            epoch: state.refills,
+            cancel: Cancel::new(),
+        });
+        // The window meditation's refill.
+        state.refills += 1;
+        let prompt = 40_000;
+        let window_cap = clamped(32_768, Some(POOL), prompt);
+        let fork = engine_footprint(old + question + fork_cap);
+        match state.trunk_room(Some(POOL), prompt, window_cap) {
+            TrunkRoom::Free => assert!(
+                engine_footprint(prompt + u64::from(window_cap)) + fork <= POOL,
+                "the window's cap beside the fork's whole prefix: {} of {POOL}",
+                engine_footprint(prompt + u64::from(window_cap)) + fork
+            ),
+            TrunkRoom::Clamped(cap) => {
+                assert!(engine_footprint(prompt + u64::from(cap)) + fork <= POOL);
+            }
+            TrunkRoom::Waits => {}
+        }
     }
 
     /// The floor's edge (Track 6): a trunk of 130,059 tokens sized against
