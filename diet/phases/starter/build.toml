@@ -1,0 +1,13 @@
+# A starter phase (#787). DRAFT ground rules, awaiting the maintainer's approval.
+name = "build"
+ground_rules = """
+Carry out the plan one step at a time, keeping each change small. Record what you decide and learn with update_record. If the plan proves wrong, say so rather than drifting from it. When the plan's steps are done, call for a phase transition with propose_phase_transition.
+"""
+
+[[transitions]]
+to = "test"
+kind = "suggested"
+
+[[transitions]]
+to = "plan"
+kind = "allowed"

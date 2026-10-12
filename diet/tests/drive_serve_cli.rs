@@ -3043,15 +3043,15 @@ fn a_drive_server_primes_the_system_prompt_under_t2_alone() {
 
 #[test]
 fn a_drive_server_runs_a_regimens_phase_graph() {
-    // #563: serve reads `phases` and `phase_transitions` (it refused them,
-    // #520), logs the graph and the phase it opens in, and takes a phase on
+    // #563, #787: serve reads a phase library and a starting phase, logs
+    // the graph and the phase it opens in, and takes a phase on
     // `declare-meditation` -- refused here as `nothing-to-meditate`, with no turn yet,
     // rather than as a body it cannot read.
     let stub =
         Stub::serving_with_props(Vec::new(), &diet::drive::canned::build_info()).expect("loopback");
     let regimen = dev_loop_sampling(
-        "interview_warrant = [\"scoping\"]\nphases = [\"plan\", \"build\"]\n\
-         [phase_transitions]\nplan = [\"build\"]\n",
+        "interview_warrant = [\"scoping\"]\nphase_library = \"starter\"\n\
+         starting_phase = \"plan\"\n",
         "seed = 7\n",
     );
     let regimen_path = regimen.0.to_string_lossy().into_owned();
@@ -3061,12 +3061,19 @@ fn a_drive_server_runs_a_regimens_phase_graph() {
     let start_line = first_logged_line(&log_file.0);
     assert_eq!(
         start_line["phases"],
-        serde_json::json!(["plan", "build"]),
+        serde_json::json!(["plan", "build", "orient", "quick", "test"]),
         "{start_line}"
     );
     assert_eq!(
         start_line["phase_transitions"],
-        serde_json::json!([{"from": "plan", "to": "build"}]),
+        serde_json::json!([
+            {"from": "plan", "to": "build"},
+            {"from": "plan", "to": "orient"},
+            {"from": "build", "to": "plan"},
+            {"from": "build", "to": "test"},
+            {"from": "orient", "to": "plan"},
+            {"from": "test", "to": "build"},
+        ]),
         "{start_line}"
     );
     assert_eq!(start_line["opening_phase"], "plan", "{start_line}");

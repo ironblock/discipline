@@ -1186,7 +1186,7 @@ mod tests {
             serve_levers(&regimen::parse(text).expect("a regimen"), (64, "default"))["meditation_trigger"]
                 .clone()
         };
-        let phased = "phases = [\"plan\", \"build\"]\n[phase_transitions]\nplan = [\"build\"]\n";
+        let phased = "phase_library = \"starter\"\nstarting_phase = \"plan\"\n";
         assert!(levers(&format!("self_capture = true\n{phased}")).contains("model-proposed"));
         assert!(!levers(phased).contains("model-proposed"));
         assert!(!levers("self_capture = true\n").contains("model-proposed"));
