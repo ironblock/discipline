@@ -636,6 +636,9 @@ export function SessionView({ session, link = 'live', linkWhy, surface, onSurfac
                 // That command near its timeout (#613): the move asks itself.
                 {...(session.proposal ? { proposal: session.proposal } : {})}
                 {...(session.phaseDocument ? { phaseDocument: session.phaseDocument } : {})}
+                {...(session.asked ? { asked: session.asked } : {})}
+                {...(session.answered ? { answered: session.answered } : {})}
+                {...(session.startable ? { startable: session.startable } : {})}
                 // A meditation held for the operator (#150's gate): what its reconcile left unaddressed, with each entry's text.
                 {...(session.held
                   ? { held: { unaddressed: session.held.unaddressed.map((id) => ({ id, text: session.memory.find((m) => m.id === id)?.text ?? id })) } }

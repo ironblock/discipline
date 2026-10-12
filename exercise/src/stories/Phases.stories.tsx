@@ -167,3 +167,25 @@ export const NothingToRefill: Story = {
     await expect(args.onRule).toHaveBeenCalledWith('keep');
   },
 };
+
+/** The operator asked the model (#788): the ask waits on its answer, and a second is not offered meanwhile. */
+export const AskedTheModel: Story = {
+  name: 'phases · the operator’s proposal, waiting on the model',
+  args: { asked: { to: 'plan', meditate: true } },
+  play: async ({ canvasElement }) => {
+    const page = within(canvasElement);
+    await expect(page.getByRole('status', { name: 'asked the model' })).toHaveTextContent('asked the model: orient → plan, through a meditation');
+    await expect(page.queryByRole('button', { name: 'Propose plan to the model' })).toBeNull();
+  },
+};
+
+/** The model declined, with its reason: said until the next move, and the operator's key is back. */
+export const ModelDeclined: Story = {
+  name: 'phases · the model declined the operator’s proposal',
+  args: { answered: { to: 'plan', accepted: false, reason: 'the options are not on the table yet' } },
+  play: async ({ canvasElement }) => {
+    const page = within(canvasElement);
+    await expect(page.getByRole('status', { name: 'the model answered' })).toHaveTextContent('the model declined plan: the options are not on the table yet');
+    await expect(page.getByRole('button', { name: 'Propose plan to the model' })).toBeEnabled();
+  },
+};

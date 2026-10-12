@@ -1,8 +1,8 @@
 import { useEffect, useRef, useState } from 'react';
 import type { ClipboardEvent, DragEvent, FormEvent, KeyboardEvent, MouseEvent } from 'react';
 
-import type { PhaseDocument, SessionState } from '../session/fold.ts';
-import type { Ack, Command, Disposition, Link, Uploaded } from '../drive/transport.ts';
+import type { PhaseDocument, PhaseEvidence, SessionState } from '../session/fold.ts';
+import type { Ack, Command, Disposition, Link, PhaseChoice, Uploaded } from '../drive/transport.ts';
 import { Phases } from './Phases.tsx';
 import type { PhaseMove } from './Phases.tsx';
 import { Segments } from './Segments.tsx';
@@ -32,9 +32,14 @@ export interface ComposerProps {
   /** That command is near its timeout (#613): the move to the background asks itself, before the timeout kills it. */
   readonly nearTimeout?: boolean;
   /** The model's phase proposal waiting on the operator (#124, #651): the move, its reason, and the call it is. */
-  readonly proposal?: { readonly call: string; readonly from?: string; readonly to: string; readonly reason?: string };
+  readonly proposal?: { readonly call: string; readonly from?: string; readonly to: string; readonly reason?: string; readonly evidence?: PhaseEvidence };
   /** The phase document in force (#787): its moves and its ground rules, on the phase control (#789). */
   readonly phaseDocument?: PhaseDocument;
+  /** The operator's proposal waiting on the model, and the model's last answer (#788). */
+  readonly asked?: { readonly to: string; readonly meditate: boolean };
+  readonly answered?: { readonly to: string; readonly accepted: boolean; readonly reason?: string };
+  /** The library the session may still start in, until the first ask (#788). */
+  readonly startable?: readonly string[];
   /** Why a meditation has nothing to refill from now, when it has none (#685): serve refuses a meditation then (`nothing-to-meditate`). */
   readonly noMeditation?: string;
   /** A meditation held for the operator (#150's gate): the changes its reconcile left unaddressed, each with its entry's text. */
@@ -63,7 +68,7 @@ const STATE_LINE: Readonly<Record<SessionState, string>> = {
 /** How long the question "end the session?" shows before a press answers it. */
 const CONFIRM_AFTER_MS = 500;
 
-export function Composer({ state, link = 'live', phase, phases, dispatch, hint, upload, tangents = false, tangent, foreground = false, nearTimeout = false, proposal, phaseDocument, noMeditation, held }: ComposerProps) {
+export function Composer({ state, link = 'live', phase, phases, dispatch, hint, upload, tangents = false, tangent, foreground = false, nearTimeout = false, proposal, phaseDocument, asked, answered, startable, noMeditation, held }: ComposerProps) {
   // Ending a tangent (#608): the operator rules on each of its entries, keep by default, then closes it.
   const [closing, setClosing] = useState(false);
   const [rulings, setRulings] = useState<Readonly<Record<string, Disposition>>>({});
@@ -215,18 +220,30 @@ export function Composer({ state, link = 'live', phase, phases, dispatch, hint, 
           </span>
         </section>
       ) : null}
-      {/* The phase control (#789): the phase in force, its moves and ground rules, and the operator's key on the model's
-          proposal (#124). Keep is #788's word; until it lands, serve takes it as #651's `continue`. */}
-      {phaseDocument || (proposal && dispatch) ? (
+      {/* The phase control (#789): the phase in force, its moves and ground rules, and both keys (#788) -- the operator's
+          ruling on the model's proposal, with its evidence, and the operator's own proposal or move. Moving alone is
+          offered as serve's default (`operator_unilateral` is not logged); a regimen that forbids it refuses in place. */}
+      {phaseDocument || startable || (proposal && dispatch) ? (
         <Phases
           phase={phase}
           moves={(phaseDocument?.transitions ?? []).filter((move): move is PhaseMove => move.kind === 'suggested' || move.kind === 'allowed')}
           {...(phaseDocument ? { groundRules: phaseDocument.groundRules } : {})}
           {...(proposal && dispatch ? { proposal } : {})}
+          {...(proposal?.evidence ? { evidence: proposal.evidence } : {})}
+          {...(asked ? { asked } : {})}
+          {...(answered ? { answered } : {})}
           {...(noMeditation !== undefined ? { noMeditation } : {})}
-          unilateral={false}
+          {...(startable && dispatch ? { start: { library: startable } } : {})}
+          unilateral
           idle={idle}
-          onRule={(ruling) => proposal && void run({ kind: 'ratify-phase', call: proposal.call, choice: ruling === 'keep' ? 'continue' : ruling })}
+          {...(dispatch
+            ? {
+                onRule: (choice: PhaseChoice) => proposal && void run({ kind: 'ratify-phase', call: proposal.call, choice }),
+                onPropose: (to: string) => run({ kind: 'propose-phase', to }),
+                onMove: (to: string, how: Exclude<PhaseChoice, 'stay'>) => run({ kind: 'move-phase', to, meditate: how === 'meditation' }),
+                onStart: (start: string) => run({ kind: 'start-phase', phase: start }),
+              }
+            : {})}
         />
       ) : null}
       {tangents && open && closing ? (

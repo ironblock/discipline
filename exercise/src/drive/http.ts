@@ -240,6 +240,12 @@ export class HttpTransport implements DriveTransport {
         return { kind: 'flag-entry', id: command.id, note: command.note };
       case 'ratify-phase':
         return { kind: 'ratify-phase', call: command.call, choice: command.choice };
+      case 'start-phase':
+        return { kind: 'start-phase', phase: command.phase };
+      case 'propose-phase':
+        return { kind: 'propose-phase', to: command.to, ...(command.meditate !== undefined ? { meditate: command.meditate } : {}) };
+      case 'move-phase':
+        return { kind: 'move-phase', to: command.to, meditate: command.meditate };
       case 'background':
         return { kind: 'background' };
       case 'refill-anyway':

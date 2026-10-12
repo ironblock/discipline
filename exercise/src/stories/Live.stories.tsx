@@ -36,6 +36,8 @@ import rehearsal from '../drive/served/rehearsal-turns-1-4.log?raw';
 import { TANGENT_OPEN } from '../drive/served/tangent.ts';
 import { SELF_CAPTURE } from '../drive/served/self-capture.ts';
 import { PHASE_PROPOSED, PHASE_PROPOSED_WITH_MEMORY, PHASE_RULED_CONTINUE } from '../drive/served/phase-proposal.ts';
+import type { LogLine } from '../drive/log.ts';
+import { MODEL_PROPOSED, OPERATOR_ASKED, PHASE_IDLE, PHASE_OPENED } from '../drive/served/phase-keys.ts';
 import { NO_COMMANDS } from '../drive/served/no-commands.ts';
 import { STOPPED_IN_PREFILL, STOPPED_IN_PREFILL_AFTER } from '../drive/served/stopped-in-prefill.ts';
 
@@ -752,9 +754,9 @@ export const ServedPhaseProposal: Story = {
     await expect(ruling).toHaveTextContent('no meditation: working memory holds nothing yet');
     await expect(canvasElement.querySelector('.ex-composer__proposal')).toBeNull();
     posted.length = 0;
-    // Keep is #788's word; until it lands, serve takes the ruling as #651's `continue`.
+    // Keep is #788's word, and serve reads v7's `continue` as it.
     await userEvent.click(within(ruling).getByRole('button', { name: 'Keep, move to build' }));
-    await waitFor(async () => expect(posted).toEqual([{ kind: 'ratify-phase', call: 'p1', choice: 'continue' }]));
+    await waitFor(async () => expect(posted).toEqual([{ kind: 'ratify-phase', call: 'p1', choice: 'keep' }]));
   },
 };
 
@@ -770,6 +772,60 @@ export const ServedPhaseDocument: Story = {
     await expect(within(moves).getAllByRole('listitem').map((li) => li.textContent)).toEqual(['build · suggested']);
     await userEvent.click(page.getByRole('button', { name: 'Ground rules of plan' }));
     await expect(page.getByText('Settle the approach before any change.', { selector: '.ex-phases__rules' })).toBeVisible();
+  },
+};
+
+const lines = (log: readonly LogLine[]) => log.map((l) => JSON.stringify(l)).join('\n');
+
+/** `?drive` (#788): the model's proposal from `phase.proposed`, ruled with the evidence it was logged with. */
+export const ServedPhaseEvidence: Story = {
+  name: '?drive: the model’s proposal is ruled with its evidence',
+  args: { drive: true, web: posting(lines(MODEL_PROPOSED)) },
+  play: async ({ canvasElement }) => {
+    const ruling = await within(canvasElement).findByRole('region', { name: 'the model proposes plan → build' });
+    await expect(within(ruling).getByRole('definition', { name: 'phase length' })).toHaveTextContent('6 steps · 12.4k tokens');
+    await expect(within(ruling).getByRole('definition', { name: 'since the last meditation' })).toHaveTextContent('12.4k tokens');
+    posted.length = 0;
+    await userEvent.click(within(ruling).getByRole('button', { name: 'Stay in plan' }));
+    await waitFor(async () => expect(posted).toEqual([{ kind: 'ratify-phase', call: 'p1', choice: 'stay' }]));
+  },
+};
+
+/** `?drive` (#788): the operator's key -- propose a move to the model, or take it alone, through a meditation or not. */
+export const ServedOperatorKey: Story = {
+  name: '?drive: the operator proposes a move, or takes it',
+  args: { drive: true, web: posting(lines(PHASE_IDLE)) },
+  play: async ({ canvasElement }) => {
+    const page = within(canvasElement);
+    await page.findByRole('region', { name: 'move from plan' });
+    posted.length = 0;
+    await userEvent.click(page.getByRole('button', { name: 'Propose build to the model' }));
+    await waitFor(async () => expect(posted).toEqual([{ kind: 'propose-phase', to: 'build' }]));
+    posted.length = 0;
+    await userEvent.click(page.getByRole('button', { name: 'Keep, move to test' }));
+    await waitFor(async () => expect(posted).toEqual([{ kind: 'move-phase', to: 'test', meditate: false }]));
+  },
+};
+
+/** `?drive` (#788): the operator's proposal waits on the model's answer. */
+export const ServedOperatorAsked: Story = {
+  name: '?drive: the operator’s proposal waits on the model',
+  args: { drive: true, web: serving(lines(OPERATOR_ASKED)) },
+  play: async ({ canvasElement }) => {
+    await expect(await within(canvasElement).findByRole('status', { name: 'asked the model' })).toHaveTextContent('asked the model: plan → build, keeping the trunk');
+  },
+};
+
+/** `?drive` (#788): before the first ask, the session may start in any phase of its library. */
+export const ServedStartingPhase: Story = {
+  name: '?drive: the starting phase, chosen before the first ask',
+  args: { drive: true, web: posting(lines(PHASE_OPENED)) },
+  play: async ({ canvasElement }) => {
+    const picker = (await within(canvasElement).findByRole('combobox', { name: 'starting phase' })) as HTMLSelectElement;
+    await expect(picker.value).toBe('plan');
+    posted.length = 0;
+    await userEvent.selectOptions(picker, 'build');
+    await waitFor(async () => expect(posted).toEqual([{ kind: 'start-phase', phase: 'build' }]));
   },
 };
 
