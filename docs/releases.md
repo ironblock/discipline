@@ -104,6 +104,13 @@ Structure for an autonomous model, enforced classically: Superpowers-like ground
 - **Phases as documents:** TOML in the user's library, each with its ground rules and suggested or allowed transitions; a starting phase by default or by choice, a quick-task phase with none. At a meditation the system prompt becomes the head plus the phase's ground rules, the only time it changes (#787).
 - **Two keys:** the model or the operator proposes a move, the other accepts, the operator may move alone; a model's proposal ends its turn; the operator rules meditate-and-move, keep or stay, shown the evidence (#788), on the page (#789) and over MCP (#790).
 - **Capture during the turn:** interviews cut at a step run in the spare slot while the trunk goes on (#782); interviews warranted by what a step produced, the predecessor's evidence, trouble and open triggers (#783); mechanical capture of the files each step touched (#784).
+- **What the phased retries found** (agent-driven T1 on Flash-Next and the floor, 2026-10-11/12):
+  - a window meditation inside a turn splits the running turn, keeping its ask and only its recent steps, as OpenCode 2 and Pi do (#813);
+  - a refill fits the window: reference lines bounded, working memory elided to the window's line (#814), and the meditation's audit fitted the same way (#821);
+  - a fork's own record-tool calls fold as its answer (#806);
+  - a fork cut from the trunk reserves only its new tokens where the server shares prefix pages (#797);
+  - the in-turn fork queue is bounded (#822);
+  - the kitchen sink shows every lever as a diet scenario (#798).
 
 **Done when** T1, driven on the floor in phases, reaches step 8's feedback loops without the window ending a turn.
 
