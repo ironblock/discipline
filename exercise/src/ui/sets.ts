@@ -232,4 +232,8 @@ export const refusalOf = registry<Refusal>({
   'not-a-phase': { label: 'not taken: that is not one of the session’s phases', level: 'warn' },
   'already-in-phase': { label: 'not taken: the session is already in that phase', level: 'quiet' },
   'no-phase-edge': { label: 'not taken: the phase graph has no move from here to there', level: 'warn' },
+  // The two keys (#788).
+  'not-unilateral': { label: 'not taken: this regimen lets the operator only propose a move, not take it alone', level: 'warn' },
+  'already-asked': { label: 'not taken: the session has asked, so its starting phase is settled', level: 'quiet' },
+  'proposal-pending': { label: 'not taken: the model’s own proposal waits on your ruling first', level: 'warn' },
 });

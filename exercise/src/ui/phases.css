@@ -14,6 +14,8 @@
 }
 
 .ex-phases__label,
+.ex-phases__asked,
+.ex-phases__answered,
 .ex-phases__reason,
 .ex-phases__why,
 .ex-phases__rules {
@@ -21,6 +23,8 @@
 }
 
 .ex-phases__rules,
+.ex-phases__asked,
+.ex-phases__answered,
 .ex-phases__reason {
   margin: 0;
 }

@@ -4,6 +4,8 @@
  */
 import { useId, useState } from 'react';
 
+import type { PhaseChoice } from '../drive/transport.ts';
+import type { PhaseEvidence } from '../session/fold.ts';
 import { tokens } from './format.ts';
 import './phases.css';
 
@@ -13,19 +15,11 @@ export interface PhaseMove {
   readonly kind: 'suggested' | 'allowed';
 }
 
-/** What an operator's choice is made with (#788). */
-export interface PhaseEvidence {
-  /** The phase's length so far, in steps and tokens. */
-  readonly steps: number;
-  readonly tokens: number;
-  /** Tokens since the last meditation. */
-  readonly sinceMeditation: number;
-  /** Whether the operator just meditated by hand. */
-  readonly manualMeditation: boolean;
-}
+/** What an operator's choice is made with (#788), as the fold reads it. */
+export type { PhaseEvidence };
 
-/** The operator's ruling on the model's proposal (#788): `keep` moves without a meditation. */
-export type PhaseRuling = 'meditation' | 'keep' | 'stay';
+/** The operator's ruling on the model's proposal (#788): `keep` moves without a meditation. One word set, the wire's. */
+export type PhaseRuling = PhaseChoice;
 
 export interface PhasesProps {
   readonly phase: string;
@@ -34,6 +28,10 @@ export interface PhasesProps {
   readonly evidence?: PhaseEvidence;
   /** The model's proposal waiting on the operator. */
   readonly proposal?: { readonly from?: string; readonly to: string; readonly reason?: string };
+  /** The operator's proposal waiting on the model (#788): no second is offered meanwhile. */
+  readonly asked?: { readonly to: string; readonly meditate: boolean };
+  /** The model's answer to the operator's last proposal (#788). */
+  readonly answered?: { readonly to: string; readonly accepted: boolean; readonly reason?: string };
   /** Why there is nothing to meditate on (#685), as serve would refuse it: meditate-and-move is not offered. */
   readonly noMeditation?: string;
   /** `operator_unilateral` (#788): the operator may move alone. */
@@ -47,7 +45,7 @@ export interface PhasesProps {
   readonly onMove?: (to: string, how: Exclude<PhaseRuling, 'stay'>) => void;
 }
 
-export function Phases({ phase, moves, groundRules, evidence, proposal, noMeditation, unilateral, idle, start, onStart, onRule, onPropose, onMove }: PhasesProps) {
+export function Phases({ phase, moves, groundRules, evidence, proposal, asked, answered, noMeditation, unilateral, idle, start, onStart, onRule, onPropose, onMove }: PhasesProps) {
   const [rules, setRules] = useState(false);
   const rulesId = useId();
   return (
@@ -87,6 +85,16 @@ export function Phases({ phase, moves, groundRules, evidence, proposal, noMedita
           ))}
         </ul>
       ) : null}
+      {asked ? (
+        <p className="ex-phases__asked" role="status" aria-label="asked the model">
+          {`asked the model: ${phase} → ${asked.to}, ${asked.meditate ? 'through a meditation' : 'keeping the trunk'}`}
+        </p>
+      ) : null}
+      {answered ? (
+        <p className="ex-phases__answered" role="status" aria-label="the model answered">
+          {`the model ${answered.accepted ? 'accepted' : 'declined'} ${answered.to}${answered.reason !== undefined ? `: ${answered.reason}` : ''}`}
+        </p>
+      ) : null}
       {proposal ? (
         // The model's key (#788): its proposal ended its turn; the operator turns the other -- meditate and move, as
         // suggested, keep, or stay -- with the facts that make the choice.
@@ -113,7 +121,7 @@ export function Phases({ phase, moves, groundRules, evidence, proposal, noMedita
           </span>
           {noMeditation !== undefined ? <span className="ex-phases__why">no meditation: {noMeditation}</span> : null}
         </section>
-      ) : moves.length > 0 && (onPropose || onMove) ? (
+      ) : moves.length > 0 && !asked && (onPropose || onMove) ? (
         // The operator's key (#788): propose a move to the model, or, where `operator_unilateral` allows, take it.
         <section className="ex-phases__operator" aria-label={`move from ${phase}`}>
           {evidence ? <Evidence evidence={evidence} /> : null}
