@@ -664,6 +664,23 @@ impl WorkingObject {
             if let Some(entry) = self.entries.get(&held)
                 && !entry.state.is_live()
             {
+                // A file the mechanical lane saw deleted and then touched
+                // again (#784): it exists again, which is not a disagreement
+                // with a correction but a new fact about a new file. A fresh
+                // entry under a fresh id; the retired one left as it was.
+                // Only the lane that retired it, and only a retire: every
+                // other restatement of an inactive entry stays refused.
+                let mechanical = crate::capture::mechanical::LANE;
+                if entry.state == EntryState::Retired
+                    && provenance.lane == mechanical
+                    && entry
+                        .provenances
+                        .last()
+                        .is_some_and(|retired| retired.lane == mechanical)
+                    && self.canonical(id).is_none()
+                {
+                    return Ok(Applied::Created(self.create(id, content, key, provenance)));
+                }
                 return Err(ObjectError::RestatesInactive {
                     id: id.clone(),
                     held,
@@ -1606,6 +1623,52 @@ mod tests {
             EntryState::Voided { by: id("e3") }
         );
         assert_eq!(object.entry(&id("e1")).expect("e1").state, EntryState::Live);
+    }
+
+    /// #784: a file the mechanical lane retired and touches again is a fresh
+    /// entry under a fresh id -- and only that: a retire by another lane, a
+    /// restatement by another lane, or the retired entry's own id stays
+    /// refused.
+    #[test]
+    fn only_the_mechanical_lane_restates_a_file_it_retired() {
+        let mechanical = crate::capture::mechanical::LANE;
+        let retired_by = |lane: &str| {
+            let mut object = object();
+            object
+                .apply(&add("m/f", "files: f", from(1, mechanical, None)))
+                .expect("the file");
+            object
+                .apply(&Patch::Retire {
+                    target: id("m/f"),
+                    provenance: from(1, lane, None),
+                })
+                .expect("its delete");
+            object
+        };
+        let mut object = retired_by(mechanical);
+        assert_eq!(
+            object.apply(&add("m/f#2", "files: f", from(2, mechanical, None))),
+            Ok(Applied::Created(id("m/f#2")))
+        );
+        assert_eq!(
+            object.entry(&id("m/f")).expect("held").state,
+            EntryState::Retired
+        );
+        assert!(object.entry(&id("m/f#2")).expect("fresh").state.is_live());
+        let mut object = retired_by(mechanical);
+        assert!(matches!(
+            object.apply(&add("e9", "files: f", from(2, "interview", None))),
+            Err(ObjectError::RestatesInactive { .. })
+        ));
+        assert!(matches!(
+            object.apply(&add("m/f", "files: f", from(2, mechanical, None))),
+            Err(ObjectError::RestatesInactive { .. })
+        ));
+        let mut object = retired_by("audit");
+        assert!(matches!(
+            object.apply(&add("m/f#2", "files: f", from(2, mechanical, None))),
+            Err(ObjectError::RestatesInactive { .. })
+        ));
     }
 
     #[test]

@@ -4,5 +4,12 @@
     "path": "/work/a"
   },
   "failures": [],
-  "files": {}
+  "files": {
+    "/work/a/b": {
+      "event": "t1",
+      "kind": "listed",
+      "resolved": true,
+      "turn": 1
+    }
+  }
 }
