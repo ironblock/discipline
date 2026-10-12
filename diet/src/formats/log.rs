@@ -550,6 +550,9 @@ vocabulary! {
         /// The operator's proposal while the model's waits on a ruling (v8,
         /// #788).
         ProposalPending => "proposal-pending",
+        /// An ask carrying an image to a substrate served without vision
+        /// (v8, #815).
+        NoVision => "no-vision",
     }
 }
 
@@ -4861,7 +4864,12 @@ fn two_keys(tags: Tags, tag: &str) -> bool {
 #[must_use]
 #[allow(clippy::too_many_lines)] // one table of arrivals, written out
 pub fn tag_introduced(tags: Tags, tag: &str) -> i64 {
-    if tags == Tags::Refusal && Refusal::from_tag(tag) == Some(Refusal::Restates) {
+    if tags == Tags::Refusal
+        && matches!(
+            Refusal::from_tag(tag),
+            Some(Refusal::Restates | Refusal::NoVision)
+        )
+    {
         return 8;
     }
     if tags == Tags::Warrant
@@ -9617,7 +9625,7 @@ mod tests {
         assert_eq!(
             tags(Refusal::ALL.iter().map(|it| it.tag()).collect()),
             "in-flight ended nothing-in-flight meditation-not-built nothing-to-meditate no-phase-graph not-a-phase \
-             already-in-phase no-phase-edge stale tangent-open no-tangent bad-tangent not-the-scope nothing-running no-proposal unknown-entry not-live empty meditation-held nothing-held restates not-unilateral already-asked proposal-pending"
+             already-in-phase no-phase-edge stale tangent-open no-tangent bad-tangent not-the-scope nothing-running no-proposal unknown-entry not-live empty meditation-held nothing-held restates not-unilateral already-asked proposal-pending no-vision"
         );
         assert_eq!(
             tags(SettleReason::ALL.iter().map(|it| it.tag()).collect()),

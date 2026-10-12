@@ -104,6 +104,7 @@ export type Refusal =
   | "not-unilateral"
   | "already-asked"
   | "proposal-pending"
+  | "no-vision"
 ;
 
 export type FailReason =

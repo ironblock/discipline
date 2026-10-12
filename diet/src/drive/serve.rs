@@ -872,6 +872,49 @@ impl<S: Streaming + 'static> Serving<S> {
 
     /// The uploads an ask's `files` names, in its order, or the first digest
     /// never uploaded to this server.
+    /// An ask: its words and the uploads it names, attached and put to the
+    /// session. `400` naming the file that cannot be attached; `409` with
+    /// the session's refusal -- for an image the substrate cannot see
+    /// (#815), naming the substrate, so the operator knows it was not the
+    /// model that ignored it.
+    fn asked(
+        &self,
+        text: &str,
+        files: &[String],
+        gap: Option<IdleGap>,
+        scoping: bool,
+    ) -> (u16, BTreeMap<String, Value>) {
+        let attached = self
+            .uploads_named(files)
+            .and_then(|uploads| attach::attached_with(text, &uploads, &self.config.attaching));
+        let attached = match attached {
+            Ok(attached) => attached,
+            Err(unattachable) => return (400, unattached(&unattachable)),
+        };
+        match self.session.ask_attached(attached, gap, scoping) {
+            Ok(admitted) => (
+                200,
+                BTreeMap::from([
+                    ("seq".to_owned(), integer(admitted.seq)),
+                    ("turn".to_owned(), integer(u64::from(admitted.turn))),
+                ]),
+            ),
+            Err(Rejected::Refused(because)) => {
+                let mut body = BTreeMap::from([(
+                    "refused".to_owned(),
+                    Value::String(because.tag().to_owned()),
+                )]);
+                if because == Refusal::NoVision
+                    && let Some(substrate) = self.session.blind()
+                {
+                    body.insert("substrate".to_owned(), Value::String(substrate));
+                }
+                (409, body)
+            }
+            Err(Rejected::NoSuchTurn(_) | Rejected::BadGap(_)) => (400, BTreeMap::new()),
+        }
+    }
+
     fn uploads_named(&self, files: &[String]) -> Result<Vec<Upload>, Unattachable> {
         let held = self.uploads.lock().unwrap_or_else(PoisonError::into_inner);
         files
@@ -908,22 +951,7 @@ impl<S: Streaming + 'static> Serving<S> {
             Rejected::NoSuchTurn(_) | Rejected::BadGap(_) => (400, BTreeMap::new()),
         };
         match command {
-            Command::Ask(text, files) => match self
-                .uploads_named(&files)
-                .and_then(|uploads| attach::attached_with(&text, &uploads, &self.config.attaching))
-            {
-                Err(unattachable) => (400, unattached(&unattachable)),
-                Ok(attached) => match self.session.ask_attached(attached, gap, scoping) {
-                    Ok(admitted) => (
-                        200,
-                        BTreeMap::from([
-                            ("seq".to_owned(), integer(admitted.seq)),
-                            ("turn".to_owned(), integer(u64::from(admitted.turn))),
-                        ]),
-                    ),
-                    Err(rejection) => rejected(rejection),
-                },
-            },
+            Command::Ask(text, files) => self.asked(&text, &files, gap, scoping),
             Command::Cancel(turn) => match self.session.cancel(turn, gap) {
                 Ok(()) => (200, BTreeMap::new()),
                 Err(rejection) => rejected(rejection),
@@ -4006,6 +4034,58 @@ mod tests {
             &mut out,
         );
         out
+    }
+
+    /// #815 end to end: on a substrate whose served configuration takes no
+    /// images, an ask naming an uploaded PNG is refused `409`, `no-vision`,
+    /// naming the substrate, logged, and never sent; the words alone go.
+    #[test]
+    fn an_image_ask_to_a_substrate_without_vision_is_409_no_vision_and_never_sent() {
+        use crate::client::stream::HttpStream;
+        use crate::client::stub::{Act, Stub};
+        use crate::client::transport::Endpoint;
+        use crate::drive::attach::tests::png;
+
+        let stub = Stub::serving(vec![Act::Raw(REPLY.to_vec())]).expect("loopback");
+        let transport = HttpStream::new(Endpoint::parse(&stub.url()).expect("the stub's URL"));
+        let session =
+            Arc::new(Session::open(transport, template()).without_vision("a-text-only-substrate"));
+        let server = Server::start(
+            TcpListener::bind("127.0.0.1:0").expect("loopback"),
+            Arc::clone(&session),
+            quick(),
+            crate::drive::session::render,
+        )
+        .expect("the server starts");
+        let bytes = png("the page's screenshot");
+        let sha256 = crate::digest::sha256_hex(&bytes);
+        assert_eq!(status(&upload_png(&server, &bytes, "image/png")), 200);
+        let reply = post(
+            &server,
+            &ask_files_json("what is on the page?", &[&sha256]),
+            "",
+        );
+        assert_eq!(status(&reply), 409, "{reply}");
+        assert_eq!(
+            json::line(body(&reply)).expect("a JSON object"),
+            BTreeMap::from([
+                ("refused".to_owned(), Value::String("no-vision".to_owned())),
+                (
+                    "substrate".to_owned(),
+                    Value::String("a-text-only-substrate".to_owned())
+                ),
+            ])
+        );
+        assert!(session.events_from(0).iter().any(|logged| matches!(
+            logged.event,
+            Event::Refused {
+                because: Refusal::NoVision,
+                ..
+            }
+        )));
+        assert!(stub.received().is_empty(), "nothing was sent");
+        let reply = post(&server, &ask_json("what is on the page?"), "");
+        assert_eq!(status(&reply), 200, "the words alone go: {reply}");
     }
 
     /// #513 end to end against a stub engine, with no regimen (an upload is
