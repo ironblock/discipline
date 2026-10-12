@@ -119,6 +119,16 @@ pub const SANDBOX_SECRETS: &str = "sandbox_secrets";
 pub const SANDBOX_WRITABLE: &str = "sandbox_writable";
 /// Environment variable names ADDED to [`DEFAULT_ENVIRONMENT`].
 pub const ENV_PASSTHROUGH: &str = "env_passthrough";
+/// The Unix sockets a sandboxed command may connect to: absolute paths, or
+/// `~/`-relative, each a literal -- never a pattern, which matching every
+/// daemon's socket would also admit other runs' daemons.
+pub const SANDBOX_UNIX_SOCKETS: &str = "sandbox_unix_sockets";
+
+/// The longest path a Unix socket's address holds, in bytes: macOS's
+/// `sun_path` is 104, its terminator included. A longer one fails to
+/// connect (`EINVAL`), so it is refused at the regimen rather than met at
+/// the first connect.
+pub const UNIX_SOCKET_PATH_MAX: usize = 103;
 
 /// What a session's commands run under.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -152,6 +162,9 @@ pub struct Policy {
     /// The session's own temporary directory, when it has one
     /// ([`Policy::session_tmpdir`]): a command's `TMPDIR`, and writable.
     pub tmpdir: Option<String>,
+    /// The Unix sockets a sandboxed command may connect to, as declared
+    /// ([`SANDBOX_UNIX_SOCKETS`]).
+    pub unix_sockets: Vec<String>,
 }
 
 impl Policy {
@@ -232,6 +245,7 @@ impl Policy {
                 .map(|name| (*name).to_owned())
                 .collect(),
             tmpdir: None,
+            unix_sockets: Vec::new(),
         }
     }
 
@@ -255,6 +269,7 @@ impl Policy {
                 .map(|name| (*name).to_owned())
                 .collect(),
             tmpdir: None,
+            unix_sockets: Vec::new(),
         }
     }
 
@@ -369,6 +384,7 @@ impl Policy {
             }
             policy.writable.push(path);
         }
+        policy.unix_sockets = unix_sockets(regimen)?;
         for name in paths(regimen, ENV_PASSTHROUGH)? {
             let mut chars = name.chars();
             let named_well = chars
@@ -385,6 +401,23 @@ impl Policy {
 
         Ok(policy)
     }
+}
+
+/// The Unix sockets `regimen` names ([`SANDBOX_UNIX_SOCKETS`]): each
+/// absolute, and short enough resolved for a socket's address.
+fn unix_sockets(regimen: &Regimen) -> Result<Vec<String>, PolicyError> {
+    let mut out = Vec::new();
+    for path in paths(regimen, SANDBOX_UNIX_SOCKETS)? {
+        if !is_rooted(&path) {
+            return Err(PolicyError::NotAbsolute(path));
+        }
+        let bytes = canonical_prefix(&home_expanded(&path)).as_os_str().len();
+        if bytes > UNIX_SOCKET_PATH_MAX {
+            return Err(PolicyError::SocketPathTooLong { path, bytes });
+        }
+        out.push(path);
+    }
+    Ok(out)
 }
 
 /// Why a regimen does not describe an isolation policy.
@@ -425,6 +458,14 @@ pub enum PolicyError {
     LoopbackWithoutNone {
         /// The network it was declared under.
         network: Network,
+    },
+    /// A `sandbox_unix_sockets` path longer, resolved, than a socket's
+    /// address holds ([`UNIX_SOCKET_PATH_MAX`]).
+    SocketPathTooLong {
+        /// The path as written.
+        path: String,
+        /// Its resolved length in bytes.
+        bytes: usize,
     },
 }
 
@@ -477,6 +518,12 @@ impl fmt::Display for PolicyError {
                  `{NETWORK} = \"{}\"` every port is already reachable, and a record \
                  carrying both would name an allowance that allowed nothing",
                 network.tag()
+            ),
+            Self::SocketPathTooLong { path, bytes } => write!(
+                f,
+                "`{SANDBOX_UNIX_SOCKETS}` names {path}, which resolves to {bytes} bytes: a Unix \
+                 socket's address holds at most {UNIX_SOCKET_PATH_MAX}, so nothing could connect \
+                 to it (EINVAL). Give the daemon a shorter path"
             ),
         }
     }
