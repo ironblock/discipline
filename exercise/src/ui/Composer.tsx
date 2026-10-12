@@ -385,28 +385,31 @@ export function Composer({ state, link = 'live', phase, phases, dispatch, hint, 
             {nearTimeout ? 'move to background?' : 'move to background'}
           </button>
         ) : null}
-        {running ? (
-          <button type="button" className="ex-composer__cancel" disabled={!dispatch} onClick={() => run({ kind: 'cancel' })}>
-            cancel
-          </button>
-        ) : (
-          <>
-            {/* The operator's mark (#453): this ask is the scope answer, whose settled turn warrants the interview fork. */}
-            <button
-              type="button"
-              className="ex-composer__scope"
-              aria-pressed={scoping}
-              disabled={!idle || !dispatch}
-              title="mark this ask the scope answer: its turn warrants the interview fork"
-              onClick={() => setScoping(!scoping)}
-            >
-              scope answer
-            </button>
-            <button type="submit" className="ex-composer__send" disabled={!idle || !dispatch || draft.trim() === '' || uploading > 0} title={uploading > 0 ? 'waiting for the attachment to reach the drive' : undefined}>
-              {scoping ? 'send as scope answer' : 'send'}
-            </button>
-          </>
-        )}
+        {/* All three are always rendered, the inapplicable ones hidden (#766): a reference taken to one outlives a turn. */}
+        <button type="button" className="ex-composer__cancel" hidden={!running} disabled={!dispatch} onClick={() => run({ kind: 'cancel' })}>
+          cancel
+        </button>
+        {/* The operator's mark (#453): this ask is the scope answer, whose settled turn warrants the interview fork. */}
+        <button
+          type="button"
+          className="ex-composer__scope"
+          hidden={running}
+          aria-pressed={scoping}
+          disabled={!idle || !dispatch}
+          title="mark this ask the scope answer: its turn warrants the interview fork"
+          onClick={() => setScoping(!scoping)}
+        >
+          scope answer
+        </button>
+        <button
+          type="submit"
+          className="ex-composer__send"
+          hidden={running}
+          disabled={!idle || !dispatch || draft.trim() === '' || uploading > 0}
+          title={uploading > 0 ? 'waiting for the attachment to reach the drive' : undefined}
+        >
+          {scoping ? 'send as scope answer' : 'send'}
+        </button>
       </div>
       {hint ? <p className="ex-composer__hint">{hint}</p> : null}
     </form>

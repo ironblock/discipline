@@ -23,6 +23,7 @@ pub mod audit;
 pub mod decline;
 pub mod interview;
 pub mod log;
+pub mod log_query;
 pub mod operating_points;
 pub mod record;
 pub mod regimen;

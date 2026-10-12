@@ -122,10 +122,12 @@ SOURCES = (
 # recompile it at all -- the same false positive this narrowing was written to
 # remove, arriving through a different door.
 #
-# `target/debug/diet.d` is the real list. Cargo writes it beside the binary on
-# every build, in Make's format -- one line, `<target>: <dep> <dep> ...` -- and
-# it holds exactly what rustc read to produce THAT artifact: no test-only
-# embed, and every grammar. There is no second reader to drift from.
+# The dep-info is the real list, in Make's format -- `<target>: <dep> <dep>
+# ...` -- holding exactly what rustc read to produce THAT artifact: no
+# test-only embed, and every grammar. There is no second reader to drift
+# from. Which file holds it for the binary at hand is `depinfo_of()`'s to
+# say: rustc's `deps/diet-<hash>.d` for the copy cargo took the binary from,
+# else cargo's `target/debug/diet.d`, which only `cargo build` writes (#776).
 DEP_TARGET = re.compile(r"^(?P<target>(?:[^:\\]|\\.)+):\s*(?P<deps>.*)$")
 
 
@@ -142,8 +144,46 @@ UNNARROWED = pathlib.Path("diet")
 CRATE_ROOT = pathlib.Path("diet/src/bin/diet.rs")
 
 
+def depinfo_of(binary: pathlib.Path) -> pathlib.Path:
+    """The dep-info that describes `binary` itself.
+
+    RUSTC'S, FOR THE ARTIFACT `binary` WAS COPIED FROM, FIRST (#776). Cargo
+    builds a binary at `deps/<name>-<hash>` and copies it up to `<name>`, but
+    only `cargo build` writes `<name>.d` beside the copy. `cargo test` --
+    which builds every binary an integration test runs -- copies it up and
+    writes no `<name>.d`. So a tree whose first build was a test run had no
+    dep-info at all, `embedded()` fell back to the whole of `diet/`, and a
+    touched `diet/tests/*.rs` -- which `diet` is not built from -- read the
+    binary as stale. And a `<name>.d` an earlier `cargo build` left is not
+    rewritten when `cargo test` relinks, so it can describe an older binary.
+    rustc writes `deps/<name>-<hash>.d` for every build of that artifact; the
+    one whose binary has `binary`'s bytes is about `binary`, whoever copied
+    it.
+
+    Cargo's `<name>.d` beside the binary when no copy in `deps/` matches,
+    and a path that does not exist when neither does -- `embedded()` then
+    falls back as it always has.
+    """
+    deps = binary.parent / "deps"
+    try:
+        size = binary.stat().st_size
+        copies = [
+            path
+            for path in deps.glob(f"{binary.name}-*")
+            if path.suffix == "" and path.is_file() and path.stat().st_size == size
+        ]
+    except OSError:
+        copies = []
+    if copies:
+        mine = digest(binary)
+        for copy in copies:
+            if digest(copy) == mine:
+                return copy.parent / f"{copy.name}.d"
+    return binary.parent / f"{binary.name}.d"
+
+
 def embedded(binary: pathlib.Path) -> list[pathlib.Path]:
-    """Every file compiled into `binary`, from cargo's dep-info beside it.
+    """Every file compiled into `binary`, from its dep-info (`depinfo_of`).
 
     `UNNARROWED` when there is no dep-info to read, or when what is there
     names nothing inside this checkout -- a binary built by something that
@@ -174,7 +214,7 @@ def embedded(binary: pathlib.Path) -> list[pathlib.Path]:
     pinned build now refuses -- and that is a false positive a person can
     clear by rebuilding, against a false negative nothing can catch.
     """
-    depinfo = binary.parent / f"{binary.name}.d"
+    depinfo = depinfo_of(binary)
     try:
         text = depinfo.read_text(encoding="utf-8", errors="replace")
     except OSError:

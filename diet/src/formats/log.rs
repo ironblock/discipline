@@ -817,6 +817,22 @@ pub struct ForkSeat {
     pub model: String,
 }
 
+/// What a fork refused for the pool did not fit beside (v8, #782): the
+/// window it was sized against, the trunk's prompt in it, the prompts of
+/// the forks in flight beside it, and its own prompt, in tokens. Its four
+/// keys come together or not at all.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct PoolRoom {
+    /// The pool's window.
+    pub window: u64,
+    /// The trunk's prompt, resident in it; 0 offboard.
+    pub trunk: u64,
+    /// The prompts of the forks in flight beside it.
+    pub beside: u64,
+    /// The fork's own prompt.
+    pub prompt: u64,
+}
+
 /// The fork ask set a session asks in (v7, #595), by name and digest.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ForkAsks {
@@ -1036,6 +1052,13 @@ pub enum Event {
         /// absent, an earlier log's notes followed the ask as messages of
         /// their own.
         notes_in_the_ask: Option<bool>,
+        /// The commit the serving binary was built from (v8, #757): 40 hex
+        /// digits, from the build script, so a run's build is read off its
+        /// log rather than typed from memory. With `build_dirty`, or neither.
+        build_commit: Option<String>,
+        /// Whether that build's tracked files differed from the commit (v8,
+        /// #757).
+        build_dirty: Option<bool>,
         /// The fork ask set a session that forks asks in (v7, #595): its name
         /// and digest, `fork_asks` and `fork_asks_digest`.
         fork_asks: Option<ForkAsks>,
@@ -1101,6 +1124,10 @@ pub enum Event {
         /// The `max_tokens` it was sent with, after the output cap was
         /// clamped to the room left in the context window (v7, #588).
         max_tokens: Option<u64>,
+        /// How many forks were in flight beside it, on a trunk request of a
+        /// session whose forks run during the turn (v8, #782): what its
+        /// `timings` are read against for the decode penalty.
+        beside: Option<u64>,
     },
     /// A command was refused.
     Refused {
@@ -1325,6 +1352,15 @@ pub enum Event {
         /// It names the latest meditation; absent, the fork is cut from its turn's
         /// warm trunk.
         after_meditation: Option<u64>,
+        /// The `seq` of the step's last `tool_call` it was cut at, during the
+        /// turn (v8, #782): the trunk as it stood after that result.
+        cut: Option<u64>,
+        /// When it ran (v8, #782): `during_turn`; absent is the gap.
+        timing: Option<String>,
+        /// The `fork_view` the regimen declared that a cut during the turn
+        /// overrode (v8, #782): such a fork sees the whole trunk at the cut,
+        /// its warm prefix.
+        view_overridden: Option<String>,
     },
     /// How a fork ended (v5, #374).
     ForkSettled {
@@ -1346,6 +1382,8 @@ pub enum Event {
         /// line (v7, levers run A): read and recorded as no entry, and kept
         /// here so it is seen.
         trailer: Option<String>,
+        /// What a fork refused for the pool did not fit beside (v8, #782).
+        pool: Option<PoolRoom>,
     },
     /// One entry a fork's answer patched into working memory (v5, #374).
     Patch {
@@ -2316,6 +2354,12 @@ struct Forks {
     /// The latest meditation's `seq`: what an audit cut from its refill names
     /// (v7, `after_meditation`).
     last_meditation: Option<u64>,
+    /// Each `tool_call` line's `seq`, to its turn: where a fork is cut
+    /// during the turn (v8, #782).
+    tool_calls: BTreeMap<u64, u32>,
+    /// The forks cut during the turn (v8, #782): each runs beside the trunk
+    /// and the others, never one after another.
+    cut: BTreeSet<u64>,
 }
 
 impl Forks {
@@ -2324,14 +2368,44 @@ impl Forks {
     /// trunk request, and the only fork in its gap -- or, carrying the
     /// `trigger` the interview cadence fired it on (v7, #564), one of the
     /// gap's forks, each opened after the one before it settled.
+    ///
+    /// A fork cut during the turn (v8, #782) is of the latest turn, settled
+    /// or not, cut at a `tool_call` of that turn after the answered trunk
+    /// `request` whose step it is, on `interview` with its `trigger`; it runs
+    /// beside the trunk and the other forks, and the gap's own forks wait
+    /// only for the gap's.
     fn fork(
         &mut self,
         seq: u64,
         (lane, of_turn, at, triggered): (Lane, u32, u64, bool),
-        after_meditation: Option<u64>,
+        (after_meditation, cut): (Option<u64>, Option<u64>),
         turns: u32,
         trunk: &BTreeMap<u32, u64>,
     ) -> Result<(), String> {
+        if let Some(cut) = cut {
+            if lane != Lane::Interview || !triggered || after_meditation.is_some() {
+                return Err(format!(
+                    "a fork cut at {cut} that is not an `interview` fork with its `trigger`: only \
+                     a step's fork is cut during the turn"
+                ));
+            }
+            if of_turn != turns || !self.answered.contains(&at) {
+                return Err(format!(
+                    "a fork of turn {of_turn} cut at {cut} from request {at}: a fork cut during \
+                     the turn is of the latest turn (here {turns}), from its answered trunk \
+                     `request`"
+                ));
+            }
+            if self.tool_calls.get(&cut) != Some(&of_turn) || cut < at {
+                return Err(format!(
+                    "a fork cut at {cut}, which is not a `tool_call` of turn {of_turn} after \
+                     request {at}"
+                ));
+            }
+            self.cut.insert(seq);
+            self.of_turn.insert(seq, of_turn);
+            return Ok(());
+        }
         if lane == Lane::Trunk {
             return Err(format!(
                 "a fork on the `{}` lane: a fork's call is made on `interview`, or a meditation's \
@@ -2384,7 +2458,7 @@ impl Forks {
         let earlier: Vec<u64> = self
             .of_turn
             .iter()
-            .filter(|(_, turn)| **turn == of_turn)
+            .filter(|(fork, turn)| **turn == of_turn && !self.cut.contains(fork))
             .map(|(fork, _)| *fork)
             .collect();
         if !earlier.is_empty() && !triggered {
@@ -2806,12 +2880,13 @@ fn check(lines: &[Line]) -> Result<(), LogError> {
                 at: forked_at,
                 trigger,
                 after_meditation,
+                cut,
                 ..
             } => forks
                 .fork(
                     line.seq,
                     (*lane, *of_turn, *forked_at, trigger.is_some()),
-                    *after_meditation,
+                    (*after_meditation, *cut),
                     turns,
                     &trunk,
                 )
@@ -2878,6 +2953,7 @@ fn check(lines: &[Line]) -> Result<(), LogError> {
                 called_from(*request, &requests).map_err(|why| at(index, why))?;
                 called_once(*request, *turn, id, &request_turns, &mut calls)
                     .map_err(|why| at(index, why))?;
+                forks.tool_calls.insert(line.seq, *turn);
             }
             _ => {}
         }
@@ -2990,6 +3066,8 @@ fn from_object(object: &BTreeMap<String, Value>) -> Result<Line, String> {
                 fork_delivery: fields.optional_tag("fork_delivery", ForkDelivery::from_tag)?,
                 levers: fields.optional_words("levers")?,
                 notes_in_the_ask: fields.optional_flag("notes_in_the_ask")?,
+                build_commit: build_of(&fields)?.0,
+                build_dirty: build_of(&fields)?.1,
                 fork_asks: match fields.optional_string("fork_asks")? {
                     None => None,
                     Some(name) => Some(ForkAsks {
@@ -3052,6 +3130,7 @@ fn from_object(object: &BTreeMap<String, Value>) -> Result<Line, String> {
             head_sha256: fields.optional_digest("head_sha256")?,
             fork: fields.optional_count("fork")?,
             max_tokens: fields.optional_count("max_tokens")?,
+            beside: fields.optional_count("beside")?,
         },
         Kind::Refused => Event::Refused {
             command: fields.tag("command", Command::from_tag)?,
@@ -3245,6 +3324,9 @@ fn from_object(object: &BTreeMap<String, Value>) -> Result<Line, String> {
             ask: fields.optional_string("ask")?,
             hazard: fields.optional_string("hazard")?,
             after_meditation: fields.optional_count("after_meditation")?,
+            cut: fields.optional_count("cut")?,
+            timing: fields.optional_string("timing")?,
+            view_overridden: fields.optional_string("view_overridden")?,
         },
         Kind::ForkSettled => Event::ForkSettled {
             fork: fields.count("fork")?,
@@ -3269,6 +3351,21 @@ fn from_object(object: &BTreeMap<String, Value>) -> Result<Line, String> {
                 refused
             },
             trailer: fields.optional_string("trailer")?,
+            // Built only when its four keys are carried ([`all_or_none`]).
+            pool: match (
+                fields.optional_count("window")?,
+                fields.optional_count("trunk_tokens")?,
+                fields.optional_count("beside_tokens")?,
+                fields.optional_count("fork_tokens")?,
+            ) {
+                (Some(window), Some(trunk), Some(beside), Some(prompt)) => Some(PoolRoom {
+                    window,
+                    trunk,
+                    beside,
+                    prompt,
+                }),
+                _ => None,
+            },
         },
         Kind::Patch => {
             let op = fields.tag("op", PatchOp::from_tag)?;
@@ -4311,6 +4408,15 @@ const fn must_v5(key: &'static str, holds: Holds) -> Field {
 }
 
 /// A key that arrived in v6 and is required wherever its object is written.
+const fn may_v8(key: &'static str, holds: Holds) -> Field {
+    Field {
+        key,
+        holds,
+        required: false,
+        since: 8,
+    }
+}
+
 const fn may_v7(key: &'static str, holds: Holds) -> Field {
     Field {
         key,
@@ -4371,6 +4477,32 @@ pub const SERVING: &[Field] = &[
 ];
 
 /// Whether `text` is a sha256 as this format writes one.
+/// A start's build (#757): `build_commit`, 40 lowercase hex digits, and
+/// `build_dirty`, both or neither.
+fn build_of(fields: &Fields<'_>) -> Result<(Option<String>, Option<bool>), String> {
+    let commit = fields.optional_string("build_commit")?;
+    let dirty = fields.optional_flag("build_dirty")?;
+    if let Some(commit) = &commit
+        && !is_a_commit(commit)
+    {
+        return Err(format!(
+            "`build_commit` is `{commit}`, and a commit is 40 lowercase hex digits"
+        ));
+    }
+    if commit.is_some() != dirty.is_some() {
+        return Err("`build_commit` and `build_dirty` name one build: both or neither".to_owned());
+    }
+    Ok((commit, dirty))
+}
+
+/// A git commit's full id: 40 lowercase hex digits (#757).
+fn is_a_commit(text: &str) -> bool {
+    text.len() == 40
+        && text
+            .bytes()
+            .all(|byte| matches!(byte, b'0'..=b'9' | b'a'..=b'f'))
+}
+
 fn is_a_digest(text: &str) -> bool {
     text.len() == 64
         && text
@@ -4567,6 +4699,8 @@ pub fn schema(kind: Kind) -> &'static [Field] {
                 may_v7("fork_delivery", Tag(Tags::ForkDelivery)),
                 may_v7("levers", Holds::Words),
                 may_v7("notes_in_the_ask", Holds::Flag),
+                may_v8("build_commit", Holds::Text),
+                may_v8("build_dirty", Holds::Flag),
                 may_v7("fork_asks", Text),
                 may_v7("fork_asks_digest", Text),
                 may_v7("reasoning_effort_default", Text),
@@ -4601,6 +4735,7 @@ pub fn schema(kind: Kind) -> &'static [Field] {
                 may_v2("head_sha256", Holds::Digest),
                 may_v5("fork", Count),
                 may_v7("max_tokens", Count),
+                may_v8("beside", Count),
             ];
             F
         }
@@ -4730,6 +4865,9 @@ pub fn schema(kind: Kind) -> &'static [Field] {
                 may_v7("ask", Text),
                 may_v7("hazard", Text),
                 may_v7("after_meditation", Count),
+                may_v8("cut", Count),
+                may_v8("timing", Text),
+                may_v8("view_overridden", Text),
             ];
             F
         }
@@ -4741,6 +4879,10 @@ pub fn schema(kind: Kind) -> &'static [Field] {
                 may_v7("wall_ms", Count),
                 may_v7("refused", Text),
                 may_v7("trailer", Text),
+                may_v8("window", Count),
+                may_v8("trunk_tokens", Count),
+                may_v8("beside_tokens", Count),
+                may_v8("fork_tokens", Count),
             ];
             F
         }
@@ -4946,6 +5088,8 @@ pub fn all_or_none(kind: Kind) -> &'static [&'static str] {
         // A context overflow's sizes (v7, #616).
         Kind::RequestFailed => &["prompt_tokens", "window", "inferred"],
         Kind::Fork => &["substrate", "model"],
+        // What a fork refused for the pool did not fit beside (v8, #782).
+        Kind::ForkSettled => &["window", "trunk_tokens", "beside_tokens", "fork_tokens"],
         _ => &[],
     }
 }
@@ -5200,6 +5344,8 @@ fn to_value(line: &Line) -> Value {
             fork_delivery,
             levers,
             notes_in_the_ask,
+            build_commit,
+            build_dirty,
             fork_asks,
             reasoning_effort_default,
             tool_output,
@@ -5252,6 +5398,12 @@ fn to_value(line: &Line) -> Value {
             }
             if let Some(in_the_ask) = notes_in_the_ask {
                 put("notes_in_the_ask", Value::Boolean(*in_the_ask));
+            }
+            if let Some(commit) = build_commit {
+                put("build_commit", text(commit));
+            }
+            if let Some(dirty) = build_dirty {
+                put("build_dirty", Value::Boolean(*dirty));
             }
             if let Some(levers) = levers {
                 put(
@@ -5375,8 +5527,12 @@ fn to_value(line: &Line) -> Value {
             head_sha256,
             fork,
             max_tokens,
+            beside,
         } => {
             put("turn", count(u64::from(*turn)));
+            if let Some(beside) = beside {
+                put("beside", count(*beside));
+            }
             put("lane", text(lane.tag()));
             if let Some(digest) = head_sha256 {
                 put("head_sha256", text(digest));
@@ -5653,6 +5809,9 @@ fn to_value(line: &Line) -> Value {
             ask,
             hazard,
             after_meditation,
+            cut,
+            timing,
+            view_overridden,
         } => {
             put("lane", text(lane.tag()));
             put("of_turn", count(u64::from(*of_turn)));
@@ -5681,6 +5840,15 @@ fn to_value(line: &Line) -> Value {
             if let Some(meditation) = after_meditation {
                 put("after_meditation", count(*meditation));
             }
+            if let Some(cut) = cut {
+                put("cut", count(*cut));
+            }
+            if let Some(timing) = timing {
+                put("timing", text(timing));
+            }
+            if let Some(view) = view_overridden {
+                put("view_overridden", text(view));
+            }
             Kind::Fork
         }
         Event::ForkSettled {
@@ -5690,8 +5858,15 @@ fn to_value(line: &Line) -> Value {
             wall_ms,
             refused,
             trailer,
+            pool,
         } => {
             put("fork", count(*fork));
+            if let Some(room) = pool {
+                put("window", count(room.window));
+                put("trunk_tokens", count(room.trunk));
+                put("beside_tokens", count(room.beside));
+                put("fork_tokens", count(room.prompt));
+            }
             put("outcome", text(outcome.tag()));
             if let Some(why) = refused {
                 put("refused", text(why));
@@ -7008,6 +7183,47 @@ mod tests {
         assert!(!text.contains(r#""kind":"meditation""#), "{text}");
     }
 
+    /// #757: a v8 `session.start` names the build serve ran -- the commit
+    /// it was built from and whether that tree was dirty -- the two together
+    /// or neither; a log before v8 names none.
+    #[test]
+    fn a_v8_start_names_its_build_and_an_earlier_one_does_not() {
+        let start = r#"{"head":[{"content":"you are the trunk","role":"system"}],"kind":"session.start","model":"a-model","opened":1790000000000,"seq":0,"t":0,"version":8}"#;
+        let commit = "0123456789abcdef0123456789abcdef01234567";
+        let built = start.replace(
+            r#""version":8}"#,
+            &format!(r#""version":8,"build_commit":"{commit}","build_dirty":false}}"#),
+        );
+        let read = super::line(&built).expect("a start naming its build");
+        let Event::SessionStart {
+            build_commit,
+            build_dirty,
+            ..
+        } = &read.event
+        else {
+            panic!("a start");
+        };
+        assert_eq!(build_commit.as_deref(), Some(commit));
+        assert_eq!(*build_dirty, Some(false));
+        assert_eq!(super::line(&super::render(&read)), Ok(read.clone()));
+        let half = start.replace(
+            r#""version":8}"#,
+            &format!(r#""version":8,"build_commit":"{commit}"}}"#),
+        );
+        assert!(
+            super::line(&half).is_err(),
+            "a commit without its dirty flag"
+        );
+        let not_a_commit = built.replace(commit, "develop");
+        assert!(
+            super::line(&not_a_commit).is_err(),
+            "a commit is 40 hex digits"
+        );
+        let v7 = built.replace(r#""version":8"#, r#""version":7"#);
+        let refused = super::parse(&format!("{v7}\n")).expect_err("a v7 log naming a build");
+        assert!(refused.why.contains("v8"), "{refused}");
+    }
+
     /// #583: this module writes v8.
     #[test]
     fn this_module_writes_v8_and_reads_every_version_before_it() {
@@ -7055,6 +7271,8 @@ mod tests {
                     digest: Some("0123456789abcdef".to_owned()),
                 }),
                 notes_in_the_ask: Some(true),
+                build_commit: Some("a".repeat(40)),
+                build_dirty: Some(false),
             },
         }
     }
@@ -7080,6 +7298,7 @@ mod tests {
                 head_sha256: None,
                 fork: None,
                 max_tokens: None,
+                beside: None,
             },
             Event::Delta {
                 request: 3,
@@ -7124,6 +7343,7 @@ mod tests {
                 head_sha256: None,
                 fork: None,
                 max_tokens: None,
+                beside: None,
             },
             Event::RequestFailed {
                 request: 13,
@@ -7166,6 +7386,7 @@ mod tests {
                 head_sha256: None,
                 fork: None,
                 max_tokens: None,
+                beside: None,
             },
             Event::Progress {
                 request: 20,
@@ -7228,6 +7449,7 @@ mod tests {
                 head_sha256: None,
                 fork: None,
                 max_tokens: None,
+                beside: None,
             },
             Event::RequestFailed {
                 request: 29,
@@ -7311,6 +7533,7 @@ mod tests {
                 head_sha256: None,
                 fork: None,
                 max_tokens: None,
+                beside: None,
             },
             Event::Response {
                 reasoning_signature: None,
@@ -7347,6 +7570,9 @@ mod tests {
                 }),
                 ask: Some("judgment".to_owned()),
                 hazard: None,
+                cut: None,
+                timing: None,
+                view_overridden: None,
             },
             Event::Request {
                 turn: 5,
@@ -7354,6 +7580,7 @@ mod tests {
                 head_sha256: None,
                 fork: Some(fork),
                 max_tokens: Some(4000),
+                beside: None,
             },
             Event::Response {
                 reasoning_signature: None,
@@ -7373,6 +7600,7 @@ mod tests {
                 prompt_tokens: Some(281),
                 wall_ms: Some(480),
                 refused: None,
+                pool: None,
             },
             Event::Patch {
                 fork: Some(fork),
@@ -7889,6 +8117,12 @@ mod tests {
                     if exactly_one(kind).contains(absent) && !exactly_one(kind).contains(present) {
                         continue;
                     }
+                    // A build's commit is 40 hex digits with its dirty flag
+                    // beside it (#757): that rule's refusal, not an
+                    // exclusivity.
+                    if kind == Kind::SessionStart && *absent == "build_commit" {
+                        continue;
+                    }
                     let mut both = object.clone();
                     both.insert((*absent).to_owned(), Value::String("x".to_owned()));
                     // Probed in this version's spelling (#583).
@@ -8153,6 +8387,8 @@ mod tests {
             levers,
             fork_asks,
             notes_in_the_ask,
+            build_commit,
+            build_dirty,
             ..
         } = &mut lines[0].event
         else {
@@ -8165,6 +8401,8 @@ mod tests {
         *levers = None;
         *fork_asks = None;
         *notes_in_the_ask = None;
+        *build_commit = None;
+        *build_dirty = None;
         // Written as a v0 log spells it (#583).
         let document: String = lines
             .iter()

@@ -23,6 +23,8 @@ use std::process::ExitCode;
 use diet::formats::Format;
 use diet::formats::record::json::{self, Value};
 
+#[path = "diet/log.rs"]
+mod log;
 #[path = "diet/replay.rs"]
 mod replay;
 
@@ -116,6 +118,11 @@ fn usage() -> String {
             ),
         };
     }
+    // Dispatched before the table, like `replay` (#757).
+    out.push_str(
+        "  log find           the lines of a log that pass every filter (#757)\n\
+         \x20                    usage: diet log find <log> [key=value | key~text]...\n",
+    );
     out.push_str("\nEvery command writes a JSON result to stdout. Exit 0 when the\n");
     out.push_str("document is what the command says it is, 1 when it is not, 2 on\n");
     out.push_str("a usage error. `replay` is the exception: see `diet replay` with no\n");
@@ -123,14 +130,28 @@ fn usage() -> String {
     out
 }
 
+/// A verb with a shape of its own, run on the rest of its arguments.
+type Verb = fn(&[String]) -> ExitCode;
+
+/// The verbs with a shape of their own: `replay` (#28) takes flags ahead of
+/// one positional, `log find` (#757) a path and any number of filters,
+/// rather than `[command, path]`.
+const VERBS: &[(&str, Verb)] = &[("replay", replay::run), ("log", log::run)];
+
+/// A verb of [`VERBS`], run on the rest of `args`: read off the front before
+/// the `[command, path]` shape is assumed at all.
+fn own_shape(args: &[String]) -> Option<ExitCode> {
+    let (_, run) = VERBS
+        .iter()
+        .find(|(verb, _)| args.first().is_some_and(|first| first == verb))?;
+    Some(run(&args[1..]))
+}
+
 fn main() -> ExitCode {
     let args: Vec<String> = std::env::args().skip(1).collect();
 
-    // `replay` takes an entirely different shape -- two required flags ahead
-    // of one positional, rather than `[command, path]` -- so it is read off
-    // the front of `args` and dispatched before that shape is assumed at all.
-    if args.first().is_some_and(|command| command == "replay") {
-        return replay::run(&args[1..]);
+    if let Some(code) = own_shape(&args) {
+        return code;
     }
 
     // `bakeoff` takes a second argument and nothing else does, so the shape is

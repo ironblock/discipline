@@ -369,6 +369,8 @@ export type SessionStartLine = {
   fork_delivery?: ForkDelivery;
   levers?: Record<string, string>;
   notes_in_the_ask?: boolean;
+  build_commit?: string;
+  build_dirty?: boolean;
   fork_asks?: string;
   fork_asks_digest?: string;
   reasoning_effort_default?: string;
@@ -409,6 +411,7 @@ export type RequestLine = {
   head_sha256?: string;
   fork?: number;
   max_tokens?: number;
+  beside?: number;
 };
 
 export type RefusedLine = {
@@ -546,6 +549,9 @@ export type ForkLine = {
   ask?: string;
   hazard?: string;
   after_meditation?: number;
+  cut?: number;
+  timing?: string;
+  view_overridden?: string;
 } & ({ substrate: string; model: string } | { substrate?: never; model?: never });
 
 export type ForkSettledLine = {
@@ -558,7 +564,7 @@ export type ForkSettledLine = {
   wall_ms?: number;
   refused?: string;
   trailer?: string;
-};
+} & ({ window: number; trunk_tokens: number; beside_tokens: number; fork_tokens: number } | { window?: never; trunk_tokens?: never; beside_tokens?: never; fork_tokens?: never });
 
 export type PatchLine = {
   seq: number;

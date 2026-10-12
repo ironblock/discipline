@@ -287,6 +287,16 @@ measured_by = "computed by canned::replay_tools_digest() and canned::hardware_fi
 serves = "diet-drive canned"
 acts_sha256 = "7336cc7fed1f2e64c6095c49f73317c9b30be3ba8d22d7cf3bf8fc2bc62c6966"
 
+[equipment.canned-loopback-scenario]
+display_name = "the routed scenario loopback server"
+entry_type = "canned-server"
+hardware_fingerprint = "b6bc80e9e8e4bc2342219f064dab89a8d17c02535600b32b84895fc0b9ba6513"
+role = "diet-drive's own server in the stub's routed mode (#760): each request answered by the scenario's reply whose text its last message holds, else the next in order, and a request none answers refused 500; it has no acts of its own -- each scenario's replies are what it plays, named by the run's replies digest"
+measured = "2026-10-11"
+measured_by = "computed by canned::scenario_digest() and canned::hardware_fingerprint() over canned::scenario_acts(), the empty list; canned::tests::every_registered_canned_digest_is_acts_this_crate_keeps re-derives both"
+serves = "diet-drive canned"
+acts_sha256 = "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+
 [equipment.canned-loopback-replay]
 display_name = "the stream-replay loopback server"
 entry_type = "canned-server"
@@ -906,6 +916,26 @@ engine_identity_is = "the composite over engine_components in the python-torch-e
 engine_component_form = "python-torch-exllamav3"
 engine_commit = "be74bf0a00bcb3a518e6feb7606f150c189be637"
 engine_commit_is = "TabbyAPI's git HEAD, clean apart from the local config.yml and api_tokens.yml (the inference seat, substrates/measurements/2026-10-03-ada48-tabbyapi/versions.txt)"
+engine_check = "declared"
+engine_check_is = "TabbyAPI reports no version or commit over HTTP (#509), so serve does not ask: the operator declares the engine by this entry, as the floor's TabbyAPI entry does, and session.start records engine_commit as a served field with provenance declared"
+dialect = "tabbyapi"
+server_kind = "local"
+served_model = "Qwen3.8-Flash-Next-exl3-2.05bpw-yarn2"
+served_max_seq_len = "524288"
+served_cache_size = "606208"
+served_cache_mode = "8,8"
+served_max_batch_size = "4"
+served_chunk_size = "2048"
+served_draft = "true"
+served_prompt_template = "chat_template"
+served_chat_template_sha256 = "c3cf9e34abf4f9e36c2d72165aa9c132d3e2a725b6c2586aaa3a8af9d7a81041"
+chat_template_provenance = "the model directory's own chat_template.jinja, read on the host 2026-10-11; byte-identical to the floor's (accel24-tabbyapi-exl3-qwen38-27b-3p00's served_chat_template_sha256)"
+declared_served_is = "the served configuration serve confirms at start (#509), read off the host's live config.yml on 2026-10-11 (model_name qwen3.8-flash-next, a link to the 2.05bpw-yarn2 directory; max_seq_len 524288, cache_size 606208, cache_mode 8,8, max_batch_size 4, chunk_size 2048, draft_mode mtp with 3 draft tokens, sampling override_preset qwen38_thinking); TabbyAPI reports the model and the first five at GET /v1/model, the draft by draft_n in a response's timings, and the chat template by its name and digest"
+dialect_is = "the client dialect serve speaks to this line: the llama.cpp paths, read from TabbyAPI's source at be74bf0, under its own name so session.start.serving says which server answered (#496)"
+template_preserve_thinking = "true"
+template_preserve_thinking_is = "the model's own convention, the same template as the floor's: earlier turns' reasoning renders when preserve_thinking is true or undefined; serve sends it on every request so it is declared, not inherited"
+template_default_effort = "xhigh"
+template_default_effort_is = "the level the chat template renders when a request names no reasoning_effort (reasoning_effort|default('xhigh')); its levels are xhigh, medium and low"
 weights_main = ["eba2be88e5afdc31cab98e2642a40e70044bce7896b0e643d6a48ad5e5715029", "55a60a6b08ae7098cd4a0c024c4f0736ff7607f54e6941e8f4dc394ac7def7ae", "7ece0208075139aae7f2eb8cf96a3ec2e0b43679dcfdbade887661eca99f3475", "9ecfe20e4fa114679d3040e5abc6800e4d3ae5708a33dde022d69e7d17d8a4f5", "92646b6fbf566c4d95aca40dbc0a0a3857568584c5645e40d46e23afc862e3b1"]
 weights_main_file = "model-0000N-of-00005.safetensors, the five shards; every file of the branch, the MTP mixer patch and the PLE table included, is in substrates/measurements/2026-10-03-ada48-tabbyapi/exl3-205bpw-sha256.txt (sha256 4a84bfae...)"
 sampler_card = "TabbyAPI's safe_defaults (temperature 0.8, top_k 40, top_p 0.95, min_p 0.05) unless a request sets its own"
@@ -1134,6 +1164,23 @@ reproducible_because = "replay the captures and the same bytes play again; exact
 engine_single_digest_suffices = "the digest is of the acts, not of an executable: the server is this repository's own code, and the captures are the whole of what it plays"
 engine_build_info = "canned-7336cc7fed1f2e64c6095c49f73317c9b30be3ba8d22d7cf3bf8fc2bc62c6966"
 engine_build_info_is = "derived, not read from a server: canned::replay_tools_build_info(), \"canned-\" + the acts digest; what `diet-drive replay` reports at GET /props"
+
+[substrate.canned-scenario]
+equipment = "canned-loopback-scenario"
+description = "the scenario substrate (#760): `diet-drive scenario` serves a scenario's own replies on loopback, routed by the text of each request's last message, and GET /props with this entry's literal; rehearsal-only, never a claim substrate -- #767 is what will enforce that -- and every answer is one the scenario wrote"
+pinned = true
+engine_name = "diet-drive scenario"
+serving_slots = 2
+serving_slots_is = "the routed stub answers each request on its own thread (#782), so a fork's call beside the trunk's is answered at once; 2, the floor's count, so a scenario runs forks during the turn as the floor would"
+engine_identity = "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+engine_identity_is = "the digest of no acts: the routed server is fixed and plays nothing of its own; what a run played is its scenario's replies, whose digest the run names on its output line and in its README"
+weights_kind = "canned"
+weights_acts_sha256 = "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+reproducible_by_config = true
+reproducible_because = "run the same scenario file and the same replies play again; exact match, no band"
+engine_single_digest_suffices = "the server is this repository's own code, and the scenario's replies, digested per run, are the whole of what it plays"
+engine_build_info = "canned-e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+engine_build_info_is = "derived, not read from a server: canned::scenario_build_info(), \"canned-\" + the digest of no acts; what `diet-drive scenario` reports at GET /props"
 
 [substrate.stub-hosted-api]
 equipment = "stub-hosted-api"

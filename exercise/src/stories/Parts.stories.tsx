@@ -958,7 +958,7 @@ const composerSays = (root: HTMLElement) => ({
   state: root.querySelector('.ex-composer__state')?.textContent,
   typing: !(root.querySelector('textarea') as HTMLTextAreaElement).disabled,
   refill: !(root.querySelector('.ex-composer__meditation button') as HTMLButtonElement).disabled,
-  cancel: root.querySelector('.ex-composer__cancel') !== null,
+  cancel: root.querySelector('.ex-composer__cancel:not([hidden])') !== null,
 });
 
 export const ComposerAwaiting: Story = {
@@ -1317,7 +1317,7 @@ export const AttachWhileRunning: Story = {
   play: async ({ canvasElement }) => {
     fresh();
     (canvasElement.querySelector('[data-probe="busy"]') as HTMLButtonElement).click();
-    await waitFor(async () => expect(canvasElement.querySelector('.ex-composer__cancel')).not.toBeNull());
+    await waitFor(async () => expect(canvasElement.querySelector('.ex-composer__cancel:not([hidden])')).not.toBeNull());
     await pick(canvasElement, 'during.png');
     await waitFor(async () => expect(attachDrive.uploads).toHaveLength(1));
     attachDrive.uploads[0]!.release({ ok: true, sha256: 'c'.repeat(64), bytes: 4 });

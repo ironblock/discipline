@@ -1,0 +1,46 @@
+# Levers run C's three levers on the canned scenario substrate (#760): run
+# C's regimen (`runs/2026-10-11-levers-run-c-agent-driven/regimen.toml`,
+# the scenario's live regimen) with the substrate, the confinement and the
+# reasoning a model-less CI run can have. Fields-modality forks on ask set
+# v4 with the audit on; a read and scoping warrant at the per-class
+# cadence; the reconcile gate set to refuse; self-capture off.
+arm = "rehearsal"
+dogma_version = 0
+
+substrate = "canned-scenario"
+substrate_reasoning = "off"
+substrate_hardware = "b6bc80e9e8e4bc2342219f064dab89a8d17c02535600b32b84895fc0b9ba6513"
+
+# Unconfined, so CI starts it anywhere; approvals off, as run C's.
+isolation = "none"
+approval = "none"
+approval_policy = "approvals are off: every command runs without a gate decision or a prompt"
+tool_surface = "standard"
+
+interview_warrant = ["read", "scoping"]
+self_capture = "off"
+capture_modality = "fields"
+fork_asks = "v4"
+
+meditation_audit = "on"
+meditation_warm = "on"
+archive_recall = "literal"
+interview_cadence = "per_class"
+interview_skip_self_recorded = "off"
+render_budget_tokens = 120
+
+meditation_tail_tokens = 2000
+meditation_tool_outputs = "reference"
+fork_view = "last_turn"
+fork_delivery = "advisory"
+
+reconcile_gate = "refuse"
+
+[limits]
+max_steps = 4
+
+[sampler]
+temperature = 1.0
+top_k = 20
+top_p = 0.95
+min_p = 0.0
