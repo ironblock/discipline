@@ -116,6 +116,12 @@ vocabulary! {
         FlagEntry => "flag-entry",
         /// Refill a held meditation anyway (#150's gate).
         RefillAnyway => "refill-anyway",
+        /// Choose the starting phase, before the first ask (#788).
+        StartPhase => "start-phase",
+        /// Propose a phase move to the model (#788).
+        ProposePhase => "propose-phase",
+        /// Move the phase alone (#788), under `operator_unilateral`.
+        MovePhase => "move-phase",
     }
 }
 
@@ -173,6 +179,14 @@ vocabulary! {
         /// An edit whose text restates the entry it corrects, or another
         /// live entry (v8, #729): working memory has it already.
         Restates => "restates",
+        /// The operator's move alone where `operator_unilateral` is off
+        /// (#788): propose it to the model instead.
+        NotUnilateral => "not-unilateral",
+        /// A starting phase chosen after the first ask (#788).
+        AlreadyAsked => "already-asked",
+        /// The operator's proposal while the model's waits on a ruling
+        /// (#788): rule on the model's first.
+        ProposalPending => "proposal-pending",
     }
 }
 
@@ -794,9 +808,12 @@ pub enum Event {
     /// A self-capture call and what it came to (#609).
     /// The operator's ruling on the model's pending phase proposal (#124).
     PhaseRuled {
-        /// The proposal's call.
-        call: String,
-        /// What the operator ruled.
+        /// The proposal's call; none on the operator's move alone (#788).
+        call: Option<String>,
+        /// Who moved (#788): the operator alone, or the model accepting the
+        /// operator's proposal; `None`, the operator ruling on the model's.
+        by: Option<Key>,
+        /// What was ruled.
         choice: PhaseChoice,
         /// The phase the session was in.
         from: Option<String>,
@@ -804,6 +821,41 @@ pub enum Event {
         to: String,
         /// The document of the phase the session is in after it (#787), on
         /// a `meditation` or `continue` under a phase library.
+        phase_document: Option<log::PhaseDocument>,
+    },
+    /// A phase move proposed (#788), by the model through its call `call`
+    /// or by the operator, with the evidence the other key rules on.
+    PhaseProposed {
+        /// Which key proposed it.
+        by: Key,
+        /// The model's call; none on the operator's proposal.
+        call: Option<String>,
+        /// The phase the session is in.
+        from: Option<String>,
+        /// The phase proposed.
+        to: String,
+        /// Why, in the model's words.
+        reason: Option<String>,
+        /// Whether the operator's proposal moves through a meditation.
+        meditate: Option<bool>,
+        /// The evidence.
+        evidence: log::PhaseEvidence,
+    },
+    /// The model's answer to the operator's proposal (#788), through its
+    /// call `call`.
+    PhaseAnswered {
+        /// The model's call.
+        call: String,
+        /// Whether it accepted.
+        accepted: bool,
+        /// Why, in its words.
+        reason: Option<String>,
+    },
+    /// The starting phase the operator chose before the first ask (#788).
+    PhaseStarted {
+        /// The phase.
+        phase: String,
+        /// Its document, under a phase library.
         phase_document: Option<log::PhaseDocument>,
     },
     /// A phase's ground rules, as a note on turn `turn`'s ask (#787): the
@@ -1144,6 +1196,9 @@ pub struct Interview {
     /// The warrants that look at what a step produced, and their numbers
     /// (#783).
     pub step: crate::drive::warrants::StepWarrants,
+    /// Whether the operator may move the phase alone (#788), the
+    /// regimen's `operator_unilateral`: on unless it says otherwise.
+    pub operator_unilateral: bool,
 }
 
 /// The interview cadence (#564): when the capture gap's forks fire, and on
@@ -1438,6 +1493,26 @@ pub fn declare_self_capture(shape: &mut RequestShape, interview: Option<&Intervi
         shape
             .tools
             .extend(crate::capture::tools::definitions(&contract));
+    }
+    // The phase tool, whenever phases are active (#788), self-capture or not.
+    declare_phase_tool(shape, interview);
+}
+
+/// The regimen key for whether the operator may move the phase alone
+/// (#788).
+pub const OPERATOR_UNILATERAL: &str = "operator_unilateral";
+
+/// Whether the regimen lets the operator move the phase alone (#788): true
+/// unless it says `operator_unilateral = false`.
+///
+/// # Errors
+///
+/// A value that is not true or false.
+pub fn operator_unilateral(regimen: &Regimen) -> Result<bool, String> {
+    match regimen.get(OPERATOR_UNILATERAL) {
+        None => Ok(true),
+        Some(crate::formats::regimen::Value::Boolean(on)) => Ok(*on),
+        Some(_) => Err(format!("`{OPERATOR_UNILATERAL}` is not true or false")),
     }
 }
 
@@ -2221,6 +2296,26 @@ struct State {
     /// (#783): every step's under the gap timing, the final answer's under
     /// either.
     gap_firings: Vec<Firing>,
+    /// The operator's phase proposal the model has not yet answered
+    /// (#788): the phase it proposes, and whether an accepted move
+    /// meditates.
+    operator_proposal: Option<(String, bool)>,
+    /// The phase an accepted move meditates into once the turn ends
+    /// (#788): a meditation never refills under a running turn.
+    move_after_turn: Option<String>,
+    /// The note that puts the operator's proposal to the model, due at the
+    /// next ask (#788).
+    operator_note_due: Option<String>,
+    /// This step's own phase proposal, which ends the turn (#788), logged
+    /// with its evidence once the step has joined the trunk.
+    proposal_ends_turn: Option<OwnProposal>,
+    /// The evidence's marks (#788): the log's length when the session
+    /// entered its phase, the trunk's tokens then, the phase's growth before
+    /// the latest meditation, and the trunk's tokens at that meditation.
+    phase_entered: u64,
+    phase_floor: u64,
+    phase_grown: u64,
+    meditation_floor: u64,
 }
 
 impl State {
@@ -2337,6 +2432,14 @@ impl State {
             deferred: None,
             step_counters: crate::drive::warrants::Counters::default(),
             gap_firings: Vec::new(),
+            operator_proposal: None,
+            move_after_turn: None,
+            operator_note_due: None,
+            proposal_ends_turn: None,
+            phase_entered: 0,
+            phase_floor: 0,
+            phase_grown: 0,
+            meditation_floor: 0,
             jobs: BTreeMap::new(),
             notices: Vec::new(),
             promotable: None,
@@ -2605,7 +2708,10 @@ impl State {
                 | CommandKind::RatifyPhase
                 | CommandKind::EditEntry
                 | CommandKind::FlagEntry
-                | CommandKind::RefillAnyway => {
+                | CommandKind::RefillAnyway
+                | CommandKind::StartPhase
+                | CommandKind::ProposePhase
+                | CommandKind::MovePhase => {
                     unreachable!("a tangent, background or phase ruling carries no idle gap")
                 }
             };
@@ -2940,6 +3046,9 @@ impl<S: Streaming + 'static> Session<S> {
             });
         let tools = tools.map(|tools| readable_outputs(tools, opened));
         let mut state = State::opening(trunk, phase_at_open.clone(), interview, tools.as_ref());
+        // The evidence counts the trunk's growth from its head (#788).
+        state.phase_floor = estimate_of(&template);
+        state.meditation_floor = state.phase_floor;
         // The opening phase's rules (#787): the head is the session's own,
         // so they ride as a note on the first ask.
         let phase_document = state.phase_document();
@@ -3133,6 +3242,14 @@ impl<S: Streaming + 'static> Session<S> {
         // in the system prompt.
         let mut message = message;
         if let Some(text) = state.noted(turn) {
+            message.notes.push(text);
+        }
+        // The operator's phase proposal, put to the model (#788).
+        if let Some(text) = state.operator_note_due.take() {
+            state.push(Event::Notified {
+                turn,
+                text: text.clone(),
+            });
             message.notes.push(text);
         }
         if let Some(note) = state.deliver(turn) {
@@ -3400,39 +3517,192 @@ impl<S: Streaming + 'static> Session<S> {
             .then(|| state.document_of(&to))
             .flatten();
         state.push(Event::PhaseRuled {
-            call,
+            call: Some(call),
+            by: None,
             choice,
             from,
             to: to.clone(),
             phase_document,
         });
-        let queued = match choice {
-            PhaseChoice::Meditation => meditation(
-                &self.shared.template,
-                &mut state,
-                crate::meditation::Reason::Phase,
-                Some(to),
-            ),
-            PhaseChoice::Continue => {
-                state.phase = Some(to);
-                // No meditation to carry its rules (#787): a note does.
-                state.phase_note_due = state.phase_note();
-                false
-            }
-            PhaseChoice::Stay => false,
-        };
+        let queued = moved(&self.shared.template, &mut state, &to, choice);
         drop(state);
         self.shared.changed.notify_all();
         if queued {
-            let shared = Arc::clone(&self.shared);
-            let spawned = std::thread::Builder::new()
-                .name("diet-meditation".to_owned())
-                .spawn(move || meditation_work(&shared));
-            if spawned.is_err() {
-                meditation_work(&self.shared);
-            }
+            self.meditate_aside();
         }
         Ok(())
+    }
+
+    /// Choose the starting phase (#788), before the first ask: the session
+    /// enters it, its rules a note on the first ask, and a `phase.started`
+    /// line records it.
+    ///
+    /// # Errors
+    ///
+    /// Refused, and logged: [`Refusal::Ended`]; [`Refusal::AlreadyAsked`]
+    /// after the first ask; [`Refusal::NoPhaseGraph`] or
+    /// [`Refusal::NotAPhase`].
+    pub fn start_phase(&self, phase: &str) -> Result<(), Rejected> {
+        let mut state = self.shared.lock();
+        let known = state
+            .interview
+            .as_ref()
+            .map(|interview| &interview.phases)
+            .filter(|graph| !graph.is_empty())
+            .map(|graph| graph.phases().iter().any(|name| name == phase));
+        let because = match (state.settlement, known) {
+            (Settlement::Ended, _) => Some(Refusal::Ended),
+            _ if state.turns > 0 => Some(Refusal::AlreadyAsked),
+            (_, None) => Some(Refusal::NoPhaseGraph),
+            (_, Some(false)) => Some(Refusal::NotAPhase),
+            (_, Some(true)) => None,
+        };
+        if let Some(because) = because {
+            return Err(self.refused(state, CommandKind::StartPhase, because));
+        }
+        state.admit_within_the_gap();
+        state.phase = Some(phase.to_owned());
+        state.phase_note_due = state.phase_note();
+        let phase_document = state.document_of(phase);
+        state.push(Event::PhaseStarted {
+            phase: phase.to_owned(),
+            phase_document,
+        });
+        entered(&self.shared.template, &mut state);
+        drop(state);
+        self.shared.changed.notify_all();
+        Ok(())
+    }
+
+    /// Propose a phase move to the model (#788), through a meditation when
+    /// it is accepted if `meditate`, else kept: logged with its evidence,
+    /// and put to the model in a note on its next ask, which it answers
+    /// through the phase tool.
+    ///
+    /// # Errors
+    ///
+    /// Refused, and logged: [`Refusal::Ended`], [`Refusal::InFlight`];
+    /// [`Refusal::ProposalPending`] while the model's own waits on a ruling;
+    /// the graph's refusal of the move.
+    pub fn propose_phase(&self, to: &str, meditate: bool) -> Result<(), Rejected> {
+        let mut state = self.shared.lock();
+        let because = match state.settlement {
+            Settlement::Ended => Some(Refusal::Ended),
+            Settlement::Turn | Settlement::Capture => Some(Refusal::InFlight),
+            Settlement::Awaiting if state.proposal.is_some() => Some(Refusal::ProposalPending),
+            Settlement::Awaiting => graph_refusal(&state, to),
+        };
+        if let Some(because) = because {
+            return Err(self.refused(state, CommandKind::ProposePhase, because));
+        }
+        state.admit_within_the_gap();
+        let from = state.phase.clone();
+        let evidence = evidence(&state, &self.shared.template);
+        state.operator_proposal = Some((to.to_owned(), meditate));
+        state.operator_note_due = Some(operator_proposal_note(from.as_deref(), to));
+        state.push(Event::PhaseProposed {
+            by: Key::Operator,
+            call: None,
+            from,
+            to: to.to_owned(),
+            reason: None,
+            meditate: Some(meditate),
+            evidence,
+        });
+        drop(state);
+        self.shared.changed.notify_all();
+        Ok(())
+    }
+
+    /// Move the phase alone (#788), where `operator_unilateral` lets the
+    /// operator: through a meditation that moves to `to` when `meditate`,
+    /// else kept, the trunk as it stands. Any proposal waiting is spent.
+    ///
+    /// # Errors
+    ///
+    /// Refused, and logged: [`Refusal::Ended`], [`Refusal::InFlight`],
+    /// [`Refusal::NotUnilateral`]; the graph's refusal of the move; and for
+    /// a meditation, [`Refusal::TangentOpen`] or
+    /// [`Refusal::NothingToMeditate`] as a declared one is refused.
+    pub fn move_phase(&self, to: &str, meditate: bool) -> Result<(), Rejected> {
+        let mut state = self.shared.lock();
+        let unilateral = state
+            .interview
+            .as_ref()
+            .is_some_and(|interview| interview.operator_unilateral);
+        let because = match state.settlement {
+            Settlement::Ended => Some(Refusal::Ended),
+            Settlement::Turn | Settlement::Capture => Some(Refusal::InFlight),
+            Settlement::Awaiting if !unilateral => Some(Refusal::NotUnilateral),
+            Settlement::Awaiting => graph_refusal(&state, to).or_else(|| {
+                if !meditate {
+                    None
+                } else if state.tangent.is_some() {
+                    Some(Refusal::TangentOpen)
+                } else {
+                    (state.turns == 0
+                        || state
+                            .interview
+                            .as_ref()
+                            .is_none_or(|interview| interview.object.live().next().is_none()))
+                    .then_some(Refusal::NothingToMeditate)
+                }
+            }),
+        };
+        if let Some(because) = because {
+            return Err(self.refused(state, CommandKind::MovePhase, because));
+        }
+        state.admit_within_the_gap();
+        state.proposal = None;
+        state.operator_proposal = None;
+        state.operator_note_due = None;
+        let choice = if meditate {
+            PhaseChoice::Meditation
+        } else {
+            PhaseChoice::Keep
+        };
+        let from = state.phase.clone();
+        let phase_document = state.document_of(to);
+        state.push(Event::PhaseRuled {
+            call: None,
+            by: Some(Key::Operator),
+            choice,
+            from,
+            to: to.to_owned(),
+            phase_document,
+        });
+        let queued = moved(&self.shared.template, &mut state, to, choice);
+        drop(state);
+        self.shared.changed.notify_all();
+        if queued {
+            self.meditate_aside();
+        }
+        Ok(())
+    }
+
+    /// `command` refused `because`, logged: the rejection to return.
+    fn refused(
+        &self,
+        mut state: MutexGuard<'_, State>,
+        command: CommandKind,
+        because: Refusal,
+    ) -> Rejected {
+        let refused = state.refuse(command, because);
+        drop(state);
+        self.shared.changed.notify_all();
+        Rejected::Refused(refused)
+    }
+
+    /// The meditation a phase move queued, on a thread of its own: its audit
+    /// or pre-warm, then its line.
+    fn meditate_aside(&self) {
+        let shared = Arc::clone(&self.shared);
+        let spawned = std::thread::Builder::new()
+            .name("diet-meditation".to_owned())
+            .spawn(move || meditation_work(&shared));
+        if spawned.is_err() {
+            meditation_work(&self.shared);
+        }
     }
 
     /// Open a tangent under `id` (#22): the trunk as it stands is the fork
@@ -4686,15 +4956,50 @@ pub fn line_of(logged: &Logged) -> log::Line {
         },
         Event::PhaseRuled {
             call,
+            by,
             choice,
             from,
             to,
             phase_document,
         } => log::Event::PhaseRuled {
             call: call.clone(),
+            by: by.map(|key| key.tag().to_owned()),
             choice: choice.tag().to_owned(),
             from: from.clone(),
             to: to.clone(),
+            phase_document: phase_document.clone(),
+        },
+        Event::PhaseProposed {
+            by,
+            call,
+            from,
+            to,
+            reason,
+            meditate,
+            evidence,
+        } => log::Event::PhaseProposed {
+            by: by.tag().to_owned(),
+            call: call.clone(),
+            from: from.clone(),
+            to: to.clone(),
+            reason: reason.clone(),
+            meditate: *meditate,
+            evidence: *evidence,
+        },
+        Event::PhaseAnswered {
+            call,
+            accepted,
+            reason,
+        } => log::Event::PhaseAnswered {
+            call: call.clone(),
+            accepted: *accepted,
+            reason: reason.clone(),
+        },
+        Event::PhaseStarted {
+            phase,
+            phase_document,
+        } => log::Event::PhaseStarted {
+            phase: phase.clone(),
             phase_document: phase_document.clone(),
         },
         Event::PhaseNoted { turn, text } => log::Event::PhaseNoted {
@@ -4985,6 +5290,9 @@ fn command_of(command: CommandKind) -> log::Command {
         CommandKind::EditEntry => log::Command::EditEntry,
         CommandKind::FlagEntry => log::Command::FlagEntry,
         CommandKind::RefillAnyway => log::Command::RefillAnyway,
+        CommandKind::StartPhase => log::Command::StartPhase,
+        CommandKind::ProposePhase => log::Command::ProposePhase,
+        CommandKind::MovePhase => log::Command::MovePhase,
     }
 }
 
@@ -5011,6 +5319,9 @@ fn refusal_of(refusal: Refusal) -> log::Refusal {
         Refusal::MeditationHeld => log::Refusal::MeditationHeld,
         Refusal::NothingHeld => log::Refusal::NothingHeld,
         Refusal::Restates => log::Refusal::Restates,
+        Refusal::NotUnilateral => log::Refusal::NotUnilateral,
+        Refusal::AlreadyAsked => log::Refusal::AlreadyAsked,
+        Refusal::ProposalPending => log::Refusal::ProposalPending,
     }
 }
 
@@ -5440,6 +5751,39 @@ fn run_calls<S: Streaming + 'static>(
         (shape, &said, &results, calls),
         settled,
     );
+    // A proposal of the model's own ends its turn after this step (#788):
+    // the step joins the trunk, the result saying so the last thing on it.
+    let proposed = state.proposal_ends_turn.take();
+    if let (Some(OwnProposal { reason }), None) = (proposed, settled) {
+        state.flight = None;
+        let mut ran = std::mem::take(exchange);
+        ran.push(said);
+        ran.extend(results);
+        state.trunk.extend(ran);
+        state.trunk_tokens = state.step_tokens.take();
+        state.ran.clear();
+        // The proposal, with the evidence of the trunk it ends the turn on.
+        if let Some(PendingProposal { call, from, to }) = state.proposal.clone() {
+            let evidence = evidence(&state, &shared.template);
+            state.push(Event::PhaseProposed {
+                by: Key::Model,
+                call: Some(call),
+                from,
+                to,
+                reason,
+                meditate: None,
+                evidence,
+            });
+        }
+        state.push(Event::TurnSettled {
+            turn,
+            reason: SettleReason::Final,
+        });
+        turn_over(&shared.template, &mut state);
+        drop(state);
+        shared.changed.notify_all();
+        return None;
+    }
     if let Some(reason) = settled {
         state.flight = None;
         let measured = state.step_tokens.take();
@@ -6213,6 +6557,17 @@ fn one_call<S: Streaming>(
         }
         return prune_call(shared, (turn, request), call);
     }
+    // The phase tool (#788), whenever the session's phases are active.
+    if declared
+        && call.name == PHASE_TOOL
+        && shared
+            .lock()
+            .interview
+            .as_ref()
+            .is_some_and(|interview| !interview.phases.is_empty())
+    {
+        return phase_call(shared, (turn, request), call);
+    }
     // Self-capture (#609): the contract's tools write working memory and
     // nothing else, so no gate, no confinement and no approval decide them.
     if declared && crate::capture::tools::CaptureTool::from_tag(&call.name).is_some() {
@@ -6915,6 +7270,9 @@ fn refilled(
     if let Some(moved) = &phase {
         state.phase = Some(moved.to.clone());
     }
+    // The phase's growth before this meditation replaces the trunk (#788).
+    let before = trunk_now(state, template);
+    state.phase_grown += before.saturating_sub(state.phase_floor);
     let Some(interview) = state.interview.as_ref() else {
         unreachable!("a meditation is refused or not due when the session keeps no working memory");
     };
@@ -6989,6 +7347,16 @@ fn refilled(
     refilled.extend(kept);
     let prefix_hash_after = digest(&refilled);
     state.trunk = refilled;
+    // The refill is where the trunk's growth counts from again (#788), and
+    // a move made by this meditation enters its phase here.
+    state.trunk_tokens = None;
+    let after = trunk_now(state, template);
+    state.meditation_floor = after;
+    state.phase_floor = after;
+    if phase.is_some() {
+        state.phase_entered = state.log.len() as u64;
+        state.phase_grown = 0;
+    }
     for item in archived {
         state.archive.push(item);
     }
@@ -8239,6 +8607,19 @@ fn turn_over(template: &RequestShape, state: &mut State) {
     if state.settlement != Settlement::Awaiting {
         return;
     }
+    // A move the model accepted to meditate into (#788), now the turn is
+    // over; with nothing to refill from, the move is kept.
+    if let Some(to) = state.move_after_turn.take() {
+        if !meditation(
+            template,
+            state,
+            crate::meditation::Reason::Phase,
+            Some(to.clone()),
+        ) {
+            moved(template, state, &to, PhaseChoice::Keep);
+        }
+        return;
+    }
     // No derived meditation while a tangent is open (#22): its close restores the
     // fork point's trunk, which a refill would have replaced.
     let due = state
@@ -8405,14 +8786,259 @@ vocabulary! {
     PhaseChoice {
         /// Start the new phase from the summary: a meditation that moves to it.
         Meditation => "meditation",
-        /// Move to the new phase and keep the trunk.
-        Continue => "continue",
+        /// Move to the new phase and keep the trunk (#788; v7's `continue`).
+        Keep => "keep",
         /// Stay: the proposal is declined.
         Stay => "stay",
     }
 }
 
+/// A phase move as `choice` makes it (#124, #788): through a meditation that
+/// moves to `to`, queued; or kept, the trunk as it stands and the phase's
+/// ground rules a note on the next ask (#787); or none. Whether a meditation
+/// was queued.
+fn moved(template: &RequestShape, state: &mut State, to: &str, choice: PhaseChoice) -> bool {
+    match choice {
+        PhaseChoice::Meditation => meditation(
+            template,
+            state,
+            crate::meditation::Reason::Phase,
+            Some(to.to_owned()),
+        ),
+        PhaseChoice::Keep => {
+            state.phase = Some(to.to_owned());
+            // No meditation to carry its rules (#787): a note does.
+            state.phase_note_due = state.phase_note();
+            entered(template, state);
+            false
+        }
+        PhaseChoice::Stay => false,
+    }
+}
+
+/// The session entered its phase now (#788): its steps and tokens count
+/// from here.
+fn entered(template: &RequestShape, state: &mut State) {
+    state.phase_entered = state.log.len() as u64;
+    state.phase_grown = 0;
+    state.phase_floor = trunk_now(state, template);
+}
+
+/// The trunk's size now, in tokens (#788): as its latest call measured it,
+/// else as estimated.
+fn trunk_now(state: &State, template: &RequestShape) -> u64 {
+    state.trunk_tokens.unwrap_or_else(|| {
+        let mut shape = template.clone();
+        shape.messages.clone_from(&state.trunk);
+        estimate_of(&shape)
+    })
+}
+
+/// The evidence a phase move is proposed with (#788): the trunk steps since
+/// the session entered its phase and the tokens the trunk grew by in it,
+/// across any meditation; the tokens it grew by since the latest meditation;
+/// and whether that meditation was the operator's with no turn since.
+fn evidence(state: &State, template: &RequestShape) -> log::PhaseEvidence {
+    let now = trunk_now(state, template);
+    let phase_steps = state
+        .log
+        .iter()
+        .filter(|logged| {
+            logged.seq >= state.phase_entered
+                && matches!(
+                    logged.event,
+                    Event::Requested {
+                        lane: Lane::Trunk,
+                        ..
+                    }
+                )
+        })
+        .count() as u64;
+    let meditated_by_hand = state
+        .log
+        .iter()
+        .rev()
+        .take_while(|logged| !matches!(logged.event, Event::Asked { .. }))
+        .find_map(|logged| match &logged.event {
+            Event::Meditated { reason, .. } => Some(*reason == crate::meditation::Reason::Operator),
+            _ => None,
+        })
+        .unwrap_or(false);
+    log::PhaseEvidence {
+        phase_steps,
+        phase_tokens: state.phase_grown + now.saturating_sub(state.phase_floor),
+        tokens_since_meditation: now.saturating_sub(state.meditation_floor),
+        meditated_by_hand,
+    }
+}
+
+/// The phase tool's name (#124, #788).
+pub const PHASE_TOOL: &str = "propose_phase_transition";
+
+/// What the model is shown when its own proposal is pending (#788): the
+/// pinned `PHASE_PROPOSED`, its turn ending.
+///
+/// # Panics
+///
+/// Never: the template's one hole is `to`, which a test holds.
+#[must_use]
+pub fn proposal_result(to: &str) -> String {
+    crate::dogma::Template::PhaseProposed
+        .fill(&[(crate::dogma::Hole::To, to)])
+        .expect("PHASE_PROPOSED's one hole is `to`")
+}
+
+/// The note that puts the operator's proposal to the model at its next ask
+/// (#788): the pinned `PHASE_OPERATOR_PROPOSAL`.
+///
+/// # Panics
+///
+/// Never: the template's holes are `from` and `to`, which a test holds.
+#[must_use]
+pub fn operator_proposal_note(from: Option<&str>, to: &str) -> String {
+    crate::dogma::Template::PhaseOperatorProposal
+        .fill(&[
+            (crate::dogma::Hole::From, from.unwrap_or("none")),
+            (crate::dogma::Hole::To, to),
+        ])
+        .expect("PHASE_OPERATOR_PROPOSAL's holes are `from` and `to`")
+}
+
+/// The phase tool's definition (#788): `to` and `reason`, and `accept`, a
+/// boolean, when answering the operator.
+#[must_use]
+pub fn phase_tool() -> crate::client::shape::ToolDefinition {
+    use crate::formats::record::json::Value;
+    let text = |s: &str| Value::String(s.to_owned());
+    let typed = |kind: &str| Value::Object(BTreeMap::from([("type".to_owned(), text(kind))]));
+    crate::client::shape::ToolDefinition {
+        name: PHASE_TOOL.to_owned(),
+        description: Some(crate::dogma::Template::PhaseTool.text().to_owned()),
+        schema: Value::Object(BTreeMap::from([
+            (
+                "properties".to_owned(),
+                Value::Object(BTreeMap::from([
+                    ("to".to_owned(), typed("string")),
+                    ("reason".to_owned(), typed("string")),
+                    ("accept".to_owned(), typed("boolean")),
+                ])),
+            ),
+            (
+                "required".to_owned(),
+                Value::Array(vec![text("to"), text("reason")]),
+            ),
+            ("type".to_owned(), text("object")),
+        ])),
+    }
+}
+
+/// The phase tool on `shape`, offered whenever the session's phases are
+/// active (#788), in place of any self-capture set's own.
+pub fn declare_phase_tool(shape: &mut RequestShape, interview: Option<&Interview>) {
+    if interview.is_some_and(|interview| !interview.phases.is_empty()) {
+        shape.tools.retain(|tool| tool.name != PHASE_TOOL);
+        shape.tools.push(phase_tool());
+    }
+}
+
+/// The phase tool's call (#788): an answer to the operator's pending
+/// proposal when it carries `accept` -- logged, and accepted, the move
+/// kept -- else the model's own proposal, refused in the graph's word or
+/// held for the operator's ruling with its evidence, its turn ending after
+/// this step.
+fn phase_call<S>(
+    shared: &Shared<S>,
+    (turn, request): (u32, u64),
+    call: &Call,
+) -> (ToolLine, Option<String>) {
+    let line = ToolLine::of(request, turn, call, log::ToolOutcome::Ran);
+    let args: serde_json::Value = serde_json::from_str(&call.arguments).unwrap_or_default();
+    let to = args["to"].as_str().unwrap_or_default().to_owned();
+    let reason = args["reason"]
+        .as_str()
+        .filter(|why| !why.is_empty())
+        .map(str::to_owned);
+    let mut state = shared.lock();
+    let shown = if let Some(accept) = args["accept"].as_bool() {
+        let pending = state
+            .operator_proposal
+            .as_ref()
+            .filter(|(proposed, _)| *proposed == to)
+            .map(|(_, meditate)| *meditate);
+        if let Some(meditate) = pending {
+            state.operator_proposal = None;
+            state.push(Event::PhaseAnswered {
+                call: call.id.clone(),
+                accepted: accept,
+                reason,
+            });
+            if accept {
+                // The operator's choice (#788): through a meditation once
+                // this turn ends, or kept now.
+                let choice = if meditate {
+                    PhaseChoice::Meditation
+                } else {
+                    PhaseChoice::Keep
+                };
+                let from = state.phase.clone();
+                let phase_document = state.document_of(&to);
+                state.push(Event::PhaseRuled {
+                    call: Some(call.id.clone()),
+                    by: Some(Key::Model),
+                    choice,
+                    from,
+                    to: to.clone(),
+                    phase_document,
+                });
+                if meditate {
+                    state.move_after_turn = Some(to.clone());
+                } else {
+                    moved(&shared.template, &mut state, &to, PhaseChoice::Keep);
+                }
+                "accepted".to_owned()
+            } else {
+                "declined".to_owned()
+            }
+        } else {
+            format!("refused: {}", Refusal::NoProposal.tag())
+        }
+    } else if state.operator_proposal.is_some() {
+        format!("refused: {}", Refusal::ProposalPending.tag())
+    } else if let Some(refusal) = graph_refusal(&state, &to) {
+        format!("refused: {}", refusal.tag())
+    } else {
+        let from = state.phase.clone();
+        state.proposal = Some(PendingProposal {
+            call: call.id.clone(),
+            from,
+            to: to.clone(),
+        });
+        state.proposal_ends_turn = Some(OwnProposal { reason });
+        proposal_result(&to)
+    };
+    drop(state);
+    shared.changed.notify_all();
+    (line, Some(shown))
+}
+
+vocabulary! {
+    /// Which key turns a phase move (#788).
+    Key {
+        /// The model.
+        Model => "model",
+        /// The operator.
+        Operator => "operator",
+    }
+}
+
+/// A step's own phase proposal, held until the step settles (#788): why,
+/// in the model's words.
+struct OwnProposal {
+    reason: Option<String>,
+}
+
 /// The model's phase proposal the operator has not yet ruled on (#124).
+#[derive(Debug, Clone)]
 struct PendingProposal {
     /// Its `propose_phase_transition` call.
     call: String,
@@ -12288,11 +12914,12 @@ pub(in crate::drive) mod tests {
                 entry: "operator-9".to_owned(),
             },
             Event::PhaseRuled {
-                call: "call-p".to_owned(),
-                choice: PhaseChoice::Continue,
+                call: Some("call-p".to_owned()),
+                choice: PhaseChoice::Keep,
                 from: Some("plan".to_owned()),
                 to: "build".to_owned(),
                 phase_document: Some(a_phase_document()),
+                by: None,
             },
             Event::MeditationHeld {
                 at_turn: 2,
@@ -12302,6 +12929,30 @@ pub(in crate::drive) mod tests {
             Event::PhaseNoted {
                 turn: 3,
                 text: "The session is now in the build phase.".to_owned(),
+            },
+            // #788's three.
+            Event::PhaseProposed {
+                by: Key::Model,
+                call: Some("call-p".to_owned()),
+                from: Some("plan".to_owned()),
+                to: "build".to_owned(),
+                reason: Some("the plan is settled".to_owned()),
+                meditate: None,
+                evidence: log::PhaseEvidence {
+                    phase_steps: 3,
+                    phase_tokens: 900,
+                    tokens_since_meditation: 900,
+                    meditated_by_hand: false,
+                },
+            },
+            Event::PhaseAnswered {
+                call: "call-a".to_owned(),
+                accepted: true,
+                reason: None,
+            },
+            Event::PhaseStarted {
+                phase: "plan".to_owned(),
+                phase_document: None,
             },
         ];
         let mut kinds = std::collections::BTreeSet::new();
@@ -12348,9 +12999,12 @@ pub(in crate::drive) mod tests {
                 Event::PatchRefused { .. } => 38,
                 Event::MeditationHeld { .. } => 39,
                 Event::PhaseNoted { .. } => 40,
+                Event::PhaseProposed { .. } => 41,
+                Event::PhaseAnswered { .. } => 42,
+                Event::PhaseStarted { .. } => 43,
             });
         }
-        assert_eq!(kinds.len(), 41, "a variant has no sample");
+        assert_eq!(kinds.len(), 44, "a variant has no sample");
         events
             .into_iter()
             .enumerate()
@@ -12779,11 +13433,12 @@ pub(in crate::drive) mod tests {
                 reason: "operator-entry".to_owned(),
             },
             log::Event::PhaseRuled {
-                call: "call-p".to_owned(),
-                choice: "continue".to_owned(),
+                call: Some("call-p".to_owned()),
+                choice: "keep".to_owned(),
                 from: Some("plan".to_owned()),
                 to: "build".to_owned(),
                 phase_document: Some(a_phase_document()),
+                by: None,
             },
             log::Event::MeditationHeld {
                 at_turn: 2,
@@ -12793,6 +13448,29 @@ pub(in crate::drive) mod tests {
             log::Event::PhaseNoted {
                 turn: 3,
                 text: "The session is now in the build phase.".to_owned(),
+            },
+            log::Event::PhaseProposed {
+                by: "model".to_owned(),
+                call: Some("call-p".to_owned()),
+                from: Some("plan".to_owned()),
+                to: "build".to_owned(),
+                reason: Some("the plan is settled".to_owned()),
+                meditate: None,
+                evidence: log::PhaseEvidence {
+                    phase_steps: 3,
+                    phase_tokens: 900,
+                    tokens_since_meditation: 900,
+                    meditated_by_hand: false,
+                },
+            },
+            log::Event::PhaseAnswered {
+                call: "call-a".to_owned(),
+                accepted: true,
+                reason: None,
+            },
+            log::Event::PhaseStarted {
+                phase: "plan".to_owned(),
+                phase_document: None,
             },
         ]
     }
@@ -13260,12 +13938,12 @@ pub(in crate::drive) mod tests {
                     .collect::<Vec<_>>()
             ),
             "ask cancel declare-meditation end open-tangent close-tangent background ratify-phase \
-             edit-entry flag-entry refill-anyway"
+             edit-entry flag-entry refill-anyway start-phase propose-phase move-phase"
         );
         assert_eq!(
             tags(&Refusal::ALL.iter().map(|it| it.tag()).collect::<Vec<_>>()),
             "in-flight ended nothing-in-flight nothing-to-meditate no-phase-graph not-a-phase \
-             already-in-phase no-phase-edge stale tangent-open no-tangent bad-tangent not-the-scope nothing-running no-proposal unknown-entry not-live empty meditation-held nothing-held restates"
+             already-in-phase no-phase-edge stale tangent-open no-tangent bad-tangent not-the-scope nothing-running no-proposal unknown-entry not-live empty meditation-held nothing-held restates not-unilateral already-asked proposal-pending"
         );
         assert_eq!(
             tags(
@@ -15586,6 +16264,7 @@ pub(in crate::drive) mod tests {
             fork_slots: 0,
             timing: Timing::Gap,
             step: crate::drive::warrants::StepWarrants::DEFAULTS,
+            operator_unilateral: true,
         }
     }
 
@@ -19608,15 +20287,7 @@ pub(in crate::drive) mod tests {
         let mut on = before.clone();
         declare_self_capture(&mut on, Some(&on_interview));
         let names: Vec<&str> = on.tools.iter().map(|tool| tool.name.as_str()).collect();
-        assert_eq!(
-            names,
-            [
-                "bash",
-                "update_record",
-                "resolve_entry",
-                "propose_phase_transition"
-            ]
-        );
+        assert_eq!(names, ["bash", "update_record", "resolve_entry",]);
         assert_eq!(on.tools[0], before.tools[0]);
     }
 
@@ -20270,6 +20941,297 @@ pub(in crate::drive) mod tests {
         }
     }
 
+    // -----------------------------------------------------------------------
+    // two keys (#788)
+    // -----------------------------------------------------------------------
+
+    /// A session under `phased()`'s graph with no self-capture, the phase
+    /// tool offered because phases are active, `unilateral` its operator's
+    /// setting, playing `acts`.
+    fn two_keys(acts: Vec<Vec<Step>>, unilateral: bool) -> Session<Canned> {
+        let interview = Interview {
+            operator_unilateral: unilateral,
+            ..phased()
+        };
+        let mut shape = template();
+        declare_phase_tool(&mut shape, Some(&interview));
+        Session::open_with(Canned::new(acts), shape, None, None, None, Some(interview))
+    }
+
+    fn propose(id: &str, args: &serde_json::Value) -> Step {
+        Step::call(0, id, "propose_phase_transition", &args.to_string())
+    }
+
+    /// A proposal as its line has it: who, the call, the move and the
+    /// evidence.
+    type Proposed = (
+        Key,
+        Option<String>,
+        Option<String>,
+        String,
+        log::PhaseEvidence,
+    );
+
+    fn proposed(log: &[Logged]) -> Vec<Proposed> {
+        log.iter()
+            .filter_map(|logged| match &logged.event {
+                Event::PhaseProposed {
+                    by,
+                    call,
+                    from,
+                    to,
+                    evidence,
+                    ..
+                } => Some((*by, call.clone(), from.clone(), to.clone(), *evidence)),
+                _ => None,
+            })
+            .collect()
+    }
+
+    fn trunk_requests(log: &[Logged], turn: u32) -> usize {
+        log.iter()
+            .filter(|logged| {
+                matches!(logged.event, Event::Requested { turn: at, lane: Lane::Trunk, .. } if at == turn)
+            })
+            .count()
+    }
+
+    /// #788: the model's proposal ends its turn -- one trunk request, the
+    /// tool's result saying so, the turn settled -- and is logged with its
+    /// evidence; it waits for the operator, whose `keep` moves the phase.
+    #[test]
+    fn a_model_proposal_ends_its_turn_with_its_evidence() {
+        let session = two_keys(
+            vec![
+                vec![
+                    Step::Delta("The plan is settled.".to_owned()),
+                    propose(
+                        "call-p",
+                        &serde_json::json!({"to": "build", "reason": "the plan is settled"}),
+                    ),
+                ],
+                deltas(&["never reached"]),
+            ],
+            true,
+        );
+        session.ask("plan it", None).expect("accepted");
+        let log = wait_until(&session, "the turn", settled);
+        assert_eq!(trunk_requests(&log, 1), 1, "the proposal ended the turn");
+        assert!(log.iter().any(|logged| matches!(
+            logged.event,
+            Event::TurnSettled {
+                turn: 1,
+                reason: SettleReason::Final
+            }
+        )));
+        let [(by, call, from, to, evidence)] = &proposed(&log)[..] else {
+            panic!("one proposal: {:?}", proposed(&log));
+        };
+        assert_eq!(*by, Key::Model);
+        assert_eq!(call.as_deref(), Some("call-p"));
+        assert_eq!((from.as_deref(), to.as_str()), (Some("plan"), "build"));
+        assert_eq!(evidence.phase_steps, 1);
+        assert!(evidence.phase_tokens > 0);
+        assert_eq!(evidence.tokens_since_meditation, evidence.phase_tokens);
+        assert!(!evidence.meditated_by_hand);
+        let shown = log
+            .iter()
+            .find_map(|logged| match &logged.event {
+                Event::ToolCalled(line) if line.id == "call-p" => line.shown.clone(),
+                _ => None,
+            })
+            .expect("the proposal's result");
+        assert_eq!(shown, proposal_result("build"));
+        session
+            .ratify_phase("call-p", PhaseChoice::Keep)
+            .expect("ruled");
+        assert_eq!(session.shared.lock().phase.as_deref(), Some("build"));
+        reads_whole(&session);
+    }
+
+    /// #788: the operator's proposal is put to the model in a note on its
+    /// next ask; the model accepts through the same tool and the phase
+    /// moves, its turn going on; or declines with its reason and nothing
+    /// moves.
+    #[test]
+    fn the_operators_proposal_is_accepted_or_declined_by_the_model() {
+        for accept in [true, false] {
+            let session = two_keys(
+                vec![
+                    vec![propose(
+                        "call-a",
+                        &serde_json::json!({"to": "build", "accept": accept, "reason": "the tests pass"}),
+                    )],
+                    deltas(&["Going on."]),
+                ],
+                true,
+            );
+            session.propose_phase("build", false).expect("proposed");
+            let log = session.events_from(0);
+            let [(by, call, ..)] = &proposed(&log)[..] else {
+                panic!("one proposal");
+            };
+            assert_eq!((*by, call.as_deref()), (Key::Operator, None));
+            session.ask("go on", None).expect("accepted");
+            let log = wait_until(&session, "the turn", settled);
+            assert_eq!(
+                trunk_requests(&log, 1),
+                2,
+                "an answer does not end the turn"
+            );
+            assert!(
+                log.iter().any(|logged| matches!(
+                    &logged.event,
+                    Event::Notified { turn: 1, text } if *text == operator_proposal_note(Some("plan"), "build")
+                )),
+                "the note rode the ask"
+            );
+            assert!(log.iter().any(|logged| matches!(
+                &logged.event,
+                Event::PhaseAnswered { call, accepted, reason: Some(reason) }
+                    if call == "call-a" && *accepted == accept && reason == "the tests pass"
+            )));
+            let moved = log.iter().any(|logged| matches!(
+                &logged.event,
+                Event::PhaseRuled { by: Some(Key::Model), choice: PhaseChoice::Keep, to, .. } if to == "build"
+            ));
+            assert_eq!(moved, accept, "accept {accept}");
+            assert_eq!(
+                session.shared.lock().phase.as_deref(),
+                Some(if accept { "build" } else { "plan" })
+            );
+            reads_whole(&session);
+        }
+    }
+
+    /// #788: the operator's proposal says whether the move it proposes
+    /// meditates -- on its line -- and when the model accepts, the
+    /// meditation that moves the phase runs once the turn has ended.
+    #[test]
+    fn an_accepted_proposal_to_meditate_moves_through_a_meditation_after_the_turn() {
+        const SAID: &str = "The schema has two tables.";
+        let mut interview = Interview {
+            self_capture: Some(crate::capture::tools::Cadence::DEFAULT),
+            ..phased()
+        };
+        interview.rules = Vec::new();
+        let mut shape = template();
+        declare_self_capture(&mut shape, Some(&interview));
+        let session = Session::open_with(
+            Canned::new(vec![
+                vec![
+                    Step::Delta(SAID.to_owned()),
+                    Step::call(
+                        0,
+                        "call-f",
+                        "update_record",
+                        &serde_json::json!({ "field": "fact", "content": SAID }).to_string(),
+                    ),
+                    Step::call(
+                        1,
+                        "call-a",
+                        PHASE_TOOL,
+                        &serde_json::json!({"to": "build", "accept": true, "reason": "planned"})
+                            .to_string(),
+                    ),
+                ],
+                deltas(&["Going on."]),
+            ]),
+            shape,
+            None,
+            None,
+            None,
+            Some(interview),
+        );
+        session.propose_phase("build", true).expect("proposed");
+        assert!(session.events_from(0).iter().any(|logged| matches!(
+            logged.event,
+            Event::PhaseProposed {
+                by: Key::Operator,
+                meditate: Some(true),
+                ..
+            }
+        )));
+        session.ask("plan it", None).expect("accepted");
+        let log = wait_until(&session, "the meditation", meditated);
+        assert!(log.iter().any(|logged| matches!(
+            &logged.event,
+            Event::PhaseRuled { by: Some(Key::Model), choice: PhaseChoice::Meditation, to, .. }
+                if to == "build"
+        )));
+        let settled_at = log
+            .iter()
+            .find_map(|logged| {
+                matches!(logged.event, Event::TurnSettled { .. }).then_some(logged.seq)
+            })
+            .expect("the turn");
+        let meditated_at = log
+            .iter()
+            .find_map(|logged| match &logged.event {
+                Event::Meditated {
+                    phase: Some(moved), ..
+                } if moved.to == "build" => Some(logged.seq),
+                _ => None,
+            })
+            .expect("a meditation that moved to build");
+        assert!(meditated_at > settled_at, "after the turn");
+        assert_eq!(session.shared.lock().phase.as_deref(), Some("build"));
+        reads_whole(&session);
+    }
+
+    /// #788: the operator moves alone only with `operator_unilateral`; a
+    /// move or proposal outside the phase's transitions is refused; the
+    /// starting phase is chosen only before the first ask; and the
+    /// operator's proposal waits while the model's does.
+    #[test]
+    fn the_operators_moves_and_their_refusals() {
+        let session = two_keys(vec![deltas(&["ok"])], false);
+        assert_eq!(
+            session.move_phase("build", false),
+            Err(Rejected::Refused(Refusal::NotUnilateral))
+        );
+        let session = two_keys(
+            vec![vec![propose(
+                "call-p",
+                &serde_json::json!({"to": "review", "reason": "the build is done"}),
+            )]],
+            true,
+        );
+        assert_eq!(
+            session.move_phase("review", false),
+            Err(Rejected::Refused(Refusal::NoPhaseEdge))
+        );
+        assert_eq!(
+            session.propose_phase("review", true),
+            Err(Rejected::Refused(Refusal::NoPhaseEdge))
+        );
+        session.start_phase("build").expect("before the first ask");
+        assert_eq!(session.shared.lock().phase.as_deref(), Some("build"));
+        assert!(session.events_from(0).iter().any(|logged| matches!(
+            &logged.event,
+            Event::PhaseStarted { phase, .. } if phase == "build"
+        )));
+        session.ask("build it", None).expect("accepted");
+        wait_until(&session, "the turn", settled);
+        assert_eq!(
+            session.start_phase("plan"),
+            Err(Rejected::Refused(Refusal::AlreadyAsked))
+        );
+        assert_eq!(
+            session.propose_phase("review", true),
+            Err(Rejected::Refused(Refusal::ProposalPending)),
+            "the model's proposal waits on a ruling"
+        );
+        session.move_phase("review", false).expect("unilateral");
+        let log = session.events_from(0);
+        assert!(log.iter().any(|logged| matches!(
+            &logged.event,
+            Event::PhaseRuled { call: None, by: Some(Key::Operator), choice: PhaseChoice::Keep, to, .. }
+                if to == "review"
+        )));
+        reads_whole(&session);
+    }
+
     /// An interview under a three-phase graph: plan to build to review.
     fn phased() -> Interview {
         let mut graph = crate::meditation::phase::PhaseGraph::of(&[
@@ -20329,22 +21291,29 @@ pub(in crate::drive) mod tests {
         (session, log)
     }
 
+    /// The model's proposal as the log has it (#124, #788): its result's
+    /// outcome word and why, as the model was shown it, and the move -- from
+    /// the `phase.proposed` line, when it is pending, and the phase it named.
     fn proposal_line(log: &[Logged]) -> (String, Option<String>, Option<String>, Option<String>) {
-        log.iter()
+        let (shown, to) = log
+            .iter()
             .find_map(|logged| match &logged.event {
-                Event::Captured {
-                    tool,
-                    outcome,
-                    why,
-                    from,
-                    to,
-                    ..
-                } if tool == "propose_phase_transition" => {
-                    Some((outcome.clone(), why.clone(), from.clone(), to.clone()))
-                }
+                Event::ToolCalled(line) if line.name == PHASE_TOOL => Some((
+                    line.shown.clone().unwrap_or_default(),
+                    serde_json::from_str::<serde_json::Value>(&line.arguments)
+                        .ok()
+                        .and_then(|args| args["to"].as_str().map(str::to_owned)),
+                )),
                 _ => None,
             })
-            .expect("the proposal's capture line")
+            .expect("the proposal's call");
+        let (outcome, why) = shown.split_once(": ").unwrap_or((shown.as_str(), ""));
+        let why = (outcome == "refused").then(|| why.to_owned());
+        let from = log.iter().find_map(|logged| match &logged.event {
+            Event::PhaseProposed { from, .. } => from.clone(),
+            _ => None,
+        });
+        (outcome.to_owned(), why, from, to)
     }
 
     /// #124: a proposal the graph allows is pending -- `proposed`, its move
@@ -20370,22 +21339,22 @@ pub(in crate::drive) mod tests {
         );
         let trunk = session.trunk();
         session
-            .ratify_phase("call-p", PhaseChoice::Continue)
+            .ratify_phase("call-p", PhaseChoice::Keep)
             .expect("ruled");
         assert_eq!(session.shared.lock().phase.as_deref(), Some("build"));
         assert_eq!(session.trunk(), trunk, "the trunk is kept");
         let log = session.events_from(0);
         assert!(log.iter().any(|logged| matches!(
             &logged.event,
-            Event::PhaseRuled { call, choice: PhaseChoice::Continue, from: Some(from), to, .. }
-                if call == "call-p" && from == "plan" && to == "build"
+            Event::PhaseRuled { call, choice: PhaseChoice::Keep, from: Some(from), to, .. }
+                if call.as_deref() == Some("call-p") && from == "plan" && to == "build"
         )));
         assert!(
             !log.iter()
                 .any(|logged| matches!(logged.event, Event::Meditated { .. }))
         );
         assert!(matches!(
-            session.ratify_phase("call-p", PhaseChoice::Continue),
+            session.ratify_phase("call-p", PhaseChoice::Keep),
             Err(Rejected::Refused(Refusal::NoProposal))
         ));
         reads_whole(&session);
@@ -20401,7 +21370,7 @@ pub(in crate::drive) mod tests {
             (
                 "refused".to_owned(),
                 Some("no-phase-edge".to_owned()),
-                Some("plan".to_owned()),
+                None,
                 Some("review".to_owned())
             )
         );
@@ -20481,7 +21450,7 @@ pub(in crate::drive) mod tests {
             vec![deltas(&["built"]), deltas(&["tested"])],
         );
         session
-            .ratify_phase("call-p", PhaseChoice::Continue)
+            .ratify_phase("call-p", PhaseChoice::Keep)
             .expect("ruled");
         let build = starter_document("build");
         assert!(session.events_from(0).iter().any(|logged| matches!(
@@ -22666,7 +23635,7 @@ pub(in crate::drive) mod tests {
                 && session_settled_awaiting(log)
         });
         session
-            .ratify_phase("call-p", PhaseChoice::Continue)
+            .ratify_phase("call-p", PhaseChoice::Keep)
             .expect("continue, while the meditation holds");
         assert_eq!(session.shared.lock().phase.as_deref(), Some("build"));
         assert_eq!(

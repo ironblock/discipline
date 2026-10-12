@@ -239,6 +239,13 @@ vocabulary! {
         Pruned => "pruned",
         /// The operator's ruling on the model's phase proposal (v7, #124).
         PhaseRuled => "phase.ruled",
+        /// A phase move proposed, by the model or the operator, with the
+        /// evidence its ruling is made on (v8, #788).
+        PhaseProposed => "phase.proposed",
+        /// The model's answer to the operator's phase proposal (v8, #788).
+        PhaseAnswered => "phase.answered",
+        /// The starting phase the operator chose (v8, #788).
+        PhaseStarted => "phase.started",
         /// A tangent opened at the operator's word (v7, #22).
         TangentOpen => "tangent.open",
         /// A tangent closed: its entries disposed and the trunk rolled back
@@ -474,6 +481,12 @@ vocabulary! {
         FlagEntry => "flag-entry",
         /// The operator refilled a held meditation anyway (v7, #150's gate).
         RefillAnyway => "refill-anyway",
+        /// The operator chose the starting phase (v8, #788).
+        StartPhase => "start-phase",
+        /// The operator proposed a phase move to the model (v8, #788).
+        ProposePhase => "propose-phase",
+        /// The operator moved the phase alone (v8, #788).
+        MovePhase => "move-phase",
     }
 }
 
@@ -529,6 +542,14 @@ vocabulary! {
         NothingHeld => "nothing-held",
         /// An edit that restates an entry working memory holds (v8, #729).
         Restates => "restates",
+        /// A move the operator made alone where `operator_unilateral` is off
+        /// (v8, #788).
+        NotUnilateral => "not-unilateral",
+        /// A starting phase chosen after the first ask (v8, #788).
+        AlreadyAsked => "already-asked",
+        /// The operator's proposal while the model's waits on a ruling (v8,
+        /// #788).
+        ProposalPending => "proposal-pending",
     }
 }
 
@@ -840,6 +861,20 @@ pub struct PoolRoom {
     pub beside: u64,
     /// The fork's own prompt.
     pub prompt: u64,
+}
+
+/// The evidence a phase move is proposed with (v8, #788): what the operator
+/// rules on, the same numbers on either key's proposal.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct PhaseEvidence {
+    /// Trunk steps since the session entered its phase.
+    pub phase_steps: u64,
+    /// The trunk's tokens added since then.
+    pub phase_tokens: u64,
+    /// The trunk's tokens added since the latest meditation.
+    pub tokens_since_meditation: u64,
+    /// The latest meditation was the operator's, with no turn since.
+    pub meditated_by_hand: bool,
 }
 
 /// The fork ask set a session asks in (v7, #595), by name and digest.
@@ -1536,9 +1571,14 @@ pub enum Event {
     /// #124): `meditation`, a meditation that moves to `to`; `continue`, the phase moved
     /// to `to` with the trunk kept; `stay`, declined.
     PhaseRuled {
-        /// The id of the `propose_phase_transition` call it rules on.
-        call: String,
-        /// `meditation`, `continue` or `stay`.
+        /// The id of the `propose_phase_transition` call it rules on; absent
+        /// on the operator's move alone (v8, #788).
+        call: Option<String>,
+        /// Who made the move (v8, #788): `operator`, alone, or `model`,
+        /// accepting the operator's proposal. Absent, the operator ruling on
+        /// the model's proposal, as v7.
+        by: Option<String>,
+        /// `meditation`, `keep` (v7's `continue`) or `stay`.
         choice: String,
         /// The phase the session was in; absent before any.
         from: Option<String>,
@@ -1546,6 +1586,45 @@ pub enum Event {
         to: String,
         /// The document of the phase the session is in after the ruling
         /// (v8, #787), on a `meditation` or `continue`.
+        phase_document: Option<PhaseDocument>,
+    },
+    /// A phase move proposed (v8, #788): by the model, through its
+    /// `propose_phase_transition` call `call`, or by the operator; from the
+    /// phase the session is in to `to`, with the evidence the other key
+    /// rules on.
+    PhaseProposed {
+        /// `model` or `operator`.
+        by: String,
+        /// The model's call; absent on the operator's proposal.
+        call: Option<String>,
+        /// The phase the session is in; absent before any.
+        from: Option<String>,
+        /// The phase proposed.
+        to: String,
+        /// Why, in the model's words.
+        reason: Option<String>,
+        /// Whether the operator's proposal moves through a meditation.
+        meditate: Option<bool>,
+        /// The evidence: the phase's steps and tokens, the tokens since the
+        /// latest meditation, and whether the operator just meditated.
+        evidence: PhaseEvidence,
+    },
+    /// The model's answer to the operator's phase proposal (v8, #788),
+    /// through its `propose_phase_transition` call `call`.
+    PhaseAnswered {
+        /// The model's call.
+        call: String,
+        /// Whether it accepted.
+        accepted: bool,
+        /// Why, in the model's words.
+        reason: Option<String>,
+    },
+    /// The starting phase the operator chose before the first ask (v8,
+    /// #788).
+    PhaseStarted {
+        /// The phase.
+        phase: String,
+        /// Its document.
         phase_document: Option<PhaseDocument>,
     },
     /// A phase's ground rules, as a note on turn `turn`'s ask (v8, #787):
@@ -2750,6 +2829,13 @@ fn beyond(line: &Line, declared: i64) -> Option<String> {
     if let Some(why) = arrived(introduced(kind), format!("a `{}` line", kind.tag())) {
         return Some(why);
     }
+    // A phase ruling's `keep` arrived in v8, for v7's `continue` (#788).
+    if kind == Kind::PhaseRuled
+        && object.get("choice") == Some(&Value::String("keep".to_owned()))
+        && let Some(why) = arrived(8, "`phase.ruled`'s `choice` is `keep`".to_owned())
+    {
+        return Some(why);
+    }
     for field in schema(kind) {
         let Some(value) = object.get(field.key) else {
             continue;
@@ -3513,13 +3599,57 @@ fn from_object(object: &BTreeMap<String, Value>) -> Result<Line, String> {
             turn: fields.turn("turn")?,
             text: fields.string("text")?,
         },
-        Kind::PhaseRuled => Event::PhaseRuled {
-            call: fields.string("call")?,
-            choice: match fields.string("choice")?.as_str() {
-                choice @ ("meditation" | "continue" | "stay") => choice.to_owned(),
+        Kind::PhaseProposed => Event::PhaseProposed {
+            by: match fields.string("by")?.as_str() {
+                by @ ("model" | "operator") => by.to_owned(),
                 other => {
                     return Err(format!(
-                        "a phase ruling's `choice` is `meditation`, `continue` or `stay`, not `{other}`"
+                        "a phase proposal is `by` `model` or `operator`, not `{other}`"
+                    ));
+                }
+            },
+            call: fields.optional_string("call")?,
+            from: fields.optional_string("from")?,
+            to: fields.string("to")?,
+            reason: fields.optional_string("reason")?,
+            meditate: fields.optional_flag("meditate")?,
+            evidence: PhaseEvidence {
+                phase_steps: fields.count("phase_steps")?,
+                phase_tokens: fields.count("phase_tokens")?,
+                tokens_since_meditation: fields.count("tokens_since_meditation")?,
+                meditated_by_hand: fields
+                    .optional_flag("meditated_by_hand")?
+                    .ok_or_else(|| "no `meditated_by_hand`".to_owned())?,
+            },
+        },
+        Kind::PhaseAnswered => Event::PhaseAnswered {
+            call: fields.string("call")?,
+            accepted: fields
+                .optional_flag("accepted")?
+                .ok_or_else(|| "no `accepted`".to_owned())?,
+            reason: fields.optional_string("reason")?,
+        },
+        Kind::PhaseStarted => Event::PhaseStarted {
+            phase: fields.string("phase")?,
+            phase_document: fields.optional_phase_document("phase_document")?,
+        },
+        Kind::PhaseRuled => Event::PhaseRuled {
+            call: fields.optional_string("call")?,
+            by: match fields.optional_string("by")?.as_deref() {
+                None => None,
+                Some(by @ ("model" | "operator")) => Some(by.to_owned()),
+                Some(other) => {
+                    return Err(format!(
+                        "a phase ruling is `by` `model` or `operator`, not `{other}`"
+                    ));
+                }
+            },
+            choice: match fields.string("choice")?.as_str() {
+                // `keep` from v8 (#788), v7's `continue` still read.
+                choice @ ("meditation" | "keep" | "continue" | "stay") => choice.to_owned(),
+                other => {
+                    return Err(format!(
+                        "a phase ruling's `choice` is `meditation`, `keep` or `stay`, not `{other}`"
                     ));
                 }
             },
@@ -4643,14 +4773,33 @@ pub fn introduced(kind: Kind) -> i64 {
         | Kind::Notice
         | Kind::TimeoutNear
         | Kind::ForkSkipped => 7,
-        Kind::PhaseNoted => 8,
+        Kind::PhaseNoted | Kind::PhaseProposed | Kind::PhaseAnswered | Kind::PhaseStarted => 8,
         _ => 0,
     }
+}
+
+/// Whether `tag` is one of #788's refusals or commands, which arrived in v8.
+fn two_keys(tags: Tags, tag: &str) -> bool {
+    (tags == Tags::Refusal
+        && Refusal::from_tag(tag).is_some_and(|refusal| {
+            matches!(
+                refusal,
+                Refusal::NotUnilateral | Refusal::AlreadyAsked | Refusal::ProposalPending
+            )
+        }))
+        || (tags == Tags::Command
+            && Command::from_tag(tag).is_some_and(|command| {
+                matches!(
+                    command,
+                    Command::StartPhase | Command::ProposePhase | Command::MovePhase
+                )
+            }))
 }
 
 /// The version a tag of `tags` arrived in. A vocabulary that arrived with
 /// its key is scoped by the key's `since`.
 #[must_use]
+#[allow(clippy::too_many_lines)] // one table of arrivals, written out
 pub fn tag_introduced(tags: Tags, tag: &str) -> i64 {
     if tags == Tags::Refusal && Refusal::from_tag(tag) == Some(Refusal::Restates) {
         return 8;
@@ -4660,6 +4809,9 @@ pub fn tag_introduced(tags: Tags, tag: &str) -> i64 {
             [Warrant::Evidence, Warrant::Trouble, Warrant::Open].contains(&warrant)
         })
     {
+        return 8;
+    }
+    if two_keys(tags, tag) {
         return 8;
     }
     let refused_in_v4 = tags == Tags::ToolRefusal
@@ -5084,9 +5236,42 @@ pub fn schema(kind: Kind) -> &'static [Field] {
             ];
             F
         }
+        Kind::PhaseProposed => {
+            const F: &[Field] = &[
+                must_v8("by", Text),
+                may_v8("call", Text),
+                may_v8("from", Text),
+                must_v8("to", Text),
+                may_v8("reason", Text),
+                may_v8("meditate", Holds::Flag),
+                must_v8("phase_steps", Count),
+                must_v8("phase_tokens", Count),
+                must_v8("tokens_since_meditation", Count),
+                must_v8("meditated_by_hand", Holds::Flag),
+            ];
+            F
+        }
+        Kind::PhaseAnswered => {
+            const F: &[Field] = &[
+                must_v8("call", Text),
+                must_v8("accepted", Holds::Flag),
+                may_v8("reason", Text),
+            ];
+            F
+        }
+        Kind::PhaseStarted => {
+            const F: &[Field] = &[
+                must_v8("phase", Text),
+                may_v8("phase_document", Holds::PhaseDocument),
+            ];
+            F
+        }
         Kind::PhaseRuled => {
             const F: &[Field] = &[
-                must_v7("call", Text),
+                // Required until v8, which leaves it off the operator's move
+                // alone (#788).
+                may_v7("call", Text),
+                may_v8("by", Text),
                 must_v7("choice", Text),
                 may_v7("from", Text),
                 must_v7("to", Text),
@@ -6346,8 +6531,66 @@ fn to_value(line: &Line) -> Value {
             put("reason", text(reason));
             Kind::PatchRefused
         }
+        Event::PhaseProposed {
+            by,
+            call,
+            from,
+            to,
+            reason,
+            meditate,
+            evidence,
+        } => {
+            put("by", text(by));
+            if let Some(call) = call {
+                put("call", text(call));
+            }
+            if let Some(from) = from {
+                put("from", text(from));
+            }
+            put("to", text(to));
+            if let Some(reason) = reason {
+                put("reason", text(reason));
+            }
+            if let Some(meditate) = meditate {
+                put("meditate", Value::Boolean(*meditate));
+            }
+            put("phase_steps", count(evidence.phase_steps));
+            put("phase_tokens", count(evidence.phase_tokens));
+            put(
+                "tokens_since_meditation",
+                count(evidence.tokens_since_meditation),
+            );
+            put(
+                "meditated_by_hand",
+                Value::Boolean(evidence.meditated_by_hand),
+            );
+            Kind::PhaseProposed
+        }
+        Event::PhaseAnswered {
+            call,
+            accepted,
+            reason,
+        } => {
+            put("call", text(call));
+            put("accepted", Value::Boolean(*accepted));
+            if let Some(reason) = reason {
+                put("reason", text(reason));
+            }
+            Kind::PhaseAnswered
+        }
+        Event::PhaseStarted {
+            phase,
+            phase_document,
+        } => {
+            put("phase", text(phase));
+            if let Some(document) = phase_document {
+                put("phase_document", phase_document_value(document));
+            }
+            Kind::PhaseStarted
+        }
         Event::PhaseRuled {
             call,
+            by,
             choice,
             from,
             to,
@@ -6356,7 +6599,12 @@ fn to_value(line: &Line) -> Value {
             if let Some(document) = phase_document {
                 put("phase_document", phase_document_value(document));
             }
-            put("call", text(call));
+            if let Some(call) = call {
+                put("call", text(call));
+            }
+            if let Some(by) = by {
+                put("by", text(by));
+            }
             put("choice", text(choice));
             if let Some(from) = from {
                 put("from", text(from));
@@ -7701,7 +7949,7 @@ mod tests {
         // the two patches it folded into.
         let asked = events.len() as u64;
         let (request, fork) = (asked + 2, asked + 6);
-        events.extend([
+        events.extend(vec![
             Event::Ask {
                 turn: 5,
                 text: "what are we building".to_owned(),
@@ -7867,7 +8115,7 @@ mod tests {
                 to: Some("build".to_owned()),
             },
             Event::PhaseRuled {
-                call: "call-p".to_owned(),
+                call: Some("call-p".to_owned()),
                 choice: "meditation".to_owned(),
                 from: Some("plan".to_owned()),
                 to: "build".to_owned(),
@@ -7880,13 +8128,75 @@ mod tests {
                     }],
                     ground_rules: "Make the change.".to_owned(),
                 }),
+                by: None,
+            },
+            // The operator's move alone (#788): no call, `by` operator.
+            Event::PhaseRuled {
+                call: None,
+                by: Some("operator".to_owned()),
+                choice: "keep".to_owned(),
+                from: Some("build".to_owned()),
+                to: "test".to_owned(),
+                phase_document: None,
+            },
+            Event::PhaseProposed {
+                by: "model".to_owned(),
+                call: Some("call-r".to_owned()),
+                from: Some("build".to_owned()),
+                to: "test".to_owned(),
+                reason: Some("the change is made".to_owned()),
+                meditate: None,
+                evidence: PhaseEvidence {
+                    phase_steps: 12,
+                    phase_tokens: 30_000,
+                    tokens_since_meditation: 41_000,
+                    meditated_by_hand: false,
+                },
+            },
+            Event::PhaseProposed {
+                by: "operator".to_owned(),
+                call: None,
+                from: None,
+                to: "test".to_owned(),
+                reason: None,
+                meditate: Some(true),
+                evidence: PhaseEvidence {
+                    phase_steps: 0,
+                    phase_tokens: 0,
+                    tokens_since_meditation: 0,
+                    meditated_by_hand: true,
+                },
+            },
+            Event::PhaseAnswered {
+                call: "call-s".to_owned(),
+                accepted: false,
+                reason: Some("the tests do not pass yet".to_owned()),
+            },
+            Event::PhaseAnswered {
+                call: "call-t".to_owned(),
+                accepted: true,
+                reason: None,
+            },
+            Event::PhaseStarted {
+                phase: "plan".to_owned(),
+                phase_document: None,
+            },
+            Event::PhaseStarted {
+                phase: "build".to_owned(),
+                phase_document: Some(PhaseDocument {
+                    name: "build".to_owned(),
+                    digest: "b".repeat(64),
+                    transitions: Vec::new(),
+                    ground_rules: "Make the change.".to_owned(),
+                }),
             },
             Event::PhaseRuled {
-                call: "call-q".to_owned(),
+                call: Some("call-q".to_owned()),
                 choice: "stay".to_owned(),
                 from: None,
                 to: "plan".to_owned(),
                 phase_document: None,
+                by: None,
             },
             Event::Reminded {
                 turn: 5,
@@ -8328,6 +8638,11 @@ mod tests {
                     if kind == Kind::ToolCall && *absent == "background" {
                         continue;
                     }
+                    // A phase ruling's `by` is `model` or `operator` (v8,
+                    // #788): the reader's value rule.
+                    if kind == Kind::PhaseRuled && *absent == "by" {
+                        continue;
+                    }
                     // A stream's text comes with its byte count: added alone,
                     // it is that pairing's refusal, not an exclusivity -- met
                     // by a call that ran no command (#612's `prune_output`,
@@ -8670,6 +8985,32 @@ mod tests {
             "{refused}"
         );
         parse(&log(8)).expect("`restates` reads in v8");
+    }
+
+    /// #788: a phase ruling writes `keep` from v8, for the move without a
+    /// meditation that v7 wrote `continue`; v8 still reads `continue`, and a
+    /// v7 log carrying `keep` is refused.
+    #[test]
+    fn a_phase_rulings_keep_is_v8s_and_continue_still_reads() {
+        let fixture =
+            include_str!("../../formats/log/fixtures/valid/a-v8-session-in-a-phase-library.jsonl");
+        assert!(fixture.contains(r#""choice":"continue""#));
+        parse(fixture).expect("`continue` reads in v8");
+        parse(&fixture.replace(r#""choice":"continue""#, r#""choice":"keep""#))
+            .expect("`keep` reads in v8");
+        let v7 = concat!(
+            r#"{"head":[{"content":"you are the trunk","role":"system"}],"kind":"session.start","model":"a-model","opened":1,"seq":0,"t":0,"version":7}"#,
+            "\n",
+            r#"{"call":"call-p","choice":"keep","from":"plan","kind":"phase.ruled","seq":1,"t":5,"to":"build"}"#,
+            "\n"
+        );
+        let refused = parse(v7).expect_err("`keep` was read as v7");
+        assert!(
+            refused
+                .why
+                .contains("which arrived in v8, and this log declares v7"),
+            "{refused}"
+        );
     }
 
     /// WHAT ARRIVED IN v4 IS REFUSED IN A LOG THAT DECLARES v3 (#388, ruled
@@ -9164,7 +9505,7 @@ mod tests {
             tags(Kind::ALL.iter().map(|it| it.tag()).collect()),
             "session.start ask settlement request refused delta stop.asked response \
              cancelled request.failed turn.settled idle.gap progress tool_call fork \
-             fork.settled patch meditation delivered recalled flag meditation.held patch.refused pruned phase.ruled tangent.open tangent.close capture reminded background.ended notice timeout.near fork.skipped phase.noted"
+             fork.settled patch meditation delivered recalled flag meditation.held patch.refused pruned phase.ruled phase.proposed phase.answered phase.started tangent.open tangent.close capture reminded background.ended notice timeout.near fork.skipped phase.noted"
         );
         assert_eq!(
             tags(FailReason::ALL.iter().map(|it| it.tag()).collect()),
@@ -9173,7 +9514,7 @@ mod tests {
         assert_eq!(
             tags(Refusal::ALL.iter().map(|it| it.tag()).collect()),
             "in-flight ended nothing-in-flight meditation-not-built nothing-to-meditate no-phase-graph not-a-phase \
-             already-in-phase no-phase-edge stale tangent-open no-tangent bad-tangent not-the-scope nothing-running no-proposal unknown-entry not-live empty meditation-held nothing-held restates"
+             already-in-phase no-phase-edge stale tangent-open no-tangent bad-tangent not-the-scope nothing-running no-proposal unknown-entry not-live empty meditation-held nothing-held restates not-unilateral already-asked proposal-pending"
         );
         assert_eq!(
             tags(SettleReason::ALL.iter().map(|it| it.tag()).collect()),

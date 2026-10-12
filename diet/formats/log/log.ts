@@ -34,6 +34,9 @@ export type Kind =
   | "patch.refused"
   | "pruned"
   | "phase.ruled"
+  | "phase.proposed"
+  | "phase.answered"
+  | "phase.started"
   | "tangent.open"
   | "tangent.close"
   | "capture"
@@ -70,6 +73,9 @@ export type Command =
   | "edit-entry"
   | "flag-entry"
   | "refill-anyway"
+  | "start-phase"
+  | "propose-phase"
+  | "move-phase"
 ;
 
 export type Refusal =
@@ -95,6 +101,9 @@ export type Refusal =
   | "meditation-held"
   | "nothing-held"
   | "restates"
+  | "not-unilateral"
+  | "already-asked"
+  | "proposal-pending"
 ;
 
 export type FailReason =
@@ -694,10 +703,44 @@ export type PhaseRuledLine = {
   seq: number;
   t: number;
   kind: "phase.ruled";
-  call: string;
+  call?: string;
+  by?: string;
   choice: string;
   from?: string;
   to: string;
+  phase_document?: PhaseDocument;
+};
+
+export type PhaseProposedLine = {
+  seq: number;
+  t: number;
+  kind: "phase.proposed";
+  by: string;
+  call?: string;
+  from?: string;
+  to: string;
+  reason?: string;
+  meditate?: boolean;
+  phase_steps: number;
+  phase_tokens: number;
+  tokens_since_meditation: number;
+  meditated_by_hand: boolean;
+};
+
+export type PhaseAnsweredLine = {
+  seq: number;
+  t: number;
+  kind: "phase.answered";
+  call: string;
+  accepted: boolean;
+  reason?: string;
+};
+
+export type PhaseStartedLine = {
+  seq: number;
+  t: number;
+  kind: "phase.started";
+  phase: string;
   phase_document?: PhaseDocument;
 };
 
@@ -818,6 +861,9 @@ export type LogLine =
   | PatchRefusedLine
   | PrunedLine
   | PhaseRuledLine
+  | PhaseProposedLine
+  | PhaseAnsweredLine
+  | PhaseStartedLine
   | TangentOpenLine
   | TangentCloseLine
   | CaptureLine

@@ -1,0 +1,1 @@
+proposed: the move to {to} waits for the operator's ruling. Your turn ends here; say nothing more.

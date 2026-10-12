@@ -1209,6 +1209,9 @@ fn serving_interview(
     .map_err(|why| format!("{path}: {why}"))?;
     // #783: the warrants that look at what a step produced.
     let step = session::step_warrants(&read, &rules).map_err(|why| format!("{path}: {why}"))?;
+    // #788: whether the operator may move the phase alone.
+    let operator_unilateral =
+        session::operator_unilateral(&read).map_err(|why| format!("{path}: {why}"))?;
     // The phase graph, by the scripted drive's own reader (#563).
     let phases =
         diet::meditation::policy::phase_graph(&read).map_err(|why| format!("{path}: {why}"))?;
@@ -1295,6 +1298,7 @@ fn serving_interview(
             timing,
             fork_slots,
             step,
+            operator_unilateral,
         }),
     )
 }

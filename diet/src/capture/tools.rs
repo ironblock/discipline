@@ -131,12 +131,18 @@ pub enum CaptureTool {
 }
 
 impl CaptureTool {
-    /// Every tool the contract may offer.
+    /// Every tool this lane reads a call of.
     pub const ALL: &'static [Self] = &[
         Self::UpdateRecord,
         Self::ResolveEntry,
         Self::ProposePhaseTransition,
     ];
+
+    /// The tools a self-capture contract offers (#788): every one but the
+    /// phase tool, which has its own pinned description
+    /// (`dogma::Template::PhaseTool`) and is offered whenever phases are
+    /// active, self-capture or not.
+    pub const OFFERED: &'static [Self] = &[Self::UpdateRecord, Self::ResolveEntry];
 
     /// The name the tool is registered under.
     #[must_use]
@@ -367,6 +373,24 @@ pub fn contract() -> Result<Vec<ToolSpec>, ContractError> {
     read_contract(CONTRACT)
 }
 
+/// The phase tool as this lane reads a call of it (#788): its pinned
+/// description, and the move it names and why, both required.
+#[must_use]
+pub fn phase_spec() -> ToolSpec {
+    let text = |name: &str| Parameter {
+        name: name.to_owned(),
+        kind: ParamType::Text,
+        required: true,
+        choices: Vec::new(),
+        description: None,
+    };
+    ToolSpec {
+        tool: CaptureTool::ProposePhaseTransition,
+        description: crate::dogma::Template::PhaseTool.text().to_owned(),
+        parameters: vec![text("to"), text("reason")],
+    }
+}
+
 /// The contract of the pinned set `set` (#609's c2 on).
 ///
 /// # Errors
@@ -402,7 +426,7 @@ fn read_contract(text: &str) -> Result<Vec<ToolSpec>, ContractError> {
             parameters,
         });
     }
-    for tool in CaptureTool::ALL {
+    for tool in CaptureTool::OFFERED {
         if !specs.iter().any(|spec| spec.tool == *tool) {
             return Err(ContractError::Undescribed(tool.tag()));
         }
@@ -929,12 +953,18 @@ pub fn apply_call(
         return Err(ToolError::NotACaptureTool(tool.to_owned()));
     };
     let specs = contract().map_err(ToolError::NoContract)?;
-    let spec = specs
-        .iter()
-        .find(|spec| spec.tool == named)
-        .ok_or(ToolError::NoContract(ContractError::Undescribed(
-            named.tag(),
-        )))?;
+    // The phase tool is described by its own pin (#788), not a contract.
+    let phase = phase_spec();
+    let spec = if named == CaptureTool::ProposePhaseTransition {
+        &phase
+    } else {
+        specs
+            .iter()
+            .find(|spec| spec.tool == named)
+            .ok_or(ToolError::NoContract(ContractError::Undescribed(
+                named.tag(),
+            )))?
+    };
     let args = admissible(spec, args)?;
 
     let provenance = Provenance {
@@ -1428,7 +1458,8 @@ mod tests {
         use crate::formats::record::json::Value;
         let specs = super::contract().expect("the contract");
         let tools = super::definitions(&specs);
-        assert_eq!(tools.len(), 3);
+        // The phase tool is its own (#788).
+        assert_eq!(tools.len(), 2);
         let update = &tools[0];
         assert_eq!(update.name, "update_record");
         assert_eq!(
@@ -1469,7 +1500,7 @@ mod tests {
         let specs = contract().expect("the shipped contract reads");
         let mut described: Vec<CaptureTool> = specs.iter().map(|spec| spec.tool).collect();
         described.sort_unstable();
-        let mut offered: Vec<CaptureTool> = CaptureTool::ALL.to_vec();
+        let mut offered: Vec<CaptureTool> = CaptureTool::OFFERED.to_vec();
         offered.sort_unstable();
         assert_eq!(
             described, offered,
@@ -2691,7 +2722,7 @@ mod tests {
                 }
             }
         }
-        for tool in CaptureTool::ALL {
+        for tool in CaptureTool::OFFERED {
             assert!(
                 called.contains(tool),
                 "`{}` is offered to the model and no corpus case ever calls it",

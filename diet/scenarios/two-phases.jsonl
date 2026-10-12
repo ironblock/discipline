@@ -1,17 +1,18 @@
 {"scenario":"two-phases","regimen":"two-phases.toml","head":"../drive/heads/floor.md"}
 {"reply":{"when":"Plan a bug tracker","text":"Two tables: bugs and people. The plan is settled.","calls":[{"id":"call-f","name":"update_record","arguments":"{\"field\": \"fact\", \"content\": \"Two tables: bugs and people.\"}"},{"id":"call-p","name":"propose_phase_transition","arguments":"{\"to\": \"build\", \"reason\": \"the plan is settled\"}"}]}}
-{"reply":{"text":"Recorded, and proposed build."}}
 {"reply":{"when":"Build the schema","text":"The schema is written."}}
 {"reply":{"when":"Add a status column","text":"Status added."}}
 {"step":"ask","text":"Plan a bug tracker."}
-{"step":"rule-phase","call":"call-p","choice":"continue"}
+{"step":"rule-phase","call":"call-p","choice":"keep"}
 {"step":"ask","text":"Build the schema."}
 {"step":"declare-meditation"}
 {"step":"ask","text":"Add a status column."}
 {"step":"end"}
 {"expect":"session.start","where":{"opening_phase":"plan","phase_document.name":"plan"}}
 {"expect":"phase.noted","name":"plan","where":{"turn":"1","text~":"now in the plan phase"}}
-{"expect":"phase.ruled","name":"ruled","where":{"choice":"continue","from":"plan","to":"build","phase_document.name":"build"},"after":"plan"}
+{"expect":"phase.proposed","name":"proposed","where":{"by":"model","to":"build"},"after":"plan"}
+{"expect":"turn.settled","where":{"turn":"1","reason":"final"},"after":"proposed"}
+{"expect":"phase.ruled","name":"ruled","where":{"choice":"keep","from":"plan","to":"build","phase_document.name":"build"},"after":"proposed"}
 {"expect":"phase.noted","name":"build","where":{"turn":"2","text~":"now in the build phase"},"after":"ruled"}
 {"expect":"meditation","name":"meditated","where":{"phase_document.name":"build"},"after":"build"}
 {"expect":"turn.settled","where":{"turn":"3","reason":"final"},"after":"meditated"}
