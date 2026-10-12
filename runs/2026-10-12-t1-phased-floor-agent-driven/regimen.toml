@@ -1,0 +1,63 @@
+# T1, retried in phases (v0.4.0), driven against the 3.8 floor: the third floor run, on a build with the running turn
+# split (#813), the refill and audit fitted (#814, #821), the fork queue bounded (#822) and the pool counting every
+# reservation (#826).
+# The first run (2026-10-11, the floor) died at step 4: one build turn filled the window with
+# working memory empty. This one runs in the starter phases and fills working memory during the
+# turn: mechanical capture every step, interviews warranted by what a step produced, cut at the
+# step into a spare slot, and self-capture on (the maintainer, 2026-10-11: "let's see if it's ever
+# used voluntarily").
+#
+# The endpoint, the head, `--worktree` and the output cap are the profile's (drive.toml), not this file.
+arm = "t1-phased-floor-r3"
+dogma_version = 0
+
+substrate = "accel24-tabbyapi-exl3-qwen38-27b-3p00"
+substrate_reasoning = "on"
+substrate_hardware = "e6489f9c1815a0c4540a0c6663acaa3c62b1b66e03806479475c2645347fe7af"
+
+isolation = "sandbox"
+network = "host"
+sandbox_reads = "all"
+# The reference is writable like the worktree (docs/trajectories/t1.md); the receipt's `reference_modified` covers it.
+sandbox_writable = ["~/git/reference/Babylon"]
+
+approval = "none"
+env_passthrough = ["npm_config_cache", "pnpm_config_store_dir"]
+approval_policy = "approvals are off: every command runs without a gate decision or a prompt; Seatbelt confines writes to the worktree and the reference"
+
+tool_surface = "standard"
+
+# Phases (#787, #788): the starter library, starting in orient.
+phase_library = "starter"
+starting_phase = "orient"
+self_capture = "on"
+
+# Working memory during the turn (#782, #783, #784).
+interview_warrant = ["scoping", "evidence", "trouble", "open"]
+interview_timing = "during_turn"
+mechanical_capture = "on"
+capture_modality = "fields"
+fork_asks = "v4"
+
+# Meditation: declared at a phase move, or automatic before the window fills (the default).
+meditation_audit = "on"
+meditation_warm = "on"
+meditation_tail_tokens = 4000
+meditation_tool_outputs = "reference"
+# The render budget (#565): the second floor run restarted its trunk at 111.7k of a 131k line after its third
+# in-turn split, working memory at 1,008 entries; 40k, tiered, leaves the turn room between splits.
+render_budget_tokens = 40000
+render_over_budget = "tier"
+archive_recall = "literal"
+reconcile_gate = "carry"
+
+[reasoning]
+effort = "xhigh"
+budget_tokens = "none"
+
+# The 3.8 line's sampler card, preset qwen38_thinking.
+[sampler]
+temperature = 1.0
+top_k = 20
+top_p = 0.95
+min_p = 0.0
