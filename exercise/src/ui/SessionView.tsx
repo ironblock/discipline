@@ -639,6 +639,8 @@ export function SessionView({ session, link = 'live', linkWhy, surface, onSurfac
                 {...(session.asked ? { asked: session.asked } : {})}
                 {...(session.answered ? { answered: session.answered } : {})}
                 {...(session.startable ? { startable: session.startable } : {})}
+                // The start row's `operator_unilateral` (#805): on, off, or undeclared -- only `off` withholds the move.
+                unilateral={session.levers.table?.['operator_unilateral'] !== 'off'}
                 // A meditation held for the operator (#150's gate): what its reconcile left unaddressed, with each entry's text.
                 {...(session.held
                   ? { held: { unaddressed: session.held.unaddressed.map((id) => ({ id, text: session.memory.find((m) => m.id === id)?.text ?? id })) } }

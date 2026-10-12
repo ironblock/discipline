@@ -38,6 +38,8 @@ export interface ComposerProps {
   /** The operator's proposal waiting on the model, and the model's last answer (#788). */
   readonly asked?: { readonly to: string; readonly meditate: boolean };
   readonly answered?: { readonly to: string; readonly accepted: boolean; readonly reason?: string };
+  /** `operator_unilateral` (#788, #805): the operator may move alone. Off only where the start row says `off`. */
+  readonly unilateral?: boolean;
   /** The library the session may still start in, until the first ask (#788). */
   readonly startable?: readonly string[];
   /** Why a meditation has nothing to refill from now, when it has none (#685): serve refuses a meditation then (`nothing-to-meditate`). */
@@ -68,7 +70,7 @@ const STATE_LINE: Readonly<Record<SessionState, string>> = {
 /** How long the question "end the session?" shows before a press answers it. */
 const CONFIRM_AFTER_MS = 500;
 
-export function Composer({ state, link = 'live', phase, phases, dispatch, hint, upload, tangents = false, tangent, foreground = false, nearTimeout = false, proposal, phaseDocument, asked, answered, startable, noMeditation, held }: ComposerProps) {
+export function Composer({ state, link = 'live', phase, phases, dispatch, hint, upload, tangents = false, tangent, foreground = false, nearTimeout = false, proposal, phaseDocument, asked, answered, startable, unilateral = true, noMeditation, held }: ComposerProps) {
   // Ending a tangent (#608): the operator rules on each of its entries, keep by default, then closes it.
   const [closing, setClosing] = useState(false);
   const [rulings, setRulings] = useState<Readonly<Record<string, Disposition>>>({});
@@ -221,8 +223,8 @@ export function Composer({ state, link = 'live', phase, phases, dispatch, hint, 
         </section>
       ) : null}
       {/* The phase control (#789): the phase in force, its moves and ground rules, and both keys (#788) -- the operator's
-          ruling on the model's proposal, with its evidence, and the operator's own proposal or move. Moving alone is
-          offered as serve's default (`operator_unilateral` is not logged); a regimen that forbids it refuses in place. */}
+          ruling on the model's proposal, with its evidence, and the operator's own proposal or move -- the move only where
+          `operator_unilateral` allows it. */}
       {phaseDocument || startable || (proposal && dispatch) ? (
         <Phases
           phase={phase}
@@ -234,7 +236,7 @@ export function Composer({ state, link = 'live', phase, phases, dispatch, hint, 
           {...(answered ? { answered } : {})}
           {...(noMeditation !== undefined ? { noMeditation } : {})}
           {...(startable && dispatch ? { start: { library: startable } } : {})}
-          unilateral
+          unilateral={unilateral}
           idle={idle}
           {...(dispatch
             ? {

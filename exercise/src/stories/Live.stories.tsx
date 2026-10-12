@@ -807,6 +807,22 @@ export const ServedOperatorKey: Story = {
   },
 };
 
+/** `?drive` (#788, #805): a regimen with `operator_unilateral` off -- the operator only proposes; no move is offered. */
+export const ServedProposeOnly: Story = {
+  name: '?drive: with operator_unilateral off, the operator only proposes',
+  args: {
+    drive: true,
+    web: posting(lines(PHASE_IDLE.map((line) => (line.kind === 'session.start' ? { ...line, levers: { operator_unilateral: 'off' } } : line)))),
+  },
+  play: async ({ canvasElement }) => {
+    const page = within(canvasElement);
+    await page.findByRole('region', { name: 'move from plan' });
+    await expect(page.getByRole('button', { name: 'Propose build to the model' })).toBeEnabled();
+    await expect(page.queryByRole('button', { name: 'Keep, move to build' })).toBeNull();
+    await expect(page.queryByRole('button', { name: 'Meditate and move to build' })).toBeNull();
+  },
+};
+
 /** `?drive` (#788): the operator's proposal waits on the model's answer. */
 export const ServedOperatorAsked: Story = {
   name: '?drive: the operator’s proposal waits on the model',
