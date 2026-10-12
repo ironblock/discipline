@@ -474,9 +474,10 @@ mod tests {
         assert_eq!(serving_slots(doc, "d"), None);
     }
 
-    /// #797: the floor declares its prefix shared, measured by #796; the
-    /// Flash-Next entry, the same engine unmeasured, does not; a value that
-    /// is neither word is refused.
+    /// #797: the floor declares its prefix shared, measured by #796, and the
+    /// Flash-Next `TabbyAPI` entry since its own measurement (2026-10-12); the
+    /// `llama.cpp` entry on the same box, unmeasured, does not; a value that is
+    /// neither word is refused.
     #[test]
     fn a_substrates_served_prefix_shared_is_declared_or_false() {
         assert_eq!(
@@ -485,6 +486,10 @@ mod tests {
         );
         assert_eq!(
             served_prefix_shared(REGISTRY, "ada48-tabbyapi-exl3-qwen38flashnext-2p05"),
+            Ok(true)
+        );
+        assert_eq!(
+            served_prefix_shared(REGISTRY, "ada48-llamacpp-qwen38flashnext-q20"),
             Ok(false)
         );
         assert_eq!(
