@@ -1,0 +1,10 @@
+warm warm: start 0.0s first-token 107.1s end 107.1s err=None
+   prompt_tokens=None cached=None cache_n=0 prompt_n=320048 prompt_ms=104990.0 predicted_n=1
+shared A: start 0.0s first-token 2.3s end 5.8s err=None
+   prompt_tokens=None cached=None cache_n=320000 prompt_n=51 prompt_ms=90.0 predicted_n=130
+shared B: start 2.0s first-token 4.2s end 5.9s err=None
+   prompt_tokens=None cached=None cache_n=320000 prompt_n=52 prompt_ms=90.0 predicted_n=124
+control A2: start 0.0s first-token 2.1s end 5.4s err=None
+   prompt_tokens=None cached=None cache_n=320000 prompt_n=49 prompt_ms=80.0 predicted_n=91
+control C: start 2.0s first-token 111.8s end 112.3s err=None
+   prompt_tokens=None cached=None cache_n=0 prompt_n=320049 prompt_ms=107610.0 predicted_n=53
