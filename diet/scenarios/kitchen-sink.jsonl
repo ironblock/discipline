@@ -157,7 +157,7 @@
 {"expect":"capture","where":{"tool":"resolve_entry","outcome":"resolved"}}
 {"expect":"reminded","where":{"text~":"Anything you meant to record?"}}
 {"expect":"meditation","where":{"reason":"budget","at_turn":"4"}}
-{"expect":"meditation","where":{"reason":"window","at_turn":"8","window":"24000","tail_tokens":"400","carried_turns":"0","newest_turn_tokens~":""}}
+{"expect":"meditation","where":{"reason":"window","at_turn":"8","window":"24000","tail_tokens":"400","carried_turns":"0","newest_turn_tokens~":"","turn_steps_kept":"1","turn_steps_compacted":"0"}}
 {"expect":"meditation","where":{"reason":"cadence","tool_outputs":"reference","outputs~":"# tool outputs","render_budget_tokens":"120","warm.prompt_n":"600"}}
 {"expect":"fork","where":{"lane":"audit","why":"meditation"},"at_least":3}
 {"expect":"recalled","where":{"recall":"literal"}}
