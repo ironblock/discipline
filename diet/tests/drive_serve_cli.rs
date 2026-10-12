@@ -4750,3 +4750,30 @@ fn a_drive_mcp_events_reads_a_long_backlog_whole() {
     let late = mcp.call("events", serde_json::json!({"after": last - 3}));
     assert_eq!(late["events"].as_array().map(Vec::len), Some(3), "{late}");
 }
+
+#[test]
+fn a_drive_server_with_mechanical_capture_alone_keeps_working_memory() {
+    // #784: `mechanical_capture = "on"` with no warrant and no self-capture
+    // still opens working memory -- the lane fills it -- and the start line
+    // names the lever.
+    let stub =
+        Stub::serving_with_props(Vec::new(), &diet::drive::canned::build_info()).expect("loopback");
+    let regimen = dev_loop_sampling("mechanical_capture = \"on\"\n", "seed = 7\n");
+    let regimen_path = regimen.0.to_string_lossy().into_owned();
+    let log_file = file_holding("log", "");
+    let logged = log_file.0.to_string_lossy().into_owned();
+    let served = start(&stub.url(), &["--regimen", &regimen_path, "--log", &logged]);
+    let start_line = first_logged_line(&log_file.0);
+    assert_eq!(
+        start_line["levers"]["mechanical_capture"], "on",
+        "{start_line}"
+    );
+    let address = served.listening.clone();
+    let memory = exchange(
+        &address,
+        &format!("GET /memory HTTP/1.1\r\nHost: {address}\r\n\r\n"),
+        |_| false,
+    );
+    assert_eq!(status(&memory), 200, "{memory}");
+    assert!(memory.contains(r#""entries":[]"#), "{memory}");
+}

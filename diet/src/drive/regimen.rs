@@ -667,13 +667,7 @@ pub fn serve_levers(regimen: &Regimen, output_cap: (u32, &str)) -> BTreeMap<Stri
     let reasoning = reasoning_lever(regimen);
     let delivery = crate::drive::session::fork_delivery(regimen)
         .map_or_else(|_| undeclared(), |delivery| delivery.tag().to_owned());
-    // #560: whether a call written as text is recovered. `off` by default,
-    // as Pi and `OpenCode` 2 have it; a value serve refuses is undeclared.
-    let text_fallback = match regimen.get(crate::drive::tool_loop::TOOL_CALL_TEXT_FALLBACK) {
-        None => "off".to_owned(),
-        Some(regimen::Value::String(state)) if state == "off" || state == "on" => state.clone(),
-        Some(_) => undeclared(),
-    };
+    let text_fallback = text_fallback_lever(regimen);
     let pruning = crate::drive::prune::lever(regimen);
     BTreeMap::from([
         ("compaction_depth".to_owned(), depth),
@@ -693,6 +687,8 @@ pub fn serve_levers(regimen: &Regimen, output_cap: (u32, &str)) -> BTreeMap<Stri
             crate::drive::archive::Recall::lever(regimen),
         ),
         ("fork_warrant".to_owned(), warrant.clone()),
+        // #784: each settled tool call's touches into working memory.
+        ("mechanical_capture".to_owned(), mechanical_lever(regimen)),
         ("fork_delivery".to_owned(), delivery),
         ("tool_output_disposition".to_owned(), disposition),
         (
@@ -780,6 +776,26 @@ fn render_budget_lever(regimen: &Regimen) -> String {
             format!("{}:{over}", budget.tokens)
         },
     )
+}
+
+/// Whether a call written as text is recovered (#560). `off` by default,
+/// as Pi and `OpenCode` 2 have it; a value serve refuses is undeclared.
+fn text_fallback_lever(regimen: &Regimen) -> String {
+    match regimen.get(crate::drive::tool_loop::TOOL_CALL_TEXT_FALLBACK) {
+        None => "off".to_owned(),
+        Some(regimen::Value::String(state)) if state == "off" || state == "on" => state.clone(),
+        Some(_) => UNDECLARED.to_owned(),
+    }
+}
+
+/// The mechanical capture lever's word (#784): `on` or `off`.
+fn mechanical_lever(regimen: &Regimen) -> String {
+    if crate::drive::session::mechanical_capture(regimen) {
+        "on"
+    } else {
+        "off"
+    }
+    .to_owned()
 }
 
 /// The interview routing and cadence lever (#564): the cadence's word, and

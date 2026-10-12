@@ -1138,69 +1138,19 @@ fn served_dialect(id: &str) -> Result<Dialect, String> {
 /// it lists no rule, or there is no regimen: then no fork and no derived
 /// meditation ever fires, and a regimen that declares a meditation trigger anyway is
 /// refused.
-fn serving_interview(
-    regimen: Option<&str>,
-    regime: Option<&Regime>,
-) -> Result<Option<Interview>, String> {
-    let (Some(path), Some(regime)) = (regimen, regime) else {
-        return Ok(None);
-    };
-    let text =
-        std::fs::read_to_string(path).map_err(|why| format!("{path} cannot be read: {why}"))?;
-    let read = regimen::parse(&text).map_err(|why| format!("{path} is not a regimen: {why:?}"))?;
-    let rules = session::interview_warrant(&read).map_err(|why| format!("{path}: {why}"))?;
-    let window = diet::drive::registry::serving_context(
-        diet::drive::registry::REGISTRY,
-        &regime.substrates[0].id,
-    );
-    let meditations = diet::meditation::policy::Served::from_regimen(&read, window)
-        .map_err(|why| format!("{path}: {why}"))?;
-    let delivery = session::fork_delivery(&read).map_err(|why| format!("{path}: {why}"))?;
-    // The phase graph, by the scripted drive's own reader (#563).
-    let phases =
-        diet::meditation::policy::phase_graph(&read).map_err(|why| format!("{path}: {why}"))?;
-    if rules.is_empty() && !phases.is_empty() {
-        return Err(format!(
-            "{path} declares phases and no `interview_warrant`: nothing fills working \
-             memory, so no meditation could ever move between them"
-        ));
-    }
-    if rules.is_empty() && meditations.declares_a_trigger() {
-        return Err(format!(
-            "{path} declares a meditation trigger and no `interview_warrant`: nothing fills \
-             working memory, so no meditation could ever fire"
-        ));
-    }
-    // Self-capture (#609) keeps working memory too, forks or none.
-    let self_capture = session::self_capture(&read);
-    // #610: a fork answers through the capture tools only where it is asked
-    // to, in a set written for them, and where self-capture declares them.
-    let capture = session::capture_modality(&read).map_err(|why| format!("{path}: {why}"))?;
-    let asks = session::fork_asks(&read);
-    if rules.is_empty() && self_capture.is_none() && diet::drive::prune::of(&read).is_some() {
-        return Err(format!(
-            "{path} declares `model_pruning = \"on\"` and neither an `interview_warrant` nor \
-             self-capture: nothing fills working memory, so no meditation could ever replace a \
-             pruned result"
-        ));
-    }
-    // #150's gate: a tools-route audit marks nothing (its pinned words
-    // carry no markers), so under `refuse` every meditation with a change would
-    // hold.
-    if meditations.reconcile_gate == diet::meditation::policy::ReconcileGate::Refuse
-        && capture == diet::dogma::asks::Modality::Tools
-    {
-        return Err(format!(
-            "{path} declares `{} = \"refuse\"` with `{}` = \"tools\": the tools-route \
-             audit addresses no operator change, so every meditation with one would hold",
-            diet::meditation::policy::RECONCILE_GATE,
-            session::CAPTURE_MODALITY
-        ));
-    }
+/// Whether the capture route a regimen declares can work (#610, #730): a
+/// tools route needs forks, self-capture and a tools ask set; a tools ask
+/// set needs the tools route.
+fn capture_route(
+    path: &str,
+    (no_forks, self_capture): (bool, bool),
+    asks: &diet::dogma::asks::AskSet,
+    capture: diet::dogma::asks::Modality,
+) -> Result<(), String> {
     if capture == diet::dogma::asks::Modality::Tools {
-        let refused = if rules.is_empty() {
+        let refused = if no_forks {
             Some("no `interview_warrant`, so no fork ever answers".to_owned())
-        } else if self_capture.is_none() {
+        } else if !self_capture {
             Some("self-capture off, so no fork is offered the capture tools".to_owned())
         } else if asks.modality != capture {
             Some(format!(
@@ -1227,8 +1177,82 @@ fn serving_interview(
             session::CAPTURE_MODALITY
         ));
     }
+    Ok(())
+}
+
+fn serving_interview(
+    regimen: Option<&str>,
+    regime: Option<&Regime>,
+) -> Result<Option<Interview>, String> {
+    let (Some(path), Some(regime)) = (regimen, regime) else {
+        return Ok(None);
+    };
+    let text =
+        std::fs::read_to_string(path).map_err(|why| format!("{path} cannot be read: {why}"))?;
+    let read = regimen::parse(&text).map_err(|why| format!("{path} is not a regimen: {why:?}"))?;
+    let rules = session::interview_warrant(&read).map_err(|why| format!("{path}: {why}"))?;
+    // #784: the mechanical lane fills working memory too, forks or none.
+    let mechanical = session::mechanical_capture(&read);
+    let window = diet::drive::registry::serving_context(
+        diet::drive::registry::REGISTRY,
+        &regime.substrates[0].id,
+    );
+    let meditations = diet::meditation::policy::Served::from_regimen(&read, window)
+        .map_err(|why| format!("{path}: {why}"))?;
+    let delivery = session::fork_delivery(&read).map_err(|why| format!("{path}: {why}"))?;
+    // The phase graph, by the scripted drive's own reader (#563).
+    let phases =
+        diet::meditation::policy::phase_graph(&read).map_err(|why| format!("{path}: {why}"))?;
+    if rules.is_empty() && !mechanical && !phases.is_empty() {
+        return Err(format!(
+            "{path} declares phases and no `interview_warrant`: nothing fills working \
+             memory, so no meditation could ever move between them"
+        ));
+    }
+    if rules.is_empty() && !mechanical && meditations.declares_a_trigger() {
+        return Err(format!(
+            "{path} declares a meditation trigger and no `interview_warrant`: nothing fills \
+             working memory, so no meditation could ever fire"
+        ));
+    }
+    // Self-capture (#609) keeps working memory too, forks or none.
+    let self_capture = session::self_capture(&read);
+    // #610: a fork answers through the capture tools only where it is asked
+    // to, in a set written for them, and where self-capture declares them.
+    let capture = session::capture_modality(&read).map_err(|why| format!("{path}: {why}"))?;
+    let asks = session::fork_asks(&read);
+    if rules.is_empty()
+        && self_capture.is_none()
+        && !mechanical
+        && diet::drive::prune::of(&read).is_some()
+    {
+        return Err(format!(
+            "{path} declares `model_pruning = \"on\"` and neither an `interview_warrant` nor \
+             self-capture: nothing fills working memory, so no meditation could ever replace a \
+             pruned result"
+        ));
+    }
+    // #150's gate: a tools-route audit marks nothing (its pinned words
+    // carry no markers), so under `refuse` every meditation with a change would
+    // hold.
+    if meditations.reconcile_gate == diet::meditation::policy::ReconcileGate::Refuse
+        && capture == diet::dogma::asks::Modality::Tools
+    {
+        return Err(format!(
+            "{path} declares `{} = \"refuse\"` with `{}` = \"tools\": the tools-route \
+             audit addresses no operator change, so every meditation with one would hold",
+            diet::meditation::policy::RECONCILE_GATE,
+            session::CAPTURE_MODALITY
+        ));
+    }
+    capture_route(
+        path,
+        (rules.is_empty(), self_capture.is_some()),
+        asks,
+        capture,
+    )?;
     Ok(
-        (!rules.is_empty() || self_capture.is_some()).then(|| Interview {
+        (!rules.is_empty() || self_capture.is_some() || mechanical).then(|| Interview {
             rules,
             object: diet::object::WorkingObject::open(regime.clone()),
             meditations,
@@ -1252,6 +1276,7 @@ fn serving_interview(
             threshold_bytes: session::interview_threshold_bytes(&read),
             // #611: off unless declared.
             skip_self_recorded: session::interview_skip_self_recorded(&read),
+            mechanical_capture: mechanical,
             role: session::interview_role(&read),
             // #612: whether the model may prune its tool results; off unless
             // declared.
