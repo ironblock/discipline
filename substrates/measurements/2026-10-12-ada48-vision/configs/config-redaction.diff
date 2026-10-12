@@ -1,0 +1,6 @@
+configs/config-redacted.yml is the live config.yml of instance 2026-10-12b (live sha256 a41e8ab76ba43eac...), and
+configs/instance-2026-10-12a/config-redacted.yml that of instance 2026-10-12a (live sha256 a9684870b5f34002...); in both these values are replaced, none of which affects serving:
+  line 1 (comment): the host's nickname replaced by the public id rtx6000ada-host, and the rollback note's local path by "the saved llama.cpp launch file"
+  network.port: replaced by <port>
+  model.model_dir: the home-directory prefix replaced by $HOME
+vtest.py is published with the home-directory prefix replaced by $HOME in its three paths, the port by <port> and the host nickname in its first line by rtx6000ada-host; nothing else differs.

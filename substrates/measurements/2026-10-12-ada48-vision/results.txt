@@ -1,0 +1,51 @@
+# rtx6000ada-host, 2026-10-12: vision enabled with vision_offload. Output of vtest.py, verbatim. Instance 2026-10-12a first, then 2026-10-12b.
+# Endpoint down 19:10:27Z (kill of the 2026-10-05 process) -> health 200 at 19:10:57Z (30 s). Model loaded in 17.5 s.
+# Startup log: "Keeping vision model weights in system RAM (vision_offload)", "Loading vision modules 30/30",
+#   "Sampler overrides (preset "qwen38_thinking")", "exllamav3 version: 1.5.4", "Context: max_seq_len 524,288 tokens (configured)".
+# VRAM after load: 47,000 MiB of 49,140 (the 2026-10-04 load at cache_size 606,208 without vision: 47,598).
+
+$ vtest.py confirm
+model Qwen3.8-Flash-Next-exl3-2.05bpw-yarn2 max_seq_len 524288 cache_size 573440 cache_mode 8,8
+warm: 'ready' 2
+
+$ vtest.py image 1024 1024
+1024x1024: 1.6s prompt_tokens=1101 peak_vram=47422 MiB
+answer: 'The image displays the text "VIOLET 4729" above a red circle and a blue square.'
+
+$ vtest.py image 2048 2048
+2048x2048: 2.9s prompt_tokens=4173 peak_vram=47646 MiB
+answer: 'The text "VIOLET 4729" appears above a red circle and a blue square.'
+
+$ vtest.py image 4096 4096        # 16.8 MP, above the 4,194,304-pixel cap: resized to the same 4,173 prompt tokens
+4096x4096: 2.8s prompt_tokens=4173 peak_vram=47648 MiB
+answer: 'The image displays the text "VIOLET 4729" above a red circle and a blue square.'
+
+$ vtest.py beside                 # a 2048x2048 image while a 94,654-token text request runs
+beside: image 20.6s, deep prompt_tokens=94654 peak_vram=47650 MiB
+answer: 'The image displays the text "VIOLET 4729" above a red circle and a blue square.'
+
+$ vtest.py fill 138000            # four concurrent distinct ~138k-token prompts (551,154 tokens of the 573,440 pool), a 2048x2048 image 60 s in
+fill: [137842, 137804, 137753, 137755] wall 192s, image 131.9s, peak_vram=47664 MiB, free_at_peak=1476 MiB
+answer: 'The image displays the text "VIOLET 4729" above a red circle and a blue square.'
+# no error, Traceback or out-of-memory line in the server log afterward
+
+# ---- instance 2026-10-12b: cache_size 524,288, no image cap (the overlay's preprocessor_config.json back to a link; longest_edge 16,777,216) ----
+# Endpoint down 19:36:08Z -> health 200 at 19:36:36Z (28 s). Model loaded in 16.2 s. Same startup lines as above (vision_offload, 30/30 vision modules, preset).
+# VRAM after load: 46,100 MiB of 49,140.
+
+$ vtest.py confirm
+model Qwen3.8-Flash-Next-exl3-2.05bpw-yarn2 max_seq_len 524288 cache_size 524288 cache_mode 8,8
+warm: 'ready' 2
+
+$ vtest.py image 4096 4096        # 16.8 MP, the model's own limit
+4096x4096: 13.3s prompt_tokens=16461 peak_vram=47942 MiB
+answer: 'The image displays the text "VIOLET 4729" above a red circle and a blue square.'
+
+$ vtest.py image 1024 1024
+1024x1024: 1.1s prompt_tokens=1101 peak_vram=47946 MiB
+answer: 'The image displays the text "VIOLET 4729" above a red circle and a blue square.'
+
+$ vtest.py fill 125000 4096       # four concurrent distinct ~125k-token prompts (499,535 tokens) and a 4096x4096 image 60 s in (16,461 tokens): 515,996 of the 524,288 pool
+fill: [124970, 124864, 125026, 124675] wall 173s, image 112.2s, peak_vram=47976 MiB, free_at_peak=1164 MiB
+answer: 'The image displays the text "VIOLET 4729" above a red circle and a blue square.'
+# no error, Traceback or out-of-memory line in the server log afterward
