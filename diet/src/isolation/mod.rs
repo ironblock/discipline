@@ -200,6 +200,13 @@ pub enum Unavailable {
         /// Where.
         on: Platform,
     },
+    /// `sandbox_unix_sockets` is declared and this platform's sandbox does
+    /// not yet give a command a named host socket: refused loudly, never
+    /// ignored.
+    UnixSocketsNotImplemented {
+        /// Where.
+        on: Platform,
+    },
     /// `sandbox_reads = "all"` is declared and this platform's sandbox cannot
     /// read everything while denying a secret set.
     ReadsAllNotImplemented {
@@ -269,6 +276,14 @@ impl fmt::Display for Unavailable {
                  ports; declare `network = \"host\"` instead. Refusing to start rather \
                  than running a command that cannot reach what the regimen declared",
                 policy::NETWORK_LOOPBACK,
+                on.tag()
+            ),
+            Self::UnixSocketsNotImplemented { on } => write!(
+                f,
+                "`{}` is not built for {}: the sandbox there does not bind a host's Unix \
+                 socket into its namespace. Refusing to start rather than running a command \
+                 that cannot reach what the regimen declared",
+                policy::SANDBOX_UNIX_SOCKETS,
                 on.tag()
             ),
             Self::ReadsAllNotImplemented { on } => write!(
@@ -395,6 +410,9 @@ fn open_sandbox(
                 }
                 if policy.reads == Reads::All {
                     return Err(Unavailable::ReadsAllNotImplemented { on: platform });
+                }
+                if !policy.unix_sockets.is_empty() {
+                    return Err(Unavailable::UnixSocketsNotImplemented { on: platform });
                 }
                 Bubblewrap::found_in(path)
                     .map(|runner| Confinement::Sandbox(Backend::Bubblewrap(runner)))
@@ -1737,6 +1755,72 @@ mod tests {
         assert_ne!(wrote.exit, Some(0), "{wrote:?}");
         assert!(!std::path::Path::new(&outside).exists(), "/tmp was written");
         let _ = std::fs::remove_dir_all(&tmp);
+    }
+
+    /// A Unix socket the regimen names (`sandbox_unix_sockets`) is one a
+    /// sandboxed command may connect to; any other stays refused; and with
+    /// one named, `kill -0` -- a liveness check, how a client finds its
+    /// daemon -- is allowed, while a real signal is not. The Mac's row only.
+    #[test]
+    fn under_seatbelt_a_named_unix_socket_is_reachable_and_no_other_is() {
+        if Platform::here() != Platform::MacOs {
+            return;
+        }
+        let ground = Ground::make("seatbelt-sockets");
+        let at = |name: &str| format!("/tmp/diet-{}-{name}.sock", std::process::id());
+        let (named, other) = (at("named"), at("other"));
+        let listen = |path: &str| {
+            let _ = std::fs::remove_file(path);
+            let listener = std::os::unix::net::UnixListener::bind(path).expect("a socket");
+            std::thread::spawn(move || {
+                for stream in listener.incoming() {
+                    drop(stream);
+                }
+            });
+        };
+        listen(&named);
+        listen(&other);
+        let mut policy = Policy::merged_usr();
+        policy.unix_sockets = vec![named.clone()];
+        let confinement = open_on(&policy, Platform::MacOs).expect("Seatbelt");
+        let connect = |path: &str| {
+            confinement
+                .run(
+                    &policy,
+                    &ground.tree,
+                    &argv(&[
+                        "/bin/sh",
+                        "-c",
+                        &format!("/usr/bin/nc -U -w 1 {path} < /dev/null"),
+                    ]),
+                )
+                .expect("it ran")
+        };
+        let reached = connect(&named);
+        assert_eq!(reached.exit, Some(0), "{reached:?}");
+        let refused = connect(&other);
+        assert_ne!(refused.exit, Some(0), "{refused:?}");
+        let mut victim = std::process::Command::new("/bin/sleep")
+            .arg("30")
+            .spawn()
+            .expect("a process outside the sandbox");
+        let signal = |how: &str| {
+            confinement
+                .run(
+                    &policy,
+                    &ground.tree,
+                    &argv(&["/bin/kill", how, &victim.id().to_string()]),
+                )
+                .expect("it ran")
+        };
+        let alive = signal("-0");
+        assert_eq!(alive.exit, Some(0), "{alive:?}");
+        let stopped = signal("-STOP");
+        assert_ne!(stopped.exit, Some(0), "{stopped:?}");
+        let _ = victim.kill();
+        let _ = victim.wait();
+        let _ = std::fs::remove_file(&named);
+        let _ = std::fs::remove_file(&other);
     }
 
     /// On Linux `bwrap`'s pid namespace ends a server with its call, so this
@@ -4494,6 +4578,46 @@ mod tests {
                 && refusal.to_string().contains("not built for linux"),
             "and it says so: {refusal}"
         );
+    }
+
+    /// `sandbox_unix_sockets` (the browser-testing design): each a literal
+    /// absolute path, refused when it is not one, or when it resolves past
+    /// what a socket's address holds; bwrap refuses the key loudly rather
+    /// than ignore it.
+    #[test]
+    fn unix_sockets_are_literal_paths_that_fit_and_refuse_to_start_on_linux() {
+        let declared = policy("sandbox_unix_sockets = [\"/private/tmp/cd-1.sock\"]\n");
+        assert_eq!(declared.unix_sockets, ["/private/tmp/cd-1.sock"]);
+        let refusal = open_on(&declared, Platform::Linux).expect_err("bwrap binds no socket");
+        assert_eq!(
+            refusal,
+            Unavailable::UnixSocketsNotImplemented {
+                on: Platform::Linux
+            }
+        );
+        assert!(
+            refusal.to_string().contains("sandbox_unix_sockets")
+                && refusal.to_string().contains("not built for linux"),
+            "{refusal}"
+        );
+        let read = |text: &str| {
+            Policy::from_regimen(&crate::formats::regimen::parse(text).expect("a regimen"))
+        };
+        assert_eq!(
+            read("sandbox_unix_sockets = [\"cd.sock\"]\n"),
+            Err(PolicyError::NotAbsolute("cd.sock".to_owned()))
+        );
+        let long = format!("/private/tmp/{}.sock", "x".repeat(100));
+        let refused = read(&format!("sandbox_unix_sockets = [\"{long}\"]\n"))
+            .expect_err("too long for a socket's address");
+        assert_eq!(
+            refused,
+            PolicyError::SocketPathTooLong {
+                path: long.clone(),
+                bytes: long.len(),
+            }
+        );
+        assert!(refused.to_string().contains("EINVAL"), "{refused}");
     }
 
     #[test]

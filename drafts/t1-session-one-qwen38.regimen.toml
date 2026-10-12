@@ -24,7 +24,13 @@ sandbox_reads = "all"
 approval = "none"
 
 # Names only: the values are set by whoever starts `serve`, inside the worktree.
-env_passthrough = ["npm_config_cache", "pnpm_config_store_dir"]
+# The chrome-devtools CLI (1.10.1): CD4A_INTERNAL_DAEMON_SESSION_ID selects the run's own daemon,
+# started by the operator outside the sandbox; the other two keep the CLI from calling home.
+env_passthrough = ["npm_config_cache", "pnpm_config_store_dir", "CD4A_INTERNAL_DAEMON_SESSION_ID", "CHROME_DEVTOOLS_MCP_NO_UPDATE_CHECKS", "CHROME_DEVTOOLS_MCP_NO_USAGE_STATISTICS"]
+
+# The run's daemon's socket, filled by the operator per run: its session id (lowercase hex), and
+# the operator's uid. A literal path, never a pattern, at most 103 bytes resolved.
+# sandbox_unix_sockets = ["/private/tmp/chrome-devtools-mcp-<session id>-<uid>.sock"]
 
 approval_policy = "approvals are off: every command runs without a gate decision or a prompt; Seatbelt confines writes to the worktree"
 

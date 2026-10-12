@@ -13,13 +13,15 @@
 //! port**. Every value -- the working tree, each `sandbox_readable` path,
 //! each declared loopback port -- enters through a `-D` parameter
 //! (`(param "WORKTREE")`, `READABLE_<n>`, `WRITABLE_<n>`, `PORT_<n>`,
-//! `SECRET_<n>`), and the values are
+//! `SOCKET_<n>`, `SECRET_<n>`), and the values are
 //! recorded in the composed argv (`Ran::confined`).
 //!
 //! **What the digest is a function of, exactly:** the policy's network
 //! (`none` or `host`), its read mode (`sandbox_reads`), the NUMBER of
 //! `sandbox_readable` paths, of `sandbox_writable` dirs and of secrets, and,
-//! under `network = "none"`, the NUMBER of declared loopback ports. Nothing
+//! under `network = "none"`, the NUMBER of declared loopback ports, and
+//! the NUMBER of `sandbox_unix_sockets` (with any, a liveness signal is
+//! allowed too). Nothing
 //! else: not the worktree, not its depth, not `HOME`, not the paths or ports
 //! themselves.
 //!
@@ -373,6 +375,21 @@ impl Seatbelt {
             }
         }
 
+        // The Unix sockets the regimen names, each a literal (the browser-testing
+        // design): a client in the sandbox reaches its daemon outside it.
+        // With one named, a liveness check -- signal 0, which delivers
+        // nothing -- is allowed: such a client reads a refused check as a
+        // daemon that is not running, and starts its own.
+        if !policy.unix_sockets.is_empty() {
+            out.push_str("(allow signal (signal-number 0))\n");
+            for index in 0..policy.unix_sockets.len() {
+                let _ = writeln!(
+                    out,
+                    "(allow network-outbound (literal (param \"SOCKET_{index}\")))"
+                );
+            }
+        }
+
         let denies = Self::secrets(policy);
         // The denies LAST. In a Seatbelt profile the later matching rule
         // wins, so a deny after every allow beats `sandbox_reads = "all"`,
@@ -412,6 +429,12 @@ impl Seatbelt {
             for (index, port) in policy.loopback.iter().enumerate() {
                 out.push(format!("PORT_{index}={port}"));
             }
+        }
+        for (index, socket) in policy.unix_sockets.iter().enumerate() {
+            out.push(format!(
+                "SOCKET_{index}={}",
+                canonical(&home_expanded(socket))
+            ));
         }
         for (index, secret) in policy.secrets.iter().enumerate() {
             out.push(format!(

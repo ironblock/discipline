@@ -2295,6 +2295,13 @@ pub fn receipt(
     if let Some(stance) = approval_policy {
         fields.insert(APPROVAL_POLICY.to_owned(), text(stance));
     }
+    // The Unix sockets its commands could connect to.
+    if !policy.unix_sockets.is_empty() {
+        fields.insert(
+            "unix_sockets".to_owned(),
+            Value::Array(policy.unix_sockets.iter().map(|path| text(path)).collect()),
+        );
+    }
     // The session's own TMPDIR, where its commands' scratch went.
     if let Some(tmpdir) = &policy.tmpdir {
         fields.insert("tmpdir".to_owned(), text(tmpdir));
@@ -3645,6 +3652,24 @@ pub(in crate::drive) mod tests {
             .status()
             .expect("git runs");
         assert!(init.success());
+    }
+
+    /// The Unix sockets a session's commands could connect to are named on
+    /// its receipt (the browser-testing design).
+    #[test]
+    fn the_receipt_names_the_unix_sockets_its_commands_could_reach() {
+        let mut policy = Policy::merged_usr();
+        policy.unix_sockets = vec!["/private/tmp/cd-1.sock".to_owned()];
+        let receipt = receipt(&[], Counts::default(), None, &policy, &BTreeMap::new());
+        let Value::Object(fields) = receipt else {
+            panic!("a receipt is an object")
+        };
+        assert_eq!(
+            fields.get("unix_sockets"),
+            Some(&Value::Array(vec![Value::String(
+                "/private/tmp/cd-1.sock".to_owned()
+            )]))
+        );
     }
 
     /// The session's own TMPDIR is named on the receipt and is not a
