@@ -38,9 +38,13 @@ const PROTOCOLS: &[&str] = &["2025-06-18", "2025-03-26", "2024-11-05"];
 /// How long a request to serve may take: past `/wait`'s cap of 300 s.
 const PATIENCE: Duration = Duration::from_secs(330);
 
-/// How long `events` reads after the last line before it answers: serve
-/// sends what it has at once and then waits for more.
+/// How long one read of `events`' stream waits before it looks at its
+/// deadline again.
 const QUIET: Duration = Duration::from_millis(300);
+
+/// How long `events` reads toward the log's end before it answers with what
+/// it has (#780).
+const EVENTS_PATIENCE: Duration = Duration::from_secs(60);
 
 /// How many log lines `events` returns unless told.
 const EVENTS_LIMIT: u64 = 200;
@@ -160,74 +164,102 @@ impl Serve {
     }
 
     /// The log lines after `after`, of `kinds` when given, at most `limit`:
-    /// `GET /events` read until it has sent what it had.
+    /// `GET /events` read up to the log's end as `/state` names it -- its
+    /// `last_seq` -- or until `limit` lines are found, or the stream ends.
+    ///
+    /// NOT UNTIL IT GOES QUIET (#780). Serve sends its head, then renders
+    /// the backlog before the first event; on a long log that took longer
+    /// than the quiet spell this once waited for, so `events` read the head
+    /// alone and answered nothing, after an early seq only -- a late one has
+    /// little to render.
     fn events(&self, after: Option<u64>, kinds: &[String], limit: u64) -> Result<Value, String> {
         let from = after.map_or(0, |after| after + 1);
+        let state = self.get("/state")?;
+        let Some(last) = state.body.get("last_seq").and_then(Value::as_u64) else {
+            return Ok(state.json());
+        };
+        if from > last {
+            return Ok(json!({"status": 200, "events": [], "more": false}));
+        }
         let mut stream = self.connect()?;
         self.send(&mut stream, "GET", &format!("/events?from={from}"), None)?;
         stream
             .set_read_timeout(Some(QUIET))
             .map_err(|why| why.to_string())?;
-        let mut read = Vec::new();
+        let until = Instant::now() + EVENTS_PATIENCE;
+        let mut pending: Vec<u8> = Vec::new();
+        let mut head: Option<u16> = None;
+        let mut lines = Vec::new();
+        let mut more = false;
+        let mut reached = false;
         let mut chunk = vec![0_u8; 64 * 1024];
-        let started = Instant::now();
-        loop {
+        while !reached && !more {
             match stream.read(&mut chunk) {
                 Ok(0) => break,
-                Ok(n) => read.extend_from_slice(&chunk[..n]),
+                Ok(n) => pending.extend_from_slice(&chunk[..n]),
                 Err(why)
                     if matches!(
                         why.kind(),
                         std::io::ErrorKind::WouldBlock | std::io::ErrorKind::TimedOut
                     ) =>
                 {
-                    break;
+                    if Instant::now() >= until {
+                        break;
+                    }
+                    continue;
                 }
                 Err(why) => return Err(format!("serve's events could not be read: {why}")),
             }
-            if started.elapsed() > PATIENCE {
-                break;
+            if head.is_none() {
+                let Some(end) = pending.windows(4).position(|window| window == b"\r\n\r\n") else {
+                    continue;
+                };
+                let status = status_of(&String::from_utf8_lossy(&pending[..end]))?;
+                pending.drain(..end + 4);
+                if status != 200 {
+                    // An answer, not a stream: read it to its end.
+                    let _ = stream.read_to_end(&mut pending);
+                    return Ok(Answer {
+                        status,
+                        body: body_of(&pending),
+                    }
+                    .json());
+                }
+                head = Some(status);
+            }
+            // Each complete event, ended by a blank line; a named event
+            // (`waiting`, `answered`) carries no `id:` and is not a log line.
+            while let Some(end) = pending.windows(2).position(|window| window == b"\n\n") {
+                let event: Vec<u8> = pending.drain(..end + 2).collect();
+                let event = String::from_utf8_lossy(&event);
+                if !event.lines().any(|line| line.starts_with("id:")) {
+                    continue;
+                }
+                let Some(line) = event
+                    .lines()
+                    .find_map(|line| line.strip_prefix("data: "))
+                    .and_then(|data| serde_json::from_str::<Value>(data).ok())
+                else {
+                    continue;
+                };
+                if line.get("seq").and_then(Value::as_u64) >= Some(last) {
+                    reached = true;
+                }
+                let kind = line.get("kind").and_then(Value::as_str).unwrap_or_default();
+                if kinds.is_empty() || kinds.iter().any(|wanted| wanted == kind) {
+                    if lines.len() as u64 >= limit {
+                        more = true;
+                        break;
+                    }
+                    lines.push(line);
+                }
+                if reached {
+                    break;
+                }
             }
         }
-        let text = String::from_utf8_lossy(&read);
-        let Some((head, stream_body)) = text.split_once("\r\n\r\n") else {
+        if head.is_none() {
             return Err("serve's events answer had no head".to_owned());
-        };
-        let status = status_of(head)?;
-        if status != 200 {
-            return Ok(Answer {
-                status,
-                body: body_of(stream_body.as_bytes()),
-            }
-            .json());
-        }
-        let mut lines = Vec::new();
-        let mut more = false;
-        // Only complete events, each ended by a blank line; a named event
-        // (`waiting`, `answered`) carries no `id:` and is not a log line.
-        let complete = stream_body
-            .rfind("\n\n")
-            .map_or("", |end| &stream_body[..end]);
-        for event in complete.split("\n\n") {
-            let logged = event.lines().any(|line| line.starts_with("id:"));
-            let Some(data) = event.lines().find_map(|line| line.strip_prefix("data: ")) else {
-                continue;
-            };
-            if !logged {
-                continue;
-            }
-            let Ok(line) = serde_json::from_str::<Value>(data) else {
-                continue;
-            };
-            let kind = line.get("kind").and_then(Value::as_str).unwrap_or_default();
-            if !kinds.is_empty() && !kinds.iter().any(|wanted| wanted == kind) {
-                continue;
-            }
-            if lines.len() as u64 >= limit {
-                more = true;
-                break;
-            }
-            lines.push(line);
         }
         Ok(json!({"status": 200, "events": lines, "more": more}))
     }

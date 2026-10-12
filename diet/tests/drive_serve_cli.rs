@@ -4697,3 +4697,56 @@ fn a_drive_mcp_ask_that_outwaits_its_timeout_returns_the_state_timed_out() {
         started.elapsed()
     );
 }
+
+/// A streamed reply of `pieces` deltas, each `piece`, then its stop.
+fn saying_in_pieces(piece: &str, pieces: usize) -> Act {
+    let one = serde_json::json!({"choices": [{"index": 0, "finish_reason": null,
+        "delta": {"content": piece}}]});
+    let done = serde_json::json!({"choices": [{"index": 0, "delta": {}, "finish_reason": "stop"}]});
+    let mut body = format!("data: {one}\n\n").repeat(pieces);
+    body.push_str("data: ");
+    body.push_str(&done.to_string());
+    body.push_str("\n\ndata: [DONE]\n\n");
+    Act::Answer(body)
+}
+
+#[test]
+fn a_drive_mcp_events_reads_a_long_backlog_whole() {
+    // #780: `events` after an early seq in a log of thousands of lines --
+    // a turn streamed in 40,000 deltas -- returns its lines, the kinds
+    // asked for among them, as it does after a late seq.
+    let stub = Stub::serving_with_props(
+        vec![saying_in_pieces("a few words of the answer, ", 40_000)],
+        &diet::drive::canned::build_info(),
+    )
+    .expect("loopback");
+    let served = start(&stub.url(), &["--regimen", &dev_loop()]);
+    let mut mcp = Mcp::attached(&served.listening);
+    let _ = mcp.request("initialize", serde_json::json!({}));
+    let asked = mcp.call("ask", serde_json::json!({"text": "go"}));
+    assert_eq!(asked["returned"], "idle", "{asked}");
+    let last = asked["state"]["last_seq"].as_u64().expect("last_seq");
+    assert!(last > 40_000, "{last}");
+    let early = mcp.call("events", serde_json::json!({"after": 1}));
+    assert_eq!(
+        early["events"].as_array().map(Vec::len),
+        Some(200),
+        "{}",
+        early["more"]
+    );
+    assert_eq!(early["events"][0]["seq"], 2, "{}", early["events"][0]);
+    assert_eq!(early["more"], true);
+    let settled = mcp.call(
+        "events",
+        serde_json::json!({"after": 1, "kinds": ["turn.settled", "response"]}),
+    );
+    let kinds: Vec<&str> = settled["events"]
+        .as_array()
+        .expect("events")
+        .iter()
+        .filter_map(|line| line["kind"].as_str())
+        .collect();
+    assert_eq!(kinds, ["response", "turn.settled"], "{settled}");
+    let late = mcp.call("events", serde_json::json!({"after": last - 3}));
+    assert_eq!(late["events"].as_array().map(Vec::len), Some(3), "{late}");
+}
