@@ -21,6 +21,9 @@ import re
 
 ROOT = pathlib.Path(__file__).resolve().parent.parent
 PATTERNS = ROOT / "scripts" / "hygiene-patterns.tsv"
+# Its sibling: a declared-safe form per row, removed from the text before the
+# row is asked again, as `hygiene.sh` applies it (see that file's header).
+EXCEPTIONS = ROOT / "scripts" / "hygiene-exceptions.tsv"
 
 # The rows a scrub rewrites, and to what. Every other row refuses.
 REWRITES = {
@@ -75,6 +78,27 @@ def scrub(text: str, account: str) -> tuple[str, dict[str, int]]:
     return text, made
 
 
+def exceptions() -> dict[str, re.Pattern]:
+    """Each row's declared exception, compiled: label -> pattern."""
+    rows = {}
+    for line in EXCEPTIONS.read_text().splitlines():
+        if not line.strip() or line.startswith("#"):
+            continue
+        label, regex = line.split("\t", 1)
+        rows[label] = re.compile(python(regex), re.MULTILINE)
+    return rows
+
+
 def unscrubbable(text: str) -> list[str]:
-    """The rows `text` still matches that no scrub rewrites, by label."""
-    return [label for label, row in table().items() if label not in REWRITES and row.search(text)]
+    """The rows `text` still matches that no scrub rewrites, by label: a
+    row's declared exception removed first, as the hygiene check removes it,
+    so a form this repository ruled safe is no refusal here either."""
+    excepted = exceptions()
+    found = []
+    for label, row in table().items():
+        if label in REWRITES:
+            continue
+        left = excepted[label].sub("", text) if label in excepted else text
+        if row.search(left):
+            found.append(label)
+    return found

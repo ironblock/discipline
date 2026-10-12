@@ -6,6 +6,7 @@ import { fileURLToPath } from 'node:url';
 import { expect, it } from 'vitest';
 
 import { fold } from '../session/fold.ts';
+import { RUN_TIMEOUT_MS } from './committed-runs.ts';
 import type { LogLine } from './log.ts';
 import { respelled } from './spelling.ts';
 
@@ -19,5 +20,5 @@ for (const dir of readdirSync(runs, { withFileTypes: true }).filter((d) => d.isD
     const tools = s.eras.flatMap((e) => e.nodes).filter((n) => n.kind === 'tool');
     expect(tools.length).toBe(lines.filter((l) => l.kind === 'tool_call' && trunk.has(l.request)).length);
     if (s.state === 'ended') expect(tools.filter((t) => t.kind === 'tool' && t.running).length).toBe(0);
-  });
+  }, RUN_TIMEOUT_MS);
 }

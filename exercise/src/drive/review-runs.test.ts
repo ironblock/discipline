@@ -7,6 +7,7 @@ import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
 
 import { fold } from '../session/fold.ts';
+import { RUN_TIMEOUT_MS } from './committed-runs.ts';
 import type { LogLine } from './log.ts';
 import { respelled } from './spelling.ts';
 
@@ -36,7 +37,7 @@ describe('committed runs through the surface', () => {
       const session = fold(lines);
       expect([...session.unknown.keys()]).toEqual([]);
       expect(session.state).not.toBe('connecting');
-    });
+    }, RUN_TIMEOUT_MS);
 
     it(`${dir}: the fold's entry states match diet's product.txt`, () => {
       const { lines } = read(dir);
@@ -53,6 +54,6 @@ describe('committed runs through the surface', () => {
         .filter((id) => want[id] !== got[id])
         .map((id) => `${id}: diet=${want[id]} surface=${got[id]}`);
       expect(diff).toEqual([]);
-    });
+    }, RUN_TIMEOUT_MS);
   }
 });

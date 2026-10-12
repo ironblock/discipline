@@ -192,3 +192,86 @@ fn a_planted_home_path_is_scrubbed_and_a_planted_lan_address_refused() {
     let _ = std::fs::remove_dir_all(&stage_ip);
     let _ = std::fs::remove_dir_all(&runs);
 }
+
+/// A host-shaped name under `.local`, built here: the tree's own hygiene
+/// check refuses the literal shape.
+fn local_host(name: &str) -> String {
+    format!("{name}.{}", ["lo", "cal"].concat())
+}
+
+/// T1 on the floor (2026-10-12): the dotenv file name `.env.local`, in a
+/// source file the model read, is no host, and its run assembles with the
+/// text as the model read it. A host-shaped `.local` name is still
+/// refused, and so is one dressed as the dotenv name's suffix.
+#[test]
+fn the_dotenv_name_assembles_and_a_local_host_is_still_refused() {
+    let home = home_of("someone-planted");
+    let plant = |what: String| {
+        move |log: String| log.replacen(r#""text":""#, &format!(r#""text":"{what} -- "#), 1)
+    };
+    let dotenv = format!("// Load .{} (not checked in)", local_host("env"));
+    let runs = scratch("dotenv-runs");
+    let stage = staged("dotenv", plant(dotenv));
+    let out = runs.join("2026-10-12-dotenv");
+    let assembled = assemble(&stage, &out, &home);
+    assert!(assembled.status.success(), "{}", said(&assembled));
+    let log = std::fs::read_to_string(out.join("session.log")).expect("the log");
+    assert!(
+        log.contains(&format!(".{} (not checked in)", local_host("env"))),
+        "kept as read"
+    );
+    for (name, host) in [
+        ("host", local_host("build")),
+        ("dressed", local_host("staging.env")),
+    ] {
+        let stage = staged(name, plant(format!("ssh {host} -- ")));
+        let out = runs.join(format!("2026-10-12-{name}"));
+        let refused = assemble(&stage, &out, &home);
+        assert_eq!(refused.status.code(), Some(1), "{host}: {}", said(&refused));
+        assert!(
+            said(&refused)["refused"]
+                .as_str()
+                .is_some_and(|why| why.contains("internal-hostname")),
+            "{host}: {}",
+            said(&refused)
+        );
+        let _ = std::fs::remove_dir_all(&stage);
+    }
+    let _ = std::fs::remove_dir_all(&stage);
+    let _ = std::fs::remove_dir_all(&runs);
+}
+
+/// The same carve-out in the tree's own gate: `hygiene.sh --tree` passes
+/// the dotenv name and still fails a host-shaped `.local` name.
+#[test]
+fn the_hygiene_gate_passes_the_dotenv_name_and_fails_a_local_host() {
+    let gate = |name: &str, line: &str| {
+        let tree = scratch(name);
+        std::fs::write(tree.join("note.txt"), format!("{line}\n")).expect("a file");
+        let ran = Command::new("bash")
+            .current_dir(root())
+            .args(["scripts/hygiene.sh", "--tree", &tree.to_string_lossy()])
+            .output()
+            .expect("bash runs the gate");
+        let _ = std::fs::remove_dir_all(&tree);
+        ran.status.code()
+    };
+    assert_eq!(
+        gate(
+            "gate-dotenv",
+            &format!("// Load .{} (not checked in)", local_host("env"))
+        ),
+        Some(0)
+    );
+    assert_ne!(
+        gate("gate-host", &format!("ssh {}", local_host("build"))),
+        Some(0)
+    );
+    assert_ne!(
+        gate(
+            "gate-dressed",
+            &format!("ssh {}", local_host("staging.env"))
+        ),
+        Some(0)
+    );
+}
