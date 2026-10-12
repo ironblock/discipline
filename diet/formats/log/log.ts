@@ -832,8 +832,10 @@ export type ForkSkippedLine = {
   of_turn: number;
   trigger: string;
   ask: string;
-  call: string;
-  field: string;
+  call?: string;
+  field?: string;
+  reason?: string;
+  cut?: number;
 };
 
 export type PhaseNotedLine = {

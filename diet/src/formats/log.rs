@@ -1737,19 +1737,27 @@ pub enum Event {
     /// The self-capture reminder (v7, #609): an advisory note after turn
     /// `turn`'s ask, when the model had recorded nothing for the cadence.
     /// A fork screened out of its gap (v7, #611): the turn's own
-    /// self-capture already recorded what it would ask.
+    /// self-capture already recorded what it would ask. Or, since v8, one
+    /// cut during the turn and dropped from its queue unsent (#822):
+    /// `reason` `backlog`.
     ForkSkipped {
-        /// The settled turn it would have followed.
+        /// The turn it would have followed, or was cut in.
         of_turn: u32,
         /// What would have fired it (#564).
         trigger: String,
         /// The ask it would have sent (#595).
         ask: String,
         /// The id of the self-capture call that recorded it, as its
-        /// `capture` line names it.
-        call: String,
-        /// The field that call recorded under.
-        field: String,
+        /// `capture` line names it. Present exactly when `reason` is absent.
+        call: Option<String>,
+        /// The field that call recorded under, with `call`.
+        field: Option<String>,
+        /// Why, when not #611's screen (v8, #822): `backlog`, the in-turn
+        /// queue past its bound, or a declared meditation dropping it.
+        reason: Option<String>,
+        /// The `seq` of the step's last `tool_call` it was cut at (v8, #822),
+        /// with `reason`.
+        cut: Option<u64>,
     },
     Reminded {
         /// The turn whose request carried it.
@@ -3105,7 +3113,9 @@ fn check(lines: &[Line]) -> Result<(), LogError> {
             Event::Capture { call, .. } => {
                 captured.insert(call.clone());
             }
-            Event::ForkSkipped { call, .. } if !captured.contains(call) => {
+            Event::ForkSkipped {
+                call: Some(call), ..
+            } if !captured.contains(call) => {
                 return Err(at(
                     index,
                     format!("`fork.skipped` cites `{call}`, which no earlier `capture` line names"),
@@ -3624,13 +3634,36 @@ fn from_object(object: &BTreeMap<String, Value>) -> Result<Line, String> {
             from: fields.optional_string("from")?,
             to: fields.optional_string("to")?,
         },
-        Kind::ForkSkipped => Event::ForkSkipped {
-            of_turn: fields.turn("of_turn")?,
-            trigger: fields.string("trigger")?,
-            ask: fields.string("ask")?,
-            call: fields.string("call")?,
-            field: fields.string("field")?,
-        },
+        Kind::ForkSkipped => {
+            let reason = fields.optional_string("reason")?;
+            let (call, field, cut) = (
+                fields.optional_string("call")?,
+                fields.optional_string("field")?,
+                fields.optional_count("cut")?,
+            );
+            // #611's screen names the call and its field; a backlog drop
+            // (#822) names the step it was cut at instead.
+            let shaped = match reason.as_deref() {
+                None => call.is_some() && field.is_some() && cut.is_none(),
+                Some(SKIPPED_BACKLOG) => call.is_none() && field.is_none() && cut.is_some(),
+                Some(_) => false,
+            };
+            if !shaped {
+                return Err(format!(
+                    "a `fork.skipped` names `call` and `field` (#611's screen), or `reason` \
+                     `{SKIPPED_BACKLOG}` and `cut` (#822), and nothing else"
+                ));
+            }
+            Event::ForkSkipped {
+                of_turn: fields.turn("of_turn")?,
+                trigger: fields.string("trigger")?,
+                ask: fields.string("ask")?,
+                call,
+                field,
+                reason,
+                cut,
+            }
+        }
         Kind::Reminded => Event::Reminded {
             turn: fields.turn("turn")?,
             text: fields.string("text")?,
@@ -5274,8 +5307,12 @@ pub fn schema(kind: Kind) -> &'static [Field] {
                 must_v7("of_turn", Count),
                 must_v7("trigger", Text),
                 must_v7("ask", Text),
-                must_v7("call", Text),
-                must_v7("field", Text),
+                // Required on #611's screen, absent on a backlog drop: the
+                // reader checks which (#822).
+                may_v7("call", Text),
+                may_v7("field", Text),
+                may_v8("reason", Text),
+                may_v8("cut", Count),
             ];
             F
         }
@@ -5510,6 +5547,11 @@ pub fn at_most_one(kind: Kind) -> &'static [&'static str] {
 // TypeScript bindings (#31: the SPA reads a log through types generated from
 // this file, never through a hand-kept mirror of it)
 // ---------------------------------------------------------------------------
+
+/// A `fork.skipped`'s `reason` (v8, #822): a fork cut during the turn and
+/// dropped from its queue unsent -- the queue past its bound, or a declared
+/// meditation that waits only for the forks in flight.
+pub const SKIPPED_BACKLOG: &str = "backlog";
 
 /// The checked-in bindings' path, relative to the crate root.
 pub const BINDINGS: &str = "formats/log/log.ts";
@@ -6377,12 +6419,24 @@ fn to_value(line: &Line) -> Value {
             ask,
             call,
             field,
+            reason,
+            cut,
         } => {
             put("of_turn", count(u64::from(*of_turn)));
             put("trigger", text(trigger));
             put("ask", text(ask));
-            put("call", text(call));
-            put("field", text(field));
+            if let Some(call) = call {
+                put("call", text(call));
+            }
+            if let Some(field) = field {
+                put("field", text(field));
+            }
+            if let Some(reason) = reason {
+                put("reason", text(reason));
+            }
+            if let Some(cut) = cut {
+                put("cut", count(*cut));
+            }
             Kind::ForkSkipped
         }
         Event::Reminded { turn, text: note } => {
@@ -8180,6 +8234,15 @@ mod tests {
                 usage: None,
                 capped: None,
             },
+            Event::ForkSkipped {
+                of_turn: 5,
+                trigger: "call:document-read:call-9".to_owned(),
+                ask: "finding".to_owned(),
+                call: None,
+                field: None,
+                reason: Some(SKIPPED_BACKLOG.to_owned()),
+                cut: Some(request),
+            },
             Event::ForkSettled {
                 trailer: None,
                 fork,
@@ -8791,6 +8854,13 @@ mod tests {
                     // A background job is a `bash` call's that `ran` (v7,
                     // #614): the reader's name and outcome rule.
                     if kind == Kind::ToolCall && *absent == "background" {
+                        continue;
+                    }
+                    // A skipped fork names `call` and `field`, or `reason`
+                    // and `cut` (v8, #822): the reader's shape rule.
+                    if kind == Kind::ForkSkipped
+                        && ["call", "field", "reason", "cut"].contains(absent)
+                    {
                         continue;
                     }
                     // A phase ruling's `by` is `model` or `operator` (v8,

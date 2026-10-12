@@ -760,6 +760,8 @@ pub fn serve_levers(regimen: &Regimen, output_cap: (u32, &str)) -> BTreeMap<Stri
             "interview_routing_and_cadence".to_owned(),
             cadence_lever(regimen),
         ),
+        // #822: the forks cut during the turn that may wait for a slot.
+        ("fork_backlog".to_owned(), fork_backlog_lever(regimen)),
         ("render_budget".to_owned(), render_budget_lever(regimen)),
         (
             "fork_memory_share".to_owned(),
@@ -775,6 +777,21 @@ pub fn serve_levers(regimen: &Regimen, output_cap: (u32, &str)) -> BTreeMap<Stri
         ("subagent".to_owned(), "harness".to_owned()),
         ("model_pruning".to_owned(), pruning),
     ])
+}
+
+/// The fork backlog lever's word (#822): `queued:<bound>`, with `:default`
+/// when the regimen declares none; undeclared for a value serve refuses.
+fn fork_backlog_lever(regimen: &Regimen) -> String {
+    crate::drive::session::fork_backlog(regimen).map_or_else(
+        |_| UNDECLARED.to_owned(),
+        |bound| {
+            if regimen.get(crate::drive::session::FORK_BACKLOG).is_some() {
+                format!("queued:{bound}")
+            } else {
+                format!("queued:{bound}:default")
+            }
+        },
+    )
 }
 
 /// The fork input view lever's word (#567): the regimen's `fork_view`, and
@@ -1386,6 +1403,21 @@ mod tests {
             "off"
         );
         assert_eq!(lever("operator_unilateral = \"yes\"\n"), UNDECLARED);
+    }
+
+    /// The fork backlog (#822): the default bound, a declared one, or
+    /// undeclared for a value serve refuses.
+    #[test]
+    fn the_fork_backlog_lever_names_the_bound_and_its_source() {
+        let lever = |text: &str| {
+            serve_levers(&regimen::parse(text).expect("a regimen"), (8192, "default"))
+                .get("fork_backlog")
+                .cloned()
+                .unwrap_or_default()
+        };
+        assert_eq!(lever(""), "queued:3:default");
+        assert_eq!(lever("fork_backlog = 6\n"), "queued:6");
+        assert_eq!(lever("fork_backlog = \"lots\"\n"), UNDECLARED);
     }
 
     /// The default timeout (#613): 120000 ms unless the regimen says, 0
