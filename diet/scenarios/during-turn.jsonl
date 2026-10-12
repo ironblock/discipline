@@ -1,0 +1,12 @@
+{"scenario":"during-turn","regimen":"during-turn.toml","head":"../drive/heads/floor.md"}
+{"reply":{"text":"Writing a note.","calls":[{"id":"call-w","name":"bash","arguments":"{\"command\": \"echo a note > notes.md\"}"}]}}
+{"reply":{"text":"Reading it back.","calls":[{"id":"call-r","name":"bash","arguments":"{\"command\": \"cat notes.md\"}"}]}}
+{"reply":{"text":"Done: notes.md holds a note.","delay_ms":1500}}
+{"reply":{"when":"You just read a document","text":"LEARNED: notes.md holds the line `a note`\nEVIDENCE: a note\nSTUCK: NONE"}}
+{"step":"ask","text":"Write a note to notes.md and read it back."}
+{"step":"end"}
+{"expect":"fork","name":"cut","where":{"timing":"during_turn","trigger~":"call:document-read:call-r"}}
+{"expect":"request","where":{"lane":"trunk","beside":"1"}}
+{"expect":"fork.settled","name":"settled","where":{"outcome":"value"},"after":"cut"}
+{"expect":"patch","where":{"op":"add","entry~":"notes.md holds the line"},"after":"cut"}
+{"expect":"turn.settled","where":{"reason":"final"},"after":"settled"}

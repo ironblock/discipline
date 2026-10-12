@@ -782,8 +782,9 @@ fn render_budget_lever(regimen: &Regimen) -> String {
     )
 }
 
-/// The interview routing and cadence lever (#564): the cadence's word, and
-/// the read fork's output threshold when one is declared.
+/// The interview routing and cadence lever (#564): the cadence's word, the
+/// read fork's output threshold when one is declared, and `during-turn`
+/// when the forks are cut during the turn (#782).
 fn cadence_lever(regimen: &Regimen) -> String {
     let cadence = crate::drive::session::interview_cadence(regimen).word();
     let threshold = crate::drive::session::interview_threshold_bytes(regimen)
@@ -795,7 +796,15 @@ fn cadence_lever(regimen: &Regimen) -> String {
     } else {
         ""
     };
-    format!("{cadence}{threshold}{skip}")
+    // #782: forks cut during the turn; an unknown word is refused at start.
+    let timing = if crate::drive::session::interview_timing(regimen)
+        == Ok(crate::drive::session::Timing::DuringTurn)
+    {
+        ":during-turn"
+    } else {
+        ""
+    };
+    format!("{cadence}{threshold}{skip}{timing}")
 }
 
 /// The fork ask set lever's word (#595): the set's name and digest.
@@ -1202,6 +1211,12 @@ mod tests {
             "gap:skip-self-recorded"
         );
         assert_eq!(lever("interview_skip_self_recorded = \"maybe\"\n"), "gap");
+        // #782: forks cut during the turn, named; the gap, the default, not.
+        assert_eq!(
+            lever("interview_cadence = \"per_class\"\ninterview_timing = \"during_turn\"\n"),
+            "per_class:during-turn"
+        );
+        assert_eq!(lever("interview_timing = \"gap\"\n"), "gap");
     }
 
     /// The tool-output disposition names the cap on arrival and, beside
