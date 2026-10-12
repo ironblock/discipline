@@ -594,6 +594,9 @@ pub enum Event {
         /// The view the regimen declared that a cut during the turn
         /// overrode: such a fork sees the whole trunk at the cut (#782).
         view_overridden: Option<ForkView>,
+        /// A cut fork's reservation of the pool, and whether its prefix
+        /// was counted as shared with the trunk's (#797).
+        reserved: Option<(u64, bool)>,
     },
     /// A meditation's audit (#504): a fork off the warm trunk on the `audit` lane,
     /// the dogma's pinned ask after it, before the refill.
@@ -1195,12 +1198,37 @@ pub struct Interview {
     /// server's slots less the trunk's own, or an offboard seat's; 0 under
     /// the gap. [`fork_slots`] reads it at start.
     pub fork_slots: u32,
+    /// Whether the trunk's server shares a prefix's pages between
+    /// concurrent requests (#797): its entry's `served_prefix_shared`.
+    /// [`crate::drive::registry::served_prefix_shared`] reads it at start.
+    pub prefix_pages: PrefixPages,
     /// The warrants that look at what a step produced, and their numbers
     /// (#783).
     pub step: crate::drive::warrants::StepWarrants,
     /// Whether the operator may move the phase alone (#788), the
     /// regimen's `operator_unilateral`: on unless it says otherwise.
     pub operator_unilateral: bool,
+}
+
+/// What a concurrent request on the trunk's prefix costs the trunk's
+/// server's pool (#797).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum PrefixPages {
+    /// Its own copy: every concurrent prompt counts in full (#782), the
+    /// default until a measurement says otherwise.
+    #[default]
+    Counted,
+    /// The trunk's pages, shared: a fork cut from the trunk reserves only
+    /// its tokens beyond the prefix the trunk holds.
+    Shared,
+}
+
+impl PrefixPages {
+    /// From the registry's `served_prefix_shared`.
+    #[must_use]
+    pub fn of(shared: bool) -> Self {
+        if shared { Self::Shared } else { Self::Counted }
+    }
 }
 
 /// The interview cadence (#564): when the capture gap's forks fire, and on
@@ -4855,8 +4883,11 @@ pub fn line_of(logged: &Logged) -> log::Line {
             cut,
             timing,
             view_overridden,
+            reserved,
         } => log::Event::Fork {
             after_meditation: None,
+            reserved: reserved.map(|(tokens, _)| tokens),
+            prefix_shared: reserved.map(|(_, shared)| shared),
             cut: *cut,
             // Absent is the gap (#782): a gap fork's line is as before.
             timing: (*timing != Timing::Gap).then(|| timing.word().to_owned()),
@@ -4901,6 +4932,8 @@ pub fn line_of(logged: &Logged) -> log::Line {
             cut: None,
             timing: None,
             view_overridden: None,
+            reserved: None,
+            prefix_shared: None,
         },
         Event::ForkSettled {
             fork,
@@ -8731,7 +8764,7 @@ impl<'a> LogRead<'a> {
 struct PoolFork {
     /// Its fork line's `seq`.
     fork: u64,
-    /// Its prompt, in tokens: what it holds of the pool.
+    /// Its reservation, in tokens: what it holds of the pool (#797).
     prompt: u64,
     /// Its call's stop.
     cancel: Cancel,
@@ -9480,6 +9513,7 @@ fn fire<S>(
         cut: None,
         timing: Timing::Gap,
         view_overridden: None,
+        reserved: None,
     });
     // Beside the forks cut during the turn still in flight (#782), each
     // prompt holds its own part of the pool.
@@ -9792,6 +9826,25 @@ fn pool_room(
     (room, short)
 }
 
+/// What a fork of `prompt` reserves of the pool (#797), and whether its
+/// prefix was counted as shared: all of it, unless the trunk's server
+/// shares a prefix's pages (`shared`), the fork sees the trunk (`view`),
+/// and the trunk holds a prompt -- then the part of its `prefix` the trunk
+/// holds, up to the trunk's resident prompt, is the trunk's and not the
+/// fork's. A fork that sees anything else counts in full.
+fn reservation(
+    prompt: u64,
+    (prefix, trunk): (u64, u64),
+    view: ForkView,
+    shared: bool,
+) -> (u64, bool) {
+    if shared && view == ForkView::Trunk && trunk > 0 {
+        (prompt.saturating_sub(prefix.min(trunk)), true)
+    } else {
+        (prompt, false)
+    }
+}
+
 /// The prompt the trunk holds of the pool while a cut fork is sized
 /// (#782): its latest sized request while the turn runs, else none.
 fn trunk_resident(state: &State) -> u64 {
@@ -9802,11 +9855,30 @@ fn trunk_resident(state: &State) -> u64 {
     }
 }
 
+/// What a cut fork is asked and sized under (#782, #797): the interview's
+/// role, the view the regimen declared, the fork's tail, and whether the
+/// trunk's server shares a prefix's pages.
+fn cut_terms(state: &State, template: &RequestShape) -> (Role, Option<ForkView>, u32, bool) {
+    state.interview.as_ref().map_or(
+        (Role::User, None, template.limits.max_output_tokens, false),
+        |interview| {
+            (
+                interview.role,
+                interview.view,
+                interview
+                    .fork_tail
+                    .unwrap_or(template.limits.max_output_tokens),
+                interview.prefix_pages == PrefixPages::Shared,
+            )
+        },
+    )
+}
+
 /// One cut fork, fired (#782): the trunk as it stood after its step's
 /// results, then the question, whatever `fork_view` says -- its warm
 /// prefix -- the view it overrode named on its line. Refused unsent when the
-/// trunk's prompt, the forks' in flight and its own leave the pool less
-/// than the clamp's floor, the numbers on its `fork.settled`.
+/// trunk's prompt, the forks' in flight and its own [`reservation`] leave
+/// the pool less than the clamp's floor, the numbers on its `fork.settled`.
 fn fire_cut<S>(shared: &Shared<S>, state: &mut State, cut: Cut) -> Option<Fired> {
     let Cut {
         turn,
@@ -9822,20 +9894,12 @@ fn fire_cut<S>(shared: &Shared<S>, state: &mut State, cut: Cut) -> Option<Fired>
         question,
         trigger,
     } = firing;
-    let (role, declared, ceiling) = state.interview.as_ref().map_or(
-        (Role::User, None, shared.template.limits.max_output_tokens),
-        |interview| {
-            (
-                interview.role,
-                interview.view,
-                interview
-                    .fork_tail
-                    .unwrap_or(shared.template.limits.max_output_tokens),
-            )
-        },
-    );
+    let (role, declared, ceiling, sharing) = cut_terms(state, &shared.template);
     let mut shape = shared.template.clone();
     shape.messages = messages;
+    // The cut, sized as the fork's prompt is: the prefix it holds in
+    // common with the trunk's (#797).
+    let prefix = state.prompt_of(&shape);
     shape.messages.push(Message::new(role, question.clone()));
     let seat = shared.seat.as_ref().map(|seat| {
         shape.model.clone_from(&seat.model);
@@ -9857,7 +9921,13 @@ fn fire_cut<S>(shared: &Shared<S>, state: &mut State, cut: Cut) -> Option<Fired>
     } else {
         trunk_resident(state)
     };
-    let (room, refused) = pool_room(state, shape.limits.context_window, (trunk, prompt), ceiling);
+    let (reserved, counted_shared) = reservation(prompt, (prefix, trunk), ForkView::Trunk, sharing);
+    let (room, refused) = pool_room(
+        state,
+        shape.limits.context_window,
+        (trunk, reserved),
+        ceiling,
+    );
     let fork = state.push(Event::Forked {
         of_turn: turn,
         at,
@@ -9873,6 +9943,7 @@ fn fire_cut<S>(shared: &Shared<S>, state: &mut State, cut: Cut) -> Option<Fired>
         cut: Some(line),
         timing: Timing::DuringTurn,
         view_overridden: declared.filter(|view| *view != ForkView::Trunk),
+        reserved: Some((reserved, counted_shared)),
     });
     if refused {
         state.push(Event::ForkSettled {
@@ -9899,7 +9970,7 @@ fn fire_cut<S>(shared: &Shared<S>, state: &mut State, cut: Cut) -> Option<Fired>
     let cancel = Cancel::new();
     state.pool.push(PoolFork {
         fork,
-        prompt,
+        prompt: reserved,
         cancel: cancel.clone(),
     });
     Some(Fired {
@@ -12792,6 +12863,7 @@ pub(in crate::drive) mod tests {
                 cut: None,
                 timing: Timing::Gap,
                 view_overridden: None,
+                reserved: None,
             },
             Event::Requested {
                 turn: 1,
@@ -13297,6 +13369,8 @@ pub(in crate::drive) mod tests {
                 cut: None,
                 timing: None,
                 view_overridden: None,
+                prefix_shared: None,
+                reserved: None,
             },
             log::Event::Request {
                 turn: 1,
@@ -13450,6 +13524,8 @@ pub(in crate::drive) mod tests {
                 cut: None,
                 timing: None,
                 view_overridden: None,
+                prefix_shared: None,
+                reserved: None,
             },
             log::Event::Flag {
                 turn: 2,
@@ -16293,6 +16369,7 @@ pub(in crate::drive) mod tests {
             capture: crate::dogma::asks::Modality::Fields,
             fork_tail: None,
             fork_slots: 0,
+            prefix_pages: PrefixPages::Counted,
             timing: Timing::Gap,
             step: crate::drive::warrants::StepWarrants::DEFAULTS,
             operator_unilateral: true,
@@ -17967,15 +18044,16 @@ pub(in crate::drive) mod tests {
         forks: Vec<Vec<Step>>,
         slots: u32,
     ) -> Session<Canned> {
-        during_turn_in(tree, (trunk, forks), slots, None)
+        during_turn_in(tree, (trunk, forks), slots, (None, false))
     }
 
-    /// [`during_turn`], its pool `window` tokens when given.
+    /// [`during_turn`], its pool `window` tokens when given, on a server
+    /// that shares a prefix's pages when `shared` (#797).
     fn during_turn_in(
         tree: &Path,
         (trunk, forks): (Vec<Vec<Step>>, Vec<Vec<Step>>),
         slots: u32,
-        window: Option<u64>,
+        (window, shared): (Option<u64>, bool),
     ) -> Session<Canned> {
         std::fs::write(tree.join("notes.md"), "a note\n").expect("a note");
         std::fs::write(tree.join("lib.rs"), "pub fn f() {}\n").expect("a source");
@@ -17997,6 +18075,7 @@ pub(in crate::drive) mod tests {
                 cadence: Cadence::PerClass,
                 timing: Timing::DuringTurn,
                 fork_slots: slots,
+                prefix_pages: PrefixPages::of(shared),
                 ..interviewing(&[log::Warrant::Scoping, log::Warrant::Read])
             }),
         )
@@ -18191,7 +18270,7 @@ pub(in crate::drive) mod tests {
                 Vec::new(),
             ),
             1,
-            Some(window),
+            (Some(window), false),
         );
         session.ask("look around", None).expect("accepted");
         let log = wait_until(&session, "the turn", settled);
@@ -18216,6 +18295,118 @@ pub(in crate::drive) mod tests {
         );
         reads_whole(&session);
         tidy(&[&tree]);
+    }
+
+    /// The floor's pool (#797): one paged KV pool of 163,840 tokens.
+    const FLOOR_POOL: u64 = 163_840;
+
+    /// #797: a session asked ~100k tokens, whose trunk then reads a file and
+    /// ends its turn: its one read cut during the turn beside the trunk's
+    /// ~100k-token prompt, in the floor's pool, on a server that shares a
+    /// prefix's pages when `shared`. Its log and its forks' outcomes, once
+    /// the turn and the fork have settled.
+    fn beside_a_100k_trunk(name: &str, shared: bool) -> (Vec<Logged>, Vec<log::ForkOutcome>) {
+        let tree = scratch(name);
+        let session = during_turn_in(
+            &tree,
+            (
+                vec![vec![bash("call-1", "cat notes.md")], deltas(&["Done."])],
+                vec![deltas(&["LEARNED: a long note\n"])],
+            ),
+            1,
+            (Some(FLOOR_POOL), shared),
+        );
+        // ~100k tokens at the estimate's four characters to one.
+        session
+            .ask(&"look around, ".repeat(31_000), None)
+            .expect("accepted");
+        let log = wait_until(&session, "the turn and its fork", |log| {
+            settled(log) && !fork_outcomes(log).is_empty()
+        });
+        let outcomes = fork_outcomes(&log);
+        reads_whole(&session);
+        tidy(&[&tree]);
+        (log, outcomes)
+    }
+
+    /// A cut fork's reservation and whether its prefix was counted shared.
+    fn reservations(log: &[Logged]) -> Vec<Option<(u64, bool)>> {
+        log.iter()
+            .filter_map(|logged| match &logged.event {
+                Event::Forked { reserved, .. } => Some(*reserved),
+                _ => None,
+            })
+            .collect()
+    }
+
+    /// #797: on a server that shares a prefix's pages, a fork cut beside a
+    /// ~100k-token trunk fits the floor's pool: it reserves only its tokens
+    /// beyond the trunk's prefix, and its line says so.
+    #[test]
+    fn a_fork_beside_a_100k_trunk_fits_the_floors_pool_when_its_prefix_is_shared() {
+        let (log, outcomes) = beside_a_100k_trunk("during-turn-shared", true);
+        assert_eq!(outcomes, [log::ForkOutcome::Value], "{log:#?}");
+        let [Some((reserved, true))] = reservations(&log)[..] else {
+            panic!("one cut fork, its prefix shared: {:?}", reservations(&log));
+        };
+        assert!(
+            reserved < 1_000,
+            "only the question is the fork's own: {reserved}"
+        );
+    }
+
+    /// #797: without the declaration, the same fork is refused for the
+    /// pool, as #782 counts it: a second full copy of the trunk.
+    #[test]
+    fn without_the_declaration_the_same_fork_is_refused_for_the_pool() {
+        let (log, outcomes) = beside_a_100k_trunk("during-turn-unshared", false);
+        assert_eq!(outcomes, [log::ForkOutcome::Refused], "{log:#?}");
+        let [Some((reserved, false))] = reservations(&log)[..] else {
+            panic!("one cut fork, counted in full: {:?}", reservations(&log));
+        };
+        assert!(reserved > 100_000, "the whole prompt: {reserved}");
+        let rooms: Vec<log::PoolRoom> = log
+            .iter()
+            .filter_map(|logged| match &logged.event {
+                Event::ForkSettled { pool, .. } => *pool,
+                _ => None,
+            })
+            .collect();
+        let [room] = rooms[..] else {
+            panic!("one refusal's numbers: {rooms:?}");
+        };
+        assert!(room.trunk > 100_000, "the trunk holds ~100k: {room:?}");
+        assert_eq!(room.prompt, reserved, "{room:?}");
+        assert!(room.trunk + room.prompt > FLOOR_POOL, "{room:?}");
+    }
+
+    /// #797: a fork that does not see the trunk shares no prefix with it,
+    /// and counts in full whatever the server declares; nor does a trunk
+    /// that holds nothing lend its prefix.
+    #[test]
+    fn a_fork_that_does_not_see_the_trunk_counts_in_full() {
+        let at = (100_000, 100_500);
+        assert_eq!(reservation(100_200, at, ForkView::Trunk, true), (200, true));
+        assert_eq!(
+            reservation(100_200, at, ForkView::Trunk, false),
+            (100_200, false)
+        );
+        for view in [ForkView::Last(1), ForkView::Last(2)] {
+            assert_eq!(
+                reservation(100_200, at, view, true),
+                (100_200, false),
+                "{view:?}"
+            );
+        }
+        assert_eq!(
+            reservation(100_200, (100_000, 0), ForkView::Trunk, true),
+            (100_200, false)
+        );
+        // The trunk holds only part of the cut: the rest is the fork's.
+        assert_eq!(
+            reservation(100_200, (100_000, 60_000), ForkView::Trunk, true),
+            (40_200, true)
+        );
     }
 
     /// #782: serve's start reads the timing against the registry: refused

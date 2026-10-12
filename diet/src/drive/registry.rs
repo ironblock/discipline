@@ -126,6 +126,31 @@ pub fn serving_slots(document: &str, id: &str) -> Option<u32> {
     substrate_count(document, id, "serving_slots").and_then(|n| u32::try_from(n).ok())
 }
 
+/// Whether a substrate's server shares a prefix's pages between concurrent
+/// requests (#797): its own table's `served_prefix_shared`. `false` when the
+/// table or the key is missing: until it is measured and declared, every
+/// concurrent prompt counts in full.
+///
+/// # Errors
+///
+/// A value other than `"true"` or `"false"`: a malformed declaration read
+/// as `false` would refuse forks the server would have run.
+pub fn served_prefix_shared(document: &str, id: &str) -> Result<bool, String> {
+    let tables = tables(document);
+    match tables
+        .get(&format!("substrate.{id}"))
+        .and_then(|table| table.strings.get("served_prefix_shared"))
+        .map(String::as_str)
+    {
+        None | Some("false") => Ok(false),
+        Some("true") => Ok(true),
+        Some(other) => Err(format!(
+            "the registry's `served_prefix_shared` for `{id}` is \"{other}\", not \"true\" or \
+             \"false\": the entry is malformed"
+        )),
+    }
+}
+
 /// A whole number `key` in the substrate's own table, not a sub-table's.
 fn substrate_count(document: &str, id: &str, key: &str) -> Option<u64> {
     let header = format!("[substrate.{id}]");
@@ -447,6 +472,29 @@ mod tests {
         );
         assert_eq!(serving_slots(doc, "b"), Some(4));
         assert_eq!(serving_slots(doc, "d"), None);
+    }
+
+    /// #797: the floor declares its prefix shared, measured by #796; the
+    /// Flash-Next entry, the same engine unmeasured, does not; a value that
+    /// is neither word is refused.
+    #[test]
+    fn a_substrates_served_prefix_shared_is_declared_or_false() {
+        assert_eq!(
+            served_prefix_shared(REGISTRY, "accel24-tabbyapi-exl3-qwen38-27b-3p00"),
+            Ok(true)
+        );
+        assert_eq!(
+            served_prefix_shared(REGISTRY, "ada48-tabbyapi-exl3-qwen38flashnext-2p05"),
+            Ok(false)
+        );
+        assert_eq!(
+            served_prefix_shared(REGISTRY, "no-such-substrate"),
+            Ok(false)
+        );
+        let doc = "[substrate.a]\nserved_prefix_shared = \"yes\"\n\
+                   [substrate.b]\nserved_prefix_shared = \"false\"\n";
+        assert!(served_prefix_shared(doc, "a").is_err_and(|why| why.contains("yes")));
+        assert_eq!(served_prefix_shared(doc, "b"), Ok(false));
     }
 
     #[test]

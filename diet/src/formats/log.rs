@@ -859,7 +859,9 @@ pub struct PoolRoom {
     pub trunk: u64,
     /// The prompts of the forks in flight beside it.
     pub beside: u64,
-    /// The fork's own prompt.
+    /// The fork's own reservation: its prompt, less the prefix it shares
+    /// with the trunk's on a server that declares `served_prefix_shared`
+    /// (#797).
     pub prompt: u64,
 }
 
@@ -1431,6 +1433,16 @@ pub enum Event {
         /// overrode (v8, #782): such a fork sees the whole trunk at the cut,
         /// its warm prefix.
         view_overridden: Option<String>,
+        /// The tokens of the pool a fork cut during the turn reserved (v8,
+        /// #797): its prompt, less the prefix it shares with the trunk's
+        /// when [`Self::Fork::prefix_shared`]. Written with it on every cut
+        /// fork.
+        reserved: Option<u64>,
+        /// Whether a cut fork's prefix was counted as shared with the
+        /// trunk's (v8, #797): the trunk's server declares
+        /// `served_prefix_shared`, and the fork sends from the trunk's own
+        /// server.
+        prefix_shared: Option<bool>,
     },
     /// How a fork ended (v5, #374).
     ForkSettled {
@@ -3470,6 +3482,8 @@ fn from_object(object: &BTreeMap<String, Value>) -> Result<Line, String> {
             cut: fields.optional_count("cut")?,
             timing: fields.optional_string("timing")?,
             view_overridden: fields.optional_string("view_overridden")?,
+            reserved: fields.optional_count("reserved")?,
+            prefix_shared: fields.optional_flag("prefix_shared")?,
         },
         Kind::ForkSettled => Event::ForkSettled {
             fork: fields.count("fork")?,
@@ -5121,6 +5135,8 @@ pub fn schema(kind: Kind) -> &'static [Field] {
                 may_v8("cut", Count),
                 may_v8("timing", Text),
                 may_v8("view_overridden", Text),
+                may_v8("reserved", Count),
+                may_v8("prefix_shared", Holds::Flag),
             ];
             F
         }
@@ -6113,6 +6129,8 @@ fn to_value(line: &Line) -> Value {
             cut,
             timing,
             view_overridden,
+            reserved,
+            prefix_shared,
         } => {
             put("lane", text(lane.tag()));
             put("of_turn", count(u64::from(*of_turn)));
@@ -6149,6 +6167,12 @@ fn to_value(line: &Line) -> Value {
             }
             if let Some(view) = view_overridden {
                 put("view_overridden", text(view));
+            }
+            if let Some(reserved) = reserved {
+                put("reserved", count(*reserved));
+            }
+            if let Some(shared) = prefix_shared {
+                put("prefix_shared", Value::Boolean(*shared));
             }
             Kind::Fork
         }
@@ -8024,6 +8048,8 @@ mod tests {
                 cut: None,
                 timing: None,
                 view_overridden: None,
+                prefix_shared: Some(true),
+                reserved: Some(212),
             },
             Event::Request {
                 turn: 5,

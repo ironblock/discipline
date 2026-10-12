@@ -578,6 +578,8 @@ export type ForkLine = {
   cut?: number;
   timing?: string;
   view_overridden?: string;
+  reserved?: number;
+  prefix_shared?: boolean;
 } & ({ substrate: string; model: string } | { substrate?: never; model?: never });
 
 export type ForkSettledLine = {
