@@ -855,6 +855,11 @@ impl Confinement {
             let mut command = Command::new(program);
             command.env_clear();
             command.envs(passed(&policy.environment, std::env::vars_os()));
+            // The session's own TMPDIR, when it has one, in place of the
+            // drive's, which no command can write.
+            if let Some(tmpdir) = &policy.tmpdir {
+                command.env("TMPDIR", tmpdir);
+            }
             command
                 .args(rest)
                 .current_dir(worktree)
@@ -944,6 +949,11 @@ impl Confinement {
             // drive's whole environment.
             command.env_clear();
             command.envs(passed(&policy.environment, std::env::vars_os()));
+            // The session's own TMPDIR, when it has one, in place of the
+            // drive's, which no command can write.
+            if let Some(tmpdir) = &policy.tmpdir {
+                command.env("TMPDIR", tmpdir);
+            }
             command
                 .args(rest)
                 .current_dir(worktree)
@@ -1670,6 +1680,63 @@ mod tests {
         }
         assert!(!group_alive(&group), "the session's end left it running");
         let _ = child.wait();
+    }
+
+    /// A sandboxed command's `TMPDIR` is the session's own directory, which
+    /// it can write (`mktemp`, a file under it); the drive's own temporary
+    /// directory, passed through as before, it cannot; and `/tmp` stays
+    /// refused. The Mac's row only, as above.
+    #[test]
+    fn under_seatbelt_a_command_writes_the_sessions_own_tmpdir_and_not_tmp() {
+        if Platform::here() != Platform::MacOs {
+            return;
+        }
+        let ground = Ground::make("seatbelt-tmpdir");
+        let make_one = argv(&["/bin/sh", "-c", "mktemp"]);
+        // As it stood: the drive's TMPDIR, which the profile does not grant.
+        let plain = Policy::merged_usr();
+        let confinement = open_on(&plain, Platform::MacOs).expect("Seatbelt");
+        let refused = confinement
+            .run(&plain, &ground.tree, &make_one)
+            .expect("it ran");
+        assert_ne!(refused.exit, Some(0), "{refused:?}");
+        let mut policy = Policy::merged_usr();
+        let tmp = policy.session_tmpdir().expect("the session's TMPDIR");
+        let confinement = open_on(&policy, Platform::MacOs).expect("Seatbelt");
+        let ran = confinement
+            .run(
+                &policy,
+                &ground.tree,
+                &argv(&[
+                    "/bin/sh",
+                    "-c",
+                    "made=$(mktemp) && echo x > \"$TMPDIR/probe\" && echo \"$made\"",
+                ]),
+            )
+            .expect("it ran");
+        assert_eq!(ran.exit, Some(0), "{ran:?}");
+        let canonical = std::fs::canonicalize(&tmp).expect("the directory");
+        assert!(
+            std::path::Path::new(ran.stdout.trim()).starts_with(&canonical),
+            "{} is not under {}",
+            ran.stdout.trim(),
+            canonical.display()
+        );
+        assert_eq!(
+            std::fs::read_to_string(tmp.join("probe")).expect("the probe"),
+            "x\n"
+        );
+        let outside = format!("/private/tmp/outside-{}-tmpdir", std::process::id());
+        let wrote = confinement
+            .run(
+                &policy,
+                &ground.tree,
+                &argv(&["/bin/sh", "-c", &format!("echo x > {outside}")]),
+            )
+            .expect("it ran");
+        assert_ne!(wrote.exit, Some(0), "{wrote:?}");
+        assert!(!std::path::Path::new(&outside).exists(), "/tmp was written");
+        let _ = std::fs::remove_dir_all(&tmp);
     }
 
     /// On Linux `bwrap`'s pid namespace ends a server with its call, so this

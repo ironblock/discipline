@@ -1452,6 +1452,15 @@ fn serving_tools(
             },
         )?;
     }
+    // A TMPDIR of the session's own, writable: the drive's is not.
+    if policy.isolation == isolation::Isolation::Sandbox {
+        policy.session_tmpdir().map_err(|why| {
+            (
+                EXIT_HALT,
+                format!("the session's own TMPDIR could not be made: {why}"),
+            )
+        })?;
+    }
     let confinement = isolation::open(&policy).map_err(|why| (EXIT_HALT, why.to_string()))?;
     let state = tool_loop::state_home().ok_or_else(|| {
         (

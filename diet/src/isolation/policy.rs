@@ -149,9 +149,45 @@ pub struct Policy {
     /// [`DEFAULT_ENVIRONMENT`] and then the regimen's additions. Every other
     /// variable is cleared, on every backend.
     pub environment: Vec<String>,
+    /// The session's own temporary directory, when it has one
+    /// ([`Policy::session_tmpdir`]): a command's `TMPDIR`, and writable.
+    pub tmpdir: Option<String>,
 }
 
 impl Policy {
+    /// A temporary directory of the session's own, made and named as its
+    /// commands' `TMPDIR`, and added to what they may write.
+    ///
+    /// The drive's own `TMPDIR` -- passed through by [`DEFAULT_ENVIRONMENT`]
+    /// -- is outside every writable path, so `mktemp`, and any tool that
+    /// writes where `TMPDIR` says, failed in the sandbox, and a model made
+    /// scratch directories in whatever it could write instead. Never the
+    /// shared `/tmp`: a directory under the drive's own temporary directory,
+    /// named for this process and the moment, so concurrent sessions cannot
+    /// see each other's files. Made owner-only. Returns its canonical path.
+    ///
+    /// # Errors
+    ///
+    /// When it cannot be made.
+    pub fn session_tmpdir(&mut self) -> std::io::Result<std::path::PathBuf> {
+        let nanos = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map_or(0, |since| since.as_nanos());
+        let dir = std::env::temp_dir().join(format!("diet-session-{}-{nanos}", std::process::id()));
+        let mut builder = std::fs::DirBuilder::new();
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::DirBuilderExt as _;
+            builder.mode(0o700);
+        }
+        builder.create(&dir)?;
+        let dir = std::fs::canonicalize(&dir)?;
+        let named = dir.to_string_lossy().into_owned();
+        self.writable.push(named.clone());
+        self.tmpdir = Some(named);
+        Ok(dir)
+    }
+
     /// The default for a live drive on a merged-`/usr` host.
     ///
     /// **This is a layout, not a fact about every Linux.** Debian, Ubuntu,
@@ -195,6 +231,7 @@ impl Policy {
                 .iter()
                 .map(|name| (*name).to_owned())
                 .collect(),
+            tmpdir: None,
         }
     }
 
@@ -217,6 +254,7 @@ impl Policy {
                 .iter()
                 .map(|name| (*name).to_owned())
                 .collect(),
+            tmpdir: None,
         }
     }
 

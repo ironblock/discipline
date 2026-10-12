@@ -4309,6 +4309,10 @@ impl<S: Streaming + 'static> Session<S> {
         }
         if let Some(tools) = &self.shared.tools {
             tools.confinement.end_session();
+            // The session's own TMPDIR, gone with it.
+            if let Some(tmpdir) = &tools.policy.tmpdir {
+                let _ = std::fs::remove_dir_all(tmpdir);
+            }
         }
     }
 

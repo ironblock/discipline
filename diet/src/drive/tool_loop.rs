@@ -2070,6 +2070,8 @@ pub fn reference_baseline(policy: &Policy) -> Baseline {
         policy
             .writable
             .iter()
+            // The session's own TMPDIR is scratch, not a reference.
+            .filter(|dir| policy.tmpdir.as_ref() != Some(*dir))
             .filter_map(|dir| {
                 let path = crate::isolation::policy::home_expanded(dir);
                 (path.is_dir() && repositories(&path).is_empty())
@@ -2190,6 +2192,10 @@ fn compared(then: &Listing, now: &Listing) -> String {
 pub fn reference_modified(policy: &Policy, baseline: &Baseline) -> BTreeMap<String, String> {
     let mut out = BTreeMap::new();
     for dir in &policy.writable {
+        // The session's own TMPDIR is scratch, named on its own.
+        if policy.tmpdir.as_ref() == Some(dir) {
+            continue;
+        }
         let path = crate::isolation::policy::home_expanded(dir);
         if !path.is_dir() {
             out.insert(dir.clone(), "not judged: no such directory".to_owned());
@@ -2288,6 +2294,10 @@ pub fn receipt(
     ]);
     if let Some(stance) = approval_policy {
         fields.insert(APPROVAL_POLICY.to_owned(), text(stance));
+    }
+    // The session's own TMPDIR, where its commands' scratch went.
+    if let Some(tmpdir) = &policy.tmpdir {
+        fields.insert("tmpdir".to_owned(), text(tmpdir));
     }
     Value::Object(fields)
 }
@@ -3635,6 +3645,26 @@ pub(in crate::drive) mod tests {
             .status()
             .expect("git runs");
         assert!(init.success());
+    }
+
+    /// The session's own TMPDIR is named on the receipt and is not a
+    /// reference: a scratch file there is no change to report.
+    #[test]
+    fn the_receipt_names_the_sessions_tmpdir_and_reports_nothing_of_its_scratch() {
+        let mut policy = Policy::merged_usr();
+        let tmp = policy.session_tmpdir().expect("a TMPDIR");
+        let baseline = reference_baseline(&policy);
+        std::fs::write(tmp.join("scratch"), "x").expect("scratch");
+        assert!(reference_modified(&policy, &baseline).is_empty());
+        let receipt = receipt(&[], Counts::default(), None, &policy, &BTreeMap::new());
+        let Value::Object(fields) = receipt else {
+            panic!("a receipt is an object")
+        };
+        assert_eq!(
+            fields.get("tmpdir"),
+            Some(&Value::String(tmp.to_string_lossy().into_owned()))
+        );
+        let _ = std::fs::remove_dir_all(&tmp);
     }
 
     #[test]

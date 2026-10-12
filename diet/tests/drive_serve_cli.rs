@@ -2705,6 +2705,15 @@ fn a_drive_server_runs_t1s_path_under_seatbelt_and_no_command_forges_an_approval
     assert_eq!(drove.call["outcome"], "ran", "{}", drove.call);
     assert_eq!(drove.call["isolation"], "sandbox");
     assert_eq!(drove.call["network"], "host");
+    // The session's own TMPDIR, named on the receipt, gone with the session.
+    let tmpdir = drove.receipt["tmpdir"]
+        .as_str()
+        .expect("the receipt names the session's TMPDIR")
+        .to_owned();
+    assert!(
+        !std::path::Path::new(&tmpdir).exists(),
+        "{tmpdir} outlived the session"
+    );
     assert_eq!(drove.call["approval"]["scope"], "once");
     assert_eq!(drove.call["cwd"], recorded_cwd(&tree).as_str());
     assert!(
