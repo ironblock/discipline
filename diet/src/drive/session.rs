@@ -698,6 +698,9 @@ pub enum Event {
         /// Under a running turn (#813): its steps kept after its ask, and
         /// those compacted with the turns before it.
         turn_steps: Option<(u64, u64)>,
+        /// Its audit fitted to the window (#821): the notes audited, those
+        /// left out, and the window's line.
+        audit_notes: Option<(u64, u64, u64)>,
     },
     /// Forks' patches delivered at the tail of a trunk request, after its
     /// ask (the fork delivery lever): the note stays on the trunk.
@@ -2241,6 +2244,9 @@ struct State {
     /// The mechanical lane, once a call under `mechanical_capture` has
     /// settled (#784): the shell state it reads each next call against.
     mechanical: Option<crate::capture::mechanical::Lane>,
+    /// The audit at the meditation in progress, fitted to the window (#821):
+    /// the notes audited, those left out, the line; for its line.
+    audit_cut: Option<(u64, u64, u64)>,
     /// Where each event is written as it is appended (see
     /// [`Session::write_through`]).
     sink: Option<Sink>,
@@ -2446,6 +2452,7 @@ impl State {
             archive: super::archive::Archive::default(),
             recovered: BTreeMap::new(),
             mechanical: None,
+            audit_cut: None,
             sink: None,
             allowed: tools
                 .as_ref()
@@ -5169,8 +5176,14 @@ pub fn line_of(logged: &Logged) -> log::Line {
             refilled_anyway,
             warm,
             turn_steps,
+            audit_notes,
         } => log::Event::Meditation {
             turn_steps: turn_steps.map(|(kept, compacted)| log::TurnSteps { kept, compacted }),
+            audit_notes: audit_notes.map(|(audited, left, line)| log::AuditNotes {
+                audited,
+                left,
+                line,
+            }),
             fired: *fired,
             warm: warm.as_ref().map(timings_line),
             phase: phase.clone(),
@@ -7513,7 +7526,125 @@ fn refilled(
         refilled_anyway: None,
         warm: None,
         turn_steps: None,
+        audit_notes: state.audit_cut.take(),
     }
+}
+
+/// Where a meditation's audit is cut (#504): the latest turn that settled
+/// `final`, and its trunk request's sequence number.
+fn audit_cut_point(state: &State) -> Option<(u32, u64)> {
+    // The latest turn that settled `final` (#729): one that failed since
+    // has no answered request to cut from, and under `refuse` a meditation
+    // that could ask nothing would hold having asked nothing.
+    let turn = state
+        .log
+        .iter()
+        .rev()
+        .find_map(|logged| match &logged.event {
+            Event::TurnSettled {
+                turn: settled,
+                reason: SettleReason::Final,
+            } => Some(*settled),
+            _ => None,
+        })?;
+    let at = state
+        .log
+        .iter()
+        .rev()
+        .find_map(|logged| match &logged.event {
+            Event::Requested {
+                turn: asked,
+                lane: Lane::Trunk,
+                ..
+            } if *asked == turn => Some(logged.seq),
+            _ => None,
+        })?;
+    Some((turn, at))
+}
+
+/// A note an audit numbers: its entry and its text.
+type Note = (crate::object::EntryId, String);
+
+/// An audit fitted to the window (#821): the notes audited, those left out,
+/// the line.
+type AuditCut = (u64, u64, u64);
+
+/// The notes an audit asks over, fitted to the window (#821): with the
+/// trunk at the cut and every note numbered past the window's line, the
+/// newest that fit -- in their own order -- the rest left as they are,
+/// neither kept nor removed by an answer that never saw them; and the cut
+/// (audited, left, the line) when there was one. `None` notes when not
+/// even one fits.
+fn fitted_items(
+    template: &RequestShape,
+    trunk: &[Message],
+    object: &crate::object::WorkingObject,
+    items: Vec<Note>,
+    asking: &dyn Fn(&[Note]) -> Option<crate::meditation::Ask>,
+) -> (Option<Vec<Note>>, Option<AuditCut>) {
+    let trunk = trunk
+        .iter()
+        .map(crate::meditation::render::estimated_tokens)
+        .sum::<u64>();
+    let sized = |ask: &crate::meditation::Ask| {
+        trunk + u64::try_from(ask.text.chars().count().div_ceil(4)).unwrap_or(u64::MAX)
+    };
+    let Some(line) =
+        window_line(template).filter(|line| asking(&items).is_some_and(|ask| sized(&ask) > *line))
+    else {
+        return (Some(items), None);
+    };
+    let newest = newest_first(object, &items);
+    let fits = |kept: usize| {
+        asking(&chosen_of(&items, &newest[..kept])).is_some_and(|ask| sized(&ask) <= line)
+    };
+    // The most of the newest that fit, by halving: the ask grows with each
+    // note, so fitting is monotone in how many.
+    let (mut low, mut high) = (0, items.len());
+    while low < high {
+        let mid = (low + high).div_ceil(2);
+        if fits(mid) {
+            low = mid;
+        } else {
+            high = mid - 1;
+        }
+    }
+    let cut = Some((low as u64, (items.len() - low) as u64, line));
+    if low == 0 {
+        return (None, cut);
+    }
+    (Some(chosen_of(&items, &newest[..low])), cut)
+}
+
+/// `items`' positions, the newest first: by each entry's latest
+/// provenance, as a budgeted render reduces the oldest first (#565).
+fn newest_first(
+    object: &crate::object::WorkingObject,
+    items: &[(crate::object::EntryId, String)],
+) -> Vec<usize> {
+    let latest = |id: &crate::object::EntryId| {
+        object
+            .entry(id)
+            .and_then(|entry| entry.provenances.iter().max().cloned())
+    };
+    let mut order: Vec<usize> = (0..items.len()).collect();
+    order.sort_by(|a, b| {
+        latest(&items[*b].0)
+            .cmp(&latest(&items[*a].0))
+            .then_with(|| items[*b].0.cmp(&items[*a].0))
+    });
+    order
+}
+
+/// The `items` at `positions`, in `items`' own order: the notes an audit
+/// fitted to the window numbers (#821).
+fn chosen_of(
+    items: &[(crate::object::EntryId, String)],
+    positions: &[usize],
+) -> Vec<(crate::object::EntryId, String)> {
+    let mut kept: Vec<usize> = positions.to_vec();
+    kept.sort_unstable();
+    kept.into_iter().map(|at| items[at].clone()).collect()
 }
 
 /// The window's line (#617, #814): the window less its reserve -- the
@@ -7898,6 +8029,8 @@ fn audit_and_gate<'a, S: Streaming>(
     mut state: std::sync::MutexGuard<'a, State>,
     reason: crate::meditation::Reason,
 ) -> std::sync::MutexGuard<'a, State> {
+    // This meditation's own cut (#821), none carried from one that held.
+    state.audit_cut = None;
     if let Some(fired) = audit_fired(&shared.template, &mut state, reason, None) {
         drop(state);
         shared.changed.notify_all();
@@ -7969,6 +8102,8 @@ fn audit_fired(
         .filter(|entry| only.is_none_or(|only| only.iter().any(|id| id == entry.id.as_str())))
         .map(|entry| (entry.id.clone(), entry.content.clone()))
         .collect();
+    // Nothing to cut from, nothing asked -- and no cut recorded.
+    let (turn, at) = audit_cut_point(state)?;
     // #610: a session whose forks answer through the record tools audits
     // through them too, in the tools-route set. That set's words carry no
     // markers yet, so it marks nothing (#150), though its patches address
@@ -7980,11 +8115,20 @@ fn audit_fired(
     } else {
         operator_marks(&state.operator_pending)
     };
-    let ask = if tools {
-        crate::meditation::audit_ask_tools(reason, &items, crate::dogma::audits::DEFAULT)?
-    } else {
-        crate::meditation::audit_ask_marked(reason, &items, &marks)?
+    let asking = |items: &[(crate::object::EntryId, String)]| {
+        if tools {
+            crate::meditation::audit_ask_tools(reason, items, crate::dogma::audits::DEFAULT)
+        } else {
+            crate::meditation::audit_ask_marked(reason, items, &marks)
+        }
     };
+    // The audit fits the window (#821): the newest notes that fit.
+    let (chosen, cut) = fitted_items(template, &state.trunk, &interview.object, items, &asking);
+    let ask = chosen.and_then(|chosen| asking(&chosen));
+    if cut.is_some() {
+        state.audit_cut = cut;
+    }
+    let ask = ask?;
     // The notes with a pending change, on either route (#748): the tools
     // route's words carry no markers, but its patches can still act on them.
     let marked = ask
@@ -7998,32 +8142,6 @@ fn audit_fired(
         })
         .map(|id| id.as_str().to_owned())
         .collect();
-    // The latest turn that settled `final` (#729): one that failed since
-    // has no answered request to cut from, and under `refuse` a meditation
-    // that could ask nothing would hold having asked nothing.
-    let turn = state
-        .log
-        .iter()
-        .rev()
-        .find_map(|logged| match &logged.event {
-            Event::TurnSettled {
-                turn: settled,
-                reason: SettleReason::Final,
-            } => Some(*settled),
-            _ => None,
-        })?;
-    let at = state
-        .log
-        .iter()
-        .rev()
-        .find_map(|logged| match &logged.event {
-            Event::Requested {
-                turn: asked,
-                lane: Lane::Trunk,
-                ..
-            } if *asked == turn => Some(logged.seq),
-            _ => None,
-        })?;
     let mut shape = template.clone();
     shape.messages.clone_from(&state.trunk);
     shape
@@ -13409,6 +13527,7 @@ pub(in crate::drive) mod tests {
                 pruned: None,
                 warm: None,
                 turn_steps: None,
+                audit_notes: None,
             },
             Event::Recalled {
                 turn: 2,
@@ -13922,6 +14041,7 @@ pub(in crate::drive) mod tests {
                 pruned: None,
                 warm: None,
                 turn_steps: None,
+                audit_notes: None,
             },
             log::Event::Recalled {
                 turn: 2,
@@ -16966,6 +17086,94 @@ pub(in crate::drive) mod tests {
             .map(crate::meditation::render::estimated_tokens)
             .sum();
         assert!(trunk <= 600, "the refilled trunk is {trunk} tokens");
+        reads_whole(&session);
+        every_head_rebuilds(&log);
+    }
+
+    /// #821: an audit over every note that would pass the window's line asks
+    /// over the newest notes that fit; the rest are left as they are, and the
+    /// meditation line names both counts and the line.
+    #[test]
+    fn an_audit_past_the_windows_line_asks_over_the_newest_notes_that_fit() {
+        let mut shape = template();
+        shape.limits.context_window = Some(crate::meditation::policy::WINDOW_RESERVE + 2_000);
+        let mut interview = interviewing(&[log::Warrant::Scoping]);
+        interview.meditations.audit = true;
+        let session = Session::open_with(
+            Canned::new(vec![
+                deltas(&[SCOPED]),
+                deltas(&[DECIDED]),
+                deltas(&["1. KEEP\n"]),
+            ]),
+            shape,
+            None,
+            None,
+            None,
+            Some(interview),
+        );
+        session
+            .ask_marked("what are we building?", None, true)
+            .expect("accepted");
+        wait_until(&session, "the fork to settle", |log| {
+            settled(log) && !fork_outcomes(log).is_empty()
+        });
+        {
+            let mut state = session.shared.lock();
+            let object = &mut state.interview.as_mut().expect("memory").object;
+            for n in 0..60_u32 {
+                object
+                    .apply(&Patch::Add {
+                        id: crate::object::EntryId::new(&format!("bulk-{n:02}")).expect("an id"),
+                        content: format!("decision: {} {n}", "the long form of a fact ".repeat(8)),
+                        provenance: crate::object::Provenance {
+                            turn: 1,
+                            lane: "interview".to_owned(),
+                            fork: None,
+                            tangent: None,
+                            index: 100 + n,
+                        },
+                    })
+                    .expect("an entry");
+            }
+        }
+        let total = live_entries(&session).len() as u64;
+        session.declare_meditation(None).expect("admitted");
+        let log = wait_until(&session, "the meditation", meditated);
+        let question = log
+            .iter()
+            .find_map(|logged| match &logged.event {
+                Event::Audited { question, .. } => Some(question.clone()),
+                _ => None,
+            })
+            .expect("an audit");
+        let notes = log
+            .iter()
+            .find_map(|logged| match &logged.event {
+                Event::Meditated { audit_notes, .. } => Some(*audit_notes),
+                _ => None,
+            })
+            .expect("a meditation")
+            .expect("the audit was fitted");
+        let (audited, left, line) = notes;
+        assert_eq!(line, 2_000);
+        assert!(audited > 0 && left > 0, "{notes:?}");
+        assert_eq!(audited + left, total);
+        assert!(
+            question.contains(" 59"),
+            "the newest note is audited: {question}"
+        );
+        assert!(
+            !question.contains(" 0\n") && !question.contains(" 00"),
+            "the oldest is not"
+        );
+        assert!(
+            question.contains(&format!("{audited}. ")),
+            "numbered through {audited}: {question}"
+        );
+        assert!(
+            !question.contains(&format!("{}. ", audited + 1)),
+            "{question}"
+        );
         reads_whole(&session);
         every_head_rebuilds(&log);
     }
@@ -24133,6 +24341,7 @@ pub(in crate::drive) mod tests {
                 pruned: None,
                 warm: None,
                 turn_steps: None,
+                audit_notes: None,
             }
         );
 

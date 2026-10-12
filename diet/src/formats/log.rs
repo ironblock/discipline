@@ -1848,7 +1848,24 @@ pub enum Event {
         /// kept after its ask, and those compacted with the turns before
         /// it. `turn_steps_kept` and `turn_steps_compacted`, both or neither.
         turn_steps: Option<TurnSteps>,
+        /// Its audit fitted to the window (v8, #821): the trunk at the cut
+        /// and every live note numbered would have passed the window's line,
+        /// so the newest notes that fit were audited and the rest left as
+        /// they were. `audit_notes`, `audit_notes_left` and
+        /// `audit_window_line`, all or none.
+        audit_notes: Option<AuditNotes>,
     },
+}
+
+/// A meditation's audit fitted to the window (v8, #821).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct AuditNotes {
+    /// The notes it audited: the newest that fit.
+    pub audited: u64,
+    /// The notes it left out, neither kept nor removed.
+    pub left: u64,
+    /// The window's line it was fitted to: the window less its reserve.
+    pub line: u64,
 }
 
 /// The running turn a `window` meditation split (v8, #813).
@@ -3791,6 +3808,24 @@ fn from_object(object: &BTreeMap<String, Value>) -> Result<Line, String> {
                 (Some(kept), Some(compacted)) => Some(TurnSteps { kept, compacted }),
                 _ => None,
             },
+            audit_notes: match (
+                fields.optional_count("audit_notes")?,
+                fields.optional_count("audit_notes_left")?,
+                fields.optional_count("audit_window_line")?,
+            ) {
+                (Some(audited), Some(left), Some(line)) => Some(AuditNotes {
+                    audited,
+                    left,
+                    line,
+                }),
+                (None, None, None) => None,
+                // `all_or_none` holds one group a kind, `turn_steps`' here.
+                _ => {
+                    return Err("a meditation's `audit_notes`, `audit_notes_left` and \
+                         `audit_window_line` are carried all or none"
+                        .to_owned());
+                }
+            },
             render_budget: match fields.optional_count("render_budget_tokens")? {
                 None => None,
                 Some(tokens) => Some(RenderBudget {
@@ -5307,6 +5342,9 @@ pub fn schema(kind: Kind) -> &'static [Field] {
                 may_v7("refilled_anyway", Holds::Flag),
                 may_v7("warm", Holds::Timings),
                 may_v8("turn_steps_kept", Count),
+                may_v8("audit_notes", Count),
+                may_v8("audit_notes_left", Count),
+                may_v8("audit_window_line", Count),
                 may_v8("turn_steps_compacted", Count),
             ];
             F
@@ -6414,11 +6452,17 @@ fn to_value(line: &Line) -> Value {
             refilled_anyway,
             warm,
             turn_steps,
+            audit_notes,
         } => {
             put("at_turn", count(u64::from(*at_turn)));
             if let Some(steps) = turn_steps {
                 put("turn_steps_kept", count(steps.kept));
                 put("turn_steps_compacted", count(steps.compacted));
+            }
+            if let Some(notes) = audit_notes {
+                put("audit_notes", count(notes.audited));
+                put("audit_notes_left", count(notes.left));
+                put("audit_window_line", count(notes.line));
             }
             if let Some(warm) = warm {
                 put("warm", timings_value(warm));

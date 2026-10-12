@@ -643,6 +643,9 @@ export type MeditationLine = {
   newest_turn_tokens?: number;
   refilled_anyway?: boolean;
   warm?: Timings;
+  audit_notes?: number;
+  audit_notes_left?: number;
+  audit_window_line?: number;
 } & ({ turn_steps_kept: number; turn_steps_compacted: number } | { turn_steps_kept?: never; turn_steps_compacted?: never });
 
 export type DeliveredLine = {
