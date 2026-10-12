@@ -121,6 +121,7 @@ impl Adapted {
             fork_delivery: None,
             tool_output: None,
             levers: None,
+            phase: None,
             // #583: version 1 spells the boundary `seam`; nothing here writes one.
             version: None,
         });

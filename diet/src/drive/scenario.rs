@@ -104,6 +104,14 @@ pub enum Step {
     DeclareMeditation,
     /// The operator refills a held meditation anyway.
     RefillAnyway,
+    /// The operator rules on the model's phase proposal (#787): the
+    /// proposal's call, and `meditation`, `continue` or `stay`.
+    RulePhase {
+        /// The `propose_phase_transition` call.
+        call: String,
+        /// The ruling.
+        choice: String,
+    },
     /// Wait until the session is idle or a line of this kind is logged.
     Wait {
         /// `idle`, or a log line's kind.
@@ -356,6 +364,10 @@ fn step_of(mut fields: Fields) -> Result<Step, ScenarioError> {
         },
         "declare-meditation" => Step::DeclareMeditation,
         "refill-anyway" => Step::RefillAnyway,
+        "rule-phase" => Step::RulePhase {
+            call: fields.text("call")?,
+            choice: fields.text("choice")?,
+        },
         "wait" => Step::Wait {
             until: fields.text("until")?,
             timeout: fields.maybe_count("timeout")?,
@@ -719,6 +731,17 @@ pub fn drive(scenario: &Scenario, driver: &Driver) -> Result<Bindings, Failure> 
                 };
                 driver
                     .command(&serde_json::json!({"kind": kind}))
+                    .map_err(failed)?;
+                driver.settle(approvals).map_err(failed)?;
+            }
+            Step::RulePhase { call, choice } => {
+                mark = driver.last_seq().map_err(failed)?;
+                driver
+                    .command(&serde_json::json!({
+                        "kind": "ratify-phase",
+                        "call": call,
+                        "choice": choice,
+                    }))
                     .map_err(failed)?;
                 driver.settle(approvals).map_err(failed)?;
             }
@@ -1144,6 +1167,10 @@ mod tests {
                     refused: Some("meditation-held".to_owned()),
                 },
                 Step::RefillAnyway,
+                Step::RulePhase {
+                    call: "call-p".to_owned(),
+                    choice: "continue".to_owned(),
+                },
                 Step::End,
             ]
         );

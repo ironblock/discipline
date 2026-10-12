@@ -23,6 +23,25 @@ pub struct Document {
 }
 
 impl Document {
+    /// The document as a log line carries it (v8, #787).
+    #[must_use]
+    pub fn logged(&self) -> crate::formats::log::PhaseDocument {
+        crate::formats::log::PhaseDocument {
+            name: self.phase.name.clone(),
+            digest: self.digest.clone(),
+            transitions: self
+                .phase
+                .transitions
+                .iter()
+                .map(|transition| crate::formats::log::PhaseOption {
+                    to: transition.to.clone(),
+                    kind: transition.kind.tag().to_owned(),
+                })
+                .collect(),
+            ground_rules: self.phase.ground_rules.clone(),
+        }
+    }
+
     /// How the move to `to` is presented, if this phase lists it.
     #[must_use]
     pub fn kind_of(&self, to: &str) -> Option<Kind> {

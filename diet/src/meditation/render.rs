@@ -327,6 +327,43 @@ pub fn refill_with(head: &[Message], render: &str, after: Option<&str>) -> Vec<M
     trunk
 }
 
+/// `head` with a phase's ground rules, when it is in one, after its system message (#787,
+/// refining #597): what a meditation's refill opens with while the session
+/// is in a phase. The head's own text is unchanged, the rules following it
+/// after a blank line; a head with no system message is returned as it is,
+/// and its rules ride as a note instead ([`phase_note`]).
+#[must_use]
+pub fn with_ground_rules(
+    head: &[Message],
+    document: Option<&crate::formats::log::PhaseDocument>,
+) -> Vec<Message> {
+    let mut head = head.to_vec();
+    if let (Some(document), Some(first)) = (
+        document,
+        head.first_mut().filter(|first| first.role == Role::System),
+    ) {
+        let _ = write!(
+            first.content,
+            "\n\nGround rules for the {} phase:\n\n{}",
+            document.name, document.ground_rules
+        );
+    }
+    head
+}
+
+/// Whether [`with_ground_rules`] carries a phase's rules on `head`.
+#[must_use]
+pub fn carries_ground_rules(head: &[Message]) -> bool {
+    head.first().is_some_and(|first| first.role == Role::System)
+}
+
+/// The note a phase's ground rules ride in on the next ask when the session
+/// entered it with no meditation (#787): at its start, or on a `continue`.
+#[must_use]
+pub fn phase_note(name: &str, ground_rules: &str) -> String {
+    format!("The session is now in the {name} phase. Its ground rules:\n\n{ground_rules}")
+}
+
 /// The message a meditation's refill rides in (#597), shaped as Pi and `OpenCode`
 /// 2 carry a compaction summary: a user message, the text inside
 /// `<summary>` tags, opened and closed on lines of their own (Pi

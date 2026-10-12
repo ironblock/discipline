@@ -325,6 +325,8 @@ pub enum Event {
         /// phases and allowed moves, and the phase it opens in; `None` when
         /// the regimen declares none.
         phases: Option<(Vec<String>, Vec<log::PhaseMove>, String)>,
+        /// The opening phase's document (#787), under a phase library.
+        phase_document: Option<log::PhaseDocument>,
     },
     /// An ask was accepted, and a turn begins on it.
     Asked {
@@ -640,6 +642,9 @@ pub enum Event {
         /// The phases it moved between (#563), when the operator named a
         /// move the graph allowed.
         phase: Option<log::PhaseMove>,
+        /// The document of the phase it left the session in (#787), whose
+        /// ground rules follow the head's system prompt on the refill.
+        phase_document: Option<log::PhaseDocument>,
         /// What it carried of the tool outputs it compacted away (#553).
         tool_outputs: log::MeditationToolOutputs,
         /// The section after the render carrying them, when it carried any,
@@ -797,6 +802,17 @@ pub enum Event {
         from: Option<String>,
         /// The phase proposed.
         to: String,
+        /// The document of the phase the session is in after it (#787), on
+        /// a `meditation` or `continue` under a phase library.
+        phase_document: Option<log::PhaseDocument>,
+    },
+    /// A phase's ground rules, as a note on turn `turn`'s ask (#787): the
+    /// session entered the phase with no meditation to carry them.
+    PhaseNoted {
+        /// The turn whose request carried it.
+        turn: u32,
+        /// The note as sent.
+        text: String,
     },
     Captured {
         /// The request whose answer made the call: the trunk's, or with
@@ -2093,6 +2109,9 @@ struct State {
     captures_this_turn: u32,
     /// The reminder due at the next ask, when the cadence fired.
     reminder_due: Option<String>,
+    /// A phase's ground rules due as a note at the next ask (#787): the
+    /// session opened in the phase, or moved to it with no meditation.
+    phase_note_due: Option<String>,
     /// Patches waiting to be delivered at the next trunk request, under a
     /// mid-turn fork delivery: each op and the entry text its line names.
     undelivered: Vec<(log::PatchOp, String, String)>,
@@ -2283,6 +2302,7 @@ impl State {
             recorded_this_turn: false,
             captures_this_turn: 0,
             reminder_due: None,
+            phase_note_due: None,
             undelivered: Vec::new(),
             archive: super::archive::Archive::default(),
             recovered: BTreeMap::new(),
@@ -2920,6 +2940,10 @@ impl<S: Streaming + 'static> Session<S> {
             });
         let tools = tools.map(|tools| readable_outputs(tools, opened));
         let mut state = State::opening(trunk, phase_at_open.clone(), interview, tools.as_ref());
+        // The opening phase's rules (#787): the head is the session's own,
+        // so they ride as a note on the first ask.
+        let phase_document = state.phase_document();
+        state.phase_note_due = state.phase_note();
         state.push(Event::Started {
             opened,
             model: template.model.clone(),
@@ -2944,6 +2968,7 @@ impl<S: Streaming + 'static> Session<S> {
             tool_output: tools.as_ref().map(|tools| tools.output_cap),
             bash_timeout_ms: bash_timeout_of(tools.as_ref(), &template),
             phases,
+            phase_document,
         });
         Self::sharing(Shared {
             transport,
@@ -3040,6 +3065,7 @@ impl<S: Streaming + 'static> Session<S> {
     /// # Errors
     ///
     /// As [`Session::ask_marked`].
+    #[allow(clippy::too_many_lines)]
     pub fn ask_attached(
         &self,
         attached: super::attach::Attached,
@@ -3106,6 +3132,9 @@ impl<S: Streaming + 'static> Session<S> {
         // self-capture reminder (#609), when its cadence came round, never
         // in the system prompt.
         let mut message = message;
+        if let Some(text) = state.noted(turn) {
+            message.notes.push(text);
+        }
         if let Some(note) = state.deliver(turn) {
             message.notes.push(note.content);
         }
@@ -3367,11 +3396,15 @@ impl<S: Streaming + 'static> Session<S> {
         let Some(PendingProposal { call, from, to }) = state.proposal.take() else {
             unreachable!("a pending proposal was checked above");
         };
+        let phase_document = (choice != PhaseChoice::Stay)
+            .then(|| state.document_of(&to))
+            .flatten();
         state.push(Event::PhaseRuled {
             call,
             choice,
             from,
             to: to.clone(),
+            phase_document,
         });
         let queued = match choice {
             PhaseChoice::Meditation => meditation(
@@ -3382,6 +3415,8 @@ impl<S: Streaming + 'static> Session<S> {
             ),
             PhaseChoice::Continue => {
                 state.phase = Some(to);
+                // No meditation to carry its rules (#787): a note does.
+                state.phase_note_due = state.phase_note();
                 false
             }
             PhaseChoice::Stay => false,
@@ -4227,11 +4262,13 @@ pub fn line_of(logged: &Logged) -> log::Line {
             tool_output,
             bash_timeout_ms,
             phases,
+            phase_document,
             instruction_files,
             levers,
             notes_in_the_ask,
             build,
         } => log::Event::SessionStart {
+            phase_document: phase_document.clone(),
             build_commit: build.as_ref().map(|(commit, _)| commit.clone()),
             build_dirty: build.as_ref().map(|(_, dirty)| *dirty),
             bash_timeout_ms: *bash_timeout_ms,
@@ -4652,11 +4689,17 @@ pub fn line_of(logged: &Logged) -> log::Line {
             choice,
             from,
             to,
+            phase_document,
         } => log::Event::PhaseRuled {
             call: call.clone(),
             choice: choice.tag().to_owned(),
             from: from.clone(),
             to: to.clone(),
+            phase_document: phase_document.clone(),
+        },
+        Event::PhaseNoted { turn, text } => log::Event::PhaseNoted {
+            turn: *turn,
+            text: text.clone(),
         },
         Event::Captured {
             request,
@@ -4733,6 +4776,7 @@ pub fn line_of(logged: &Logged) -> log::Line {
             carried_turns,
             carried_tokens,
             phase,
+            phase_document,
             tool_outputs,
             outputs,
             background,
@@ -4748,6 +4792,7 @@ pub fn line_of(logged: &Logged) -> log::Line {
             fired: *fired,
             warm: warm.as_ref().map(timings_line),
             phase: phase.clone(),
+            phase_document: phase_document.clone(),
             at_turn: *at_turn,
             reason: meditation_reason_of(*reason),
             prefix_hash_before: prefix_hash_before.clone(),
@@ -6854,6 +6899,7 @@ fn refill_trunk(
 
 /// [`refill_trunk`]'s refill, its line returned rather than logged, so a
 /// pre-warm's timings can join it (#504).
+#[allow(clippy::too_many_lines)]
 fn refilled(
     template: &RequestShape,
     state: &mut State,
@@ -6937,8 +6983,8 @@ fn refilled(
     // the refill's message, as Qwen Code places its list: the refill
     // compacts away the call that started it.
     let background = super::background::running_at_meditation(state.jobs.values_mut());
-    let mut refilled =
-        crate::meditation::render::refill_with(&template.messages, &sent, background.as_deref());
+    let (head, phase_document) = state.phase_head(&template.messages);
+    let mut refilled = crate::meditation::render::refill_with(&head, &sent, background.as_deref());
     state.refilled = true;
     refilled.extend(kept);
     let prefix_hash_after = digest(&refilled);
@@ -6962,6 +7008,7 @@ fn refilled(
         carried_turns,
         carried_tokens,
         phase,
+        phase_document,
         tool_outputs,
         outputs,
         background,
@@ -8373,6 +8420,55 @@ struct PendingProposal {
     from: Option<String>,
     /// The phase proposed.
     to: String,
+}
+
+impl State {
+    /// The document of the phase `name` (#787), under a phase library.
+    fn document_of(&self, name: &str) -> Option<log::PhaseDocument> {
+        self.interview
+            .as_ref()?
+            .phases
+            .document(name)
+            .map(crate::meditation::library::Document::logged)
+    }
+
+    /// The document of the phase the session is in (#787).
+    fn phase_document(&self) -> Option<log::PhaseDocument> {
+        self.document_of(self.phase.as_deref()?)
+    }
+
+    /// The head a meditation refills under (#787, refining #597): `head`
+    /// with the current phase's ground rules after its system prompt, and
+    /// that phase's document. The meditation carries them, so a note due
+    /// is spent -- unless the head has no system prompt to carry them.
+    fn phase_head(&mut self, head: &[Message]) -> (Vec<Message>, Option<log::PhaseDocument>) {
+        let document = self.phase_document();
+        if document.is_some() && crate::meditation::render::carries_ground_rules(head) {
+            self.phase_note_due = None;
+        }
+        (
+            crate::meditation::render::with_ground_rules(head, document.as_ref()),
+            document,
+        )
+    }
+
+    /// The phase note due at turn `turn`'s ask (#787), logged: first among
+    /// its notes, the frame the rest is read in.
+    fn noted(&mut self, turn: u32) -> Option<String> {
+        let text = self.phase_note_due.take()?;
+        self.push(Event::PhaseNoted {
+            turn,
+            text: text.clone(),
+        });
+        Some(text)
+    }
+
+    /// The note carrying the current phase's ground rules (#787).
+    fn phase_note(&self) -> Option<String> {
+        self.phase_document().map(|document| {
+            crate::meditation::render::phase_note(&document.name, &document.ground_rules)
+        })
+    }
 }
 
 /// The phase graph's ruling on a move from `from` to `to` (#563, #124),
@@ -11806,6 +11902,19 @@ pub(in crate::drive) mod tests {
         }
     }
 
+    /// A phase document, as a log line carries it (#787).
+    fn a_phase_document() -> log::PhaseDocument {
+        log::PhaseDocument {
+            name: "build".to_owned(),
+            digest: "b".repeat(64),
+            transitions: vec![log::PhaseOption {
+                to: "test".to_owned(),
+                kind: "suggested".to_owned(),
+            }],
+            ground_rules: "Make the change.".to_owned(),
+        }
+    }
+
     /// One of every event, and a match with no wildcard that names each
     /// variant: an event added to [`Event`] fails to compile here until it
     /// has a sample, and so a line. One entry per variant is its length.
@@ -11813,6 +11922,7 @@ pub(in crate::drive) mod tests {
     fn one_of_every_event() -> Vec<Logged> {
         let events = vec![
             Event::Started {
+                phase_document: None,
                 bash_timeout_ms: None,
                 opened: 1_790_000_000_000,
                 model: "a-model".to_owned(),
@@ -12058,6 +12168,7 @@ pub(in crate::drive) mod tests {
                 tangent: Some("t/1".to_owned()),
             },
             Event::Meditated {
+                phase_document: None,
                 newest_turn_tokens: None,
                 refilled_anyway: None,
                 operator_changes: None,
@@ -12181,11 +12292,16 @@ pub(in crate::drive) mod tests {
                 choice: PhaseChoice::Continue,
                 from: Some("plan".to_owned()),
                 to: "build".to_owned(),
+                phase_document: Some(a_phase_document()),
             },
             Event::MeditationHeld {
                 at_turn: 2,
                 reason: crate::meditation::Reason::Operator,
                 unaddressed: vec!["interview-t1-0".to_owned()],
+            },
+            Event::PhaseNoted {
+                turn: 3,
+                text: "The session is now in the build phase.".to_owned(),
             },
         ];
         let mut kinds = std::collections::BTreeSet::new();
@@ -12231,9 +12347,10 @@ pub(in crate::drive) mod tests {
                 Event::Flagged { .. } => 37,
                 Event::PatchRefused { .. } => 38,
                 Event::MeditationHeld { .. } => 39,
+                Event::PhaseNoted { .. } => 40,
             });
         }
-        assert_eq!(kinds.len(), 40, "a variant has no sample");
+        assert_eq!(kinds.len(), 41, "a variant has no sample");
         events
             .into_iter()
             .enumerate()
@@ -12251,6 +12368,7 @@ pub(in crate::drive) mod tests {
     fn the_lines_of_every_event() -> Vec<log::Event> {
         vec![
             log::Event::SessionStart {
+                phase_document: None,
                 bash_timeout_ms: None,
                 version: log::VERSION,
                 opened: 1_790_000_000_000,
@@ -12526,6 +12644,7 @@ pub(in crate::drive) mod tests {
                 tangent: Some("t/1".to_owned()),
             },
             log::Event::Meditation {
+                phase_document: None,
                 newest_turn_tokens: None,
                 refilled_anyway: None,
                 operator_changes: None,
@@ -12664,11 +12783,16 @@ pub(in crate::drive) mod tests {
                 choice: "continue".to_owned(),
                 from: Some("plan".to_owned()),
                 to: "build".to_owned(),
+                phase_document: Some(a_phase_document()),
             },
             log::Event::MeditationHeld {
                 at_turn: 2,
                 reason: log::MeditationReason::Operator,
                 unaddressed: vec!["interview-t1-0".to_owned()],
+            },
+            log::Event::PhaseNoted {
+                turn: 3,
+                text: "The session is now in the build phase.".to_owned(),
             },
         ]
     }
@@ -20165,8 +20289,16 @@ pub(in crate::drive) mod tests {
     /// A self-capturing session over `phased()`'s graph whose first turn
     /// records a fact and proposes `to` (#124); the log once it settled.
     fn proposing(to: &str, rest: Vec<Vec<Step>>) -> (Session<Canned>, Vec<Logged>) {
+        proposing_in(phased(), to, rest)
+    }
+
+    /// As [`proposing`], under `interview`'s phases.
+    fn proposing_in(
+        mut interview: Interview,
+        to: &str,
+        rest: Vec<Vec<Step>>,
+    ) -> (Session<Canned>, Vec<Logged>) {
         const SAID: &str = "The schema has two tables.";
-        let mut interview = phased();
         interview.rules = Vec::new();
         interview.self_capture = Some(crate::capture::tools::Cadence::DEFAULT);
         let mut shape = template();
@@ -20245,7 +20377,7 @@ pub(in crate::drive) mod tests {
         let log = session.events_from(0);
         assert!(log.iter().any(|logged| matches!(
             &logged.event,
-            Event::PhaseRuled { call, choice: PhaseChoice::Continue, from: Some(from), to }
+            Event::PhaseRuled { call, choice: PhaseChoice::Continue, from: Some(from), to, .. }
                 if call == "call-p" && from == "plan" && to == "build"
         )));
         assert!(
@@ -20281,6 +20413,152 @@ pub(in crate::drive) mod tests {
             session.ratify_phase("call-p", PhaseChoice::Meditation),
             Err(Rejected::Refused(Refusal::NoProposal))
         ));
+        reads_whole(&session);
+    }
+
+    /// An interview under the starter phase library (#787), opening in `plan`.
+    fn in_the_starter_library() -> Interview {
+        Interview {
+            phases: crate::meditation::phase::PhaseGraph::from_library(
+                &crate::meditation::library::Library::starter(),
+                "plan",
+            )
+            .expect("the starter library has a plan phase"),
+            ..interviewing(&[log::Warrant::Scoping])
+        }
+    }
+
+    /// The starter document of the phase `name` (#787).
+    fn starter_document(name: &str) -> log::PhaseDocument {
+        crate::meditation::library::Library::starter()
+            .document(name)
+            .expect("a starter phase")
+            .logged()
+    }
+
+    /// The phase notes the log carries, by turn (#787).
+    fn phase_notes(log: &[Logged]) -> Vec<(u32, String)> {
+        log.iter()
+            .filter_map(|logged| match &logged.event {
+                Event::PhaseNoted { turn, text } => Some((*turn, text.clone())),
+                _ => None,
+            })
+            .collect()
+    }
+
+    /// #787: a session opens in the phase its regimen names, logs that
+    /// phase's document, and -- the head being the session's own -- carries
+    /// its ground rules as a note on the first ask, the system prompt
+    /// untouched.
+    #[test]
+    fn a_session_opens_in_a_named_phase_and_notes_its_ground_rules_on_the_first_ask() {
+        let (session, log) = proposing_in(in_the_starter_library(), "build", Vec::new());
+        let plan = starter_document("plan");
+        assert!(log.iter().any(|logged| matches!(
+            &logged.event,
+            Event::Started { phase_document: Some(document), phases: Some((_, _, first)), .. }
+                if *document == plan && first == "plan"
+        )));
+        let note = crate::meditation::render::phase_note("plan", &plan.ground_rules);
+        assert_eq!(phase_notes(&log), [(1, note.clone())]);
+        let trunk = session.trunk();
+        assert_eq!(
+            trunk[0].content, HEAD,
+            "the system prompt is the head's own"
+        );
+        assert!(trunk[1].notes.contains(&note), "{:?}", trunk[1].notes);
+        reads_whole(&session);
+    }
+
+    /// #787: `continue` moves the phase with no meditation, so the new
+    /// phase's ground rules ride as a note on the next ask -- once -- and
+    /// the ruling names the document.
+    #[test]
+    fn a_continue_carries_the_new_phases_ground_rules_as_a_note_on_the_next_ask() {
+        let (session, _) = proposing_in(
+            in_the_starter_library(),
+            "build",
+            vec![deltas(&["built"]), deltas(&["tested"])],
+        );
+        session
+            .ratify_phase("call-p", PhaseChoice::Continue)
+            .expect("ruled");
+        let build = starter_document("build");
+        assert!(session.events_from(0).iter().any(|logged| matches!(
+            &logged.event,
+            Event::PhaseRuled { phase_document: Some(document), .. } if *document == build
+        )));
+        session.ask("build it", None).expect("accepted");
+        wait_until(&session, "turn two", |log| {
+            settled(log)
+                && log
+                    .iter()
+                    .filter(|l| matches!(l.event, Event::Asked { .. }))
+                    .count()
+                    == 2
+        });
+        session.ask("and again", None).expect("accepted");
+        let log = wait_until(&session, "turn three", |log| {
+            settled(log)
+                && log
+                    .iter()
+                    .filter(|l| matches!(l.event, Event::Asked { .. }))
+                    .count()
+                    == 3
+        });
+        let note = crate::meditation::render::phase_note("build", &build.ground_rules);
+        assert_eq!(
+            phase_notes(&log).last(),
+            Some(&(2, note)),
+            "the next ask, and only it"
+        );
+        assert_eq!(session.trunk()[0].content, HEAD);
+        reads_whole(&session);
+    }
+
+    /// #787, refining #597: at a meditation the system prompt becomes the
+    /// head's plus the current phase's ground rules, and they are nowhere
+    /// else -- not in the refill's summary, and no note follows.
+    #[test]
+    fn a_meditation_puts_the_phases_ground_rules_after_the_system_prompt_and_nowhere_else() {
+        let (session, _) =
+            proposing_in(in_the_starter_library(), "build", vec![deltas(&["built"])]);
+        session
+            .ratify_phase("call-p", PhaseChoice::Meditation)
+            .expect("ruled");
+        let log = wait_until(&session, "the meditation", |log| {
+            log.iter()
+                .any(|l| matches!(l.event, Event::Meditated { .. }))
+        });
+        let build = starter_document("build");
+        assert!(log.iter().any(|logged| matches!(
+            &logged.event,
+            Event::Meditated { phase_document: Some(document), .. } if *document == build
+        )));
+        let trunk = session.trunk();
+        assert_eq!(
+            trunk[0].content,
+            format!(
+                "{HEAD}\n\nGround rules for the build phase:\n\n{}",
+                build.ground_rules
+            )
+        );
+        assert!(
+            trunk[1..]
+                .iter()
+                .all(|message| !message.content.contains(&build.ground_rules)),
+            "the rules ride in the system prompt alone"
+        );
+        session.ask("build it", None).expect("accepted");
+        let log = wait_until(&session, "turn two", |log| {
+            settled(log)
+                && log
+                    .iter()
+                    .filter(|l| matches!(l.event, Event::Asked { .. }))
+                    .count()
+                    == 2
+        });
+        assert_eq!(phase_notes(&log).len(), 1, "the opening note, and no other");
         reads_whole(&session);
     }
 
@@ -21726,6 +22004,7 @@ pub(in crate::drive) mod tests {
         assert_eq!(
             line_of(&log[meditation]).event,
             log::Event::Meditation {
+                phase_document: None,
                 newest_turn_tokens: None,
                 refilled_anyway: None,
                 operator_changes: None,

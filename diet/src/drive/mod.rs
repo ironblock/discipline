@@ -843,6 +843,7 @@ pub fn run<T: Transport>(script: &Script, gym: &Gym<'_, T>) -> Result<Drive, Hal
         fork_delivery: None,
         tool_output: None,
         levers: None,
+        phase: None,
         // #583: the version this crate writes, spelling it `meditation`.
         version: Some(crate::formats::record::VERSION),
     }];
@@ -1009,6 +1010,7 @@ pub fn run<T: Transport>(script: &Script, gym: &Gym<'_, T>) -> Result<Drive, Hal
             prefill_tokens: Some(prefill),
             prefill_from: None,
             files: None,
+            phase: None,
         });
         prefill_total = prefill_total.saturating_add(prefill);
         archive(
