@@ -1851,7 +1851,10 @@ pub struct MeditationFired {
 
 /// A meditation's render budget and what it did (v7, #565): `render_budget_tokens`,
 /// `render_over_budget`, `render_tokens` and `render_reduced`, together or
-/// not at all; and `render_fits`, whether it fit.
+/// not at all; and `render_fits`, whether it fit. A v8 `render_window_line`
+/// says the window set the budget (#814): the refill as sized would have
+/// passed that many tokens -- the window less its reserve, #617's line --
+/// so the oldest entries were elided to fit.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct RenderBudget {
     /// The estimated tokens the render could run to.
@@ -1866,6 +1869,8 @@ pub struct RenderBudget {
     /// when it did not with every reducible entry reduced. `None` on a log
     /// written before it was logged.
     pub fits: Option<bool>,
+    /// The window's line, when it set the budget (v8, #814).
+    pub window_line: Option<u64>,
 }
 
 /// A patch's entry (v5, #374): its id, its text, and its category when the
@@ -3757,6 +3762,7 @@ fn from_object(object: &BTreeMap<String, Value>) -> Result<Line, String> {
                     rendered: fields.count("render_tokens")?,
                     reduced: fields.count("render_reduced")?,
                     fits: fields.optional_flag("render_fits")?,
+                    window_line: fields.optional_count("render_window_line")?,
                 }),
             },
             warm: match object.get("warm") {
@@ -5248,6 +5254,7 @@ pub fn schema(kind: Kind) -> &'static [Field] {
                 may_v7("render_tokens", Count),
                 may_v7("render_reduced", Count),
                 may_v7("render_fits", Holds::Flag),
+                may_v8("render_window_line", Count),
                 may_v7("prompt_tokens", Count),
                 may_v7("window", Count),
                 may_v7("pruned", Holds::Strings),
@@ -6408,6 +6415,9 @@ fn to_value(line: &Line) -> Value {
                 put("render_reduced", count(budget.reduced));
                 if let Some(fits) = budget.fits {
                     put("render_fits", Value::Boolean(fits));
+                }
+                if let Some(line) = budget.window_line {
+                    put("render_window_line", count(line));
                 }
             }
             if let Some(calls) = pruned {
