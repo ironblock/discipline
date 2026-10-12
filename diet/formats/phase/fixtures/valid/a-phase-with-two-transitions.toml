@@ -1,0 +1,14 @@
+# A phase that suggests one move and allows another.
+name = "plan"
+ground_rules = """
+Turn the chosen approach into a plan.
+Change no files yet.
+"""
+
+[[transitions]]
+to = "build"
+kind = "suggested"
+
+[[transitions]]
+to = "orient"   # back, when the plan finds a gap
+kind = "allowed"

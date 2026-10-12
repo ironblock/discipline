@@ -34,6 +34,9 @@ export type Kind =
   | "patch.refused"
   | "pruned"
   | "phase.ruled"
+  | "phase.proposed"
+  | "phase.answered"
+  | "phase.started"
   | "tangent.open"
   | "tangent.close"
   | "capture"
@@ -42,6 +45,7 @@ export type Kind =
   | "notice"
   | "timeout.near"
   | "fork.skipped"
+  | "phase.noted"
 ;
 
 export type State =
@@ -69,6 +73,9 @@ export type Command =
   | "edit-entry"
   | "flag-entry"
   | "refill-anyway"
+  | "start-phase"
+  | "propose-phase"
+  | "move-phase"
 ;
 
 export type Refusal =
@@ -94,6 +101,10 @@ export type Refusal =
   | "meditation-held"
   | "nothing-held"
   | "restates"
+  | "not-unilateral"
+  | "already-asked"
+  | "proposal-pending"
+  | "no-vision"
 ;
 
 export type FailReason =
@@ -183,6 +194,9 @@ export type Warrant =
   | "read"
   | "scoping"
   | "meditation"
+  | "evidence"
+  | "trouble"
+  | "open"
 ;
 
 export type ForkOutcome =
@@ -294,6 +308,18 @@ export interface PhaseMove {
   to: string;
 }
 
+export interface PhaseDocument {
+  name: string;
+  digest: string;
+  transitions: PhaseOption[];
+  ground_rules: string;
+}
+
+export interface PhaseOption {
+  to: string;
+  kind: string;
+}
+
 export interface InstructionFile {
   path: string;
   sha256: string;
@@ -369,11 +395,14 @@ export type SessionStartLine = {
   fork_delivery?: ForkDelivery;
   levers?: Record<string, string>;
   notes_in_the_ask?: boolean;
+  build_commit?: string;
+  build_dirty?: boolean;
   fork_asks?: string;
   fork_asks_digest?: string;
   reasoning_effort_default?: string;
   phases?: string[];
   phase_transitions?: PhaseMove[];
+  phase_document?: PhaseDocument;
   opening_phase?: string;
   instruction_files?: InstructionFile[];
   tool_output?: ToolOutputState;
@@ -409,6 +438,7 @@ export type RequestLine = {
   head_sha256?: string;
   fork?: number;
   max_tokens?: number;
+  beside?: number;
 };
 
 export type RefusedLine = {
@@ -546,6 +576,11 @@ export type ForkLine = {
   ask?: string;
   hazard?: string;
   after_meditation?: number;
+  cut?: number;
+  timing?: string;
+  view_overridden?: string;
+  reserved?: number;
+  prefix_shared?: boolean;
 } & ({ substrate: string; model: string } | { substrate?: never; model?: never });
 
 export type ForkSettledLine = {
@@ -558,7 +593,8 @@ export type ForkSettledLine = {
   wall_ms?: number;
   refused?: string;
   trailer?: string;
-};
+  not_run?: number;
+} & ({ window: number; trunk_tokens: number; beside_tokens: number; fork_tokens: number } | { window?: never; trunk_tokens?: never; beside_tokens?: never; fork_tokens?: never });
 
 export type PatchLine = {
   seq: number;
@@ -568,6 +604,7 @@ export type PatchLine = {
   entry: PatchEntry;
   supersedes?: string;
   tangent?: string;
+  reason?: string;
 } & ({ fork: number; lane?: never } | { lane: string; fork?: never });
 
 export type MeditationLine = {
@@ -585,6 +622,7 @@ export type MeditationLine = {
   tail_tokens?: number;
   carried_tokens?: number;
   phase?: PhaseMove;
+  phase_document?: PhaseDocument;
   tool_outputs?: MeditationToolOutputs;
   outputs?: string;
   carried_outputs?: number;
@@ -596,6 +634,7 @@ export type MeditationLine = {
   render_tokens?: number;
   render_reduced?: number;
   render_fits?: boolean;
+  render_window_line?: number;
   prompt_tokens?: number;
   window?: number;
   pruned?: string[];
@@ -604,7 +643,10 @@ export type MeditationLine = {
   newest_turn_tokens?: number;
   refilled_anyway?: boolean;
   warm?: Timings;
-};
+  audit_notes?: number;
+  audit_notes_left?: number;
+  audit_window_line?: number;
+} & ({ turn_steps_kept: number; turn_steps_compacted: number } | { turn_steps_kept?: never; turn_steps_compacted?: never });
 
 export type DeliveredLine = {
   seq: number;
@@ -670,10 +712,45 @@ export type PhaseRuledLine = {
   seq: number;
   t: number;
   kind: "phase.ruled";
-  call: string;
+  call?: string;
+  by?: string;
   choice: string;
   from?: string;
   to: string;
+  phase_document?: PhaseDocument;
+};
+
+export type PhaseProposedLine = {
+  seq: number;
+  t: number;
+  kind: "phase.proposed";
+  by: string;
+  call?: string;
+  from?: string;
+  to: string;
+  reason?: string;
+  meditate?: boolean;
+  phase_steps: number;
+  phase_tokens: number;
+  tokens_since_meditation: number;
+  meditated_by_hand: boolean;
+};
+
+export type PhaseAnsweredLine = {
+  seq: number;
+  t: number;
+  kind: "phase.answered";
+  call: string;
+  accepted: boolean;
+  reason?: string;
+};
+
+export type PhaseStartedLine = {
+  seq: number;
+  t: number;
+  kind: "phase.started";
+  phase: string;
+  phase_document?: PhaseDocument;
 };
 
 export type TangentOpenLine = {
@@ -755,8 +832,18 @@ export type ForkSkippedLine = {
   of_turn: number;
   trigger: string;
   ask: string;
-  call: string;
-  field: string;
+  call?: string;
+  field?: string;
+  reason?: string;
+  cut?: number;
+};
+
+export type PhaseNotedLine = {
+  seq: number;
+  t: number;
+  kind: "phase.noted";
+  turn: number;
+  text: string;
 };
 
 export type LogLine =
@@ -785,6 +872,9 @@ export type LogLine =
   | PatchRefusedLine
   | PrunedLine
   | PhaseRuledLine
+  | PhaseProposedLine
+  | PhaseAnsweredLine
+  | PhaseStartedLine
   | TangentOpenLine
   | TangentCloseLine
   | CaptureLine
@@ -793,4 +883,5 @@ export type LogLine =
   | NoticeLine
   | TimeoutNearLine
   | ForkSkippedLine
+  | PhaseNotedLine
 ;

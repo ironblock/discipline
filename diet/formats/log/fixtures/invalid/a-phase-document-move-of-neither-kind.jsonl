@@ -1,0 +1,8 @@
+{"head":[{"content":"you are the trunk","role":"system"}],"kind":"session.start","model":"a-model","notes_in_the_ask":true,"opened":1790000000000,"opening_phase":"plan","phase_document":{"digest":"cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc","ground_rules":"Settle the approach before any change.","name":"plan","transitions":[{"kind":"required","to":"build"}]},"phase_transitions":[{"from":"plan","to":"build"}],"phases":["plan","build"],"seq":0,"t":0,"version":8}
+{"kind":"ask","scoping":true,"seq":1,"t":5,"text":"what are we building","turn":1}
+{"from":"awaiting","kind":"settlement","seq":2,"t":10,"to":"turn"}
+{"kind":"phase.noted","seq":3,"t":15,"text":"The session is now in the plan phase. Its ground rules:\n\nSettle the approach before any change.","turn":1}
+{"kind":"request","lane":"trunk","seq":4,"t":20,"turn":1}
+{"kind":"response","seq":5,"t":25,"text":"a tracker for the team's bugs","to_request":4}
+{"kind":"turn.settled","reason":"final","seq":6,"t":30,"turn":1}
+{"from":"turn","kind":"settlement","seq":7,"t":35,"to":"awaiting"}

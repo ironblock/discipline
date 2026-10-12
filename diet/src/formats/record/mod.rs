@@ -1189,6 +1189,10 @@ pub enum Event {
         /// lever, in that table's words; `undeclared` where nothing said.
         /// Best effort: absent, partial or `undeclared`, it is never refused.
         levers: Option<BTreeMap<String, String>>,
+        /// The phase the session opened in (#787): its name and its
+        /// document's sha256, `phase` and `phase_sha256`, both or neither.
+        /// Absent when the session ran under no phase library.
+        phase: Option<PhaseNamed>,
         /// The record's version (#583): [`VERSION`] for one this crate
         /// writes; absent, version 1, which spells the boundary `seam`.
         version: Option<i64>,
@@ -1208,6 +1212,10 @@ pub enum Event {
         /// The files the operator attached to the turn's ask, by reference:
         /// the log's `ask.files`, never inlined (#372, 5989411005).
         files: Option<Vec<log::RecordedFile>>,
+        /// The phase the turn ran in, when it is not the one the record
+        /// last named (#787): the session moved since, at a meditation or
+        /// on the operator's `continue`.
+        phase: Option<PhaseNamed>,
     },
     /// A request went to the substrate.
     Request {
@@ -1627,6 +1635,16 @@ impl Event {
             | Self::Unknown { .. } => None,
         }
     }
+}
+
+/// A phase by name and its document's sha256 (#787): `phase` and
+/// `phase_sha256` on a row.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PhaseNamed {
+    /// The phase's name.
+    pub name: String,
+    /// The sha256 of its document's bytes.
+    pub sha256: String,
 }
 
 /// A parsed session record.
@@ -2591,6 +2609,7 @@ fn event(mut members: BTreeMap<String, Value>) -> Result<Event, ParseError> {
             )?,
             tool_output: take_tool_output(&mut members, of)?,
             levers: levers(&mut members),
+            phase: take_phase(&mut members, of)?,
             version: take_version(&mut members, of)?,
         },
         Kind::Turn => Event::Turn {
@@ -2598,6 +2617,7 @@ fn event(mut members: BTreeMap<String, Value>) -> Result<Event, ParseError> {
             prefill_tokens: take_count(&mut members, of, "prefill_tokens")?,
             prefill_from: take_source(&mut members, of, "prefill_from")?,
             files: take_files(&mut members, of)?,
+            phase: take_phase(&mut members, of)?,
         },
         Kind::Request => Event::Request {
             id: take_string(&mut members, of, "id")?,
@@ -4128,6 +4148,25 @@ fn take_payload(
 /// Checked HERE rather than in the structural pass, for the reason
 /// `take_digests` gives one function up: a string that is not a digest is a
 /// shape error, because nothing downstream can compare it.
+/// A row's phase (#787): `phase` and `phase_sha256`, both or neither.
+fn take_phase(
+    members: &mut BTreeMap<String, Value>,
+    of: &'static str,
+) -> Result<Option<PhaseNamed>, ParseError> {
+    match (
+        take_optional_string(members, of, "phase")?,
+        take_optional_digest(members, of, "phase_sha256")?,
+    ) {
+        (None, None) => Ok(None),
+        (Some(name), Some(sha256)) => Ok(Some(PhaseNamed { name, sha256 })),
+        _ => Err(SchemaError::Inconsistent {
+            of,
+            why: "`phase` and `phase_sha256` name one phase document: both or neither".to_owned(),
+        }
+        .into()),
+    }
+}
+
 fn take_optional_digest(
     members: &mut BTreeMap<String, Value>,
     of: &'static str,
@@ -5198,6 +5237,14 @@ impl Members {
     }
 }
 
+/// A row's phase (#787), when it names one.
+fn put_phase(members: &mut Members, phase: Option<&PhaseNamed>) {
+    if let Some(phase) = phase {
+        members.put("phase", Value::String(phase.name.clone()));
+        members.put("phase_sha256", Value::String(phase.sha256.clone()));
+    }
+}
+
 /// One event, as the value space.
 ///
 /// The identifier is written once, from [`Event::id`], rather than in every
@@ -5231,8 +5278,10 @@ fn event_value(event: &Event) -> BTreeMap<String, Value> {
             fork_delivery,
             tool_output,
             levers,
+            phase,
             version,
         } => {
+            put_phase(&mut members, phase.as_ref());
             members.put("regime", regime_value(regime));
             members.put_optional("version", version.map(Value::Integer));
             if let Some(cap) = tool_output {
@@ -5271,7 +5320,9 @@ fn event_value(event: &Event) -> BTreeMap<String, Value> {
             prefill_tokens,
             prefill_from,
             files,
+            phase,
         } => {
+            put_phase(&mut members, phase.as_ref());
             members.put_u32("index", *index);
             members.put_optional("prefill_tokens", prefill_tokens.map(integer));
             members.put_optional(

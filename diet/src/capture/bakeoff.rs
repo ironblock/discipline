@@ -2255,6 +2255,7 @@ fn synthesized_record(
                 fork_delivery: done.record.fork_delivery(),
                 tool_output: done.record.tool_output(),
                 levers: None,
+                phase: None,
                 // #583: version 1 spells the boundary `seam`; nothing here writes one.
                 version: None,
             },

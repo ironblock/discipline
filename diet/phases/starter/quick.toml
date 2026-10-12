@@ -1,0 +1,6 @@
+# A starter phase (#787): a quick task, with no phase after it. Ground rules
+# approved by the maintainer as a starting point, 2026-10-11.
+name = "quick"
+ground_rules = """
+A quick task: do what was asked directly, without a separate planning step, and say what you did and how you checked it.
+"""

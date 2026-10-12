@@ -52,6 +52,8 @@ pub enum Decision {
 pub struct PhaseGraph {
     order: Vec<String>,
     edges: BTreeMap<String, BTreeSet<String>>,
+    /// Each phase's document, when the graph was read from a library (#787).
+    documents: BTreeMap<String, super::library::Document>,
 }
 
 impl PhaseGraph {
@@ -78,7 +80,47 @@ impl PhaseGraph {
         Ok(Self {
             order: phases.to_vec(),
             edges: BTreeMap::new(),
+            documents: BTreeMap::new(),
         })
+    }
+
+    /// The graph a phase library makes, starting in `start` (#787): every
+    /// phase of the library, `start` first, and every move a document lists.
+    ///
+    /// # Errors
+    ///
+    /// [`PolicyError::NotInTheLibrary`] when `start` is not one of its
+    /// phases.
+    pub fn from_library(
+        library: &super::library::Library,
+        start: &str,
+    ) -> Result<Self, PolicyError> {
+        if library.document(start).is_none() {
+            return Err(PolicyError::NotInTheLibrary(start.to_owned()));
+        }
+        let order: Vec<String> = std::iter::once(start.to_owned())
+            .chain(
+                library
+                    .documents
+                    .keys()
+                    .filter(|name| *name != start)
+                    .cloned(),
+            )
+            .collect();
+        let mut graph = Self::of(&order)?;
+        for (from, document) in &library.documents {
+            for transition in &document.phase.transitions {
+                graph.allow(from, &transition.to)?;
+            }
+        }
+        graph.documents.clone_from(&library.documents);
+        Ok(graph)
+    }
+
+    /// The document of the phase `name`, when the graph came from a library.
+    #[must_use]
+    pub fn document(&self, name: &str) -> Option<&super::library::Document> {
+        self.documents.get(name)
     }
 
     /// Allow a move from `from` to `to`.

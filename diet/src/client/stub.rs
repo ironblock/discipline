@@ -65,6 +65,79 @@ pub enum Act {
     Trickle(Duration, Vec<String>),
 }
 
+/// One reply of a routed stub ([`Stub::routing`], #760): the act, and the
+/// text a request's last message must hold for it to answer -- or none, for
+/// a reply taken in order by any request no routed reply matched.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Route {
+    /// Text the request's last message holds, when it is routed by content.
+    pub when: Option<String>,
+    /// What it answers.
+    pub act: Act,
+}
+
+impl Route {
+    /// A reply for the first request whose last message holds `text`.
+    #[must_use]
+    pub fn when(text: &str, act: Act) -> Self {
+        Self {
+            when: Some(text.to_owned()),
+            act,
+        }
+    }
+
+    /// A reply taken in order.
+    #[must_use]
+    pub fn ordered(act: Act) -> Self {
+        Self { when: None, act }
+    }
+}
+
+/// A routed stub's replies not yet spent, and the requests none answered.
+#[derive(Debug, Default)]
+struct Routes {
+    left: Vec<Route>,
+}
+
+impl Routes {
+    /// The reply for a request whose last message is `last`: the first
+    /// routed reply whose text it holds, else the first ordered one; each
+    /// spent once.
+    fn take(&mut self, last: &str) -> Option<Act> {
+        let at = self
+            .left
+            .iter()
+            .position(|route| {
+                route
+                    .when
+                    .as_deref()
+                    .is_some_and(|text| last.contains(text))
+            })
+            .or_else(|| self.left.iter().position(|route| route.when.is_none()))?;
+        Some(self.left.remove(at).act)
+    }
+}
+
+/// A chat-completions body's last message's text: its `content` string, or
+/// its text parts joined. Empty when the body does not read.
+fn last_message(body: &str) -> String {
+    let Ok(value) = serde_json::from_str::<serde_json::Value>(body) else {
+        return String::new();
+    };
+    let Some(last) = value["messages"].as_array().and_then(|all| all.last()) else {
+        return String::new();
+    };
+    match &last["content"] {
+        serde_json::Value::String(text) => text.clone(),
+        serde_json::Value::Array(parts) => parts
+            .iter()
+            .filter_map(|part| part["text"].as_str())
+            .collect::<Vec<_>>()
+            .join("\n"),
+        _ => String::new(),
+    }
+}
+
 /// What an [`Act::StreamThenHold`] saw of its client while it held.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Held {
@@ -88,6 +161,7 @@ pub struct Stub {
     stop: Arc<AtomicBool>,
     hangups: Arc<Mutex<Vec<Held>>>,
     heads: Arc<Mutex<Vec<String>>>,
+    unmatched: Arc<Mutex<Vec<String>>>,
     worker: Option<JoinHandle<Vec<String>>>,
 }
 
@@ -108,6 +182,36 @@ impl Stub {
     /// Returns the I/O error if loopback cannot be bound.
     pub fn serving(acts: Vec<Act>) -> io::Result<Self> {
         Self::start(acts, None, Replay::No, 0)
+    }
+
+    /// The routed mode (#760): each request that is not a `GET /props` is
+    /// answered by the first unspent `routes` reply whose text its last
+    /// message holds, else by the first unspent ordered one, for as long as
+    /// the stub runs; `/props` answers `build_info`. A request no reply is
+    /// left for is answered `500` and named in [`Stub::unmatched`] -- never
+    /// with something generic, so a drifted ask cannot pass. On `port` of
+    /// loopback; `0` lets the system choose.
+    ///
+    /// # Errors
+    ///
+    /// Returns the I/O error if loopback cannot be bound.
+    pub fn routing(routes: Vec<Route>, build_info: &str, port: u16) -> io::Result<Self> {
+        Self::start_routed(
+            Vec::new(),
+            Some(format!("{{\"build_info\":\"{build_info}\"}}")),
+            (Replay::Routed, port),
+            routes,
+        )
+    }
+
+    /// The last messages of the requests a routed stub had no reply for
+    /// (#760), in order.
+    #[must_use]
+    pub fn unmatched(&self) -> Vec<String> {
+        self.unmatched
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .clone()
     }
 
     /// A stub serving `acts` that ALSO answers `GET /props` with
@@ -178,6 +282,15 @@ impl Stub {
     }
 
     fn start(acts: Vec<Act>, props: Option<String>, replay: Replay, port: u16) -> io::Result<Self> {
+        Self::start_routed(acts, props, (replay, port), Vec::new())
+    }
+
+    fn start_routed(
+        acts: Vec<Act>,
+        props: Option<String>,
+        (replay, port): (Replay, u16),
+        routes: Vec<Route>,
+    ) -> io::Result<Self> {
         let listener = TcpListener::bind(("127.0.0.1", port))?;
         listener.set_nonblocking(true)?;
         // Spelled through the type rather than as a method call on the
@@ -193,15 +306,17 @@ impl Stub {
         let seen = Arc::clone(&hangups);
         let heads = Arc::new(Mutex::new(Vec::new()));
         let headed = Arc::clone(&heads);
+        let unmatched = Arc::new(Mutex::new(Vec::new()));
+        let missed = Arc::clone(&unmatched);
         let worker = thread::spawn(move || {
             serve(
                 &listener,
-                acts,
+                (acts, Routes { left: routes }),
                 props.as_deref(),
                 replay,
                 &flag,
                 &seen,
-                &headed,
+                (&headed, &missed),
             )
         });
         Ok(Self {
@@ -209,6 +324,7 @@ impl Stub {
             stop,
             hangups,
             heads,
+            unmatched,
             worker: Some(worker),
         })
     }
@@ -281,6 +397,9 @@ enum Replay {
     /// The first act for a request whose last message is not a tool result,
     /// the second for one whose last message is.
     ToolTurns,
+    /// Each request's reply chosen from the routes by its last message
+    /// (#760).
+    Routed,
 }
 
 /// Whether a chat-completions body's last message is a tool result: the
@@ -291,30 +410,115 @@ fn answers_a_tool(body: &str) -> bool {
     body.rfind(KEY)
         .is_some_and(|at| body[at + KEY.len()..].starts_with("tool\""))
 }
+/// A routed stub's reply for the request `read`, or the request's last
+/// message when none is left for it.
+fn routed(routes: &mut Routes, read: &io::Result<(String, String)>) -> Result<Act, String> {
+    let last = read
+        .as_ref()
+        .map(|(_, body)| last_message(body))
+        .unwrap_or_default();
+    let act = routes.take(&last).ok_or(last)?;
+    let job = read.as_ref().ok().and_then(|(_, body)| last_job(body));
+    Ok(match job {
+        Some(job) => with_job(act, &job),
+        None => act,
+    })
+}
+
+/// The last background job id in `body` (#798): `bg_` and eight hex
+/// digits, as `diet::drive::background::new_id` makes them.
+fn last_job(body: &str) -> Option<String> {
+    body.match_indices("bg_")
+        .filter_map(|(at, _)| body.get(at..at + 11))
+        .filter(|id| id[3..].bytes().all(|byte| byte.is_ascii_hexdigit()))
+        .last()
+        .map(str::to_owned)
+}
+
+/// `act` with each `$job` in what it sends replaced by `job`.
+fn with_job(act: Act, job: &str) -> Act {
+    let named = |text: String| text.replace("$job", job);
+    match act {
+        Act::Answer(text) => Act::Answer(named(text)),
+        // A canned reply's head declares its body's length: counted again.
+        Act::Raw(bytes) => Act::Raw(match String::from_utf8(bytes) {
+            Ok(text) => match text.split_once("\r\n\r\n") {
+                Some((head, body)) if body.contains("$job") => {
+                    let body = named(body.to_owned());
+                    let head = head
+                        .lines()
+                        .map(|line| {
+                            if line.to_ascii_lowercase().starts_with("content-length:") {
+                                format!("Content-Length: {}", body.len())
+                            } else {
+                                line.to_owned()
+                            }
+                        })
+                        .collect::<Vec<_>>()
+                        .join("\r\n");
+                    format!("{head}\r\n\r\n{body}").into_bytes()
+                }
+                _ => text.into_bytes(),
+            },
+            Err(unread) => unread.into_bytes(),
+        }),
+        Act::Trickle(gap, pieces) => Act::Trickle(gap, pieces.into_iter().map(named).collect()),
+        other => other,
+    }
+}
+
+/// A routed stub's request no reply is left for (#760): named in
+/// `unmatched` and among the heads and bodies, and refused `500`.
+fn unanswered(
+    stream: &mut TcpStream,
+    (read, last): (&io::Result<(String, String)>, &str),
+    (heads, unmatched): (&Mutex<Vec<String>>, &Mutex<Vec<String>>),
+    asked: &mut Vec<String>,
+) {
+    unmatched
+        .lock()
+        .unwrap_or_else(PoisonError::into_inner)
+        .push(last.to_owned());
+    if let Ok((head, body)) = read {
+        heads
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .push(head.clone());
+        asked.push(body.clone());
+    }
+    write_reply(
+        stream,
+        500,
+        &format!("no scripted reply for: {last}"),
+        Closing::Yes,
+    );
+}
+
 /// Serve every act, and collect what was asked.
 fn serve(
     listener: &TcpListener,
-    acts: Vec<Act>,
+    (acts, mut routes): (Vec<Act>, Routes),
     props: Option<&str>,
     replay: Replay,
     stop: &AtomicBool,
     hangups: &Mutex<Vec<Held>>,
-    heads: &Mutex<Vec<String>>,
+    (heads, unmatched): (&Mutex<Vec<String>>, &Mutex<Vec<String>>),
 ) -> Vec<String> {
     let mut asked = Vec::new();
     let pair = acts.clone();
     let played: Box<dyn Iterator<Item = Act>> = match replay {
-        Replay::No => Box::new(acts.into_iter()),
+        Replay::No | Replay::Routed => Box::new(acts.into_iter()),
         Replay::Forever | Replay::ToolTurns => Box::new(acts.into_iter().cycle()),
     };
     let mut acts = played.peekable();
     let idle_cap = (replay == Replay::No).then_some(IDLE_CAP);
+    let by_content = replay == Replay::Routed;
     loop {
         // Without a `/props` to answer, the stub serves exactly its acts and
         // then refuses, as it always has. With one, it answers `/props`
         // whenever asked -- before, between and after its acts -- and an act
         // waits for the next connection that is not a `/props`.
-        if props.is_none() && acts.peek().is_none() {
+        if props.is_none() && acts.peek().is_none() && !by_content {
             break;
         }
         let Some(mut stream) = accept(listener, stop, idle_cap) else {
@@ -331,7 +535,17 @@ fn serve(
             write_reply(&mut stream, 200, props, Closing::Yes);
             continue;
         }
-        let Some(act) = acts.next() else {
+        let picked = if by_content {
+            let picked = routed(&mut routes, &read);
+            if let Err(last) = &picked {
+                unanswered(&mut stream, (&read, last), (heads, unmatched), &mut asked);
+                continue;
+            }
+            picked.ok()
+        } else {
+            acts.next()
+        };
+        let Some(act) = picked else {
             // Beyond the script, with `/props` still answered: a defect, made
             // to look like one rather than closed silently.
             let beyond = match &read {
@@ -373,6 +587,12 @@ fn serve(
                     .push(unread.clone());
                 asked.push(unread);
             }
+        }
+        // A routed stub answers each request on its own thread (#782): a
+        // reply held back never holds back the next request's.
+        if by_content {
+            thread::spawn(move || act_on(&mut stream, &act));
+            continue;
         }
         if let Some(hung_up) = act_on(&mut stream, &act) {
             hangups
@@ -579,4 +799,159 @@ fn write_undercount(stream: &mut TcpStream, body: &str, short_by: usize) {
     let _ = stream.write_all(head.as_bytes());
     let _ = stream.write_all(body.as_bytes());
     let _ = stream.flush();
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// One chat-completions POST whose last message says `last`: the
+    /// reply's status and body.
+    fn ask(stub: &Stub, last: &str) -> (u16, String) {
+        let body = serde_json::json!({
+            "messages": [
+                {"role": "system", "content": "head"},
+                {"role": "user", "content": [{"type": "text", "text": last}]},
+            ]
+        })
+        .to_string();
+        let mut stream = TcpStream::connect(stub.address()).expect("connects");
+        let request = format!(
+            "POST /v1/chat/completions HTTP/1.1\r\nHost: stub\r\nContent-Type: application/json\r\n\
+             Content-Length: {}\r\n\r\n{body}",
+            body.len()
+        );
+        stream.write_all(request.as_bytes()).expect("written");
+        let mut reply = String::new();
+        stream.read_to_string(&mut reply).expect("read");
+        let status = reply
+            .split(' ')
+            .nth(1)
+            .and_then(|code| code.parse().ok())
+            .unwrap_or(0);
+        let body = reply
+            .split_once("\r\n\r\n")
+            .map_or("", |(_, b)| b)
+            .to_owned();
+        (status, body)
+    }
+
+    /// #798: a routed reply's `$job` is the last background job id the
+    /// request carries -- the id `task_stop` needs, which no script can know
+    /// ahead of the run -- and stays `$job` when it carries none.
+    #[test]
+    fn a_routed_reply_names_the_last_background_job_its_request_carries() {
+        let stub = Stub::routing(
+            vec![
+                Route::when("started", Act::Answer("stop $job".to_owned())),
+                Route::ordered(Act::Answer("stop $job".to_owned())),
+            ],
+            "build",
+            0,
+        )
+        .expect("loopback");
+        assert_eq!(
+            ask(&stub, "bg_00000000 ended; bg_0123abcd started"),
+            (200, "stop bg_0123abcd".to_owned())
+        );
+        assert_eq!(ask(&stub, "nothing running"), (200, "stop $job".to_owned()));
+        // A canned reply streamed whole: its declared length is the body's.
+        let canned = Stub::routing(
+            vec![Route::ordered(Act::Raw(crate::drive::canned::streamed(
+                "stop $job",
+                &[],
+            )))],
+            "build",
+            0,
+        )
+        .expect("loopback");
+        let (status, body) = ask(&canned, "bg_0123abcd started");
+        assert_eq!(status, 200);
+        assert!(body.contains("stop bg_0123abcd"), "{body}");
+        let Act::Raw(sent) = with_job(
+            Act::Raw(crate::drive::canned::streamed("stop $job", &[])),
+            "bg_0123abcd",
+        ) else {
+            unreachable!("raw stays raw");
+        };
+        let sent = String::from_utf8(sent).expect("text");
+        let (head, body) = sent.split_once("\r\n\r\n").expect("a head");
+        assert!(
+            head.contains(&format!("Content-Length: {}", body.len())),
+            "the declared length is the body's: {head}"
+        );
+    }
+
+    /// #760: a routed stub answers a request whose last message holds a
+    /// route's text with that route's reply, each once, whatever its place;
+    /// every other request takes the unrouted replies in order; and a
+    /// request nothing answers is refused `500`, named in `unmatched`, not
+    /// answered with something generic.
+    #[test]
+    fn a_routed_stub_answers_by_content_then_in_order_and_names_what_it_cannot() {
+        let stub = Stub::routing(
+            vec![
+                Route::when("the fork's ask", Act::Answer("forked".to_owned())),
+                Route::ordered(Act::Answer("first".to_owned())),
+                Route::when("the audit's ask", Act::Answer("audited once".to_owned())),
+                Route::when("the audit's ask", Act::Answer("audited twice".to_owned())),
+                Route::ordered(Act::Answer("second".to_owned())),
+            ],
+            "build",
+            0,
+        )
+        .expect("loopback");
+        assert_eq!(ask(&stub, "hello"), (200, "first".to_owned()));
+        assert_eq!(
+            ask(&stub, "now the audit's ask, numbered"),
+            (200, "audited once".to_owned())
+        );
+        assert_eq!(ask(&stub, "x the fork's ask y"), (200, "forked".to_owned()));
+        assert_eq!(ask(&stub, "again"), (200, "second".to_owned()));
+        assert_eq!(
+            ask(&stub, "the audit's ask"),
+            (200, "audited twice".to_owned())
+        );
+        assert!(stub.unmatched().is_empty());
+        // #782: a reply held back does not hold back the next request's.
+        let slow = Stub::routing(
+            vec![
+                Route::when(
+                    "the trunk",
+                    Act::Trickle(Duration::from_millis(1500), vec!["late".to_owned()]),
+                ),
+                Route::when("the fork", Act::Answer("at once".to_owned())),
+            ],
+            "build",
+            0,
+        )
+        .expect("loopback");
+        let address = slow.address();
+        let held = thread::spawn(move || {
+            let stub = Stub {
+                address,
+                stop: Arc::new(AtomicBool::new(false)),
+                hangups: Arc::new(Mutex::new(Vec::new())),
+                heads: Arc::new(Mutex::new(Vec::new())),
+                unmatched: Arc::new(Mutex::new(Vec::new())),
+                worker: None,
+            };
+            ask(&stub, "the trunk")
+        });
+        thread::sleep(Duration::from_millis(200));
+        let began = Instant::now();
+        assert_eq!(ask(&slow, "the fork"), (200, "at once".to_owned()));
+        assert!(
+            began.elapsed() < Duration::from_millis(1000),
+            "the fork waited {:?} behind the trunk's held reply",
+            began.elapsed()
+        );
+        assert_eq!(held.join().expect("the trunk").0, 200);
+        let (status, _) = ask(&stub, "the fork's ask, a second time");
+        assert_eq!(status, 500);
+        assert_eq!(
+            stub.unmatched(),
+            ["the fork's ask, a second time".to_owned()]
+        );
+    }
 }

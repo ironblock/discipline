@@ -115,6 +115,44 @@ pub fn tables(document: &str) -> BTreeMap<String, Table> {
 /// or the key is missing, or the value is not a whole number.
 #[must_use]
 pub fn serving_context(document: &str, id: &str) -> Option<u64> {
+    substrate_count(document, id, "serving_context")
+}
+
+/// A substrate's `serving_slots` (#782): the requests its server runs at
+/// once, read from its own `[substrate.<id>]` table. `None` when the table
+/// or the key is missing, or the value is not a whole number.
+#[must_use]
+pub fn serving_slots(document: &str, id: &str) -> Option<u32> {
+    substrate_count(document, id, "serving_slots").and_then(|n| u32::try_from(n).ok())
+}
+
+/// Whether a substrate's server shares a prefix's pages between concurrent
+/// requests (#797): its own table's `served_prefix_shared`. `false` when the
+/// table or the key is missing: until it is measured and declared, every
+/// concurrent prompt counts in full.
+///
+/// # Errors
+///
+/// A value other than `"true"` or `"false"`: a malformed declaration read
+/// as `false` would refuse forks the server would have run.
+pub fn served_prefix_shared(document: &str, id: &str) -> Result<bool, String> {
+    let tables = tables(document);
+    match tables
+        .get(&format!("substrate.{id}"))
+        .and_then(|table| table.strings.get("served_prefix_shared"))
+        .map(String::as_str)
+    {
+        None | Some("false") => Ok(false),
+        Some("true") => Ok(true),
+        Some(other) => Err(format!(
+            "the registry's `served_prefix_shared` for `{id}` is \"{other}\", not \"true\" or \
+             \"false\": the entry is malformed"
+        )),
+    }
+}
+
+/// A whole number `key` in the substrate's own table, not a sub-table's.
+fn substrate_count(document: &str, id: &str, key: &str) -> Option<u64> {
     let header = format!("[substrate.{id}]");
     let quoted = format!("[substrate.\"{id}\"]");
     let mut inside = false;
@@ -125,7 +163,9 @@ pub fn serving_context(document: &str, id: &str) -> Option<u64> {
             inside = header_only == header || header_only == quoted;
             continue;
         }
-        if let Some(value) = trimmed.strip_prefix("serving_context = ")
+        if let Some(value) = trimmed
+            .strip_prefix(key)
+            .and_then(|rest| rest.strip_prefix(" = "))
             && inside
         {
             return value.trim().parse().ok();
@@ -412,6 +452,54 @@ mod tests {
         );
         assert_eq!(serving_context(doc, "b.c"), Some(4096));
         assert_eq!(serving_context(doc, "d"), None);
+    }
+
+    /// #782: a substrate's `serving_slots`, from its own table only.
+    #[test]
+    fn a_substrates_serving_slots_are_read_from_its_own_table_only() {
+        assert_eq!(
+            serving_slots(REGISTRY, "accel24-beellama-qwen27b-q4kxl"),
+            Some(2)
+        );
+        assert_eq!(serving_slots(REGISTRY, "canned"), None);
+        assert_eq!(serving_slots(REGISTRY, "no-such-substrate"), None);
+        let doc = "[substrate.a]\nserving_context = 9\n[substrate.a.instance]\nserving_slots = 4\n\
+                   [substrate.b]\nserving_slots = 4\n[substrate.d]\nserving_slots = many\n";
+        assert_eq!(
+            serving_slots(doc, "a"),
+            None,
+            "a sub-table's key is not the substrate's"
+        );
+        assert_eq!(serving_slots(doc, "b"), Some(4));
+        assert_eq!(serving_slots(doc, "d"), None);
+    }
+
+    /// #797: the floor declares its prefix shared, measured by #796, and the
+    /// Flash-Next `TabbyAPI` entry since its own measurement (2026-10-12); the
+    /// `llama.cpp` entry on the same box, unmeasured, does not; a value that is
+    /// neither word is refused.
+    #[test]
+    fn a_substrates_served_prefix_shared_is_declared_or_false() {
+        assert_eq!(
+            served_prefix_shared(REGISTRY, "accel24-tabbyapi-exl3-qwen38-27b-3p00"),
+            Ok(true)
+        );
+        assert_eq!(
+            served_prefix_shared(REGISTRY, "ada48-tabbyapi-exl3-qwen38flashnext-2p05"),
+            Ok(true)
+        );
+        assert_eq!(
+            served_prefix_shared(REGISTRY, "ada48-llamacpp-qwen38flashnext-q20"),
+            Ok(false)
+        );
+        assert_eq!(
+            served_prefix_shared(REGISTRY, "no-such-substrate"),
+            Ok(false)
+        );
+        let doc = "[substrate.a]\nserved_prefix_shared = \"yes\"\n\
+                   [substrate.b]\nserved_prefix_shared = \"false\"\n";
+        assert!(served_prefix_shared(doc, "a").is_err_and(|why| why.contains("yes")));
+        assert_eq!(served_prefix_shared(doc, "b"), Ok(false));
     }
 
     #[test]

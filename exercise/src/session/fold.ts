@@ -82,6 +82,8 @@ export interface UserNode extends Provenance {
   readonly pruned?: readonly { readonly call: string; readonly bytes: number; readonly text: string }[];
   /** Self-capture's reminder after this ask (log v7's `reminded`, #619): a note the model was sent, the harness's words. */
   readonly reminded?: string;
+  /** A phase's ground rules on this ask (log v8's `phase.noted`, #787): the phase entered with no meditation, first among the notes. */
+  readonly phaseNoted?: string;
   /** The files the operator attached to the ask (log v5's `ask.files`, #372): read by digest, never by path. */
   readonly files?: readonly FileRef[];
   /** The operator marked it the scope answer (the `ask` line's `scoping`, log v5, #453): its turn warrants the interview fork. */
@@ -400,6 +402,24 @@ export interface GapNode {
   readonly residual?: number;
 }
 
+/** The facts an operator's phase choice is made with (#788), as `phase.proposed` logs them. */
+export interface PhaseEvidence {
+  /** The phase's length so far, in steps and tokens. */
+  readonly steps: number;
+  readonly tokens: number;
+  /** Tokens since the last meditation. */
+  readonly sinceMeditation: number;
+  /** Whether the operator meditated by hand with no turn since. */
+  readonly manualMeditation: boolean;
+}
+
+/** A phase as its document says it (#787): what the page shows of the phase in force (#789). */
+export interface PhaseDocument {
+  readonly name: string;
+  readonly groundRules: string;
+  readonly transitions: readonly { readonly to: string; readonly kind: string }[];
+}
+
 export interface Session {
   readonly state: SessionState;
   /** The `seq` of the latest `turn.settled`: the gap a person's next command ends opened there. */
@@ -426,7 +446,16 @@ export interface Session {
   /** How many tangents the session has opened: the next one's id is `t/<this + 1>`. */
   readonly tangentsOpened: number;
   /** The model's phase proposal waiting on the operator's ruling (#124, #651): its call, the move, and its reason. */
-  readonly proposal?: { readonly call: string; readonly from?: string; readonly to: string; readonly reason?: string };
+  readonly proposal?: { readonly call: string; readonly from?: string; readonly to: string; readonly reason?: string; readonly evidence?: PhaseEvidence };
+  /** The operator's proposal waiting on the model's answer (#788): the move, and whether it goes through a meditation. */
+  readonly asked?: { readonly to: string; readonly meditate: boolean };
+  /** The model's answer to the operator's last proposal (#788), until the next one. */
+  readonly answered?: { readonly to: string; readonly accepted: boolean; readonly reason?: string };
+  /** The library the session may still start in (#788): `session.start`'s phases, until the first ask. */
+  readonly startable?: readonly string[];
+  /** The phase document in force (log v8's `phase_document`, #787): the opening one, then the one each move names -- its
+   * ground rules as the model was given them, and its moves with their kinds. None before v8. */
+  readonly phaseDocument?: PhaseDocument;
   /** A meditation held for the operator (#150's gate, #698): its turn, why it was declared, and the changes left unaddressed. */
   readonly held?: { readonly atTurn: number; readonly reason: string; readonly unaddressed: readonly string[] };
   /** What each slot is serving right now, and for which lane; absent when idle. */
@@ -618,6 +647,7 @@ export function fold(written: readonly LogLine[]): Session {
   // The calls whose output a meditation replaced by its pointer (#630): every meditation's `pruned`.
   const replacedByMeditation = new Set<string>();
   const reminders = new Map<number, LineOf<'reminded'>>();
+  const phaseNotes = new Map<number, LineOf<'phase.noted'>>();
   // Self-capture's outcomes, by the call they belong to: `<request>/<call id>`.
   const captures = new Map<string, LineOf<'capture'>>();
   const firstRequestOfTurn = new Map<number, number>();
@@ -667,7 +697,10 @@ export function fold(written: readonly LogLine[]): Session {
   // The phase it opens in: the graph's opening phase (log v7, #563), or a placed recording's own `phase`.
   // `phase` is a placed log's spelling of `opening_phase`: it declares v3 or v4, before the key arrived (v7, #563).
   let phase = start.opening_phase ?? start.phase ?? '';
-  let proposal: { call: string; from?: string; to: string; reason?: string } | undefined;
+  let proposal: { call: string; from?: string; to: string; reason?: string; evidence?: PhaseEvidence } | undefined;
+  let asked: { to: string; meditate: boolean } | undefined;
+  let answered: { to: string; accepted: boolean; reason?: string } | undefined;
+  let inForce = start.phase_document;
   let held: { atTurn: number; reason: string; unaddressed: readonly string[] } | undefined;
   // The last meditation's seq: an audit forked after it belongs to the next one.
   let lastMeditation = -1;
@@ -882,6 +915,9 @@ export function fold(written: readonly LogLine[]): Session {
       case 'reminded':
         reminders.set(e.turn, e);
         break;
+      case 'phase.noted':
+        phaseNotes.set(e.turn, e);
+        break;
       case 'capture':
         captures.set(`${e.request}/${e.call}`, e);
         // The model's phase proposal (#651): the latest one waits on the operator until a ruling names its call.
@@ -894,14 +930,37 @@ export function fold(written: readonly LogLine[]): Session {
         const ruled = [...calls.entries()].filter(([at, c]) => c.id === e.call && at < e.seq).at(-1)?.[0];
         if (ruled !== undefined) rulings.set(ruled, e);
         if (proposal?.call === e.call) proposal = undefined;
-        // "continue" moves the phase with no meditation; "meditation" is followed by the meditation line, which moves it.
-        if (e.choice === 'continue') phase = e.to;
+        asked = undefined;
+        // "keep" (v7's "continue") moves the phase with no meditation; "meditation" is followed by the meditation line,
+        // which moves it.
+        if (e.choice === 'keep' || e.choice === 'continue') phase = e.to;
+        if (e.phase_document) inForce = e.phase_document;
         break;
       }
+      // The two keys (#788): the model's proposal waits on the operator's ruling; the operator's, on the model's answer.
+      case 'phase.proposed': {
+        const evidence = { steps: e.phase_steps, tokens: e.phase_tokens, sinceMeditation: e.tokens_since_meditation, manualMeditation: e.meditated_by_hand };
+        if (e.by === 'model' && e.call !== undefined)
+          proposal = { call: e.call, ...(e.from !== undefined ? { from: e.from } : {}), to: e.to, ...(e.reason !== undefined ? { reason: e.reason } : {}), evidence };
+        else if (e.by === 'operator') {
+          asked = { to: e.to, meditate: e.meditate ?? true };
+          answered = undefined;
+        }
+        break;
+      }
+      case 'phase.answered':
+        if (asked) answered = { to: asked.to, accepted: e.accepted, ...(e.reason !== undefined ? { reason: e.reason } : {}) };
+        asked = undefined;
+        break;
+      case 'phase.started':
+        phase = e.phase;
+        if (e.phase_document) inForce = e.phase_document;
+        break;
       case 'meditation': {
         held = undefined;
         for (const call of e.pruned ?? []) replacedByMeditation.add(call);
         if (e.phase) phase = e.phase.to;
+        if (e.phase_document) inForce = e.phase_document;
         // What the model was sent after the meditation -- `diet`'s `meditation::render::refill`, whose output the record's head
         // check verifies: since #597 the head as it was and a user message carrying the render (and the tool outputs
         // the meditation carried, #553); before, the head's system message, a blank line, then the render.
@@ -1048,6 +1107,7 @@ export function fold(written: readonly LogLine[]): Session {
               ? { pruned: prunes.get(slot.turn)!.map(({ call, bytes, text }) => ({ call, bytes, text })) }
               : {}),
             ...(reminders.has(slot.turn) ? { reminded: reminders.get(slot.turn)!.text } : {}),
+            ...(phaseNotes.has(slot.turn) ? { phaseNoted: phaseNotes.get(slot.turn)!.text } : {}),
             ...provenance(ask, first?.response),
           });
         }
@@ -1272,6 +1332,12 @@ export function fold(written: readonly LogLine[]): Session {
     phase,
     tangentsOpened,
     ...(proposal ? { proposal } : {}),
+    ...(asked ? { asked } : {}),
+    ...(answered ? { answered } : {}),
+    ...(asks.size === 0 && start.phases !== undefined && start.phases.length > 0 ? { startable: start.phases } : {}),
+    ...(inForce
+      ? { phaseDocument: { name: inForce.name, groundRules: inForce.ground_rules, transitions: inForce.transitions.map(({ to, kind }) => ({ to, kind })) } }
+      : {}),
     ...(held ? { held } : {}),
     ...(openTangent !== undefined
       ? { tangent: { id: openTangent, entries: [...entries.values()].filter((x) => x.tangent === openTangent && x.state === 'live').map((x) => x.id) } }

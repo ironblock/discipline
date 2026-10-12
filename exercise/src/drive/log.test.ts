@@ -381,6 +381,19 @@ describe("diet's valid v0 logs, as the surface reads them", () => {
     expect(session.memory.find((entry) => entry.id === 'd2')?.flag).toBe('is one team enough?');
   });
 
+  it('folds the phase document in force: the opening one, then the one each move names (#787, #789)', () => {
+    const log = logOf('a-v8-session-in-a-phase-library.jsonl');
+    const ruled = log.findIndex((line) => line.kind === 'phase.ruled');
+    expect(fold(log.slice(0, ruled)).phaseDocument).toEqual({
+      name: 'plan',
+      groundRules: 'Settle the approach before any change.',
+      transitions: [{ to: 'build', kind: 'suggested' }],
+    });
+    expect(fold(log).phaseDocument).toEqual({ name: 'build', groundRules: 'Make the change the plan settled.', transitions: [] });
+    // A log before v8 names none.
+    expect(fold(logOf('an-answered-turn.jsonl')).phaseDocument).toBeUndefined();
+  });
+
   it('takes the state from the log: an ended session is ended', () => {
     expect(fold(logOf('an-ended-session.jsonl')).state).toBe('ended');
   });

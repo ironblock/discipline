@@ -9,6 +9,14 @@
 //!   session's own start time, read from its first event, so a page that
 //!   resumes against a restarted process is told `410` instead of being fed
 //!   another session's events as if they continued its own (D7).
+//! * `GET /state` answers what the session is doing now, as one JSON
+//!   object ([`Session::status`], #756); `GET /wait?until=idle|<kind>&
+//!   after=<seq>&timeout=<s>` answers the same once the session is idle or
+//!   a line of that kind is logged after `after`, with the line as `event`,
+//!   or at the timeout (capped at [`WAIT_CAP`]) with `timed_out`. Neither
+//!   logs anything. `GET /memory` answers working memory as the session
+//!   holds it ([`Session::memory`]): the live entries, or every one with
+//!   `?all`, in the object's own dump shape.
 //! * `POST /commands` takes `{"kind": <command>, ...}`. A refusal is `409`
 //!   with its tag, and the session has logged it (D8). An ask may carry
 //!   `"scoping": true`, the operator's mark that warrants the capture gap's
@@ -57,7 +65,8 @@
 //!
 //! How a logged event is written is a parameter, [`Render`] -- the binary
 //! passes `session::render`, the log format's own writer (`diet/formats/log`)
-//! -- and nothing here reads an event's kind.
+//! -- and nothing here reads an event's kind but `/wait`, which reads the
+//! log's own line for it (`session::line_value`), whatever `Render` is.
 
 use std::collections::BTreeMap;
 use std::fmt::{self, Write as _};
@@ -431,9 +440,12 @@ type Handler<S> = fn(&Serving<S>, &mut TcpStream, &Request);
 
 /// Every route there is. Anything else, `OPTIONS` included, is `404`. A
 /// path ending in `/` is a prefix: `/files/` answers `/files/<sha256>`.
-fn routes<S: Streaming + 'static>() -> [(&'static str, &'static str, Handler<S>); 5] {
+fn routes<S: Streaming + 'static>() -> [(&'static str, &'static str, Handler<S>); 8] {
     [
         ("GET", "/events", Serving::<S>::events),
+        ("GET", "/state", Serving::<S>::state),
+        ("GET", "/wait", Serving::<S>::wait),
+        ("GET", "/memory", Serving::<S>::memory),
         ("POST", "/commands", Serving::<S>::command),
         ("POST", "/approve", Serving::<S>::approve),
         ("POST", "/files", Serving::<S>::upload),
@@ -610,6 +622,73 @@ impl<S: Streaming + 'static> Serving<S> {
             if stream.write_all(out.as_bytes()).is_err() || stream.flush().is_err() {
                 return;
             }
+        }
+    }
+
+    /// `GET /state`: what the session is doing now (#756), as
+    /// [`Session::status`] reads it.
+    fn state(&self, stream: &mut TcpStream, _request: &Request) {
+        respond(stream, 200, &self.session.status());
+    }
+
+    /// `GET /memory`: working memory as the session holds it (#756), the
+    /// live entries, or every entry with `?all`; `400` for any other query.
+    fn memory(&self, stream: &mut TcpStream, request: &Request) {
+        let all = match request.query.as_str() {
+            "" => false,
+            "all" | "all=true" => true,
+            _ => return respond(stream, 400, &empty()),
+        };
+        respond(stream, 200, &self.session.memory(all));
+    }
+
+    /// `GET /wait?until=idle|<kind>&after=<seq>&timeout=<s>` (#756): the
+    /// state once the session is idle, or once a line of that kind is
+    /// logged after `after` (from the first line when absent), with that
+    /// line as `event`; or, at `timeout` -- [`WAIT_DEFAULT`] when absent,
+    /// at most [`WAIT_CAP`] -- the state as it is, `timed_out`. `400` for
+    /// any other query.
+    fn wait(&self, stream: &mut TcpStream, request: &Request) {
+        let Some((until, after, patience)) = wait_query(&request.query) else {
+            return respond(stream, 400, &empty());
+        };
+        let Some(mut next) = after.map_or(Some(0), |after| after.checked_add(1)) else {
+            return respond(stream, 400, &empty());
+        };
+        let deadline = Instant::now() + patience;
+        loop {
+            let mut matched = None;
+            if let Some(kind) = until {
+                for logged in self.session.events_from(next) {
+                    next = logged.seq + 1;
+                    let line = super::session::line_value(&logged);
+                    if line.get("kind") == Some(&Value::String(kind.to_owned())) {
+                        matched = Some(line);
+                        break;
+                    }
+                }
+            }
+            let Value::Object(mut status) = self.session.status() else {
+                unreachable!("the status is an object");
+            };
+            let idle = status.get("idle") == Some(&Value::Boolean(true));
+            if until.is_none()
+                && let Some(Value::Integer(last)) = status.get("last_seq")
+            {
+                next = u64::try_from(*last).unwrap_or(0) + 1;
+            }
+            let done = matched.is_some() || (until.is_none() && idle);
+            let now = Instant::now();
+            if done || now >= deadline || self.stopping.load(Ordering::SeqCst) {
+                status.insert("timed_out".to_owned(), Value::Boolean(!done));
+                if let Some(line) = matched {
+                    status.insert("event".to_owned(), Value::Object(line));
+                }
+                return respond(stream, 200, &Value::Object(status));
+            }
+            let _ = self
+                .session
+                .wait_from(next, (deadline - now).min(self.config.heartbeat));
         }
     }
 
@@ -793,6 +872,49 @@ impl<S: Streaming + 'static> Serving<S> {
 
     /// The uploads an ask's `files` names, in its order, or the first digest
     /// never uploaded to this server.
+    /// An ask: its words and the uploads it names, attached and put to the
+    /// session. `400` naming the file that cannot be attached; `409` with
+    /// the session's refusal -- for an image the substrate cannot see
+    /// (#815), naming the substrate, so the operator knows it was not the
+    /// model that ignored it.
+    fn asked(
+        &self,
+        text: &str,
+        files: &[String],
+        gap: Option<IdleGap>,
+        scoping: bool,
+    ) -> (u16, BTreeMap<String, Value>) {
+        let attached = self
+            .uploads_named(files)
+            .and_then(|uploads| attach::attached_with(text, &uploads, &self.config.attaching));
+        let attached = match attached {
+            Ok(attached) => attached,
+            Err(unattachable) => return (400, unattached(&unattachable)),
+        };
+        match self.session.ask_attached(attached, gap, scoping) {
+            Ok(admitted) => (
+                200,
+                BTreeMap::from([
+                    ("seq".to_owned(), integer(admitted.seq)),
+                    ("turn".to_owned(), integer(u64::from(admitted.turn))),
+                ]),
+            ),
+            Err(Rejected::Refused(because)) => {
+                let mut body = BTreeMap::from([(
+                    "refused".to_owned(),
+                    Value::String(because.tag().to_owned()),
+                )]);
+                if because == Refusal::NoVision
+                    && let Some(substrate) = self.session.blind()
+                {
+                    body.insert("substrate".to_owned(), Value::String(substrate));
+                }
+                (409, body)
+            }
+            Err(Rejected::NoSuchTurn(_) | Rejected::BadGap(_)) => (400, BTreeMap::new()),
+        }
+    }
+
     fn uploads_named(&self, files: &[String]) -> Result<Vec<Upload>, Unattachable> {
         let held = self.uploads.lock().unwrap_or_else(PoisonError::into_inner);
         files
@@ -829,22 +951,7 @@ impl<S: Streaming + 'static> Serving<S> {
             Rejected::NoSuchTurn(_) | Rejected::BadGap(_) => (400, BTreeMap::new()),
         };
         match command {
-            Command::Ask(text, files) => match self
-                .uploads_named(&files)
-                .and_then(|uploads| attach::attached_with(&text, &uploads, &self.config.attaching))
-            {
-                Err(unattachable) => (400, unattached(&unattachable)),
-                Ok(attached) => match self.session.ask_attached(attached, gap, scoping) {
-                    Ok(admitted) => (
-                        200,
-                        BTreeMap::from([
-                            ("seq".to_owned(), integer(admitted.seq)),
-                            ("turn".to_owned(), integer(u64::from(admitted.turn))),
-                        ]),
-                    ),
-                    Err(rejection) => rejected(rejection),
-                },
-            },
+            Command::Ask(text, files) => self.asked(&text, &files, gap, scoping),
             Command::Cancel(turn) => match self.session.cancel(turn, gap) {
                 Ok(()) => (200, BTreeMap::new()),
                 Err(rejection) => rejected(rejection),
@@ -880,6 +987,21 @@ impl<S: Streaming + 'static> Serving<S> {
                 Err(rejection) => rejected(rejection),
             },
             Command::FlagEntry(id, note) => match self.session.flag_entry(&id, &note) {
+                Ok(()) => (200, BTreeMap::new()),
+                Err(rejection) => rejected(rejection),
+            },
+            // The operator's phase commands (#788).
+            Command::StartPhase(phase) => match self.session.start_phase(&phase) {
+                Ok(()) => (200, BTreeMap::new()),
+                Err(rejection) => rejected(rejection),
+            },
+            Command::ProposePhase(to, meditate) => {
+                match self.session.propose_phase(&to, meditate) {
+                    Ok(()) => (200, BTreeMap::new()),
+                    Err(rejection) => rejected(rejection),
+                }
+            }
+            Command::MovePhase(to, meditate) => match self.session.move_phase(&to, meditate) {
                 Ok(()) => (200, BTreeMap::new()),
                 Err(rejection) => rejected(rejection),
             },
@@ -931,6 +1053,13 @@ enum Command {
     FlagEntry(String, String),
     /// Refill the held meditation anyway (#150's gate).
     RefillAnyway,
+    /// Choose the starting phase, before the first ask (#788).
+    StartPhase(String),
+    /// Propose a phase move to the model (#788), and whether an accepted
+    /// move meditates.
+    ProposePhase(String, bool),
+    /// Move the phase alone, through a meditation or not (#788).
+    MovePhase(String, bool),
 }
 
 /// A command's word as a client written before #583's rename may send it,
@@ -940,13 +1069,50 @@ fn current(word: &str) -> &str {
     match word {
         "declare-seam" => "declare-meditation",
         "seam" => "meditation",
+        // A phase ruling's move without a meditation, v7's word (#788).
+        "continue" => "keep",
         other => other,
     }
 }
 
 impl Command {
+    /// The operator's phase commands (#788), from their bodies.
+    fn phase_command(kind: CommandKind, object: &BTreeMap<String, Value>) -> Option<Self> {
+        match (
+            kind,
+            object.get("phase"),
+            object.get("to"),
+            object.get("meditate"),
+        ) {
+            (CommandKind::StartPhase, Some(Value::String(phase)), _, _) => {
+                Some(Self::StartPhase(phase.clone()))
+            }
+            // Meditate-and-move, the suggested option, unless it says not.
+            (CommandKind::ProposePhase, _, Some(Value::String(to)), None) => {
+                Some(Self::ProposePhase(to.clone(), true))
+            }
+            (
+                CommandKind::ProposePhase,
+                _,
+                Some(Value::String(to)),
+                Some(Value::Boolean(meditate)),
+            ) => Some(Self::ProposePhase(to.clone(), *meditate)),
+            (CommandKind::MovePhase, _, Some(Value::String(to)), None) => {
+                Some(Self::MovePhase(to.clone(), false))
+            }
+            (
+                CommandKind::MovePhase,
+                _,
+                Some(Value::String(to)),
+                Some(Value::Boolean(meditate)),
+            ) => Some(Self::MovePhase(to.clone(), *meditate)),
+            _ => None,
+        }
+    }
+
     /// A command from its body: `kind` names it, and every other key must be
     /// one that kind takes.
+    #[allow(clippy::too_many_lines)]
     fn from_object(object: &BTreeMap<String, Value>) -> Option<Posted> {
         let Some(Value::String(kind)) = object.get("kind") else {
             return None;
@@ -975,6 +1141,9 @@ impl Command {
             // ends no idle gap.
             CommandKind::EditEntry => &["kind", "id", "content"],
             CommandKind::FlagEntry => &["kind", "id", "note"],
+            // #788: the operator's phase commands; none ends an idle gap.
+            CommandKind::StartPhase => &["kind", "phase"],
+            CommandKind::ProposePhase | CommandKind::MovePhase => &["kind", "to", "meditate"],
         };
         if object.keys().any(|key| !takes.contains(&key.as_str())) {
             return None;
@@ -1046,6 +1215,9 @@ impl Command {
             },
             CommandKind::EditEntry => {
                 entry_and(object, "content").map(|(id, text)| Self::EditEntry(id, text))
+            }
+            CommandKind::StartPhase | CommandKind::ProposePhase | CommandKind::MovePhase => {
+                Self::phase_command(kind, object)
             }
             CommandKind::FlagEntry => {
                 entry_and(object, "note").map(|(id, text)| Self::FlagEntry(id, text))
@@ -1148,6 +1320,50 @@ fn resume_after(id: &str, opened: u64) -> Result<u64, u16> {
 
 /// The `from` a first connection asks to start at: `0` when it names none,
 /// and nothing when what it names is not a number.
+/// A `/wait` with no `timeout` waits this long (#756).
+pub const WAIT_DEFAULT: Duration = Duration::from_secs(30);
+
+/// No `/wait` waits longer than this (#756): a caller loops, rather than
+/// holding one request open.
+pub const WAIT_CAP: Duration = Duration::from_secs(300);
+
+/// `/wait`'s query (#756): `until` -- `None` for `idle`, else a log line's
+/// kind -- then `after` and the patience, capped at [`WAIT_CAP`]. `None`
+/// when `until` is missing or names no kind, a number does not parse, or a
+/// key is unknown or repeated.
+fn wait_query(query: &str) -> Option<(Option<&'static str>, Option<u64>, Duration)> {
+    let mut until = None;
+    let mut after = None;
+    let mut timeout = None;
+    for pair in query.split('&').filter(|pair| !pair.is_empty()) {
+        let (key, value) = pair.split_once('=')?;
+        let slot_was_empty = match key {
+            "until" => until
+                .replace(if value == "idle" {
+                    None
+                } else {
+                    Some(
+                        crate::formats::log::Kind::ALL
+                            .iter()
+                            .map(|kind| kind.tag())
+                            .find(|tag| *tag == value)?,
+                    )
+                })
+                .is_none(),
+            "after" => after.replace(value.parse::<u64>().ok()?).is_none(),
+            "timeout" => timeout.replace(value.parse::<u64>().ok()?).is_none(),
+            _ => return None,
+        };
+        if !slot_was_empty {
+            return None;
+        }
+    }
+    let patience = timeout.map_or(WAIT_DEFAULT, |seconds| {
+        Duration::from_secs(seconds).min(WAIT_CAP)
+    });
+    Some((until?, after, patience))
+}
+
 fn from_query(query: &str) -> Option<u64> {
     let named = query.split('&').find_map(|pair| pair.strip_prefix("from="));
     named.map_or(Some(0), |from| from.parse().ok())
@@ -1586,6 +1802,44 @@ mod tests {
     /// #124: `ratify-phase` takes the proposal's call and a choice --
     /// `meditation`, `continue` or `stay`; anything else, or an idle gap, is no
     /// command.
+    /// #788: the operator's phase commands read their phase, their move
+    /// and, for a move alone, whether it meditates; nothing else.
+    #[test]
+    fn the_operators_phase_commands_read_their_moves_and_nothing_else() {
+        let read = |body: &str| {
+            let object = crate::formats::record::json::line(body).expect("an object");
+            Command::from_object(&object).map(|posted| posted.command)
+        };
+        assert!(matches!(
+            read(r#"{"kind":"start-phase","phase":"plan"}"#),
+            Some(Command::StartPhase(phase)) if phase == "plan"
+        ));
+        assert!(matches!(
+            read(r#"{"kind":"propose-phase","to":"build"}"#),
+            Some(Command::ProposePhase(to, true)) if to == "build"
+        ));
+        assert!(matches!(
+            read(r#"{"kind":"propose-phase","to":"build","meditate":false}"#),
+            Some(Command::ProposePhase(to, false)) if to == "build"
+        ));
+        assert!(matches!(
+            read(r#"{"kind":"move-phase","to":"build","meditate":true}"#),
+            Some(Command::MovePhase(to, true)) if to == "build"
+        ));
+        assert!(matches!(
+            read(r#"{"kind":"move-phase","to":"build"}"#),
+            Some(Command::MovePhase(to, false)) if to == "build"
+        ));
+        for refused in [
+            r#"{"kind":"start-phase"}"#,
+            r#"{"kind":"propose-phase","to":"build","meditate":"yes"}"#,
+            r#"{"kind":"move-phase","to":"build","meditate":"yes"}"#,
+            r#"{"kind":"move-phase","to":7}"#,
+        ] {
+            assert!(read(refused).is_none(), "{refused}");
+        }
+    }
+
     #[test]
     fn the_phase_ruling_reads_its_call_and_choice_and_nothing_else() {
         use crate::drive::session::PhaseChoice;
@@ -1595,7 +1849,9 @@ mod tests {
         };
         for (word, choice) in [
             ("meditation", PhaseChoice::Meditation),
-            ("continue", PhaseChoice::Continue),
+            ("keep", PhaseChoice::Keep),
+            // #788: v7's word, read as `keep`.
+            ("continue", PhaseChoice::Keep),
             ("stay", PhaseChoice::Stay),
         ] {
             assert!(matches!(
@@ -2815,6 +3071,385 @@ mod tests {
     }
 
     // -----------------------------------------------------------------------
+    // `GET /state` and `GET /wait` (#756)
+    // -----------------------------------------------------------------------
+
+    /// `GET <path>` on `server`, answered as JSON: the status and the body.
+    fn get_json(server: &Server, path: &str) -> (u16, serde_json::Value) {
+        let reply = Client::send(
+            server,
+            &format!("GET {path} HTTP/1.1\r\nHost: {}\r\n\r\n", host(server)),
+        )
+        .reply();
+        let parsed = serde_json::from_str(body(&reply)).unwrap_or(serde_json::Value::Null);
+        (status(&reply), parsed)
+    }
+
+    /// A session interviewing under `scoping` whose meditations `shape_it`
+    /// configures, served with the log's own renderer, answering `acts`.
+    fn serve_interviewing(
+        acts: Vec<Vec<Step>>,
+        shape_it: impl FnOnce(&mut crate::meditation::policy::Served),
+    ) -> (Arc<Session<Canned>>, Server) {
+        use crate::drive::session::tests::interviewing;
+        let mut interview = interviewing(&[crate::formats::log::Warrant::Scoping]);
+        shape_it(&mut interview.meditations);
+        let listener = TcpListener::bind("127.0.0.1:0").expect("loopback");
+        let session = Arc::new(Session::open_with(
+            Canned::new(acts),
+            template(),
+            None,
+            None,
+            None,
+            Some(interview),
+        ));
+        let server = Server::start(
+            listener,
+            Arc::clone(&session),
+            quick(),
+            crate::drive::session::render,
+        )
+        .expect("the server starts");
+        (session, server)
+    }
+
+    /// #756: a fresh session is idle at once -- `/state` says so, and a
+    /// wait for idle returns without waiting; a bad query is `400`.
+    #[test]
+    fn a_fresh_session_is_idle_and_a_wait_for_idle_returns_at_once() {
+        let (_session, server) = serve(Canned::new([]), quick());
+        let (code, state) = get_json(&server, "/state");
+        assert_eq!(code, 200);
+        assert_eq!(
+            state,
+            serde_json::json!({
+                "session": "running",
+                "settlement": "awaiting",
+                "in_flight": {"forks": [], "audits": [], "queued": 0, "warming": false},
+                "meditation": {"state": "none"},
+                "last_seq": state["last_seq"],
+                "idle": true,
+            })
+        );
+        let started = Instant::now();
+        let (code, waited) = get_json(&server, "/wait?until=idle&timeout=30");
+        assert_eq!(code, 200);
+        assert_eq!(waited["idle"], true);
+        assert_eq!(waited["timed_out"], false);
+        assert!(started.elapsed() < Duration::from_secs(5));
+        for bad in [
+            "/wait",
+            "/wait?until=nonsense",
+            "/wait?until=idle&timeout=soon",
+            "/wait?until=idle&after=-1",
+        ] {
+            assert_eq!(get_json(&server, bad).0, 400, "{bad}");
+        }
+    }
+
+    /// #756: a refused command shows in `/state` with its `because`.
+    #[test]
+    fn the_last_refusal_shows_in_state_with_its_because() {
+        let (_session, server) = serve(Canned::new([]), quick());
+        let reply = post(&server, r#"{"kind":"background"}"#, "");
+        assert_eq!(status(&reply), 409, "{reply}");
+        let (_, state) = get_json(&server, "/state");
+        assert_eq!(state["refusal"]["command"], "background", "{state}");
+        assert_eq!(state["refusal"]["because"], "nothing-running");
+        assert!(state["refusal"]["seq"].is_u64());
+    }
+
+    /// #756's first case: `idle` waits for the gap's fork, not only for
+    /// `turn.settled`. While the fork's call is held the turn has settled
+    /// but the session is not idle, and a wait for idle times out -- it
+    /// returns, with `timed_out`, rather than hanging; once the fork
+    /// settles a wait for idle returns idle.
+    #[test]
+    fn idle_waits_for_the_fork_not_only_turn_settled_and_a_timeout_returns() {
+        use crate::drive::session::tests::{DECIDED, SCOPED};
+        let gate = Gate::new();
+        let (session, server) = serve_interviewing(
+            vec![
+                deltas(&[SCOPED]),
+                vec![Step::Hold(gate.clone()), Step::Delta(DECIDED.to_owned())],
+            ],
+            |_| {},
+        );
+        let reply = post(
+            &server,
+            r#"{"kind":"ask","text":"what are we building?","scoping":true}"#,
+            "",
+        );
+        assert_eq!(status(&reply), 200, "{reply}");
+        assert!(gate.wait_for_a_waiter(Duration::from_secs(10)));
+        let (_, state) = get_json(&server, "/state");
+        assert_eq!(state["turn"]["number"], 1);
+        assert_eq!(state["turn"]["state"], "settled");
+        assert_eq!(state["turn"]["reason"], "final");
+        assert_eq!(
+            state["in_flight"]["forks"].as_array().map(Vec::len),
+            Some(1)
+        );
+        assert_eq!(state["idle"], false, "{state}");
+        let started = Instant::now();
+        let (code, waited) = get_json(&server, "/wait?until=idle&timeout=1");
+        assert_eq!(code, 200);
+        assert_eq!(waited["timed_out"], true, "{waited}");
+        assert_eq!(waited["idle"], false);
+        assert!(started.elapsed() < Duration::from_secs(5));
+        let opener = {
+            let gate = gate.clone();
+            std::thread::spawn(move || {
+                std::thread::sleep(Duration::from_millis(200));
+                gate.open();
+            })
+        };
+        let (_, waited) = get_json(&server, "/wait?until=idle&timeout=30");
+        opener.join().expect("the opener");
+        assert_eq!(waited["timed_out"], false, "{waited}");
+        assert_eq!(waited["idle"], true);
+        assert_eq!(waited["in_flight"]["forks"], serde_json::json!([]));
+        assert!(
+            session
+                .events_from(0)
+                .iter()
+                .any(|logged| matches!(logged.event, Event::ForkSettled { .. }))
+        );
+    }
+
+    /// #756: `idle` waits for a meditation's audit too: while its call is
+    /// held the meditation is `capturing` and the audit in flight.
+    #[test]
+    fn idle_waits_for_a_meditations_audit() {
+        use crate::drive::session::tests::{DECIDED, SCOPED};
+        let gate = Gate::new();
+        let (_session, server) = serve_interviewing(
+            vec![
+                deltas(&[SCOPED]),
+                deltas(&[DECIDED]),
+                vec![
+                    Step::Hold(gate.clone()),
+                    Step::Delta("1. KEEP\n2. KEEP\n3. KEEP\n".to_owned()),
+                ],
+            ],
+            |meditations| meditations.audit = true,
+        );
+        let reply = post(
+            &server,
+            r#"{"kind":"ask","text":"what are we building?","scoping":true}"#,
+            "",
+        );
+        assert_eq!(status(&reply), 200, "{reply}");
+        let (_, waited) = get_json(&server, "/wait?until=idle&timeout=30");
+        assert_eq!(waited["idle"], true, "{waited}");
+        let reply = post(&server, r#"{"kind":"declare-meditation"}"#, "");
+        assert_eq!(status(&reply), 200, "{reply}");
+        assert!(gate.wait_for_a_waiter(Duration::from_secs(10)));
+        let (_, state) = get_json(&server, "/state");
+        assert_eq!(state["meditation"]["state"], "capturing", "{state}");
+        assert_eq!(
+            state["in_flight"]["audits"].as_array().map(Vec::len),
+            Some(1)
+        );
+        assert_eq!(state["idle"], false);
+        let (_, waited) = get_json(&server, "/wait?until=idle&timeout=1");
+        assert_eq!(waited["timed_out"], true);
+        gate.open();
+        let (_, waited) = get_json(&server, "/wait?until=idle&timeout=30");
+        assert_eq!(waited["idle"], true, "{waited}");
+        assert_eq!(waited["meditation"]["state"], "none");
+        assert_eq!(waited["in_flight"]["audits"], serde_json::json!([]));
+    }
+
+    /// #756: `until=meditation.held` returns the hold -- its line as the
+    /// `event`, and the state held, naming the entry left unaddressed.
+    #[test]
+    fn a_wait_until_meditation_held_returns_the_hold() {
+        use crate::drive::session::tests::{DECIDED, SCOPED};
+        let (session, server) = serve_interviewing(
+            vec![
+                deltas(&[SCOPED]),
+                deltas(&[DECIDED]),
+                deltas(&["1. KEEP\n2. KEEP\n"]),
+                deltas(&["nothing to say"]),
+            ],
+            |meditations| {
+                meditations.audit = true;
+                meditations.reconcile_gate = crate::meditation::policy::ReconcileGate::Refuse;
+            },
+        );
+        let reply = post(
+            &server,
+            r#"{"kind":"ask","text":"what are we building?","scoping":true}"#,
+            "",
+        );
+        assert_eq!(status(&reply), 200, "{reply}");
+        let (_, waited) = get_json(&server, "/wait?until=idle&timeout=30");
+        assert_eq!(waited["idle"], true, "{waited}");
+        let after = waited["last_seq"].as_u64().expect("a seq");
+        session
+            .flag_entry("interview-t1-0", "still so?")
+            .expect("a flag");
+        let reply = post(&server, r#"{"kind":"declare-meditation"}"#, "");
+        assert_eq!(status(&reply), 200, "{reply}");
+        let (code, waited) = get_json(
+            &server,
+            &format!("/wait?until=meditation.held&after={after}&timeout=30"),
+        );
+        assert_eq!(code, 200);
+        assert_eq!(waited["timed_out"], false, "{waited}");
+        assert_eq!(waited["event"]["kind"], "meditation.held");
+        assert_eq!(
+            waited["event"]["unaddressed"],
+            serde_json::json!(["interview-t1-0"])
+        );
+        assert!(waited["event"]["seq"].as_u64() > Some(after));
+        assert_eq!(
+            waited["meditation"],
+            serde_json::json!({"state": "held", "unaddressed": ["interview-t1-0"]})
+        );
+        // A kind already past `after` is not waited for again.
+        let (_, again) = get_json(
+            &server,
+            &format!(
+                "/wait?until=meditation.held&after={}&timeout=1",
+                waited["event"]["seq"]
+            ),
+        );
+        assert_eq!(again["timed_out"], true);
+        assert!(again.get("event").is_none(), "{again}");
+    }
+
+    /// #756: a pending approval shows in `/state`, in `waiting`'s own shape,
+    /// and the turn is `awaiting-approval`; once answered, the wait for idle
+    /// returns with none.
+    #[test]
+    fn a_pending_approval_shows_in_state() {
+        use crate::drive::session::tests::{bash, looping, tools};
+        use crate::drive::tool_loop::Decider;
+        use crate::drive::tool_loop::tests::scratch;
+        use crate::isolation::Confinement;
+        let tree = scratch("serve-state-approval");
+        let listener = TcpListener::bind("127.0.0.1:0").expect("loopback");
+        let session = Arc::new(Session::open_looping(
+            Canned::new([vec![bash("call-1", "touch a")], deltas(&["ok"])]),
+            looping(),
+            None,
+            tools(Confinement::Unconfined, &tree, &[], None, Decider::Operator),
+        ));
+        let server = Server::start(listener, Arc::clone(&session), quick(), render)
+            .expect("the server starts");
+        assert_eq!(
+            status(&post(&server, r#"{"kind":"ask","text":"go"}"#, "")),
+            200
+        );
+        eventually("the prompt", || session.waiting().is_some());
+        let (_, state) = get_json(&server, "/state");
+        assert_eq!(state["turn"]["state"], "awaiting-approval", "{state}");
+        assert_eq!(state["approval"]["id"], "call-1");
+        assert_eq!(state["approval"]["command"], "touch a");
+        assert_eq!(state["idle"], false);
+        let approve = r#"{"call":"call-1","scope":"once"}"#;
+        let taken = Client::send(
+            &server,
+            &format!(
+                "POST /approve HTTP/1.1\r\nHost: {}\r\nContent-Type: application/json\r\n\
+                 Content-Length: {}\r\n\r\n{approve}",
+                host(&server),
+                approve.len()
+            ),
+        )
+        .reply();
+        assert_eq!(status(&taken), 204, "{taken}");
+        let (_, waited) = get_json(&server, "/wait?until=idle&timeout=30");
+        assert_eq!(waited["idle"], true, "{waited}");
+        assert!(waited.get("approval").is_none(), "{waited}");
+        let _ = std::fs::remove_dir_all(&tree);
+    }
+
+    /// #756: `GET /memory` is working memory as serve holds it, in the
+    /// object's own dump shape: the live entries, the operator's pending
+    /// edit and flag on theirs, with `?all` the voided one too; any other
+    /// query is `400`, and nothing is logged.
+    #[test]
+    fn memory_answers_the_sessions_own_object() {
+        use crate::drive::session::tests::{DECIDED, SCOPED};
+        let (session, server) =
+            serve_interviewing(vec![deltas(&[SCOPED]), deltas(&[DECIDED])], |_| {});
+        let reply = post(
+            &server,
+            r#"{"kind":"ask","text":"what are we building?","scoping":true}"#,
+            "",
+        );
+        assert_eq!(status(&reply), 200, "{reply}");
+        let (_, waited) = get_json(&server, "/wait?until=idle&timeout=30");
+        assert_eq!(waited["idle"], true, "{waited}");
+        session
+            .flag_entry("interview-t1-0", "still so?")
+            .expect("a flag");
+        session
+            .edit_entry("interview-t1-1", "decision: the operator's version")
+            .expect("an edit");
+        let logged = session.events_from(0).len();
+        let (code, memory) = get_json(&server, "/memory");
+        assert_eq!(code, 200);
+        let entries = memory["entries"].as_array().expect("entries").clone();
+        let ids: Vec<&str> = entries
+            .iter()
+            .map(|entry| entry["id"].as_str().expect("an id"))
+            .collect();
+        assert_eq!(ids.len(), 3, "{memory}");
+        assert!(!ids.contains(&"interview-t1-1"), "{memory}");
+        assert!(entries.iter().all(|entry| entry["state"] == "live"));
+        let flagged = &entries[ids
+            .iter()
+            .position(|id| *id == "interview-t1-0")
+            .expect("t1-0")];
+        assert_eq!(
+            flagged["operator"],
+            serde_json::json!([{"kind": "flag", "note": "still so?"}])
+        );
+        let theirs = entries
+            .iter()
+            .find(|entry| entry["content"] == "decision: the operator's version")
+            .expect("the operator's entry");
+        assert_eq!(theirs["operator"], serde_json::json!([{"kind": "edit"}]));
+        assert_eq!(theirs["supersedes"], "interview-t1-1");
+        assert_eq!(theirs["provenances"][0]["lane"], "operator");
+        // The object's own dump, entry for entry, past the operator's marks.
+        let dumped: Vec<serde_json::Value> = session
+            .product()
+            .lines()
+            .map(|line| {
+                serde_json::from_str(line.split_once('\t').map_or(line, |(_, rest)| rest))
+                    .expect("JSON")
+            })
+            .filter(|entry: &serde_json::Value| entry["state"] == "live")
+            .collect();
+        let unmarked: Vec<serde_json::Value> = entries
+            .iter()
+            .map(|entry| {
+                let mut entry = entry.clone();
+                entry.as_object_mut().expect("an object").remove("operator");
+                entry
+            })
+            .collect();
+        assert_eq!(unmarked, dumped);
+        let (_, every) = get_json(&server, "/memory?all");
+        let voided = every["entries"]
+            .as_array()
+            .expect("entries")
+            .iter()
+            .find(|entry| entry["id"] == "interview-t1-1")
+            .expect("the voided entry")
+            .clone();
+        assert_eq!(voided["state"], "voided");
+        assert_eq!(every["entries"].as_array().map(Vec::len), Some(4));
+        assert_eq!(get_json(&server, "/memory?all=no").0, 400);
+        assert_eq!(session.events_from(0).len(), logged, "nothing logged");
+    }
+
+    // -----------------------------------------------------------------------
     // the capture gap's fork, served (#374)
     // -----------------------------------------------------------------------
 
@@ -3399,6 +4034,58 @@ mod tests {
             &mut out,
         );
         out
+    }
+
+    /// #815 end to end: on a substrate whose served configuration takes no
+    /// images, an ask naming an uploaded PNG is refused `409`, `no-vision`,
+    /// naming the substrate, logged, and never sent; the words alone go.
+    #[test]
+    fn an_image_ask_to_a_substrate_without_vision_is_409_no_vision_and_never_sent() {
+        use crate::client::stream::HttpStream;
+        use crate::client::stub::{Act, Stub};
+        use crate::client::transport::Endpoint;
+        use crate::drive::attach::tests::png;
+
+        let stub = Stub::serving(vec![Act::Raw(REPLY.to_vec())]).expect("loopback");
+        let transport = HttpStream::new(Endpoint::parse(&stub.url()).expect("the stub's URL"));
+        let session =
+            Arc::new(Session::open(transport, template()).without_vision("a-text-only-substrate"));
+        let server = Server::start(
+            TcpListener::bind("127.0.0.1:0").expect("loopback"),
+            Arc::clone(&session),
+            quick(),
+            crate::drive::session::render,
+        )
+        .expect("the server starts");
+        let bytes = png("the page's screenshot");
+        let sha256 = crate::digest::sha256_hex(&bytes);
+        assert_eq!(status(&upload_png(&server, &bytes, "image/png")), 200);
+        let reply = post(
+            &server,
+            &ask_files_json("what is on the page?", &[&sha256]),
+            "",
+        );
+        assert_eq!(status(&reply), 409, "{reply}");
+        assert_eq!(
+            json::line(body(&reply)).expect("a JSON object"),
+            BTreeMap::from([
+                ("refused".to_owned(), Value::String("no-vision".to_owned())),
+                (
+                    "substrate".to_owned(),
+                    Value::String("a-text-only-substrate".to_owned())
+                ),
+            ])
+        );
+        assert!(session.events_from(0).iter().any(|logged| matches!(
+            logged.event,
+            Event::Refused {
+                because: Refusal::NoVision,
+                ..
+            }
+        )));
+        assert!(stub.received().is_empty(), "nothing was sent");
+        let reply = post(&server, &ask_json("what is on the page?"), "");
+        assert_eq!(status(&reply), 200, "the words alone go: {reply}");
     }
 
     /// #513 end to end against a stub engine, with no regimen (an upload is

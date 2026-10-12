@@ -101,11 +101,14 @@ pub mod canned;
 pub mod engine;
 pub mod hosted;
 pub mod instructions;
+pub mod mcp;
 pub mod output;
+pub mod profile;
 pub mod projection;
 pub mod prune;
 pub mod regimen;
 pub mod registry;
+pub mod scenario;
 pub mod script;
 pub mod serve;
 pub mod served;
@@ -114,6 +117,7 @@ pub mod shell_gate;
 pub mod standard;
 pub mod template_roles;
 pub mod tool_loop;
+pub mod warrants;
 
 use std::cell::Cell;
 use std::collections::{BTreeMap, BTreeSet};
@@ -839,6 +843,7 @@ pub fn run<T: Transport>(script: &Script, gym: &Gym<'_, T>) -> Result<Drive, Hal
         fork_delivery: None,
         tool_output: None,
         levers: None,
+        phase: None,
         // #583: the version this crate writes, spelling it `meditation`.
         version: Some(crate::formats::record::VERSION),
     }];
@@ -1005,6 +1010,7 @@ pub fn run<T: Transport>(script: &Script, gym: &Gym<'_, T>) -> Result<Drive, Hal
             prefill_tokens: Some(prefill),
             prefill_from: None,
             files: None,
+            phase: None,
         });
         prefill_total = prefill_total.saturating_add(prefill);
         archive(

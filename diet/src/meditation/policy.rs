@@ -49,6 +49,24 @@ pub const MEDITATION_WINDOW: &str = "meditation_window";
 /// `OpenCode` 2's `DEFAULT_BUFFER`, or the output cap when that is larger
 /// (`oc:packages/core/src/session/compaction.ts:12,236-240`).
 pub const WINDOW_RESERVE: u64 = 20_000;
+/// The running turn's recent steps a window meditation under it keeps
+/// (#813): a quarter of the usable window -- the window less the reserve --
+/// within these bounds, `OpenCode` 2's `preserveRecentBudget`
+/// (`oc:packages/opencode/src/session/compaction.ts:32-33,115-120`). Pi keeps
+/// a flat 20,000 (`pi:packages/coding-agent/src/core/settings-defaults.ts:11`,
+/// `keepRecentTokens`); Qwen Code keeps no tail at all, only a pending call's
+/// pair (`qc:packages/core/src/services/chatCompressionService.ts:535-539`),
+/// so the tie goes to the smaller, `OpenCode` 2's.
+pub const KEEP_RECENT_MIN: u64 = 2_000;
+/// [`KEEP_RECENT_MIN`]'s upper bound.
+pub const KEEP_RECENT_MAX: u64 = 15_000;
+
+/// The tokens of the running turn's recent steps a window meditation keeps
+/// in a `window` with `reserve` kept for output (#813).
+#[must_use]
+pub fn keep_recent_budget(window: u64, reserve: u64) -> u64 {
+    (window.saturating_sub(reserve) / 4).clamp(KEEP_RECENT_MIN, KEEP_RECENT_MAX)
+}
 /// A meditation's audit (#504): `"on"` (or `true`) puts the dogma's pinned audit
 /// ask over working memory before the refill and folds its answer; off by
 /// default.
@@ -80,9 +98,15 @@ pub const RENDER_BUDGET_TOKENS: &str = "render_budget_tokens";
 /// What the render does past its budget (#565): `"tier"` (the default) or
 /// `"elide"`.
 pub const RENDER_OVER_BUDGET: &str = "render_over_budget";
-/// The ordered list of phases the work moves through.
+/// The phase library a session runs in (#787): `starter`, `user`, or a
+/// directory of phase documents.
+pub const PHASE_LIBRARY: &str = "phase_library";
+/// The library's phase the session starts in (#787).
+pub const STARTING_PHASE: &str = "starting_phase";
+/// The ordered list of phases (#563), replaced by [`PHASE_LIBRARY`] and
+/// [`STARTING_PHASE`] (#787): refused, naming them.
 pub const PHASES: &str = "phases";
-/// The table of allowed transitions, one array per phase.
+/// The table of allowed transitions (#563), replaced likewise.
 pub const PHASE_TRANSITIONS: &str = "phase_transitions";
 
 /// When this session's meditations fire.
@@ -124,8 +148,8 @@ pub enum PolicyError {
         /// Where it was named.
         under: String,
     },
-    /// Transitions were declared with no phases to move between.
-    TransitionsWithoutPhases,
+    /// A key that must hold one word holds something else.
+    NotAWord(&'static str),
     /// The same phase appears twice in the list.
     DuplicatePhase(String),
     /// A key that must hold a fraction in (0, 1] holds something else.
@@ -141,6 +165,14 @@ pub enum PolicyError {
     /// [`RECONCILE_GATE`] is `refuse` with the audit off: nothing could
     /// address a change, so every meditation with one would hold.
     GateWithoutAudit,
+    /// A key #787 replaced: `phases` or `phase_transitions`.
+    Replaced(&'static str),
+    /// [`PHASE_LIBRARY`] without [`STARTING_PHASE`], or the other way round.
+    HalfAPhaseStart,
+    /// The library [`PHASE_LIBRARY`] names does not read: why.
+    PhaseLibrary(String),
+    /// [`STARTING_PHASE`] names no phase of the library.
+    NotInTheLibrary(String),
 }
 
 impl fmt::Display for PolicyError {
@@ -163,13 +195,24 @@ impl fmt::Display for PolicyError {
                 f,
                 "`{named}`, named under `{under}`, is not one of the declared phases"
             ),
-            Self::TransitionsWithoutPhases => f.write_str(
-                "transitions are declared and phases are not, so every transition names \
-                 a phase that does not exist",
-            ),
+            Self::NotAWord(key) => write!(f, "`{key}` is not a quoted word"),
             Self::DuplicatePhase(name) => {
                 write!(f, "`{name}` appears twice in the phase list")
             }
+            Self::Replaced(key) => write!(
+                f,
+                "`{key}` is replaced by `{PHASE_LIBRARY}` and `{STARTING_PHASE}` (#787): name a \
+                 library of phase documents and the phase to start in"
+            ),
+            Self::HalfAPhaseStart => write!(
+                f,
+                "`{PHASE_LIBRARY}` and `{STARTING_PHASE}` name one start: both or neither"
+            ),
+            Self::PhaseLibrary(why) => write!(f, "`{PHASE_LIBRARY}`: {why}"),
+            Self::NotInTheLibrary(name) => write!(
+                f,
+                "`{STARTING_PHASE}` is `{name}`, a phase the library has no document for"
+            ),
             Self::NotAFraction(key) => {
                 write!(f, "`{key}` must be a decimal greater than 0 and at most 1")
             }
@@ -235,33 +278,24 @@ impl Policy {
 /// [`PolicyError`] for a key of the wrong shape, a duplicate phase, or a
 /// transition naming a phase that was never declared.
 pub fn phase_graph(regimen: &Regimen) -> Result<PhaseGraph, PolicyError> {
-    let phases = names(regimen, PHASES)?.unwrap_or_default();
-    let mut graph = PhaseGraph::of(&phases)?;
-
-    if let Some(value) = regimen.get(PHASE_TRANSITIONS) {
-        let Value::Table(table) = value else {
-            return Err(PolicyError::NotAListOfNames(PHASE_TRANSITIONS.to_owned()));
-        };
-        if phases.is_empty() && !table.is_empty() {
-            return Err(PolicyError::TransitionsWithoutPhases);
-        }
-        for (from, targets) in table {
-            let Value::Array(items) = targets else {
-                return Err(PolicyError::NotAListOfNames(format!(
-                    "{PHASE_TRANSITIONS}.{from}"
-                )));
-            };
-            for item in items {
-                let Value::String(to) = item else {
-                    return Err(PolicyError::NotAListOfNames(format!(
-                        "{PHASE_TRANSITIONS}.{from}"
-                    )));
-                };
-                graph.allow(from, to)?;
-            }
+    for replaced in [PHASES, PHASE_TRANSITIONS] {
+        if regimen.get(replaced).is_some() {
+            return Err(PolicyError::Replaced(replaced));
         }
     }
-    Ok(graph)
+    let word = |key: &'static str| match regimen.get(key) {
+        None => Ok(None),
+        Some(Value::String(word)) => Ok(Some(word.clone())),
+        Some(_) => Err(PolicyError::NotAWord(key)),
+    };
+    match (word(PHASE_LIBRARY)?, word(STARTING_PHASE)?) {
+        (None, None) => Ok(PhaseGraph::none()),
+        (Some(library), Some(start)) => {
+            let library = super::library::named(&library).map_err(PolicyError::PhaseLibrary)?;
+            PhaseGraph::from_library(&library, &start)
+        }
+        _ => Err(PolicyError::HalfAPhaseStart),
+    }
 }
 
 impl Policy {
@@ -474,24 +508,6 @@ fn positive(regimen: &Regimen, key: &'static str) -> Result<Option<u64>, PolicyE
     // The cast is safe: the branch above has established the value is
     // positive, so it fits an unsigned integer of the same width.
     Ok(Some(count.unsigned_abs()))
-}
-
-/// A list of names under `key`, if the regimen carries one.
-fn names(regimen: &Regimen, key: &'static str) -> Result<Option<Vec<String>>, PolicyError> {
-    let Some(value) = regimen.get(key) else {
-        return Ok(None);
-    };
-    let Value::Array(items) = value else {
-        return Err(PolicyError::NotAListOfNames(key.to_owned()));
-    };
-    let mut out = Vec::with_capacity(items.len());
-    for item in items {
-        let Value::String(name) = item else {
-            return Err(PolicyError::NotAListOfNames(key.to_owned()));
-        };
-        out.push(name.clone());
-    }
-    Ok(Some(out))
 }
 
 #[cfg(test)]

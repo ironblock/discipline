@@ -154,6 +154,88 @@ Send `end`: `{"kind":"end"}` posted to `serve`'s `/commands`. `serve` then:
 
 You do not need to interrupt it. Once it has exited, a later command finds nothing listening. In the moment before (while the record is written and the streams drain) one is answered `409` and writes nothing to the log.
 
+## A profile, and the first-run check
+
+The endpoint, the model, the head and the regimen can live in a per-user config instead of on every start's command line. The file is `$XDG_CONFIG_HOME/discipline/drive.toml`, or `~/.config/discipline/drive.toml` when `XDG_CONFIG_HOME` is unset. It is your own file, outside any checkout; nothing about it goes in the tree. It is written in the regimen's TOML subset, with two tables of tables:
+
+```toml
+[endpoints.floor]
+url = "http://HOST:PORT/v1/chat/completions"
+key_file = "~/.config/discipline/floor.key"
+
+[profiles.floor]
+endpoint = "floor"
+model = "the-model"
+head = "~/heads/floor.txt"
+regimen = "~/regimens/floor.toml"
+auth_file = "~/.config/discipline/drive.auth"
+port = 7801
+```
+
+- **Keys:** a profile's keys are `serve`'s flags without their dashes, with `_` for `-`.
+- **`endpoint`:** names an `[endpoints]` table, which supplies its `url`, and its `key_file` unless the profile names one. It can instead be a URL itself.
+- **Credentials:** a key or credential is named by its file's path. No key holds one written in, so a profile cannot inline a secret.
+- **Paths:** a leading `~` means the home directory.
+
+Start from it:
+
+```
+diet-drive serve --profile floor
+```
+
+A flag given on the command line beats the profile's, and `--config FILE` names another config file.
+
+**The first-run check.** `diet-drive check --profile floor` (or with `serve`'s flags) starts nothing and binds nothing. It reports four results on one screen, each `ok`, `failed` or `skipped`, with why:
+
+1. **endpoint:** whether the endpoint answers `GET /v1/models`.
+2. **model:** whether it lists the model.
+3. **engine:** whether the regimen's engine check passes, as `serve` runs it before it binds.
+4. **sandbox:** whether the sandbox opens on this host: Seatbelt on macOS, `bwrap` on Linux.
+
+It exits `0` when nothing failed, `1` otherwise.
+
+## An agent drives it over MCP
+
+`diet-drive mcp` is an MCP server on standard input and output. Its tools drive one running `serve`, so a Claude app or Claude Code session drives the session in place of the page. Start `serve` as in step 1, then give the MCP server its `listening` and, when `serve` has one, the same auth file:
+
+```
+diet-drive mcp --url http://127.0.0.1:7801 --auth-file ~/.config/discipline/drive.auth
+```
+
+Attach it to Claude Code with the binary's absolute path:
+
+```
+claude mcp add diet-drive -- /abs/path/to/target/debug/diet-drive mcp --url http://127.0.0.1:7801 --auth-file ~/.config/discipline/drive.auth
+```
+
+In the Claude app, add the same command under `mcpServers` in its MCP configuration, as `command` and `args`.
+
+**From nothing, in one call.** Started with no `--url`, the server's `start` tool takes a profile's name. It launches `diet-drive serve --profile NAME`, attaches to the address `serve` prints, and uses the profile's auth file. `stop` ends the session and the `serve` it started; nothing is left running, and closing the MCP server stops it too. So the Claude Code line can be:
+
+```
+claude mcp add diet-drive -- /abs/path/to/target/debug/diet-drive mcp
+```
+
+
+| tool | what it calls |
+| --- | --- |
+| `start`, `stop` | a profile launched as `serve`, with `phase` its `start-phase`; the session and that process ended |
+| `status`, `wait` | `GET /state`, with the current `phase` and a pending proposal and its evidence read from the log; `GET /wait` |
+| `ask` | the `ask` command: `text`, `scoping`, `files`; then waits for the turn (below) unless `wait` is false |
+| `attach` | a local PNG uploaded to `POST /files`; returns its `sha256` for an ask's `files` |
+| `approve` | `POST /approve`: `call`, `scope` |
+| `cancel`, `end` | the matching commands; `cancel` takes the current turn when none is named |
+| `memory` | `GET /memory`, or `?all` |
+| `edit`, `flag` | `edit-entry`, `flag-entry` |
+| `declare_meditation`, `refill_anyway` | the matching commands |
+| `propose_phase`, `move_phase`, `rule_phase` | the operator's proposal (`propose-phase`), the operator's move alone (`move-phase`, refused `not-unilateral` under `operator_unilateral = false`), and a ruling on the model's (`ratify-phase`: `meditation`, `keep` or `stay`, the pending proposal when no `call` is named) |
+| `open_tangent`, `close_tangent` | the matching commands |
+| `events` | `GET /events`: the log lines after a seq, of the kinds named |
+
+**`ask` waits for its turn** by default. It returns when the session is next idle (the turn and its forks and audits settled), holds a meditation, waits on an approval, or has ended, or when `timeout` passes (30 minutes unless given). It sends `notifications/progress` while it waits, when the call carries a progress token. It returns why it returned (`idle`, `held`, `approval`, `ended` or `timed_out`), the last state, and a digest of what the turn did: the final answer, each tool call and its outcome, each fork and audit with its patches, meditations, refusals, and how the turn settled. Claude Code moves a call that runs past two minutes to a background task and delivers its result as a notification, so a long turn tells the driving session when it is done. `wait: false` returns at once with the ask's seq and turn.
+
+Each tool returns `serve`'s status and body as they came, a refusal's `refused` tag included. A tool that cannot reach `serve`, or is given the wrong arguments, says so as a tool error. The loop an agent runs is the one under `status` and `wait`: read the state, send a command, then wait with `after` set to the last state's `last_seq`.
+
 ## No model at hand
 
 Run this first: a whole session, driven end to end, with no model server, no GPU and no regimen. Each long-running command gets its own terminal, every one from the repository root: the stand-in, `serve`, and (for the `curl` path) one watching the events and one sending commands.
@@ -207,6 +289,29 @@ An ask is answered `200` with the turn it opened, `{"seq":1,"turn":1}`. `end` is
 
 After `end`, the stream closes, `serve` exits `0`, and `session.log` holds the same lines the stream carried. Before `end`, a command `serve` refuses is answered `409` with `{"refused": <why>}`, and the log gains a `refused` line naming it. An ask sent while a turn is in flight is one: `{"refused":"in-flight"}`.
 
+**An agent driving it reads the state, not the log.** Three routes beside `/events`, under the same `Host`, `Origin` and auth rules, log nothing:
+
+- **`GET /state`** answers what the session is doing now, as one JSON object:
+  - `session`: `running` or `ended`, and `settlement`;
+  - `turn`: `number`, and `state` — `running`, `awaiting-approval`, or `settled` with its `reason`;
+  - `in_flight`: the `forks` and `audits` running, by their lines' `seq`, the forks `queued` behind them, and whether a pre-warm is `warming`;
+  - `meditation`: `state` — `none`, `capturing`, or `held` with its `unaddressed`;
+  - `approval`: the prompt waiting on you, in `event: waiting`'s shape;
+  - `refusal`: the last refused command, its `seq`, `command` and `because`;
+  - `last_seq`, and `idle`: no turn running, nothing in flight or queued, and no prompt waiting.
+
+  `turn`, `approval` and `refusal` are absent when there is none.
+- **`GET /wait?until=idle|<kind>&after=<seq>&timeout=<s>`** is the same object, once the session is idle, or once a line of that `kind` (`meditation.held`, `turn.settled`, any line's) is logged after `after` — the whole log when `after` is absent — with that line as `event`. At `timeout` (30 s when absent, at most 300 s) it answers the state as it is with `"timed_out": true`, so loop on it rather than holding one request open. Any other query is `400`.
+
+- **`GET /memory`** is working memory as `serve` holds it: `entries`, the live ones, each in the object's own dump shape (`id`, `content`, `state`, `provenances` with each one's `lane`, `turn` and `fork`, and `supersedes`, `voided_by` or `aliases` when it has them), and `last_seq`. An entry with an edit or flag of yours no meditation has addressed yet carries `operator`: each change's `kind`, `edit` or `flag`, and a flag's `note`. With `?all`, resolved, parked, retired and voided entries come too. Read memory here rather than folding the log again.
+
+```
+curl -s -X POST -H 'Content-Type: application/json' -d '{"kind":"ask","text":"hello"}' http://127.0.0.1:7801/commands
+curl -s 'http://127.0.0.1:7801/wait?until=idle&timeout=120'
+```
+
+`idle` waits for the gap's forks and a meditation's audit, not only for `turn.settled`. A held meditation is idle: it waits on you, and `meditation.state` says so.
+
 ## Rehearsing a regimen with no model
 
 To rehearse a session that runs commands, with approvals and a record, use the rehearsal regimen [`replay.toml`](replay.toml) against `diet-drive replay`. It plays two captures of one real llama.cpp session, byte for byte. Every ask is answered with a `bash` call of `ls | wc -l`, and once the call's output comes back, with that session's answer, which settles `final`.
@@ -226,3 +331,30 @@ target/debug/diet-drive serve --endpoint http://127.0.0.1:7902/v1/chat/completio
 ```
 
 `serve`'s engine check passes only against the replay: its `GET /props` reports the `build_info` the registry's `canned-replay` entry declares.
+
+## Scenarios: a drive written down
+
+A scenario is a drive written as steps and expectations, one JSON line each (#760). Its format note is [`diet/scenarios/README.md`](../scenarios/README.md), and each one lives under [`diet/scenarios/`](../scenarios/). From the repository root:
+
+```
+target/debug/diet-drive scenario diet/scenarios/levers-run-c.jsonl --out runs/YYYY-MM-DD-<name>
+```
+
+This runs it on the canned scenario substrate:
+- `serve` is started as a child process, answered by the scenario's own replies;
+- it is driven through `/commands`, `/state`, `/wait` and `/memory`;
+- its log is checked against the expectations;
+- when they pass, the outputs go to `scripts/assemble-run.py` (`--no-assemble` keeps the log and the record under `--out` instead).
+
+One JSON line on stdout says how it went:
+- `ok`;
+- `substrate`;
+- `replies_sha256`, on a canned run;
+- `unmet`: the expectations not met;
+- `unmatched`: the requests no reply answered;
+- `failure`: the step that went wrong.
+
+It exits `0` only when all of it passed. `./verify.sh`'s `scenarios` check runs every scenario this way, and fails when there are none.
+
+**Re-firing a run on a model:** add `--endpoint URL --model NAME` (and `--key-file FILE`). It runs under the scenario's `live_regimen` unless `--regimen` names another. The replies are ignored. The assembled README says who drove it: the scenario, re-fired on the regimen's substrate. The endpoint is never written.
+

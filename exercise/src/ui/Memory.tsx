@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, type FormEvent } from 'react';
 
 import type { Ack, Command } from '../drive/transport.ts';
 import type { Folded, MemoryEntry } from '../session/fold.ts';
@@ -108,39 +108,52 @@ function EntryActions({ id, text, act }: { readonly id: string; readonly text: s
       setRefused(undefined);
     } else setRefused(refusalOf(ack.refused).label);
   };
+  // A form, so Return submits whichever mode is open; each control is named with its entry, so one query finds one.
+  const submit = (e: FormEvent) => {
+    e.preventDefault();
+    if (mode === 'edit') void send({ kind: 'edit-entry', id, content: draft.trim() });
+    else if (mode === 'flag') void send({ kind: 'flag-entry', id, note: note.trim() });
+  };
   return (
-    <span className="ex-memory__actions">
+    <form className="ex-memory__actions" onSubmit={submit}>
       {mode === 'edit' ? (
         <>
-          <textarea aria-label={`edit ${id}`} value={draft} rows={2} onChange={(e) => setDraft(e.target.value)} />
-          <button type="button" data-action="save" onClick={() => void send({ kind: 'edit-entry', id, content: draft.trim() })}>
+          <input
+            type="text"
+            aria-label={`Edit ${id}`}
+            value={draft}
+            autoFocus
+            onFocus={(e) => e.currentTarget.select()}
+            onChange={(e) => setDraft(e.target.value)}
+          />
+          <button type="submit" data-action="save" aria-label={`Save edit ${id}`}>
             save
           </button>
-          <button type="button" onClick={() => setMode('none')}>
+          <button type="button" aria-label={`Cancel edit ${id}`} onClick={() => setMode('none')}>
             cancel
           </button>
         </>
       ) : mode === 'flag' ? (
         <>
-          <input aria-label={`flag ${id}`} value={note} placeholder="what is wrong with it?" onChange={(e) => setNote(e.target.value)} />
-          <button type="button" data-action="send-flag" onClick={() => void send({ kind: 'flag-entry', id, note: note.trim() })}>
+          <input type="text" aria-label={`Flag ${id}`} value={note} placeholder="what is wrong with it?" autoFocus onChange={(e) => setNote(e.target.value)} />
+          <button type="submit" data-action="send-flag" aria-label={`Send flag ${id}`}>
             flag
           </button>
-          <button type="button" onClick={() => setMode('none')}>
+          <button type="button" aria-label={`Cancel flag ${id}`} onClick={() => setMode('none')}>
             cancel
           </button>
         </>
       ) : (
         <>
-          <button type="button" data-action="edit" title="rewrite this entry: yours supersedes it, and the model may not overwrite it" onClick={() => (setDraft(text), setMode('edit'))}>
+          <button type="button" data-action="edit" aria-label={`Edit ${id}`} title="rewrite this entry: yours supersedes it, and the model may not overwrite it" onClick={() => (setDraft(text), setMode('edit'))}>
             edit
           </button>
-          <button type="button" data-action="flag" title="flag this entry with a note: the next meditation addresses it" onClick={() => setMode('flag')}>
+          <button type="button" data-action="flag" aria-label={`Flag ${id}`} title="flag this entry with a note: the next meditation addresses it" onClick={() => setMode('flag')}>
             flag
           </button>
         </>
       )}
       {refused ? <span className="ex-memory__refusal">{refused}</span> : null}
-    </span>
+    </form>
   );
 }

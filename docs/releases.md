@@ -6,18 +6,18 @@
 
 The maintainer, 2026-10-09: "Working prototype _with every theorized lever present_ → controls and reproducible tests → rigor, test matrix, data collection → publish." Each is an initiative, run in that order, and holds as many milestones as it needs; nothing in a later initiative is an obstacle to an earlier one.
 
-1. **The prototype:** every theorized lever (`program.md`, The levers) present and working. v0.1.0 is its first milestone, v0.2.0 the remainder of the levers, and v0.3.0 the hosted API (approved by the maintainer, 2026-10-10).
+1. **The prototype:** every theorized lever (`program.md`, The levers) present and working. v0.1.0 is its first milestone, v0.2.0 the remainder of the levers, v0.3.0 sessions an agent can drive end to end, v0.4.0 phased operation (both the maintainer, 2026-10-11), and v0.5.0 the hosted API (approved by the maintainer, 2026-10-10).
 2. **Controls and reproducible tests.**
 3. **Rigor:** the test matrix and data collection.
 4. **Publish.**
 
 ## v0.1.0 — the pieces work
 
-The prototype's first milestone. Each piece of the harness shown working **once, live, on the floor**. A passing test does not count. Using the pieces together is v0.4.0's.
+The prototype's first milestone. Each piece of the harness shown working **once, live, on the floor**. A passing test does not count. Using the pieces together is v0.6.0's.
 
 **Floor:** the 3.8 EXL3 line, config r2, on linux-pc (`accel24-tabbyapi-exl3-qwen38-27b-3p00`, #497), driven through TabbyAPI (#496). The 3.6 is retired.
 
-**Evidence:** four agent-driven runs under `runs/`, each row's approved by the maintainer (2026-10-10). Finishing T1 ([`trajectories/t1.md`](trajectories/t1.md)) moved to v0.4.0: at `xhigh` its script does not fit the floor's window without a seam ([`2026-10-10-t1-run-3-agent-driven`](../runs/2026-10-10-t1-run-3-agent-driven)).
+**Evidence:** four agent-driven runs under `runs/`, each row's approved by the maintainer (2026-10-10). Finishing T1 ([`trajectories/t1.md`](trajectories/t1.md)) moved to v0.6.0: at `xhigh` its script does not fit the floor's window without a seam ([`2026-10-10-t1-run-3-agent-driven`](../runs/2026-10-10-t1-run-3-agent-driven)).
 
 | piece | shown when | evidence |
 | --- | --- | --- |
@@ -53,7 +53,7 @@ One working state per lever, a non-default one where the default is off, none or
 | isolation | `sandbox` | [`seam-smoke-run-3`](../runs/2026-10-10-seam-smoke-run-3-agent-driven): a Seatbelt refusal at 12815 |
 | approval | none | [`seam-smoke-run-3`](../runs/2026-10-10-seam-smoke-run-3-agent-driven) |
 | reasoning state | on, `xhigh` | [`seam-smoke-run-1`](../runs/2026-10-10-seam-smoke-run-1-agent-driven) and [`seam-smoke-run-3`](../runs/2026-10-10-seam-smoke-run-3-agent-driven) |
-| cache lifetime (hosted) | — | v0.3.0's: every paid call needs the maintainer's approval |
+| cache lifetime (hosted) | — | v0.5.0's: every paid call needs the maintainer's approval |
 | substrate rung | the floor | [`seam-smoke-run-3`](../runs/2026-10-10-seam-smoke-run-3-agent-driven) |
 | tool surface | standard | [`seam-smoke-run-1`](../runs/2026-10-10-seam-smoke-run-1-agent-driven), [`seam-smoke-run-3`](../runs/2026-10-10-seam-smoke-run-3-agent-driven) and [`image-smoke`](../runs/2026-10-10-image-smoke-agent-driven) |
 | instruction files | on, an AGENTS.md in the worktree | [`levers-run-a`](../runs/2026-10-10-levers-run-a-agent-driven): all 8 trunk answers followed it |
@@ -85,15 +85,54 @@ It also carries what merged after v0.2.0's tag:
 - sidechains as lanes in the Claude Code adapter (#708);
 - a capture row's count (#443).
 
-## v0.3.0 — the hosted API live
+## v0.3.0 — driveable
+
+An agent drives a served session end to end, and a drive can be run again. The maintainer, 2026-10-11, pulling it forward: his ability to run sessions is always the limiting factor. The work follows the surface seat's friction list from driving every run under `runs/`, and is split by whose concern it is: the session's on diet's side, the operator's page on exercise's.
+
+- **The session's state, readable:** `GET /state`, a `/wait` long-poll and `GET /memory` (#756).
+- **A run assembled, not transcribed:** the log names its build; one command scrubs, checks and digests a run directory and writes its README skeleton; the seqs a README cites come from a query (#757).
+- **Driven through tools:** an MCP server over serve's operator commands, so a Claude.app session drives a session without a browser (#758).
+- **The page operable by keyboard and by an agent** (#759).
+- **Scenarios:** a drive written as steps and expectations, run on the stand-in in CI and re-fired on a named endpoint by one command (#760).
+
+**Done when** levers run C's three levers, written as a scenario, pass on the stand-in in CI; and the same scenario, re-fired on the floor through the runner, lands as an assembled run under `runs/`.
+
+**Done:** the scenario passes on the stand-in in CI (`diet/scenarios/levers-run-c.jsonl`, #777), and its re-fire on the floor is [`2026-10-12-levers-run-c-refire-agent-driven`](../runs/2026-10-12-levers-run-c-refire-agent-driven) (#811): every expectation met, assembled and checked. The maintainer approved it on 2026-10-12.
+
+**v0.3.0** (2026-10-12): the milestone's issues, #756–#760, #717, #766, #772, and #780's fix to MCP `events`. It also carries the v0.4.0 work merged so far:
+- phases as documents, two keys, the page and MCP (#787–#790);
+- capture during the turn (#782–#784);
+- what the phased T1 retries found (#797, #806, #813, #814, #821, #822, #826);
+- the kitchen-sink scenario (#798, part 1).
+
+v0.4.0 is not done: its done-when, T1 in phases on the floor reaching step 8, is being driven.
+
+## v0.4.0 — phased operation
+
+Structure for an autonomous model, enforced classically: Superpowers-like ground rules without its token weight (the maintainer, 2026-10-11). Agent-driven T1 on the floor died at step 4 when one build turn filled the window with working memory empty (the T1 smoke run, 2026-10-11); phases give that turn a checkpoint, and capture during the turn gives the checkpoint something to refill from.
+
+- **Phases as documents:** TOML in the user's library, each with its ground rules and suggested or allowed transitions; a starting phase by default or by choice, a quick-task phase with none. At a meditation the system prompt becomes the head plus the phase's ground rules, the only time it changes (#787).
+- **Two keys:** the model or the operator proposes a move, the other accepts, the operator may move alone; a model's proposal ends its turn; the operator rules meditate-and-move, keep or stay, shown the evidence (#788), on the page (#789) and over MCP (#790).
+- **Capture during the turn:** interviews cut at a step run in the spare slot while the trunk goes on (#782); interviews warranted by what a step produced, the predecessor's evidence, trouble and open triggers (#783); mechanical capture of the files each step touched (#784).
+- **What the phased retries found** (agent-driven T1 on Flash-Next and the floor, 2026-10-11/12):
+  - a window meditation inside a turn splits the running turn, keeping its ask and only its recent steps, as OpenCode 2 and Pi do (#813);
+  - a refill fits the window: reference lines bounded, working memory elided to the window's line (#814), and the meditation's audit fitted the same way (#821);
+  - a fork's own record-tool calls fold as its answer (#806);
+  - a fork cut from the trunk reserves only its new tokens where the server shares prefix pages (#797);
+  - the in-turn fork queue is bounded (#822);
+  - the kitchen sink shows every lever as a diet scenario (#798).
+
+**Done when** T1, driven on the floor in phases, reaches step 8's feedback loops without the window ending a turn.
+
+## v0.5.0 — the hosted API live
 
 The hosted API kind driven live (#555, #556): the first paid calls, the cache lifetime lever, and the per-fork cache-read share, on Haiku 5.5 (the nearest to the 27B floor) and Sonnet 5.5 (the maintainer, 2026-10-10). Every live call needs the maintainer's approval.
 
-## v0.4.0 — the pieces together (T2)
+## v0.6.0 — the pieces together (T2)
 
-The pieces used in whatever order the work needs to reach a goal, in one session that ends in a declared compaction. T2 is that session; its trajectory is not yet written. Finishing T1 moved here from v0.1.0 (the maintainer, 2026-10-10); how it runs, with a seam or without, is still the maintainer's to decide. This milestone and v0.5.0 predate the initiatives, and follow its lever milestones.
+The pieces used in whatever order the work needs to reach a goal, in one session that ends in a declared compaction. T2 is that session; its trajectory is not yet written. Finishing T1 moved here from v0.1.0 (the maintainer, 2026-10-10); it runs with meditation allowed, automatic or declared (the maintainer, 2026-10-11; [`trajectories/t1.md`](trajectories/t1.md)). This milestone and v0.7.0 predate the initiatives, and follow its lever milestones.
 
-## v0.5.0 — T3, NetHack
+## v0.7.0 — T3, NetHack
 
 Attempting the NetHack 5 WebAssembly port, with a record that says truthfully which arm, regime and model ran it. The comparison is the archived Claude desktop app session of the same work, read by the Claude Code adapter (#500, #501).
 

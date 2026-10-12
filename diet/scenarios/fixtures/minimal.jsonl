@@ -1,0 +1,21 @@
+{"scenario":"minimal","regimen":"minimal.toml","live_regimen":"../drive/floor.toml","head":"../drive/heads/floor.md","approvals":"session","seed":{"AGENTS.md":"minimal.agents.md"}}
+{"reply":{"when":"Record the decisions","text":"DECISION: a tracker"}}
+{"reply":{"text":"Writing it.","calls":[{"id":"call-w","name":"write","arguments":"{\"path\":\"a.py\",\"content\":\"x\"}"}]}}
+{"reply":{"text":"Done.","delay_ms":250,"prompt_tokens":1200}}
+{"step":"start-phase","phase":"orient"}
+{"step":"ask","text":"write a.py","scoping":true}
+{"step":"ask","text":"what is in shot.png","attach":["shot.png"]}
+{"step":"open-tangent","id":"t/1"}
+{"step":"close-tangent","each":"keep"}
+{"step":"flag","pick":0,"note":"stale?","as":"flagged"}
+{"step":"edit","pick":"tracker","text":"decision: a ledger","as":"edited"}
+{"step":"declare-meditation"}
+{"step":"wait","until":"meditation.held","timeout":60}
+{"step":"ask","text":"go on","refused":"meditation-held"}
+{"step":"refill-anyway"}
+{"step":"rule-phase","call":"call-p","choice":"keep"}
+{"step":"propose-phase","to":"build","meditate":false}
+{"step":"move-phase","to":"plan"}
+{"step":"end"}
+{"expect":"fork","name":"fork","where":{"trigger~":"call:","why":"read"},"at_least":2}
+{"expect":"meditation.held","where":{"unaddressed~":"$flagged"},"after":"fork"}

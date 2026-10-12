@@ -1,0 +1,10 @@
+name = "plan"
+ground_rules = "x"
+
+[[transitions]]
+to = "build"
+kind = "allowed"
+
+[[transitions]]
+to = "build"
+kind = "suggested"

@@ -1,0 +1,2 @@
+A row's `phase` and `phase_sha256` name one phase document (#787): a name
+with no digest says which phase and not which version of it.

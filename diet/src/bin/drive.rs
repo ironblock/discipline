@@ -77,6 +77,15 @@ const SERVE: &str = "serve";
 /// The stream-replay server's subcommand (#411).
 const REPLAY: &str = "replay";
 
+/// The subcommand that serves MCP over a running `serve` (#758).
+const MCP: &str = "mcp";
+
+/// The first-run check (#717).
+const CHECK: &str = "check";
+
+/// The scenario runner's subcommand (#760).
+const SCENARIO: &str = "scenario";
+
 /// The port `diet-drive replay` listens on unless told another.
 const REPLAY_PORT: u16 = 7902;
 
@@ -87,8 +96,12 @@ fn serve_usage() -> String {
          \x20                       [--log FILE] [--record FILE]\n\
          \x20                       [--allow-origin URL]... [--max-output-tokens N]\n\
          \x20                       [--worktree DIR]\n\
-         \x20                       [--seat-endpoint URL --seat-model NAME [--seat-key-file FILE]]\n\n",
+         \x20                       [--seat-endpoint URL --seat-model NAME [--seat-key-file FILE]]\n\
+         \x20      diet-drive serve --profile NAME [--config FILE] [any flag above]\n\n",
     );
+    out.push_str("--profile takes the flags from a profile in the per-user config\n");
+    out.push_str("($XDG_CONFIG_HOME/discipline/drive.toml, or --config); a flag given\n");
+    out.push_str("here beats the profile's (#717).\n\n");
     out.push_str("Serves one interactive session over HTTP + SSE on 127.0.0.1, or on\n");
     out.push_str("--listen's address:\n");
     out.push_str("GET /events streams the session's log, POST /commands takes its\n");
@@ -709,9 +722,17 @@ fn serve(args: &[String]) -> ExitCode {
         Ok(listener) => listener,
         Err(refused) => return refused,
     };
+    // A substrate whose served configuration takes no images (#815): an
+    // ask carrying one is refused rather than dropped by the engine.
+    let blind = substrate
+        .filter(|id| {
+            diet::drive::registry::identity(diet::drive::registry::REGISTRY, id)
+                .is_ok_and(|identity| !diet::drive::served::takes_images(&identity))
+        })
+        .map(str::to_owned);
     let session = served_session(
         (transport, seat),
-        (shape, dialect),
+        (shape, dialect, blind),
         tools,
         (
             claim,
@@ -722,6 +743,8 @@ fn serve(args: &[String]) -> ExitCode {
                 instruction_files,
                 // #573: the start row's levers, from the same reading.
                 read_at_start.as_ref().map(|read| read.levers.clone()),
+                // #757: the build serving it, as the build script read it.
+                diet::build::build(),
             ),
         ),
     );
@@ -921,7 +944,7 @@ fn outputs(
 /// how many streams the server serves.
 fn served_session(
     (transport, seat): (HttpStream, Option<session::Offboard<HttpStream>>),
-    (mut shape, dialect): (RequestShape, Dialect),
+    (mut shape, dialect, blind): (RequestShape, Dialect, Option<String>),
     tools: Option<Tools>,
     declared: session::Declared,
 ) -> std::sync::Arc<Session<HttpStream>> {
@@ -957,6 +980,10 @@ fn served_session(
     // A hosted fork's own lifetimes (#556), when they differ.
     let session = match forks {
         Some(forks) => session.forking_through(forks),
+        None => session,
+    };
+    let session = match blind {
+        Some(substrate) => session.without_vision(&substrate),
         None => session,
     };
     std::sync::Arc::new(match seat {
@@ -1116,76 +1143,19 @@ fn served_dialect(id: &str) -> Result<Dialect, String> {
     }
 }
 
-/// What `serve`'s capture gap forks under (#374): the rules the regimen at
-/// `regimen` lists under `interview_warrant`, a working object under
-/// `regime`, and the cadence and budget its derived meditations fire on, the
-/// budget taken of the substrate's registered `serving_context`. `None` when
-/// it lists no rule, or there is no regimen: then no fork and no derived
-/// meditation ever fires, and a regimen that declares a meditation trigger anyway is
-/// refused.
-fn serving_interview(
-    regimen: Option<&str>,
-    regime: Option<&Regime>,
-) -> Result<Option<Interview>, String> {
-    let (Some(path), Some(regime)) = (regimen, regime) else {
-        return Ok(None);
-    };
-    let text =
-        std::fs::read_to_string(path).map_err(|why| format!("{path} cannot be read: {why}"))?;
-    let read = regimen::parse(&text).map_err(|why| format!("{path} is not a regimen: {why:?}"))?;
-    let rules = session::interview_warrant(&read).map_err(|why| format!("{path}: {why}"))?;
-    let window = diet::drive::registry::serving_context(
-        diet::drive::registry::REGISTRY,
-        &regime.substrates[0].id,
-    );
-    let meditations = diet::meditation::policy::Served::from_regimen(&read, window)
-        .map_err(|why| format!("{path}: {why}"))?;
-    let delivery = session::fork_delivery(&read).map_err(|why| format!("{path}: {why}"))?;
-    // The phase graph, by the scripted drive's own reader (#563).
-    let phases =
-        diet::meditation::policy::phase_graph(&read).map_err(|why| format!("{path}: {why}"))?;
-    if rules.is_empty() && !phases.is_empty() {
-        return Err(format!(
-            "{path} declares phases and no `interview_warrant`: nothing fills working \
-             memory, so no meditation could ever move between them"
-        ));
-    }
-    if rules.is_empty() && meditations.declares_a_trigger() {
-        return Err(format!(
-            "{path} declares a meditation trigger and no `interview_warrant`: nothing fills \
-             working memory, so no meditation could ever fire"
-        ));
-    }
-    // Self-capture (#609) keeps working memory too, forks or none.
-    let self_capture = session::self_capture(&read);
-    // #610: a fork answers through the capture tools only where it is asked
-    // to, in a set written for them, and where self-capture declares them.
-    let capture = session::capture_modality(&read).map_err(|why| format!("{path}: {why}"))?;
-    let asks = session::fork_asks(&read);
-    if rules.is_empty() && self_capture.is_none() && diet::drive::prune::of(&read).is_some() {
-        return Err(format!(
-            "{path} declares `model_pruning = \"on\"` and neither an `interview_warrant` nor \
-             self-capture: nothing fills working memory, so no meditation could ever replace a \
-             pruned result"
-        ));
-    }
-    // #150's gate: a tools-route audit marks nothing (its pinned words
-    // carry no markers), so under `refuse` every meditation with a change would
-    // hold.
-    if meditations.reconcile_gate == diet::meditation::policy::ReconcileGate::Refuse
-        && capture == diet::dogma::asks::Modality::Tools
-    {
-        return Err(format!(
-            "{path} declares `{} = \"refuse\"` with `{}` = \"tools\": the tools-route \
-             audit addresses no operator change, so every meditation with one would hold",
-            diet::meditation::policy::RECONCILE_GATE,
-            session::CAPTURE_MODALITY
-        ));
-    }
+/// Whether the capture route a regimen declares can work (#610, #730): a
+/// tools route needs forks, self-capture and a tools ask set; a tools ask
+/// set needs the tools route.
+fn capture_route(
+    path: &str,
+    (no_forks, self_capture): (bool, bool),
+    asks: &diet::dogma::asks::AskSet,
+    capture: diet::dogma::asks::Modality,
+) -> Result<(), String> {
     if capture == diet::dogma::asks::Modality::Tools {
-        let refused = if rules.is_empty() {
+        let refused = if no_forks {
             Some("no `interview_warrant`, so no fork ever answers".to_owned())
-        } else if self_capture.is_none() {
+        } else if !self_capture {
             Some("self-capture off, so no fork is offered the capture tools".to_owned())
         } else if asks.modality != capture {
             Some(format!(
@@ -1212,8 +1182,111 @@ fn serving_interview(
             session::CAPTURE_MODALITY
         ));
     }
+    Ok(())
+}
+
+/// What `serve`'s capture gap forks under (#374): the rules the regimen at
+/// `regimen` lists under `interview_warrant`, a working object under
+/// `regime`, and the cadence and budget its derived meditations fire on, the
+/// budget taken of the substrate's registered `serving_context`. `None` when
+/// it lists no rule, or there is no regimen: then no fork and no derived
+/// meditation ever fires, and a regimen that declares a meditation trigger anyway is
+/// refused.
+#[allow(clippy::too_many_lines)]
+fn serving_interview(
+    regimen: Option<&str>,
+    regime: Option<&Regime>,
+) -> Result<Option<Interview>, String> {
+    let (Some(path), Some(regime)) = (regimen, regime) else {
+        return Ok(None);
+    };
+    let text =
+        std::fs::read_to_string(path).map_err(|why| format!("{path} cannot be read: {why}"))?;
+    let read = regimen::parse(&text).map_err(|why| format!("{path} is not a regimen: {why:?}"))?;
+    let rules = session::interview_warrant(&read).map_err(|why| format!("{path}: {why}"))?;
+    // #784: the mechanical lane fills working memory too, forks or none.
+    let mechanical = session::mechanical_capture(&read);
+    let window = diet::drive::registry::serving_context(
+        diet::drive::registry::REGISTRY,
+        &regime.substrates[0].id,
+    );
+    let meditations = diet::meditation::policy::Served::from_regimen(&read, window)
+        .map_err(|why| format!("{path}: {why}"))?;
+    let delivery = session::fork_delivery(&read).map_err(|why| format!("{path}: {why}"))?;
+    // #782: when a step's forks run, and how many at once beside the trunk.
+    let (timing, fork_slots) = session::timing_and_slots(
+        &read,
+        (diet::drive::registry::REGISTRY, &regime.substrates[0].id),
+    )
+    .map_err(|why| format!("{path}: {why}"))?;
+    // #797: whether the trunk's server shares a cut fork's prefix pages.
+    let prefix_pages = session::PrefixPages::of(
+        diet::drive::registry::served_prefix_shared(
+            diet::drive::registry::REGISTRY,
+            &regime.substrates[0].id,
+        )
+        .map_err(|why| format!("{path}: {why}"))?,
+    );
+    // #822: the forks cut during the turn that may wait for a slot.
+    let fork_backlog = session::fork_backlog(&read).map_err(|why| format!("{path}: {why}"))?;
+    // #783: the warrants that look at what a step produced.
+    let step = session::step_warrants(&read, &rules).map_err(|why| format!("{path}: {why}"))?;
+    // #788: whether the operator may move the phase alone.
+    let operator_unilateral =
+        session::operator_unilateral(&read).map_err(|why| format!("{path}: {why}"))?;
+    // The phase graph, by the scripted drive's own reader (#563).
+    let phases =
+        diet::meditation::policy::phase_graph(&read).map_err(|why| format!("{path}: {why}"))?;
+    if rules.is_empty() && !mechanical && !phases.is_empty() {
+        return Err(format!(
+            "{path} declares phases and no `interview_warrant`: nothing fills working \
+             memory, so no meditation could ever move between them"
+        ));
+    }
+    if rules.is_empty() && !mechanical && meditations.declares_a_trigger() {
+        return Err(format!(
+            "{path} declares a meditation trigger and no `interview_warrant`: nothing fills \
+             working memory, so no meditation could ever fire"
+        ));
+    }
+    // Self-capture (#609) keeps working memory too, forks or none.
+    let self_capture = session::self_capture(&read);
+    // #610: a fork answers through the capture tools only where it is asked
+    // to, in a set written for them, and where self-capture declares them.
+    let capture = session::capture_modality(&read).map_err(|why| format!("{path}: {why}"))?;
+    let asks = session::fork_asks(&read);
+    if rules.is_empty()
+        && self_capture.is_none()
+        && !mechanical
+        && diet::drive::prune::of(&read).is_some()
+    {
+        return Err(format!(
+            "{path} declares `model_pruning = \"on\"` and neither an `interview_warrant` nor \
+             self-capture: nothing fills working memory, so no meditation could ever replace a \
+             pruned result"
+        ));
+    }
+    // #150's gate: a tools-route audit marks nothing (its pinned words
+    // carry no markers), so under `refuse` every meditation with a change would
+    // hold.
+    if meditations.reconcile_gate == diet::meditation::policy::ReconcileGate::Refuse
+        && capture == diet::dogma::asks::Modality::Tools
+    {
+        return Err(format!(
+            "{path} declares `{} = \"refuse\"` with `{}` = \"tools\": the tools-route \
+             audit addresses no operator change, so every meditation with one would hold",
+            diet::meditation::policy::RECONCILE_GATE,
+            session::CAPTURE_MODALITY
+        ));
+    }
+    capture_route(
+        path,
+        (rules.is_empty(), self_capture.is_some()),
+        asks,
+        capture,
+    )?;
     Ok(
-        (!rules.is_empty() || self_capture.is_some()).then(|| Interview {
+        (!rules.is_empty() || self_capture.is_some() || mechanical).then(|| Interview {
             rules,
             object: diet::object::WorkingObject::open(regime.clone()),
             meditations,
@@ -1237,12 +1310,20 @@ fn serving_interview(
             threshold_bytes: session::interview_threshold_bytes(&read),
             // #611: off unless declared.
             skip_self_recorded: session::interview_skip_self_recorded(&read),
+            mechanical_capture: mechanical,
             role: session::interview_role(&read),
             // #612: whether the model may prune its tool results; off unless
             // declared.
             prune: diet::drive::prune::of(&read),
-            // #406: a fork's tail; the output cap unless declared.
+            // #406: a fork's tail; 8,192 or the output cap if less, unless
+            // declared (#826).
             fork_tail: session::fork_tail(&read),
+            timing,
+            fork_slots,
+            fork_backlog,
+            prefix_pages,
+            step,
+            operator_unilateral,
         }),
     )
 }
@@ -1911,10 +1992,14 @@ fn confirmations(
         identity.weights,
         diet::formats::record::Weights::Canned { .. }
     ) {
+        // A canned substrate's window is the one its registry entry
+        // declares, as an API substrate's is (#798): none, mostly.
+        let window = diet::drive::registry::serving_context(diet::drive::registry::REGISTRY, id)
+            .map(|tokens| (tokens, "declared"));
         return Ok(Confirmed {
             fields: Vec::new(),
             warmed: Warmed::NotApplicable,
-            window: None,
+            window,
             template: None,
         });
     }
@@ -2182,10 +2267,13 @@ fn key_file_in_declared_path(regimen: Option<&str>, key_file: &str) -> Option<St
 /// Re-execute this program under only the regimen's environment
 /// (`PATH`, `HOME`, `LANG`, `TERM`, `TMPDIR` and its `env_passthrough`),
 /// marked so it does not do it twice. Returns only if the exec failed.
-fn scrubbed() -> ExitCode {
+fn scrubbed(args: &[String]) -> ExitCode {
     use std::os::unix::process::CommandExt as _;
-    let args: Vec<std::ffi::OsString> = std::env::args_os().skip(1).collect();
-    let regimen = if args.first().is_some_and(|first| first == SERVE) {
+    let args: Vec<std::ffi::OsString> = args.iter().map(std::ffi::OsString::from).collect();
+    let regimen = if args
+        .first()
+        .is_some_and(|first| first == SERVE || first == CHECK)
+    {
         args.iter()
             .position(|arg| arg == "--regimen")
             .and_then(|at| args.get(at + 1))
@@ -2224,6 +2312,18 @@ fn usage() -> String {
     // The interactive server, which the first form's usage once hid (#290).
     out.push_str("       diet-drive serve --endpoint URL --model NAME --head FILE ...\n");
     out.push_str("       (one interactive session over HTTP; `diet-drive serve --help`)\n");
+    out.push_str("       diet-drive serve --profile NAME [--config FILE] [serve's flags]\n");
+    out.push_str("       (a profile from the per-user config; `diet-drive serve --help`)\n");
+    out.push_str("       diet-drive check --profile NAME [--config FILE]\n");
+    out.push_str("       (the first-run check; `diet-drive check --help`)\n");
+    out.push_str("       diet-drive mcp [--url http://HOST:PORT] [--auth-file FILE]\n");
+    out.push_str("       (MCP over stdio, driving a running serve; `diet-drive mcp --help`)\n");
+    out.push_str("       diet-drive scenario FILE --out DIR [--endpoint URL --model NAME\n");
+    out.push_str(
+        "           [--key-file FILE]] [--regimen FILE] [--worktree DIR] [--no-assemble]\n",
+    );
+    out.push_str("       (a scenario, #760: on the canned scenario substrate, or re-fired on\n");
+    out.push_str("       an endpoint; diet/scenarios/README.md)\n");
     out.push_str("       diet-drive replay [--answers] [--port N]\n");
     out.push_str("       (substrate `canned-replay-tools` on loopback: captured llama.cpp\n");
     out.push_str("       replies, a `bash` call and then its answer, for a regimen rehearsed\n");
@@ -2248,6 +2348,69 @@ fn usage() -> String {
     out.push_str("a drive that could not run, 3 when the record could not be filed.\n");
     out.push_str("--help prints this to stdout and exits 0.\n");
     out
+}
+
+/// `diet-drive scenario FILE --out DIR [--endpoint URL --model NAME
+/// [--key-file FILE]] [--regimen FILE] [--worktree DIR] [--no-assemble]`
+/// (#760): a scenario run on the canned substrate, or re-fired on a named
+/// endpoint under the scenario's live regimen; one JSON line on stdout says
+/// how it went, and it exits 0 when every step went as written, every
+/// expectation was met and every request had its reply, else 1.
+fn scenario(args: &[String]) -> ExitCode {
+    use diet::drive::scenario::{RunOptions, run};
+    let usage = || {
+        fail(
+            EXIT_USAGE,
+            "usage: diet-drive scenario FILE --out DIR [--endpoint URL --model NAME \
+             [--key-file FILE]] [--regimen FILE] [--worktree DIR] [--no-assemble]",
+        )
+    };
+    let Some((file, rest)) = args.split_first() else {
+        return usage();
+    };
+    let mut options = RunOptions {
+        file: file.into(),
+        assemble: true,
+        ..RunOptions::default()
+    };
+    let mut out = None;
+    let mut flags = rest.iter();
+    while let Some(flag) = flags.next() {
+        if flag == "--no-assemble" {
+            options.assemble = false;
+            continue;
+        }
+        let Some(value) = flags.next() else {
+            return usage();
+        };
+        match flag.as_str() {
+            "--out" => out = Some(value.into()),
+            "--endpoint" => options.endpoint = Some(value.clone()),
+            "--model" => options.model = Some(value.clone()),
+            "--key-file" => options.key_file = Some(value.clone()),
+            "--regimen" => options.regimen = Some(value.into()),
+            "--worktree" => options.worktree = Some(value.into()),
+            _ => return usage(),
+        }
+    }
+    let Some(out) = out else {
+        return usage();
+    };
+    options.out = out;
+    if options.endpoint.is_some() != options.model.is_some() {
+        return fail(EXIT_USAGE, "--endpoint and --model go together");
+    }
+    let drive = match std::env::current_exe() {
+        Ok(drive) => drive,
+        Err(why) => return fail(EXIT_HALT, &format!("this binary cannot be found: {why}")),
+    };
+    let (said, passed) = run(&drive, &options);
+    println!("{said}");
+    if passed {
+        ExitCode::SUCCESS
+    } else {
+        ExitCode::from(EXIT_INPUT)
+    }
 }
 
 /// `diet-drive replay [--answers] [--port N]`: the stream-replay
@@ -2305,25 +2468,298 @@ fn replay(args: &[String]) -> ExitCode {
     }
 }
 
+fn mcp_usage() -> String {
+    String::from(
+        "usage: diet-drive mcp [--url http://HOST:PORT] [--auth-file FILE] [--config FILE]\n\
+         An MCP server on standard input and output (JSON-RPC 2.0, one message a\n\
+         line) whose tools drive one `diet-drive serve`: the one at --url -- its\n\
+         `listening` -- with the credential in --auth-file (`user:password`), or\n\
+         one its `start` tool launches from a profile in the per-user config\n\
+         (--config, else $XDG_CONFIG_HOME/discipline/drive.toml). Each tool\n\
+         returns serve's status and body; `stop` ends the session and the serve\n\
+         it started.\n",
+    )
+}
+
+/// `diet-drive mcp` (#758): the MCP server over a running serve.
+fn mcp(args: &[String]) -> ExitCode {
+    let mut url = None;
+    let mut auth_file = None;
+    let mut config = None;
+    let mut rest = args.iter();
+    while let Some(flag) = rest.next() {
+        let value = rest.next();
+        match (flag.as_str(), value) {
+            ("--url", Some(value)) => url = Some(value.clone()),
+            ("--auth-file", Some(value)) => auth_file = Some(value.clone()),
+            ("--config", Some(value)) => config = Some(std::path::PathBuf::from(value)),
+            _ => {
+                eprint!("{}", mcp_usage());
+                return ExitCode::from(EXIT_USAGE);
+            }
+        }
+    }
+    let credential = match auth_file
+        .as_deref()
+        .map(diet::drive::mcp::credential_in)
+        .transpose()
+    {
+        Ok(credential) => credential,
+        Err(why) => {
+            eprintln!("diet-drive mcp: {why}");
+            return ExitCode::from(EXIT_INPUT);
+        }
+    };
+    let serve = match url
+        .as_deref()
+        .map(|url| diet::drive::mcp::Serve::new(url, credential.as_deref()))
+        .transpose()
+    {
+        Ok(serve) => serve,
+        Err(why) => {
+            eprintln!("diet-drive mcp: {why}");
+            return ExitCode::from(EXIT_USAGE);
+        }
+    };
+    let exe = match std::env::current_exe() {
+        Ok(exe) => exe,
+        Err(why) => {
+            eprintln!("diet-drive mcp: cannot find this program to start serve: {why}");
+            return ExitCode::from(EXIT_HALT);
+        }
+    };
+    let config =
+        config.or_else(|| diet::drive::profile::default_path(|name| std::env::var_os(name)));
+    let home = std::env::var_os("HOME").map(std::path::PathBuf::from);
+    let mut driver = diet::drive::mcp::Driver::new(serve, exe, config, home);
+    match diet::drive::mcp::run(
+        &mut driver,
+        std::io::stdin().lock(),
+        std::io::stdout().lock(),
+    ) {
+        Ok(()) => ExitCode::SUCCESS,
+        Err(why) => {
+            eprintln!("diet-drive mcp: {why}");
+            ExitCode::from(EXIT_OUTPUT)
+        }
+    }
+}
+
+fn check_usage() -> String {
+    String::from(
+        "usage: diet-drive check --profile NAME [--config FILE]\n\
+         \x20      diet-drive check --endpoint URL --model NAME --head FILE [serve's flags]\n\
+         The first-run check (#717), on one screen: whether the endpoint answers,\n\
+         whether it lists the model, whether the regimen's engine check passes,\n\
+         and whether the sandbox is available on this host. Exit 0 when none\n\
+         failed, 1 otherwise. It starts nothing and binds nothing.\n",
+    )
+}
+
+/// `diet-drive check` (#717): the first-run check, its four results one a
+/// line -- `ok`, `failed` or `skipped`, and why.
+fn check(args: &[String]) -> ExitCode {
+    let Some(ServeArgs {
+        endpoint,
+        model,
+        key_file,
+        regimen_file,
+        max_output_tokens,
+        ..
+    }) = serve_args(args)
+    else {
+        eprint!("{}", check_usage());
+        return ExitCode::from(EXIT_USAGE);
+    };
+    let mut failed = false;
+    let mut said = |what: &str, result: Result<String, String>| {
+        let (word, why) = match result {
+            Ok(why) if why.starts_with("skipped") => ("skipped", why),
+            Ok(why) => ("ok", why),
+            Err(why) => {
+                failed = true;
+                ("failed", why)
+            }
+        };
+        println!("{what:<9}{word:<9}{why}");
+    };
+    let transport = match Endpoint::parse(&endpoint) {
+        Ok(parsed) => {
+            let transport = HttpStream::new(chat_endpoint(parsed));
+            match key_file.as_deref().map(bearer_from).transpose() {
+                Ok(Some(bearer)) => Ok(transport.with_bearer(bearer)),
+                Ok(None) => Ok(transport),
+                Err(why) => Err(why),
+            }
+        }
+        Err(why) => Err(format!("{endpoint} is not an endpoint: {why}")),
+    };
+    // The endpoint, and the models it lists, by `GET /v1/models`.
+    let listed = transport
+        .as_ref()
+        .map_err(Clone::clone)
+        .and_then(|transport| {
+            transport
+                .get(
+                    "/v1/models",
+                    std::time::Instant::now() + std::time::Duration::from_secs(10),
+                )
+                .map_err(|why| format!("{endpoint} did not answer GET /v1/models: {why:?}"))
+        });
+    said(
+        "endpoint",
+        listed
+            .as_ref()
+            .map(|reply| format!("{endpoint} answered GET /v1/models {}", reply.status))
+            .map_err(Clone::clone),
+    );
+    said("model", model_listed(&listed, &model));
+    // The regimen's engine check, as serve runs it before it binds.
+    said(
+        "engine",
+        match regimen_file.as_deref() {
+            None => Ok("skipped: no regimen names a substrate to check".to_owned()),
+            Some(path) => registered_regime(path, max_output_tokens).and_then(|(regime, _)| {
+                let id = regime.substrates[0].id.clone();
+                let transport = transport.as_ref().map_err(Clone::clone)?;
+                diet::drive::engine::check_served(transport, &id)
+                    .map(|passed| format!("`{id}`: {}", passed.identity.tag()))
+            }),
+        },
+    );
+    said("sandbox", sandbox_available(regimen_file.as_deref()));
+    if failed {
+        ExitCode::from(EXIT_INPUT)
+    } else {
+        ExitCode::SUCCESS
+    }
+}
+
+/// Whether `listed` -- the endpoint's `GET /v1/models` -- lists `model`
+/// (#717).
+fn model_listed(
+    listed: &Result<diet::client::transport::HttpReply, String>,
+    model: &str,
+) -> Result<String, String> {
+    match listed {
+        Err(_) => Err("nothing to list it: the endpoint did not answer".to_owned()),
+        Ok(reply) if reply.status != 200 => Err(format!(
+            "GET /v1/models answered {}, listing nothing",
+            reply.status
+        )),
+        Ok(reply) => {
+            let ids: Vec<String> = serde_json::from_str::<serde_json::Value>(&reply.body)
+                .ok()
+                .and_then(|body| body.get("data").and_then(|data| data.as_array()).cloned())
+                .unwrap_or_default()
+                .iter()
+                .filter_map(|entry| entry.get("id").and_then(|id| id.as_str()))
+                .map(str::to_owned)
+                .collect();
+            if ids.iter().any(|id| id == model) {
+                Ok(format!("`{model}` is listed"))
+            } else {
+                Err(format!(
+                    "`{model}` is not among the {} it lists: {}",
+                    ids.len(),
+                    ids.join(", ")
+                ))
+            }
+        }
+    }
+}
+
+/// Whether the sandbox opens on this host (#717): the regimen's policy
+/// when it confines, else the default one, opened as serve opens it --
+/// Seatbelt's profile run once.
+fn sandbox_available(regimen_file: Option<&str>) -> Result<String, String> {
+    let policy = regimen_file
+        .and_then(isolation_policy_of)
+        .filter(|policy| policy.isolation == isolation::Isolation::Sandbox)
+        .unwrap_or_else(IsolationPolicy::merged_usr);
+    isolation::open(&policy)
+        .map(|_| {
+            let mechanism = match isolation::Platform::here() {
+                isolation::Platform::MacOs => "Seatbelt",
+                isolation::Platform::Linux => "bubblewrap",
+                isolation::Platform::Other => "none",
+            };
+            format!("available on this host: {mechanism}")
+        })
+        .map_err(|why| why.to_string())
+}
+
+/// `args` with a profile as the flags it stands for (#717), for `serve`
+/// and `check`, before the re-exec: the config is found under this
+/// environment, and the re-exec reads the regimen the profile names.
+fn with_profile_flags(args: &mut Vec<String>) -> Result<(), ExitCode> {
+    if !matches!(args.first().map(String::as_str), Some(SERVE | CHECK)) || asks_for_help(&args[1..])
+    {
+        return Ok(());
+    }
+    let home = std::env::var_os("HOME").map(std::path::PathBuf::from);
+    let config = diet::drive::profile::default_path(|name| std::env::var_os(name));
+    match diet::drive::profile::with_profile(&args[1..], config, home.as_deref()) {
+        Ok(rest) => {
+            args.splice(1.., rest).for_each(drop);
+            Ok(())
+        }
+        Err(why) => Err(fail(EXIT_INPUT, &format!("--profile: {why}"))),
+    }
+}
+
+/// `serve`, `replay` or `check`, run, when `args` names one.
+fn subcommand(args: &[String]) -> Option<ExitCode> {
+    if args.first().map(String::as_str) == Some(SERVE) {
+        if asks_for_help(&args[1..]) {
+            print!("{}", serve_usage());
+            return Some(ExitCode::SUCCESS);
+        }
+        return Some(serve(&args[1..]));
+    }
+    if args.first().map(String::as_str) == Some(REPLAY) {
+        return Some(replay(&args[1..]));
+    }
+    if args.first().map(String::as_str) == Some(CHECK) {
+        if asks_for_help(&args[1..]) {
+            print!("{}", check_usage());
+            return Some(ExitCode::SUCCESS);
+        }
+        return Some(check(&args[1..]));
+    }
+    None
+}
+
 fn main() -> ExitCode {
     // FIRST, before any thread: a sandboxed command can read this process's
     // environment and argv (`KERN_PROCARGS2`), so the drive re-executes
     // itself holding only what a command is given anyway (#299, ruling
     // 5983673467, H(1)). The endpoint's key is never in either; serve reads
     // it from `--key-file` after this.
-    if std::env::var_os(isolation::SCRUBBED).is_none() {
-        return scrubbed();
-    }
-    let args: Vec<String> = std::env::args().skip(1).collect();
-    if args.first().map(String::as_str) == Some(SERVE) {
+    let mut args: Vec<String> = std::env::args().skip(1).collect();
+    // The MCP server runs no command, so it is not re-executed: it keeps
+    // the environment a profile is found in, and the serve it starts
+    // re-executes itself (#717).
+    if args.first().map(String::as_str) == Some(MCP) {
         if asks_for_help(&args[1..]) {
-            print!("{}", serve_usage());
+            print!("{}", mcp_usage());
             return ExitCode::SUCCESS;
         }
-        return serve(&args[1..]);
+        return mcp(&args[1..]);
     }
-    if args.first().map(String::as_str) == Some(REPLAY) {
-        return replay(&args[1..]);
+    // Nor does the scenario runner: the serve it starts re-executes itself,
+    // and the assembler it hands to runs with the environment it was given.
+    if args.first().map(String::as_str) == Some(SCENARIO) {
+        return scenario(&args[1..]);
+    }
+    if let Err(refused) = with_profile_flags(&mut args) {
+        return refused;
+    }
+    if std::env::var_os(isolation::SCRUBBED).is_none() {
+        return scrubbed(&args);
+    }
+    if let Some(done) = subcommand(&args) {
+        return done;
     }
     if args
         .first()

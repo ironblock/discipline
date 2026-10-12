@@ -1,0 +1,17 @@
+# The canned regimen every scenario without its own runs under (#760): the
+# routed scenario substrate, no tools and no interview. A scenario that
+# drives tools or forks names its own canned regimen beside it.
+
+arm = "rehearsal"
+dogma_version = 0
+
+substrate = "canned-scenario"
+substrate_reasoning = "off"
+# The `hardware_fingerprint` of equipment `canned-loopback-scenario` in
+# `substrates/registry.toml`.
+substrate_hardware = "b6bc80e9e8e4bc2342219f064dab89a8d17c02535600b32b84895fc0b9ba6513"
+
+[sampler]
+temperature = 0.6
+top_p = 0.95
+seed = 7

@@ -389,6 +389,7 @@ mod formats {
         interview,
         log,
         operating_points,
+        phase,
         record,
         regimen,
         shell,

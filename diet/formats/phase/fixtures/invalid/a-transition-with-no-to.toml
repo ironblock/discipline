@@ -1,0 +1,5 @@
+name = "plan"
+ground_rules = "x"
+
+[[transitions]]
+kind = "suggested"

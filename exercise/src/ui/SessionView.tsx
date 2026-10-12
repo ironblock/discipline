@@ -635,6 +635,12 @@ export function SessionView({ session, link = 'live', linkWhy, surface, onSurfac
                 foreground={session.eras.at(-1)?.nodes.some((n) => n.kind === 'tool' && n.running && n.tool === 'bash') ?? false}
                 // That command near its timeout (#613): the move asks itself.
                 {...(session.proposal ? { proposal: session.proposal } : {})}
+                {...(session.phaseDocument ? { phaseDocument: session.phaseDocument } : {})}
+                {...(session.asked ? { asked: session.asked } : {})}
+                {...(session.answered ? { answered: session.answered } : {})}
+                {...(session.startable ? { startable: session.startable } : {})}
+                // The start row's `operator_unilateral` (#805): on, off, or undeclared -- only `off` withholds the move.
+                unilateral={session.levers.table?.['operator_unilateral'] !== 'off'}
                 // A meditation held for the operator (#150's gate): what its reconcile left unaddressed, with each entry's text.
                 {...(session.held
                   ? { held: { unaddressed: session.held.unaddressed.map((id) => ({ id, text: session.memory.find((m) => m.id === id)?.text ?? id })) } }

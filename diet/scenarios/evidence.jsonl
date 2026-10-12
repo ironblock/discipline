@@ -1,0 +1,10 @@
+{"scenario":"evidence","regimen":"evidence.toml","head":"../drive/heads/floor.md"}
+{"reply":{"text":"Making a large file.","calls":[{"id":"call-w","name":"bash","arguments":"{\"command\": \"head -c 3200 /dev/zero | tr '\\\\0' x > big.txt\"}"}]}}
+{"reply":{"text":"Reading it.","calls":[{"id":"call-r","name":"bash","arguments":"{\"command\": \"cat big.txt\"}"}]}}
+{"reply":{"text":"Done: big.txt is 3200 x characters."}}
+{"reply":{"when":"You just ingested a large piece of material (bash of cat big.txt","text":"EXCERPT: xxxxxxxx"}}
+{"step":"ask","text":"Make big.txt and read it."}
+{"step":"end"}
+{"expect":"fork","name":"evidence","where":{"why":"evidence","ask":"evidence","trigger":"evidence:call-r","question~":"bash of cat big.txt, roughly 3201 characters"}}
+{"expect":"fork.settled","where":{"outcome":"value"},"after":"evidence"}
+{"expect":"patch","where":{"op":"add","entry~":"xxxxxxxx"},"after":"evidence"}

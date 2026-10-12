@@ -7,6 +7,7 @@
 // Reading a foreign harness's session log into this crate's types (#28): the
 // adoption path is pointing the library at the harness you already use.
 pub mod adapters;
+pub mod build;
 pub mod capture;
 pub mod client;
 pub mod digest;

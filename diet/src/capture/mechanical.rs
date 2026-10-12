@@ -59,6 +59,9 @@ pub const ARG_COMMAND: &str = "command";
 /// The argument a path tool carries its file in.
 pub const ARG_PATH: &str = "path";
 
+/// The argument `drive serve`'s `edit` carries its file in (#784).
+pub const ARG_FILE_PATH: &str = "file_path";
+
 /// The argument any tool may carry the directory it ran in.
 pub const ARG_CWD: &str = "cwd";
 
@@ -119,6 +122,11 @@ pub const TOOLS: &[(&str, ToolKind)] = &[
     ("edit_file", ToolKind::Edit),
     ("write_file", ToolKind::Edit),
     ("create_file", ToolKind::Edit),
+    // `drive serve`'s standard tools (#557, #784): `read` and `write` name
+    // their file `path`, `edit` names it `file_path`.
+    ("read", ToolKind::Read),
+    ("write", ToolKind::Edit),
+    ("edit", ToolKind::Edit),
 ];
 
 /// The kind of the tool called `name`, if the lane knows it.
@@ -238,11 +246,13 @@ pub enum TouchKind {
     Written,
     /// Deleted, by `rm`, `rmdir`, or as the source of a `mv`.
     Deleted,
+    /// Listed, by `ls` (#784): a directory looked into, not a file read.
+    Listed,
 }
 
 impl TouchKind {
     /// Every kind.
-    pub const ALL: &'static [Self] = &[Self::Read, Self::Written, Self::Deleted];
+    pub const ALL: &'static [Self] = &[Self::Read, Self::Written, Self::Deleted, Self::Listed];
 
     /// A stable name, for entries and fixtures.
     #[must_use]
@@ -251,6 +261,7 @@ impl TouchKind {
             Self::Read => "read",
             Self::Written => "written",
             Self::Deleted => "deleted",
+            Self::Listed => "listed",
         }
     }
 
@@ -261,6 +272,7 @@ impl TouchKind {
             Self::Read => "read",
             Self::Written => "wrote",
             Self::Deleted => "deleted",
+            Self::Listed => "listed",
         }
     }
 }
@@ -362,6 +374,9 @@ pub enum Operands {
     /// records what the turn did to a file rather than every descriptor a
     /// syscall opened.
     Copy,
+    /// Every operand is listed -- or, with none, the working directory
+    /// (#784).
+    List,
 }
 
 impl Operands {
@@ -372,6 +387,7 @@ impl Operands {
         Self::Delete,
         Self::Move,
         Self::Copy,
+        Self::List,
     ];
 
     /// A stable name, for fixtures.
@@ -383,6 +399,7 @@ impl Operands {
             Self::Delete => "delete",
             Self::Move => "move",
             Self::Copy => "copy",
+            Self::List => "list",
         }
     }
 }
@@ -458,6 +475,7 @@ const TARGET_FLAGS: &[&str] = &[TARGET_DIRECTORY];
 /// The shell commands the lane reads a file operand out of.
 pub const FILE_COMMANDS: &[FileCommand] = &[
     FileCommand::plain("cat", Operands::Read, &[]),
+    FileCommand::plain("ls", Operands::List, &[]),
     FileCommand::plain("head", Operands::Read, &["-n", "-c"]),
     FileCommand::plain("tail", Operands::Read, &["-n", "-c"]),
     FileCommand::plain("less", Operands::Read, &[]),
@@ -848,6 +866,29 @@ impl Lane {
         }
     }
 
+    /// A lane whose shell starts in `cwd` (#784): `drive serve`'s, whose
+    /// commands run in its worktree.
+    #[must_use]
+    pub fn starting_in(cwd: PathBuf) -> Self {
+        let mut lane = Self::default();
+        lane.state.cwd = Cwd::Path(cwd);
+        lane
+    }
+
+    /// The files tool call `event` touched, and how, in the order derived
+    /// (#784): what a live session patches in as the call settles.
+    #[must_use]
+    pub fn touched_by(&self, event: &str) -> Vec<(PathBuf, TouchKind)> {
+        self.facts
+            .iter()
+            .filter(|fact| fact.event == event)
+            .filter_map(|fact| match &fact.derived {
+                Derived::Touch { path, touch } => Some((path.clone(), touch.kind)),
+                Derived::Cwd(_) | Derived::Ran { .. } => None,
+            })
+            .collect()
+    }
+
     /// The tracked working directory.
     #[must_use]
     pub fn cwd(&self) -> &Cwd {
@@ -1041,7 +1082,9 @@ impl Lane {
             // is what the session ran, and a reader who wants "what did this
             // turn do to that file" is answered by the touch, exactly.
             Some(kind @ (ToolKind::Read | ToolKind::Edit)) => {
-                if let Some(path) = string_arg(args, ARG_PATH) {
+                if let Some(path) =
+                    string_arg(args, ARG_PATH).or_else(|| string_arg(args, ARG_FILE_PATH))
+                {
                     let touch = match kind {
                         ToolKind::Read => TouchKind::Read,
                         ToolKind::Edit | ToolKind::Shell => TouchKind::Written,
@@ -1393,10 +1436,22 @@ impl Lane {
                 let kind = match known.operands {
                     Operands::Read => TouchKind::Read,
                     Operands::Write => TouchKind::Written,
-                    Operands::Delete | Operands::Move | Operands::Copy => TouchKind::Deleted,
+                    Operands::Delete | Operands::Move | Operands::Copy | Operands::List => {
+                        TouchKind::Deleted
+                    }
                 };
                 for operand in operands {
                     self.record_touch(&event, call.turn, operand, kind, &cwd);
+                }
+            }
+            Operands::List => {
+                let listed = if operands.is_empty() {
+                    vec!["."]
+                } else {
+                    operands
+                };
+                for operand in listed {
+                    self.record_touch(&event, call.turn, operand, TouchKind::Listed, &cwd);
                 }
             }
             Operands::Move | Operands::Copy => {
@@ -2039,10 +2094,15 @@ mod tests {
             &at("/work/diet"),
             "the `||` branch did not run after a known failure"
         );
-        // Nothing is known about `ls`, so it is taken to have succeeded and
-        // the `||` branch is not claimed to have run.
+        // Nothing is known about `ls`'s exit, so it is taken to have
+        // succeeded -- it listed the working directory (#784) -- and the
+        // `||` branch is not claimed to have run.
         let lane = lane_after(&[shell("t1", "ls || cat secret.txt")]);
-        assert!(lane.files().is_empty());
+        assert!(
+            !lane.files().keys().any(|path| path.ends_with("secret.txt")),
+            "{:?}",
+            lane.files()
+        );
     }
 
     #[test]
@@ -2343,13 +2403,16 @@ mod tests {
         let tools: Vec<&str> = ToolKind::ALL.iter().map(|kind| kind.tag()).collect();
         assert_eq!(tools, vec!["shell", "read", "edit"]);
         let touches: Vec<&str> = TouchKind::ALL.iter().map(|kind| kind.tag()).collect();
-        assert_eq!(touches, vec!["read", "written", "deleted"]);
+        assert_eq!(touches, vec!["read", "written", "deleted", "listed"]);
         let cwds: Vec<&str> = CwdKind::ALL.iter().map(|kind| kind.tag()).collect();
         assert_eq!(cwds, vec!["unknown", "home", "path"]);
         let builtins: Vec<&str> = Builtin::ALL.iter().map(|kind| kind.tag()).collect();
         assert_eq!(builtins, vec!["cd", "pushd", "popd"]);
         let operands: Vec<&str> = Operands::ALL.iter().map(|kind| kind.tag()).collect();
-        assert_eq!(operands, vec!["read", "write", "delete", "move", "copy"]);
+        assert_eq!(
+            operands,
+            vec!["read", "write", "delete", "move", "copy", "list"]
+        );
         // Named, not iterated: a hole dropped from `ALL` stops being
         // recognised, and the template's `{last_edited}` then reaches the
         // model as five literal characters.
@@ -2424,7 +2487,8 @@ mod tests {
                 "t2/written:/work/diet/src/lib.rs",
             ]
         );
-        assert_eq!(lane.patches(2).len(), 1, "turn 2 has its own entries");
+        // `ls` ran, and listed the working directory (#784).
+        assert_eq!(lane.patches(2).len(), 2, "turn 2 has its own entries");
         assert!(lane.patches(3).is_empty());
     }
 
@@ -3558,6 +3622,9 @@ mod tests {
             ("edit_file", ToolKind::Edit),
             ("write_file", ToolKind::Edit),
             ("create_file", ToolKind::Edit),
+            ("read", ToolKind::Read),
+            ("write", ToolKind::Edit),
+            ("edit", ToolKind::Edit),
         ];
         for (name, kind) in NAMED {
             assert_eq!(

@@ -1,0 +1,79 @@
+.ex-phases {
+  display: grid;
+  gap: 0.4rem;
+  font: var(--size-chrome) / 1.4 var(--font-chrome);
+  color: var(--ink-muted);
+}
+
+.ex-phases__now,
+.ex-phases__actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.3rem 0.6rem;
+}
+
+.ex-phases__label,
+.ex-phases__asked,
+.ex-phases__answered,
+.ex-phases__reason,
+.ex-phases__why,
+.ex-phases__rules {
+  color: var(--ink-faint);
+}
+
+.ex-phases__rules,
+.ex-phases__asked,
+.ex-phases__answered,
+.ex-phases__reason {
+  margin: 0;
+}
+
+.ex-phases__moves {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.6rem;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.ex-phases__moves [data-kind='allowed'] {
+  color: var(--ink-faint);
+}
+
+.ex-phases__evidence {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.2rem 1rem;
+  margin: 0;
+}
+
+.ex-phases__evidence div {
+  display: flex;
+  gap: 0.4rem;
+}
+
+.ex-phases__evidence dt {
+  color: var(--ink-faint);
+}
+
+.ex-phases__evidence dd {
+  margin: 0;
+}
+
+/* The suggested ruling (#788) is in the meditation's ink, as the composer's refill is. */
+.ex-phases button[data-suggested]:not(:disabled) {
+  border-color: var(--meditation);
+  color: var(--meditation);
+}
+
+/* The model's proposal, waiting on the operator's ruling (#124, #788). */
+.ex-phases__proposal {
+  display: grid;
+  gap: 0.3rem;
+  padding: 0.5rem 0.6rem;
+  border: 1px solid var(--ink-ratify);
+  border-radius: var(--radius);
+  color: var(--ink);
+}

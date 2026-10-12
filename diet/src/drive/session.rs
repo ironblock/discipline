@@ -116,6 +116,12 @@ vocabulary! {
         FlagEntry => "flag-entry",
         /// Refill a held meditation anyway (#150's gate).
         RefillAnyway => "refill-anyway",
+        /// Choose the starting phase, before the first ask (#788).
+        StartPhase => "start-phase",
+        /// Propose a phase move to the model (#788).
+        ProposePhase => "propose-phase",
+        /// Move the phase alone (#788), under `operator_unilateral`.
+        MovePhase => "move-phase",
     }
 }
 
@@ -173,6 +179,18 @@ vocabulary! {
         /// An edit whose text restates the entry it corrects, or another
         /// live entry (v8, #729): working memory has it already.
         Restates => "restates",
+        /// The operator's move alone where `operator_unilateral` is off
+        /// (#788): propose it to the model instead.
+        NotUnilateral => "not-unilateral",
+        /// A starting phase chosen after the first ask (#788).
+        AlreadyAsked => "already-asked",
+        /// The operator's proposal while the model's waits on a ruling
+        /// (#788): rule on the model's first.
+        ProposalPending => "proposal-pending",
+        /// An ask carrying an image to a substrate whose served
+        /// configuration takes none (#815): the engine would drop it
+        /// silently.
+        NoVision => "no-vision",
     }
 }
 
@@ -312,6 +330,9 @@ pub enum Event {
         /// Whether a turn's notes ride in its ask's user message (#609):
         /// always, from this build on.
         notes_in_the_ask: bool,
+        /// The build serving the session (#757): its commit and whether its
+        /// tracked files differed; `None` where serve did not say.
+        build: Option<(String, bool)>,
         /// The cap tool outputs arrive under, for a session that runs tools
         /// (#554).
         tool_output: Option<super::output::OutputCap>,
@@ -322,6 +343,8 @@ pub enum Event {
         /// phases and allowed moves, and the phase it opens in; `None` when
         /// the regimen declares none.
         phases: Option<(Vec<String>, Vec<log::PhaseMove>, String)>,
+        /// The opening phase's document (#787), under a phase library.
+        phase_document: Option<log::PhaseDocument>,
     },
     /// An ask was accepted, and a turn begins on it.
     Asked {
@@ -353,6 +376,9 @@ pub enum Event {
         fork: Option<u64>,
         /// The `max_tokens` it was sent with, after the clamp (#588).
         max_tokens: u32,
+        /// How many forks were in flight beside a trunk request, when the
+        /// session's forks run during the turn (#782); `None` otherwise.
+        beside: Option<u32>,
     },
     /// The settlement moved.
     Settled {
@@ -557,10 +583,24 @@ pub enum Event {
         seat: Option<log::ForkSeat>,
         /// Which ask of its set it sent (#595).
         ask: AskKind,
+        /// The pinned dogma template it asked instead (#783), named on its
+        /// line as its `ask`.
+        pinned: Option<crate::dogma::Template>,
         /// Whether it is sent to the trunk's own server with a prompt that
         /// is not the trunk's prefix, and so may displace the trunk's cached
         /// prefix there (#406).
         displaces: bool,
+        /// The `seq` of the step's last `tool_call` it was cut at, when it
+        /// was cut during the turn (#782).
+        cut: Option<u64>,
+        /// When it ran (#782).
+        timing: Timing,
+        /// The view the regimen declared that a cut during the turn
+        /// overrode: such a fork sees the whole trunk at the cut (#782).
+        view_overridden: Option<ForkView>,
+        /// A cut fork's reservation of the pool, and whether its prefix
+        /// was counted as shared with the trunk's (#797).
+        reserved: Option<(u64, bool)>,
     },
     /// A meditation's audit (#504): a fork off the warm trunk on the `audit` lane,
     /// the dogma's pinned ask after it, before the refill.
@@ -594,6 +634,10 @@ pub enum Event {
         /// What its answer wrote after its last field, past a blank line:
         /// recorded as no entry (levers run A).
         trailer: Option<String>,
+        /// What a fork refused for the pool did not fit beside (#782).
+        pool: Option<log::PoolRoom>,
+        /// The calls the fork made that ran nothing (#806).
+        not_run: Option<u64>,
     },
     /// A meditation fired, and the trunk was refilled from working memory (#493):
     /// the head with the working object rendered after it, and no turn of
@@ -621,6 +665,9 @@ pub enum Event {
         /// The phases it moved between (#563), when the operator named a
         /// move the graph allowed.
         phase: Option<log::PhaseMove>,
+        /// The document of the phase it left the session in (#787), whose
+        /// ground rules follow the head's system prompt on the refill.
+        phase_document: Option<log::PhaseDocument>,
         /// What it carried of the tool outputs it compacted away (#553).
         tool_outputs: log::MeditationToolOutputs,
         /// The section after the render carrying them, when it carried any,
@@ -648,6 +695,12 @@ pub enum Event {
         /// The pre-warm's timings (#504), when the refilled trunk was sent
         /// once and the call finished.
         warm: Option<Timings>,
+        /// Under a running turn (#813): its steps kept after its ask, and
+        /// those compacted with the turns before it.
+        turn_steps: Option<(u64, u64)>,
+        /// Its audit fitted to the window (#821): the notes audited, those
+        /// left out, and the window's line.
+        audit_notes: Option<(u64, u64, u64)>,
     },
     /// Forks' patches delivered at the tail of a trunk request, after its
     /// ask (the fork delivery lever): the note stays on the trunk.
@@ -766,18 +819,70 @@ pub enum Event {
         supersedes: Option<String>,
         /// The tangent it was made under (#22), when one was open.
         tangent: Option<String>,
+        /// Why the entry it voided or retired went (#812), when the fork
+        /// said so: a `SUPERSEDE: <id> — <reason>` pair's reason.
+        reason: Option<String>,
     },
     /// A self-capture call and what it came to (#609).
     /// The operator's ruling on the model's pending phase proposal (#124).
     PhaseRuled {
-        /// The proposal's call.
-        call: String,
-        /// What the operator ruled.
+        /// The proposal's call; none on the operator's move alone (#788).
+        call: Option<String>,
+        /// Who moved (#788): the operator alone, or the model accepting the
+        /// operator's proposal; `None`, the operator ruling on the model's.
+        by: Option<Key>,
+        /// What was ruled.
         choice: PhaseChoice,
         /// The phase the session was in.
         from: Option<String>,
         /// The phase proposed.
         to: String,
+        /// The document of the phase the session is in after it (#787), on
+        /// a `meditation` or `continue` under a phase library.
+        phase_document: Option<log::PhaseDocument>,
+    },
+    /// A phase move proposed (#788), by the model through its call `call`
+    /// or by the operator, with the evidence the other key rules on.
+    PhaseProposed {
+        /// Which key proposed it.
+        by: Key,
+        /// The model's call; none on the operator's proposal.
+        call: Option<String>,
+        /// The phase the session is in.
+        from: Option<String>,
+        /// The phase proposed.
+        to: String,
+        /// Why, in the model's words.
+        reason: Option<String>,
+        /// Whether the operator's proposal moves through a meditation.
+        meditate: Option<bool>,
+        /// The evidence.
+        evidence: log::PhaseEvidence,
+    },
+    /// The model's answer to the operator's proposal (#788), through its
+    /// call `call`.
+    PhaseAnswered {
+        /// The model's call.
+        call: String,
+        /// Whether it accepted.
+        accepted: bool,
+        /// Why, in its words.
+        reason: Option<String>,
+    },
+    /// The starting phase the operator chose before the first ask (#788).
+    PhaseStarted {
+        /// The phase.
+        phase: String,
+        /// Its document, under a phase library.
+        phase_document: Option<log::PhaseDocument>,
+    },
+    /// A phase's ground rules, as a note on turn `turn`'s ask (#787): the
+    /// session entered the phase with no meditation to carry them.
+    PhaseNoted {
+        /// The turn whose request carried it.
+        turn: u32,
+        /// The note as sent.
+        text: String,
     },
     Captured {
         /// The request whose answer made the call: the trunk's, or with
@@ -814,6 +919,19 @@ pub enum Event {
         call: String,
         /// The field that call recorded under.
         field: String,
+    },
+    /// A fork cut during the turn and dropped from its queue unsent
+    /// (#822): the queue past its bound, or a declared meditation that
+    /// waits only for the forks in flight.
+    Backlogged {
+        /// The turn it was cut in.
+        of_turn: u32,
+        /// What fired it.
+        trigger: String,
+        /// The ask it would have sent, as its fork line would name it.
+        ask: String,
+        /// The `seq` of the step's last `tool_call` it was cut at.
+        cut: u64,
     },
     /// The self-capture reminder, as a note after turn `turn`'s ask (#609).
     Reminded {
@@ -1018,6 +1136,8 @@ pub type Declared = (
         Option<String>,
         Vec<log::InstructionFile>,
         Option<BTreeMap<String, String>>,
+        // The build serving it (#757): its commit and whether it was dirty.
+        Option<(String, bool)>,
     ),
 );
 
@@ -1075,6 +1195,12 @@ pub struct Interview {
     /// Whether a fork the turn's own self-capture already recorded is
     /// skipped (#611); off, the default.
     pub skip_self_recorded: bool,
+    /// Whether each settled tool call's touches are patched into working
+    /// memory by the mechanical lane (#784); off, the default. On, it opens
+    /// working memory by itself, warrant or none: a refill holding only
+    /// `files:` entries beats a session dead of its window -- the model can
+    /// re-read what they list, and archive recall covers the rest.
+    pub mechanical_capture: bool,
     /// Self-capture (#609): the contract's tools offered from the first
     /// request, and the cadence of silent turns its reminder fires after;
     /// `None` when off.
@@ -1091,6 +1217,48 @@ pub struct Interview {
     /// Whether the model is offered `prune_output`, and when its prunes
     /// are applied (#612); `None`, the default, offers nothing.
     pub prune: Option<super::prune::PruneMeditation>,
+    /// When a fork a step warrants runs (#782): in the gap, the default, or
+    /// during the turn.
+    pub timing: Timing,
+    /// The forks in flight at once during the turn (#782): the trunk's
+    /// server's slots less the trunk's own, or an offboard seat's; 0 under
+    /// the gap. [`fork_slots`] reads it at start.
+    pub fork_slots: u32,
+    /// The forks cut during the turn that may wait for a slot (#822):
+    /// past it, the oldest queued are dropped, newest kept. [`fork_backlog`]
+    /// reads it at start.
+    pub fork_backlog: usize,
+    /// Whether the trunk's server shares a prefix's pages between
+    /// concurrent requests (#797): its entry's `served_prefix_shared`.
+    /// [`crate::drive::registry::served_prefix_shared`] reads it at start.
+    pub prefix_pages: PrefixPages,
+    /// The warrants that look at what a step produced, and their numbers
+    /// (#783).
+    pub step: crate::drive::warrants::StepWarrants,
+    /// Whether the operator may move the phase alone (#788), the
+    /// regimen's `operator_unilateral`: on unless it says otherwise.
+    pub operator_unilateral: bool,
+}
+
+/// What a concurrent request on the trunk's prefix costs the trunk's
+/// server's pool (#797).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum PrefixPages {
+    /// Its own copy: every concurrent prompt counts in full (#782), the
+    /// default until a measurement says otherwise.
+    #[default]
+    Counted,
+    /// The trunk's pages, shared: a fork cut from the trunk reserves only
+    /// its tokens beyond the prefix the trunk holds.
+    Shared,
+}
+
+impl PrefixPages {
+    /// From the registry's `served_prefix_shared`.
+    #[must_use]
+    pub fn of(shared: bool) -> Self {
+        if shared { Self::Shared } else { Self::Counted }
+    }
 }
 
 /// The interview cadence (#564): when the capture gap's forks fire, and on
@@ -1131,6 +1299,186 @@ impl Cadence {
 /// The regimen key for the interview cadence (#564).
 pub const INTERVIEW_CADENCE: &str = "interview_cadence";
 
+/// When a fork a step warrants runs (#782).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum Timing {
+    /// In the capture gap after the turn settles: today's, the default.
+    #[default]
+    Gap,
+    /// Cut from the trunk as it stood after the step's tool results and
+    /// sent at once, in a spare slot, while the trunk goes on.
+    DuringTurn,
+}
+
+impl Timing {
+    /// The regimen's word for it.
+    #[must_use]
+    pub fn word(self) -> &'static str {
+        match self {
+            Self::Gap => "gap",
+            Self::DuringTurn => "during_turn",
+        }
+    }
+}
+
+/// The regimen key for the interview timing (#782).
+pub const INTERVIEW_TIMING: &str = "interview_timing";
+
+/// The regimen key for the shown output, in characters, an `evidence` fork
+/// needs (#783).
+pub const EVIDENCE_MIN_CHARS: &str = "evidence_min_chars";
+/// The regimen key for the `evidence` forks one step fires at most (#783).
+pub const EVIDENCE_PER_STEP: &str = "evidence_per_step";
+/// The regimen key for the steps the surprise path waits after the trio
+/// (#783).
+pub const TROUBLE_COOLDOWN_STEPS: &str = "trouble_cooldown_steps";
+/// The regimen key for the steps between `open` forks (#783).
+pub const OPEN_EVERY_STEPS: &str = "open_every_steps";
+
+/// The step warrants among `rules`, with the numbers the regimen declares,
+/// each the predecessor's default when it declares none (#783).
+///
+/// # Errors
+///
+/// A number that is not a positive whole number, naming its key.
+pub fn step_warrants(
+    regimen: &Regimen,
+    rules: &[log::Warrant],
+) -> Result<crate::drive::warrants::StepWarrants, String> {
+    let defaults = crate::drive::warrants::StepWarrants::DEFAULTS;
+    let count = |key: &str, default: u64| -> Result<u64, String> {
+        match regimen.get(key) {
+            None => Ok(default),
+            Some(crate::formats::regimen::Value::Integer(n)) if *n > 0 => {
+                u64::try_from(*n).map_err(|_| format!("`{key}` is too large"))
+            }
+            Some(_) => Err(format!("`{key}` is not a positive whole number")),
+        }
+    };
+    let small = |key: &str, default: u32| -> Result<u32, String> {
+        count(key, u64::from(default))
+            .and_then(|n| u32::try_from(n).map_err(|_| format!("`{key}` is too large")))
+    };
+    Ok(crate::drive::warrants::StepWarrants {
+        evidence: rules.contains(&log::Warrant::Evidence),
+        trouble: rules.contains(&log::Warrant::Trouble),
+        open: rules.contains(&log::Warrant::Open),
+        evidence_min_chars: count(EVIDENCE_MIN_CHARS, defaults.evidence_min_chars)?,
+        evidence_per_step: usize::try_from(small(
+            EVIDENCE_PER_STEP,
+            u32::try_from(defaults.evidence_per_step).unwrap_or(u32::MAX),
+        )?)
+        .unwrap_or(usize::MAX),
+        trouble_cooldown_steps: small(TROUBLE_COOLDOWN_STEPS, defaults.trouble_cooldown_steps)?,
+        open_every_steps: small(OPEN_EVERY_STEPS, defaults.open_every_steps)?,
+    })
+}
+
+/// The forks a session runs at once during the turn (#782), from the
+/// registry's `serving_slots`: the trunk's server's slots less the trunk's
+/// own, or, when forks run on an offboard seat (`seat` is `Some`), the
+/// seat's -- which holds no trunk, so one is enough. 0 under the gap.
+///
+/// # Errors
+///
+/// During the turn: a server that declares no `serving_slots`, or a trunk's
+/// server with fewer than 2, which leaves no slot for a fork beside the
+/// trunk.
+pub fn fork_slots(
+    timing: Timing,
+    trunk_slots: Option<u32>,
+    seat: Option<Option<u32>>,
+) -> Result<u32, String> {
+    if timing == Timing::Gap {
+        return Ok(0);
+    }
+    match seat {
+        Some(Some(slots)) if slots >= 1 => Ok(slots),
+        Some(_) => Err(format!(
+            "`{INTERVIEW_TIMING} = \"during_turn\"` needs the offboard seat's `serving_slots` \
+             in the registry, and it declares none"
+        )),
+        None => match trunk_slots {
+            Some(slots) if slots >= 2 => Ok(slots - 1),
+            Some(slots) => Err(format!(
+                "`{INTERVIEW_TIMING} = \"during_turn\"` runs a fork beside the trunk, and the \
+                 trunk's server declares {slots} `serving_slots`: it needs 2 or more"
+            )),
+            None => Err(format!(
+                "`{INTERVIEW_TIMING} = \"during_turn\"` needs the trunk's server's \
+                 `serving_slots` in the registry, and it declares none"
+            )),
+        },
+    }
+}
+
+/// The timing `regimen` declares and the forks it runs at once (#782), its
+/// trunk on substrate `trunk` and any offboard seat the regimen names, both
+/// read from `registry`.
+///
+/// # Errors
+///
+/// A timing word it does not know; `during_turn` with no per-step source --
+/// the `read` warrant at the `per_class` or `per_call` cadence -- which
+/// would run nothing during the turn; or [`fork_slots`]' refusals.
+pub fn timing_and_slots(
+    regimen: &Regimen,
+    (registry, trunk): (&str, &str),
+) -> Result<(Timing, u32), String> {
+    let timing = interview_timing(regimen)?;
+    if timing == Timing::DuringTurn {
+        let rules = interview_warrant(regimen).unwrap_or_default();
+        let per_call = rules.contains(&log::Warrant::Read)
+            && matches!(
+                interview_cadence(regimen),
+                Cadence::PerClass | Cadence::PerCall
+            );
+        // Or a warrant that looks at what a step produced (#783).
+        let content = step_warrants(regimen, &rules).is_ok_and(|warrants| warrants.any());
+        if !per_call && !content {
+            return Err(format!(
+                "`{INTERVIEW_TIMING} = \"during_turn\"` cuts the forks a step warrants, and \
+                 nothing here warrants one at a step: it needs the `read` warrant and \
+                 `{INTERVIEW_CADENCE} = \"per_class\"` or `\"per_call\"`, or a step warrant: \
+                 `evidence`, `trouble` or `open`"
+            ));
+        }
+    }
+    let seat = match crate::drive::regimen::Seat::of(regimen) {
+        crate::drive::regimen::Seat::Warm => None,
+        crate::drive::regimen::Seat::Offboard(id) => {
+            Some(crate::drive::registry::serving_slots(registry, &id))
+        }
+    };
+    let slots = fork_slots(
+        timing,
+        crate::drive::registry::serving_slots(registry, trunk),
+        seat,
+    )?;
+    Ok((timing, slots))
+}
+
+/// The interview timing the regimen declares: `gap` when it declares none.
+///
+/// # Errors
+///
+/// A value that is not one of the two words, naming it: a lever silently
+/// read as its default would run a session the regimen did not ask for.
+pub fn interview_timing(regimen: &Regimen) -> Result<Timing, String> {
+    match regimen.get(INTERVIEW_TIMING) {
+        None => Ok(Timing::Gap),
+        Some(crate::formats::regimen::Value::String(word)) => [Timing::Gap, Timing::DuringTurn]
+            .into_iter()
+            .find(|timing| timing.word() == word)
+            .ok_or_else(|| {
+                format!("`{INTERVIEW_TIMING} = \"{word}\"` is not `gap` or `during_turn`")
+            }),
+        Some(_) => Err(format!(
+            "`{INTERVIEW_TIMING}` is not a string: `gap` or `during_turn`"
+        )),
+    }
+}
+
 /// The regimen key for the read fork's output threshold, in bytes (#564).
 pub const INTERVIEW_THRESHOLD_BYTES: &str = "interview_threshold_bytes";
 
@@ -1149,6 +1497,20 @@ pub fn interview_cadence(regimen: &Regimen) -> Cadence {
     .into_iter()
     .find(|cadence| cadence.word() == word)
     .unwrap_or_default()
+}
+
+/// The regimen key for the mechanical lane in the live loop (#784).
+pub const MECHANICAL_CAPTURE: &str = "mechanical_capture";
+
+/// Whether the regimen turns mechanical capture on, leniently: `true` or
+/// `"on"`; anything else is off.
+#[must_use]
+pub fn mechanical_capture(regimen: &Regimen) -> bool {
+    match regimen.get(MECHANICAL_CAPTURE) {
+        Some(crate::formats::regimen::Value::Boolean(on)) => *on,
+        Some(crate::formats::regimen::Value::String(word)) => word == "on",
+        _ => false,
+    }
 }
 
 /// The regimen key for skipping a fork the turn's self-capture already
@@ -1191,6 +1553,26 @@ pub fn declare_self_capture(shape: &mut RequestShape, interview: Option<&Intervi
         shape
             .tools
             .extend(crate::capture::tools::definitions(&contract));
+    }
+    // The phase tool, whenever phases are active (#788), self-capture or not.
+    declare_phase_tool(shape, interview);
+}
+
+/// The regimen key for whether the operator may move the phase alone
+/// (#788).
+pub const OPERATOR_UNILATERAL: &str = "operator_unilateral";
+
+/// Whether the regimen lets the operator move the phase alone (#788): true
+/// unless it says `operator_unilateral = false`.
+///
+/// # Errors
+///
+/// A value that is not true or false.
+pub fn operator_unilateral(regimen: &Regimen) -> Result<bool, String> {
+    match regimen.get(OPERATOR_UNILATERAL) {
+        None => Ok(true),
+        Some(crate::formats::regimen::Value::Boolean(on)) => Ok(*on),
+        Some(_) => Err(format!("`{OPERATOR_UNILATERAL}` is not true or false")),
     }
 }
 
@@ -1404,8 +1786,12 @@ struct Firing {
     why: log::Warrant,
     /// Which ask of the session's set it sends (#595).
     ask: AskKind,
+    /// The pinned dogma template it asks instead (#783), for a warrant
+    /// that looks at what a step produced.
+    pinned: Option<crate::dogma::Template>,
     question: String,
-    /// `turn_end`, or `call:<class>:<id>`.
+    /// `turn_end`, `call:<class>:<id>`, or the step warrant and what fired
+    /// it (#783).
     trigger: String,
 }
 
@@ -1436,6 +1822,47 @@ struct Routed {
 /// about to do, as the router does; a read under the threshold forks
 /// nothing.
 fn firings(interview: &Interview, log: &[Logged], turn: u32, answer: &str) -> Vec<Firing> {
+    // During the turn (#782), the calls' forks were cut at their steps.
+    let calls = if interview.rules.contains(&log::Warrant::Read) && interview.timing == Timing::Gap
+    {
+        routed(log, turn)
+    } else {
+        Vec::new()
+    };
+    firings_over(interview, log, (turn, answer), &calls, true)
+}
+
+/// The forks a step of `turn` warrants during the turn (#782): the per-call
+/// forks of `per_class` and `per_call` over the step's calls `ids`, each
+/// asking about what the step's text `said` it was about to do. None under
+/// a cadence that forks on no call.
+fn step_firings(
+    interview: &Interview,
+    log: &[Logged],
+    (turn, said): (u32, &str),
+    ids: &[String],
+) -> Vec<Firing> {
+    if !interview.rules.contains(&log::Warrant::Read)
+        || !matches!(interview.cadence, Cadence::PerClass | Cadence::PerCall)
+    {
+        return Vec::new();
+    }
+    let calls: Vec<Routed> = routed(log, turn)
+        .into_iter()
+        .filter(|call| ids.contains(&call.id))
+        .collect();
+    firings_over(interview, log, (turn, said), &calls, false)
+}
+
+/// [`firings`] over `calls`, the judgment ask on a marked turn only when
+/// `judge`.
+fn firings_over(
+    interview: &Interview,
+    log: &[Logged],
+    (turn, answer): (u32, &str),
+    calls: &[Routed],
+    judge: bool,
+) -> Vec<Firing> {
     let rules = &interview.rules;
     let intent = router::stated_intent(answer);
     // The working record, for an ask in a set that shows it (#595).
@@ -1461,19 +1888,16 @@ fn firings(interview: &Interview, log: &[Logged], turn: u32, answer: &str) -> Ve
         Firing {
             why: log::Warrant::Scoping,
             ask: kind,
+            pinned: None,
             question,
             trigger: TURN_END.to_owned(),
         }
     };
-    let marked = rules.contains(&log::Warrant::Scoping)
+    let marked = judge
+        && rules.contains(&log::Warrant::Scoping)
         && log.iter().any(|logged| {
             matches!(&logged.event, Event::Asked { turn: asked, scoping: true, .. } if *asked == turn)
         });
-    let calls = if rules.contains(&log::Warrant::Read) {
-        routed(log, turn)
-    } else {
-        Vec::new()
-    };
     let enough = |call: &&Routed| {
         !READS.contains(&call.class)
             || interview
@@ -1485,6 +1909,7 @@ fn firings(interview: &Interview, log: &[Logged], turn: u32, answer: &str) -> Ve
         Firing {
             why: log::Warrant::Read,
             ask: kind,
+            pinned: None,
             question,
             trigger: format!("call:{}:{}", call.class.tag(), call.id),
         }
@@ -1507,7 +1932,7 @@ fn firings(interview: &Interview, log: &[Logged], turn: u32, answer: &str) -> Ve
                 .collect();
         }
         Cadence::TurnBoundary => {
-            return if rules.contains(&log::Warrant::Scoping) {
+            return if judge && rules.contains(&log::Warrant::Scoping) {
                 vec![judgment()]
             } else {
                 Vec::new()
@@ -1819,6 +2244,12 @@ struct State {
     captures_this_turn: u32,
     /// The reminder due at the next ask, when the cadence fired.
     reminder_due: Option<String>,
+    /// The substrate an ask's images cannot reach (#815): its served
+    /// configuration takes none. `None` sends them.
+    blind: Option<String>,
+    /// A phase's ground rules due as a note at the next ask (#787): the
+    /// session opened in the phase, or moved to it with no meditation.
+    phase_note_due: Option<String>,
     /// Patches waiting to be delivered at the next trunk request, under a
     /// mid-turn fork delivery: each op and the entry text its line names.
     undelivered: Vec<(log::PatchOp, String, String)>,
@@ -1827,6 +2258,12 @@ struct State {
     /// The text each recovered call came from, by its id, until its line is
     /// logged (#560).
     recovered: BTreeMap<String, String>,
+    /// The mechanical lane, once a call under `mechanical_capture` has
+    /// settled (#784): the shell state it reads each next call against.
+    mechanical: Option<crate::capture::mechanical::Lane>,
+    /// The audit at the meditation in progress, fitted to the window (#821):
+    /// the notes audited, those left out, the line; for its line.
+    audit_cut: Option<(u64, u64, u64)>,
     /// Where each event is written as it is appended (see
     /// [`Session::write_through`]).
     sink: Option<Sink>,
@@ -1867,6 +2304,9 @@ struct State {
     /// A meditation queued for its audit or pre-warm (#504), until [`meditation_work`]
     /// takes it.
     meditation_pending: Option<PendingMeditation>,
+    /// What fired the meditation [`meditation_work`] has taken and not yet
+    /// logged the outcome of (#756): what `GET /state` calls `capturing`.
+    meditating: Option<crate::meditation::Reason>,
     /// A meditation held for the operator (#150's gate): `reconcile_gate =
     /// "refuse"` and an operator change no answer addressed.
     held: Option<PendingMeditation>,
@@ -1907,9 +2347,87 @@ struct State {
     /// Whether the trunk carries a meditation's refill message after the head
     /// (#597): the turns start after it.
     refilled: bool,
+    /// The forks cut during the turn that are in flight (#782), each its
+    /// fork line's `seq`, its prompt and its stop.
+    pool: Vec<PoolFork>,
+    /// The forks cut during the turn waiting for a slot (#782), in step
+    /// order.
+    pool_queue: std::collections::VecDeque<Cut>,
+    /// What waits for the last fork cut during the turn (#782): the turn's
+    /// end, or a move to `awaiting`.
+    deferred: Option<Deferred>,
+    /// What the step warrants carry from step to step (#783).
+    step_counters: crate::drive::warrants::Counters,
+    /// The forks the step warrants fired this turn that run in its gap
+    /// (#783): every step's under the gap timing, the final answer's under
+    /// either.
+    gap_firings: Vec<Firing>,
+    /// The operator's phase proposal the model has not yet answered
+    /// (#788): the phase it proposes, and whether an accepted move
+    /// meditates.
+    operator_proposal: Option<(String, bool)>,
+    /// The phase an accepted move meditates into once the turn ends
+    /// (#788): a meditation never refills under a running turn.
+    move_after_turn: Option<String>,
+    /// The operator's meditation declared while forks cut during the turn
+    /// were in flight (#822), and the phase it moves to: run once they
+    /// settle and the turn is over.
+    declared_after_pool: Option<DeclaredMeditation>,
+    /// The note that puts the operator's proposal to the model, due at the
+    /// next ask (#788).
+    operator_note_due: Option<String>,
+    /// This step's own phase proposal, which ends the turn (#788), logged
+    /// with its evidence once the step has joined the trunk.
+    proposal_ends_turn: Option<OwnProposal>,
+    /// The evidence's marks (#788): the log's length when the session
+    /// entered its phase, the trunk's tokens then, the phase's growth before
+    /// the latest meditation, and the trunk's tokens at that meditation.
+    phase_entered: u64,
+    phase_floor: u64,
+    phase_grown: u64,
+    meditation_floor: u64,
 }
 
 impl State {
+    /// Whether nothing is running or in flight by the state's own fields
+    /// (#756): awaiting or ended, no call, no fork in flight or queued, no
+    /// pre-warm, and no meditation queued or under way. `GET /state`'s
+    /// `idle` adds no prompt waiting and no fork line unsettled.
+    fn idle(&self) -> bool {
+        matches!(self.settlement, Settlement::Awaiting | Settlement::Ended)
+            && self.flight.is_none()
+            && self.forking.is_none()
+            && self.queued.is_empty()
+            && self.warming.is_none()
+            && self.meditation_pending.is_none()
+            && self.meditating.is_none()
+            && !self.pool_busy()
+    }
+
+    /// How many cut forks are in flight beside a trunk request (#782), in a
+    /// session whose forks run during the turn; `None` otherwise.
+    fn trunk_beside(&self) -> Option<u32> {
+        self.interview
+            .as_ref()
+            .filter(|interview| interview.timing == Timing::DuringTurn)
+            .map(|_| u32::try_from(self.pool.len()).unwrap_or(u32::MAX))
+    }
+
+    /// Whether a fork cut during the turn is in flight or queued (#782).
+    fn pool_busy(&self) -> bool {
+        !self.pool.is_empty() || !self.pool_queue.is_empty()
+    }
+
+    /// `f`, with the trunk's sizing as it was before (#782): a fork in
+    /// flight beside the trunk is sized, and answers, without moving the
+    /// measurement the trunk's next request is sized from.
+    fn aside_sizing<T>(&mut self, f: impl FnOnce(&mut Self) -> T) -> T {
+        let kept = (self.sent_estimate, self.last_sized, self.measured_prompt);
+        let out = f(self);
+        (self.sent_estimate, self.last_sized, self.measured_prompt) = kept;
+        out
+    }
+
     /// A session's state as it opens: awaiting, on `trunk`, in `phase`.
     fn opening(
         trunk: Vec<Message>,
@@ -1929,6 +2447,7 @@ impl State {
             last_sized: None,
             overflow_retried: None,
             meditation_pending: None,
+            meditating: None,
             held: None,
             warming: None,
             proposal: None,
@@ -1948,9 +2467,13 @@ impl State {
             recorded_this_turn: false,
             captures_this_turn: 0,
             reminder_due: None,
+            blind: None,
+            phase_note_due: None,
             undelivered: Vec::new(),
             archive: super::archive::Archive::default(),
             recovered: BTreeMap::new(),
+            mechanical: None,
+            audit_cut: None,
             sink: None,
             allowed: tools
                 .as_ref()
@@ -1976,6 +2499,20 @@ impl State {
             operator_pending: Vec::new(),
             operator_addressed: Vec::new(),
             refilled: false,
+            pool: Vec::new(),
+            pool_queue: std::collections::VecDeque::new(),
+            deferred: None,
+            step_counters: crate::drive::warrants::Counters::default(),
+            gap_firings: Vec::new(),
+            operator_proposal: None,
+            move_after_turn: None,
+            declared_after_pool: None,
+            operator_note_due: None,
+            proposal_ends_turn: None,
+            phase_entered: 0,
+            phase_floor: 0,
+            phase_grown: 0,
+            meditation_floor: 0,
             jobs: BTreeMap::new(),
             notices: Vec::new(),
             promotable: None,
@@ -2244,7 +2781,10 @@ impl State {
                 | CommandKind::RatifyPhase
                 | CommandKind::EditEntry
                 | CommandKind::FlagEntry
-                | CommandKind::RefillAnyway => {
+                | CommandKind::RefillAnyway
+                | CommandKind::StartPhase
+                | CommandKind::ProposePhase
+                | CommandKind::MovePhase => {
                     unreachable!("a tangent, background or phase ruling carries no idle gap")
                 }
             };
@@ -2320,6 +2860,17 @@ impl State {
     }
 
     fn move_to(&mut self, to: Settlement) {
+        // While a fork cut during the turn runs, the session is not
+        // awaiting (#782): the move waits for the last of them.
+        let to = if to == Settlement::Awaiting && self.pool_busy() {
+            self.deferred.get_or_insert(Deferred::Move);
+            if self.settlement == Settlement::Capture {
+                return;
+            }
+            Settlement::Capture
+        } else {
+            to
+        };
         if to == Settlement::Ended {
             self.stop_jobs();
         }
@@ -2470,7 +3021,7 @@ impl<S: Streaming + 'static> Session<S> {
             template,
             None,
             None,
-            (None, None, (None, None, Vec::new(), None)),
+            (None, None, (None, None, Vec::new(), None, None)),
         )
     }
 
@@ -2484,7 +3035,7 @@ impl<S: Streaming + 'static> Session<S> {
             template,
             Some(serving),
             None,
-            (None, None, (None, None, Vec::new(), None)),
+            (None, None, (None, None, Vec::new(), None, None)),
         )
     }
 
@@ -2502,7 +3053,7 @@ impl<S: Streaming + 'static> Session<S> {
             template,
             serving,
             Some(tools),
-            (None, None, (None, None, Vec::new(), None)),
+            (None, None, (None, None, Vec::new(), None, None)),
         )
     }
 
@@ -2525,7 +3076,7 @@ impl<S: Streaming + 'static> Session<S> {
             template,
             serving,
             tools,
-            (claim, interview, (None, None, Vec::new(), None)),
+            (claim, interview, (None, None, Vec::new(), None, None)),
         )
     }
 
@@ -2553,7 +3104,7 @@ impl<S: Streaming + 'static> Session<S> {
         template: RequestShape,
         serving: Option<Serving>,
         tools: Option<Tools>,
-        (claim, interview, (unsent, reasoning_effort_default, instruction_files, levers)): Declared,
+        (claim, interview, (unsent, reasoning_effort_default, instruction_files, levers, build)): Declared,
     ) -> Self {
         a_head(&template.messages);
         let trunk = template.messages.clone();
@@ -2568,6 +3119,13 @@ impl<S: Streaming + 'static> Session<S> {
             });
         let tools = tools.map(|tools| readable_outputs(tools, opened));
         let mut state = State::opening(trunk, phase_at_open.clone(), interview, tools.as_ref());
+        // The evidence counts the trunk's growth from its head (#788).
+        state.phase_floor = estimate_of(&template);
+        state.meditation_floor = state.phase_floor;
+        // The opening phase's rules (#787): the head is the session's own,
+        // so they ride as a note on the first ask.
+        let phase_document = state.phase_document();
+        state.phase_note_due = state.phase_note();
         state.push(Event::Started {
             opened,
             model: template.model.clone(),
@@ -2587,10 +3145,12 @@ impl<S: Streaming + 'static> Session<S> {
             reasoning_effort_default,
             instruction_files,
             levers,
+            build,
             notes_in_the_ask: true,
             tool_output: tools.as_ref().map(|tools| tools.output_cap),
             bash_timeout_ms: bash_timeout_of(tools.as_ref(), &template),
             phases,
+            phase_document,
         });
         Self::sharing(Shared {
             transport,
@@ -2643,6 +3203,22 @@ impl<S: Streaming + 'static> Session<S> {
         self
     }
 
+    /// This session, on `substrate`, whose served configuration takes no
+    /// images (#815): an ask carrying one is refused `no-vision` rather
+    /// than sent to an engine that would drop it silently.
+    #[must_use]
+    pub fn without_vision(self, substrate: &str) -> Self {
+        self.shared.lock().blind = Some(substrate.to_owned());
+        self
+    }
+
+    /// The substrate an ask's images cannot reach, when serve opened the
+    /// session on one (#815).
+    #[must_use]
+    pub fn blind(&self) -> Option<String> {
+        self.shared.lock().blind.clone()
+    }
+
     /// Send an ask to the trunk. Returns the sequence number of its
     /// [`Event::Asked`] and the turn it begins; the answer arrives in the log.
     ///
@@ -2687,6 +3263,7 @@ impl<S: Streaming + 'static> Session<S> {
     /// # Errors
     ///
     /// As [`Session::ask_marked`].
+    #[allow(clippy::too_many_lines)]
     pub fn ask_attached(
         &self,
         attached: super::attach::Attached,
@@ -2714,6 +3291,12 @@ impl<S: Streaming + 'static> Session<S> {
                 self.shared.changed.notify_all();
                 return Err(Rejected::Refused(refused));
             }
+            // An image the engine could not see (#815).
+            Settlement::Awaiting if !message.images.is_empty() && state.blind.is_some() => {
+                let refused = state.refuse(CommandKind::Ask, Refusal::NoVision);
+                self.shared.changed.notify_all();
+                return Err(Rejected::Refused(refused));
+            }
             Settlement::Awaiting => {}
             Settlement::Turn | Settlement::Capture => {
                 let refused = state.refuse(CommandKind::Ask, Refusal::InFlight);
@@ -2728,6 +3311,10 @@ impl<S: Streaming + 'static> Session<S> {
         }
         state.admit()?;
         state.turns += 1;
+        // A new turn's outputs are its own to cover, and its gap's forks
+        // its own (#783).
+        state.step_counters.covered.clear();
+        state.gap_firings.clear();
         let turn = state.turns;
         let seq = state.push(Event::Asked {
             turn,
@@ -2749,6 +3336,17 @@ impl<S: Streaming + 'static> Session<S> {
         // self-capture reminder (#609), when its cadence came round, never
         // in the system prompt.
         let mut message = message;
+        if let Some(text) = state.noted(turn) {
+            message.notes.push(text);
+        }
+        // The operator's phase proposal, put to the model (#788).
+        if let Some(text) = state.operator_note_due.take() {
+            state.push(Event::Notified {
+                turn,
+                text: text.clone(),
+            });
+            message.notes.push(text);
+        }
         if let Some(note) = state.deliver(turn) {
             message.notes.push(note.content);
         }
@@ -2774,12 +3372,14 @@ impl<S: Streaming + 'static> Session<S> {
         // The automatic meditation (#617), before the request is sized.
         window_meditation(&self.shared.template, &mut state, &mut shape, false);
         let max_tokens = state.sized(&mut shape, self.shared.template.limits.max_output_tokens);
+        let beside = state.trunk_beside();
         let request = state.push(Event::Requested {
             turn,
             lane: Lane::Trunk,
             head_sha256: crate::client::head::Head::of(&shape).digest().to_owned(),
             fork: None,
             max_tokens,
+            beside,
         });
         let cancel = Cancel::new();
         state.flight = Some(Flight {
@@ -2907,8 +3507,19 @@ impl<S: Streaming + 'static> Session<S> {
     ) -> Result<(), Rejected> {
         let mut state = self.shared.lock();
         state.carry(gap, CommandKind::DeclareMeditation);
+        // Only forks cut during the turn hold the session in `capture`
+        // (#822): the meditation waits for those in flight, and drops the
+        // queued.
+        let pool_only = state.settlement == Settlement::Capture
+            && state.pool_busy()
+            && state.forking.is_none()
+            && state.queued.is_empty()
+            && state.meditation_pending.is_none()
+            && state.meditating.is_none()
+            && state.declared_after_pool.is_none();
         let because = match state.settlement {
             Settlement::Ended => Some(Refusal::Ended),
+            Settlement::Capture if pool_only => pool_refusal(&state, to),
             Settlement::Turn | Settlement::Capture => Some(Refusal::InFlight),
             // Nothing to refill from: no turn yet, no working object, or an
             // empty one -- a refill from an empty object would drop every
@@ -2934,6 +3545,27 @@ impl<S: Streaming + 'static> Session<S> {
             return Err(Rejected::Refused(refused));
         }
         state.admit()?;
+        if pool_only {
+            let dropped: Vec<Cut> = state.pool_queue.drain(..).collect();
+            backlogged(&mut state, dropped);
+            state.declared_after_pool = Some(DeclaredMeditation {
+                to: to.map(str::to_owned),
+            });
+            // With none in flight, the turn is over now.
+            let due = pool_settled(&self.shared.template, &mut state);
+            drop(state);
+            self.shared.changed.notify_all();
+            if due {
+                let shared = Arc::clone(&self.shared);
+                let spawned = std::thread::Builder::new()
+                    .name("diet-meditation".to_owned())
+                    .spawn(move || meditation_work(&shared));
+                if spawned.is_err() {
+                    meditation_work(&self.shared);
+                }
+            }
+            return Ok(());
+        }
         let queued = meditation(
             &self.shared.template,
             &mut state,
@@ -3008,37 +3640,196 @@ impl<S: Streaming + 'static> Session<S> {
         let Some(PendingProposal { call, from, to }) = state.proposal.take() else {
             unreachable!("a pending proposal was checked above");
         };
+        let phase_document = (choice != PhaseChoice::Stay)
+            .then(|| state.document_of(&to))
+            .flatten();
         state.push(Event::PhaseRuled {
-            call,
+            call: Some(call),
+            by: None,
             choice,
             from,
             to: to.clone(),
+            phase_document,
         });
-        let queued = match choice {
-            PhaseChoice::Meditation => meditation(
-                &self.shared.template,
-                &mut state,
-                crate::meditation::Reason::Phase,
-                Some(to),
-            ),
-            PhaseChoice::Continue => {
-                state.phase = Some(to);
-                false
-            }
-            PhaseChoice::Stay => false,
-        };
+        let queued = moved(&self.shared.template, &mut state, &to, choice);
         drop(state);
         self.shared.changed.notify_all();
         if queued {
-            let shared = Arc::clone(&self.shared);
-            let spawned = std::thread::Builder::new()
-                .name("diet-meditation".to_owned())
-                .spawn(move || meditation_work(&shared));
-            if spawned.is_err() {
-                meditation_work(&self.shared);
-            }
+            self.meditate_aside();
         }
         Ok(())
+    }
+
+    /// Choose the starting phase (#788), before the first ask: the session
+    /// enters it, its rules a note on the first ask, and a `phase.started`
+    /// line records it.
+    ///
+    /// # Errors
+    ///
+    /// Refused, and logged: [`Refusal::Ended`]; [`Refusal::AlreadyAsked`]
+    /// after the first ask; [`Refusal::NoPhaseGraph`] or
+    /// [`Refusal::NotAPhase`].
+    pub fn start_phase(&self, phase: &str) -> Result<(), Rejected> {
+        let mut state = self.shared.lock();
+        let known = state
+            .interview
+            .as_ref()
+            .map(|interview| &interview.phases)
+            .filter(|graph| !graph.is_empty())
+            .map(|graph| graph.phases().iter().any(|name| name == phase));
+        let because = match (state.settlement, known) {
+            (Settlement::Ended, _) => Some(Refusal::Ended),
+            _ if state.turns > 0 => Some(Refusal::AlreadyAsked),
+            (_, None) => Some(Refusal::NoPhaseGraph),
+            (_, Some(false)) => Some(Refusal::NotAPhase),
+            (_, Some(true)) => None,
+        };
+        if let Some(because) = because {
+            return Err(self.refused(state, CommandKind::StartPhase, because));
+        }
+        state.admit_within_the_gap();
+        state.phase = Some(phase.to_owned());
+        state.phase_note_due = state.phase_note();
+        let phase_document = state.document_of(phase);
+        state.push(Event::PhaseStarted {
+            phase: phase.to_owned(),
+            phase_document,
+        });
+        entered(&self.shared.template, &mut state);
+        drop(state);
+        self.shared.changed.notify_all();
+        Ok(())
+    }
+
+    /// Propose a phase move to the model (#788), through a meditation when
+    /// it is accepted if `meditate`, else kept: logged with its evidence,
+    /// and put to the model in a note on its next ask, which it answers
+    /// through the phase tool.
+    ///
+    /// # Errors
+    ///
+    /// Refused, and logged: [`Refusal::Ended`], [`Refusal::InFlight`];
+    /// [`Refusal::ProposalPending`] while the model's own waits on a ruling;
+    /// the graph's refusal of the move.
+    pub fn propose_phase(&self, to: &str, meditate: bool) -> Result<(), Rejected> {
+        let mut state = self.shared.lock();
+        let because = match state.settlement {
+            Settlement::Ended => Some(Refusal::Ended),
+            Settlement::Turn | Settlement::Capture => Some(Refusal::InFlight),
+            Settlement::Awaiting if state.proposal.is_some() => Some(Refusal::ProposalPending),
+            Settlement::Awaiting => graph_refusal(&state, to),
+        };
+        if let Some(because) = because {
+            return Err(self.refused(state, CommandKind::ProposePhase, because));
+        }
+        state.admit_within_the_gap();
+        let from = state.phase.clone();
+        let evidence = evidence(&state, &self.shared.template);
+        state.operator_proposal = Some((to.to_owned(), meditate));
+        state.operator_note_due = Some(operator_proposal_note(from.as_deref(), to));
+        state.push(Event::PhaseProposed {
+            by: Key::Operator,
+            call: None,
+            from,
+            to: to.to_owned(),
+            reason: None,
+            meditate: Some(meditate),
+            evidence,
+        });
+        drop(state);
+        self.shared.changed.notify_all();
+        Ok(())
+    }
+
+    /// Move the phase alone (#788), where `operator_unilateral` lets the
+    /// operator: through a meditation that moves to `to` when `meditate`,
+    /// else kept, the trunk as it stands. Any proposal waiting is spent.
+    ///
+    /// # Errors
+    ///
+    /// Refused, and logged: [`Refusal::Ended`], [`Refusal::InFlight`],
+    /// [`Refusal::NotUnilateral`]; the graph's refusal of the move; and for
+    /// a meditation, [`Refusal::TangentOpen`] or
+    /// [`Refusal::NothingToMeditate`] as a declared one is refused.
+    pub fn move_phase(&self, to: &str, meditate: bool) -> Result<(), Rejected> {
+        let mut state = self.shared.lock();
+        let unilateral = state
+            .interview
+            .as_ref()
+            .is_some_and(|interview| interview.operator_unilateral);
+        let because = match state.settlement {
+            Settlement::Ended => Some(Refusal::Ended),
+            Settlement::Turn | Settlement::Capture => Some(Refusal::InFlight),
+            Settlement::Awaiting if !unilateral => Some(Refusal::NotUnilateral),
+            Settlement::Awaiting => graph_refusal(&state, to).or_else(|| {
+                if !meditate {
+                    None
+                } else if state.tangent.is_some() {
+                    Some(Refusal::TangentOpen)
+                } else {
+                    (state.turns == 0
+                        || state
+                            .interview
+                            .as_ref()
+                            .is_none_or(|interview| interview.object.live().next().is_none()))
+                    .then_some(Refusal::NothingToMeditate)
+                }
+            }),
+        };
+        if let Some(because) = because {
+            return Err(self.refused(state, CommandKind::MovePhase, because));
+        }
+        state.admit_within_the_gap();
+        state.proposal = None;
+        state.operator_proposal = None;
+        state.operator_note_due = None;
+        let choice = if meditate {
+            PhaseChoice::Meditation
+        } else {
+            PhaseChoice::Keep
+        };
+        let from = state.phase.clone();
+        let phase_document = state.document_of(to);
+        state.push(Event::PhaseRuled {
+            call: None,
+            by: Some(Key::Operator),
+            choice,
+            from,
+            to: to.to_owned(),
+            phase_document,
+        });
+        let queued = moved(&self.shared.template, &mut state, to, choice);
+        drop(state);
+        self.shared.changed.notify_all();
+        if queued {
+            self.meditate_aside();
+        }
+        Ok(())
+    }
+
+    /// `command` refused `because`, logged: the rejection to return.
+    fn refused(
+        &self,
+        mut state: MutexGuard<'_, State>,
+        command: CommandKind,
+        because: Refusal,
+    ) -> Rejected {
+        let refused = state.refuse(command, because);
+        drop(state);
+        self.shared.changed.notify_all();
+        Rejected::Refused(refused)
+    }
+
+    /// The meditation a phase move queued, on a thread of its own: its audit
+    /// or pre-warm, then its line.
+    fn meditate_aside(&self) {
+        let shared = Arc::clone(&self.shared);
+        let spawned = std::thread::Builder::new()
+            .name("diet-meditation".to_owned())
+            .spawn(move || meditation_work(&shared));
+        if spawned.is_err() {
+            meditation_work(&self.shared);
+        }
     }
 
     /// Open a tangent under `id` (#22): the trunk as it stands is the fork
@@ -3351,6 +4142,7 @@ impl<S: Streaming + 'static> Session<S> {
         state.carry(gap, CommandKind::End);
         let waiting = state.waiting.as_ref().is_some_and(|w| w.answer.is_none());
         let mut stop = None;
+        let mut stops: Vec<Cancel> = Vec::new();
         let outcome = match state.settlement {
             Settlement::Awaiting => state.admit().map(|()| state.move_to(Settlement::Ended)),
             // A prompt waits with no timeout, so `end` is how a session that
@@ -3362,11 +4154,17 @@ impl<S: Streaming + 'static> Session<S> {
             }),
             // So does an `end` in the capture gap while its fork is in
             // flight: the fork settles `cancelled`, then the session ends
-            // (#374).
-            Settlement::Capture if state.forking.is_some() => state.admit().map(|()| {
-                state.ending = true;
-                stop = state.flight.as_ref().map(|flight| flight.cancel.clone());
-            }),
+            // (#374). Every fork cut during the turn is stopped too, and
+            // none queued is sent (#782).
+            Settlement::Capture if state.forking.is_some() || state.pool_busy() => {
+                state.admit().map(|()| {
+                    state.ending = true;
+                    stop = state.flight.as_ref().map(|flight| flight.cancel.clone());
+                    stops.extend(state.pool.iter().map(|pool| pool.cancel.clone()));
+                    state.pool_queue.clear();
+                    let _ = pool_settled(&self.shared.template, &mut state);
+                })
+            }
             Settlement::Turn | Settlement::Capture => Err(Rejected::Refused(
                 state.refuse(CommandKind::End, Refusal::InFlight),
             )),
@@ -3376,7 +4174,7 @@ impl<S: Streaming + 'static> Session<S> {
         };
         drop(state);
         self.shared.changed.notify_all();
-        if let Some(stop) = stop {
+        for stop in stop.into_iter().chain(stops) {
             stop.ask();
         }
         outcome
@@ -3584,6 +4382,170 @@ impl<S: Streaming + 'static> Session<S> {
         self.shared.lock().settlement
     }
 
+    /// What the session is doing now, as `GET /state` answers it (#756),
+    /// read under one lock: whether it is running or ended; its settlement;
+    /// the latest turn -- `running`, `awaiting-approval`, or `settled` with
+    /// its reason; the forks and audits in flight, by their lines' `seq`,
+    /// the forks queued behind them, and whether a pre-warm is in flight;
+    /// the meditation -- `none`, `capturing`, or `held` with what it left
+    /// `unaddressed`; the prompt waiting on the operator, in `waiting`'s
+    /// shape; the last refusal, its `seq`, `command` and `because`; the
+    /// last `seq`; and whether it is `idle`: no turn running, nothing in
+    /// flight, nothing queued and no prompt waiting. `turn`, `approval` and
+    /// `refusal` are absent when there is none, as the log leaves a key out.
+    #[must_use]
+    pub fn status(&self) -> Value {
+        let state = self.shared.lock();
+        let (number, text, object) = (status_number, status_text, status_object);
+        let LogRead {
+            open,
+            settled,
+            refusal,
+            unaddressed,
+        } = LogRead::of(&state);
+        let refusal = refusal.map(|(seq, command, because)| {
+            object(vec![
+                ("seq", number(seq)),
+                ("command", text(command.tag())),
+                ("because", text(because.tag())),
+            ])
+        });
+        let prompt = state
+            .waiting
+            .as_ref()
+            .filter(|waiting| waiting.answer.is_none())
+            .map(|waiting| waiting.prompt.value());
+        let turn = match (state.turns, settled) {
+            (0, _) => None,
+            (n, Some(reason)) => Some(object(vec![
+                ("number", number(u64::from(n))),
+                ("state", text("settled")),
+                ("reason", text(reason.tag())),
+            ])),
+            (n, None) => Some(object(vec![
+                ("number", number(u64::from(n))),
+                (
+                    "state",
+                    text(if prompt.is_some() {
+                        "awaiting-approval"
+                    } else {
+                        "running"
+                    }),
+                ),
+            ])),
+        };
+        let meditation = match (&state.held, unaddressed) {
+            (Some(_), Some(left)) => object(vec![
+                ("state", text("held")),
+                (
+                    "unaddressed",
+                    Value::Array(left.iter().map(|entry| text(entry)).collect()),
+                ),
+            ]),
+            _ if state.meditation_pending.is_some() || state.meditating.is_some() => {
+                object(vec![("state", text("capturing"))])
+            }
+            _ => object(vec![("state", text("none"))]),
+        };
+        let idle = state.idle() && prompt.is_none() && open.is_empty();
+        let seqs = |audits: bool| {
+            Value::Array(
+                open.iter()
+                    .filter(|(_, audit)| *audit == audits)
+                    .map(|(seq, _)| number(*seq))
+                    .collect(),
+            )
+        };
+        let mut status = vec![
+            (
+                "session",
+                text(if state.settlement == Settlement::Ended {
+                    "ended"
+                } else {
+                    "running"
+                }),
+            ),
+            ("settlement", text(state.settlement.tag())),
+            (
+                "in_flight",
+                object(vec![
+                    ("forks", seqs(false)),
+                    ("audits", seqs(true)),
+                    ("queued", number(state.queued.len() as u64)),
+                    ("warming", Value::Boolean(state.warming.is_some())),
+                ]),
+            ),
+            ("meditation", meditation),
+            (
+                "last_seq",
+                number(state.log.last().map_or(0, |logged| logged.seq)),
+            ),
+            ("idle", Value::Boolean(idle)),
+        ];
+        for (key, value) in [("turn", turn), ("approval", prompt), ("refusal", refusal)] {
+            if let Some(value) = value {
+                status.push((key, value));
+            }
+        }
+        object(status)
+    }
+
+    /// Working memory as the session holds it, as `GET /memory` answers it
+    /// (#756): `entries`, each as the object's dump writes it (`id`,
+    /// `content`, `state`, `provenances`, and its links), the live ones
+    /// only unless `all`; on each, the operator's changes no meditation has
+    /// addressed yet as `operator`, each a `kind` -- `edit` or `flag` --
+    /// and a flag's `note`; and `last_seq`, the log's position it was read
+    /// at. A session with no working memory answers no entries.
+    #[must_use]
+    pub fn memory(&self, all: bool) -> Value {
+        let state = self.shared.lock();
+        let entries = state.interview.as_ref().map_or_else(Vec::new, |interview| {
+            interview
+                .object
+                .dump_values()
+                .into_iter()
+                .filter(|(id, _)| {
+                    all || interview
+                        .object
+                        .entry(id)
+                        .is_some_and(|entry| entry.state.is_live())
+                })
+                .map(|(id, mut value)| {
+                    let changes: Vec<Value> = state
+                        .operator_pending
+                        .iter()
+                        .filter(|change| change.entry == id.as_str())
+                        .map(|change| {
+                            let mut members = BTreeMap::from([(
+                                "kind".to_owned(),
+                                Value::String(change.kind.to_owned()),
+                            )]);
+                            if let Some(note) = &change.note {
+                                members.insert("note".to_owned(), Value::String(note.clone()));
+                            }
+                            Value::Object(members)
+                        })
+                        .collect();
+                    if let Value::Object(members) = &mut value
+                        && !changes.is_empty()
+                    {
+                        members.insert("operator".to_owned(), Value::Array(changes));
+                    }
+                    value
+                })
+                .collect()
+        });
+        let last = state.log.last().map_or(0, |logged| logged.seq);
+        Value::Object(BTreeMap::from([
+            ("entries".to_owned(), Value::Array(entries)),
+            (
+                "last_seq".to_owned(),
+                Value::Integer(i64::try_from(last).unwrap_or(i64::MAX)),
+            ),
+        ]))
+    }
+
     /// The trunk as it stands: the head, then every settled exchange.
     #[must_use]
     pub fn trunk(&self) -> Vec<Message> {
@@ -3697,10 +4659,15 @@ pub fn line_of(logged: &Logged) -> log::Line {
             tool_output,
             bash_timeout_ms,
             phases,
+            phase_document,
             instruction_files,
             levers,
             notes_in_the_ask,
+            build,
         } => log::Event::SessionStart {
+            phase_document: phase_document.clone(),
+            build_commit: build.as_ref().map(|(commit, _)| commit.clone()),
+            build_dirty: build.as_ref().map(|(_, dirty)| *dirty),
             bash_timeout_ms: *bash_timeout_ms,
             levers: levers.clone(),
             notes_in_the_ask: notes_in_the_ask.then_some(true),
@@ -3767,7 +4734,9 @@ pub fn line_of(logged: &Logged) -> log::Line {
             head_sha256,
             fork,
             max_tokens,
+            beside,
         } => log::Event::Request {
+            beside: beside.map(u64::from),
             turn: *turn,
             lane: match lane {
                 Lane::Trunk => log::Lane::Trunk,
@@ -4006,9 +4975,20 @@ pub fn line_of(logged: &Logged) -> log::Line {
             role,
             seat,
             ask,
+            pinned,
             displaces,
+            cut,
+            timing,
+            view_overridden,
+            reserved,
         } => log::Event::Fork {
             after_meditation: None,
+            reserved: reserved.map(|(tokens, _)| tokens),
+            prefix_shared: reserved.map(|(_, shared)| shared),
+            cut: *cut,
+            // Absent is the gap (#782): a gap fork's line is as before.
+            timing: (*timing != Timing::Gap).then(|| timing.word().to_owned()),
+            view_overridden: view_overridden.map(ForkView::word),
             lane: log::Lane::Interview,
             of_turn: *of_turn,
             at: *at,
@@ -4021,7 +5001,9 @@ pub fn line_of(logged: &Logged) -> log::Line {
             // Absent is `user` (#599): a user-role fork's line is as before.
             role: (*role != Role::User).then(|| role.tag().to_owned()),
             seat: seat.clone(),
-            ask: Some(ask.tag().to_owned()),
+            // A pinned template by its dogma name, lower case, as an
+            // audit's is (#783).
+            ask: Some(pinned.map_or_else(|| ask.tag().to_owned(), |t| t.name().to_lowercase())),
             hazard: displaces.then(|| DISPLACES_TRUNK_CACHE.to_owned()),
         },
         Event::Audited {
@@ -4044,6 +5026,11 @@ pub fn line_of(logged: &Logged) -> log::Line {
             // The pinned ask it put, by its dogma name, lower case.
             ask: Some(template.name().to_lowercase()),
             hazard: None,
+            cut: None,
+            timing: None,
+            view_overridden: None,
+            reserved: None,
+            prefix_shared: None,
         },
         Event::ForkSettled {
             fork,
@@ -4052,7 +5039,11 @@ pub fn line_of(logged: &Logged) -> log::Line {
             wall_ms,
             refused,
             trailer,
+            pool,
+            not_run,
         } => log::Event::ForkSettled {
+            pool: *pool,
+            not_run: *not_run,
             fork: *fork,
             outcome: *outcome,
             prompt_tokens: *prompt_tokens,
@@ -4089,6 +5080,7 @@ pub fn line_of(logged: &Logged) -> log::Line {
             entry,
             supersedes,
             tangent,
+            reason,
         } => log::Event::Patch {
             fork: *fork,
             lane: lane.clone(),
@@ -4096,17 +5088,59 @@ pub fn line_of(logged: &Logged) -> log::Line {
             entry: entry.clone(),
             supersedes: supersedes.clone(),
             tangent: tangent.clone(),
+            reason: reason.clone(),
         },
         Event::PhaseRuled {
             call,
+            by,
             choice,
             from,
             to,
+            phase_document,
         } => log::Event::PhaseRuled {
             call: call.clone(),
+            by: by.map(|key| key.tag().to_owned()),
             choice: choice.tag().to_owned(),
             from: from.clone(),
             to: to.clone(),
+            phase_document: phase_document.clone(),
+        },
+        Event::PhaseProposed {
+            by,
+            call,
+            from,
+            to,
+            reason,
+            meditate,
+            evidence,
+        } => log::Event::PhaseProposed {
+            by: by.tag().to_owned(),
+            call: call.clone(),
+            from: from.clone(),
+            to: to.clone(),
+            reason: reason.clone(),
+            meditate: *meditate,
+            evidence: *evidence,
+        },
+        Event::PhaseAnswered {
+            call,
+            accepted,
+            reason,
+        } => log::Event::PhaseAnswered {
+            call: call.clone(),
+            accepted: *accepted,
+            reason: reason.clone(),
+        },
+        Event::PhaseStarted {
+            phase,
+            phase_document,
+        } => log::Event::PhaseStarted {
+            phase: phase.clone(),
+            phase_document: phase_document.clone(),
+        },
+        Event::PhaseNoted { turn, text } => log::Event::PhaseNoted {
+            turn: *turn,
+            text: text.clone(),
         },
         Event::Captured {
             request,
@@ -4139,8 +5173,24 @@ pub fn line_of(logged: &Logged) -> log::Line {
             of_turn: *of_turn,
             trigger: trigger.clone(),
             ask: ask.tag().to_owned(),
-            call: call.clone(),
-            field: field.clone(),
+            call: Some(call.clone()),
+            field: Some(field.clone()),
+            reason: None,
+            cut: None,
+        },
+        Event::Backlogged {
+            of_turn,
+            trigger,
+            ask,
+            cut,
+        } => log::Event::ForkSkipped {
+            of_turn: *of_turn,
+            trigger: trigger.clone(),
+            ask: ask.clone(),
+            call: None,
+            field: None,
+            reason: Some(log::SKIPPED_BACKLOG.to_owned()),
+            cut: Some(*cut),
         },
         Event::Reminded { turn, text } => log::Event::Reminded {
             turn: *turn,
@@ -4183,6 +5233,7 @@ pub fn line_of(logged: &Logged) -> log::Line {
             carried_turns,
             carried_tokens,
             phase,
+            phase_document,
             tool_outputs,
             outputs,
             background,
@@ -4194,10 +5245,19 @@ pub fn line_of(logged: &Logged) -> log::Line {
             newest_turn_tokens,
             refilled_anyway,
             warm,
+            turn_steps,
+            audit_notes,
         } => log::Event::Meditation {
+            turn_steps: turn_steps.map(|(kept, compacted)| log::TurnSteps { kept, compacted }),
+            audit_notes: audit_notes.map(|(audited, left, line)| log::AuditNotes {
+                audited,
+                left,
+                line,
+            }),
             fired: *fired,
             warm: warm.as_ref().map(timings_line),
             phase: phase.clone(),
+            phase_document: phase_document.clone(),
             at_turn: *at_turn,
             reason: meditation_reason_of(*reason),
             prefix_hash_before: prefix_hash_before.clone(),
@@ -4278,6 +5338,13 @@ pub fn line_of(logged: &Logged) -> log::Line {
 #[must_use]
 pub fn render(logged: &Logged) -> String {
     log::render(&line_of(logged))
+}
+
+/// A logged event as its log line, read back as an object (#756): what
+/// `GET /wait` names as its `event`, and whose `kind` it matches.
+#[must_use]
+pub fn line_value(logged: &Logged) -> BTreeMap<String, Value> {
+    crate::formats::record::json::line(&render(logged)).unwrap_or_default()
 }
 
 /// A call's timings as the log carries them: the same keys, the
@@ -4383,6 +5450,9 @@ fn command_of(command: CommandKind) -> log::Command {
         CommandKind::EditEntry => log::Command::EditEntry,
         CommandKind::FlagEntry => log::Command::FlagEntry,
         CommandKind::RefillAnyway => log::Command::RefillAnyway,
+        CommandKind::StartPhase => log::Command::StartPhase,
+        CommandKind::ProposePhase => log::Command::ProposePhase,
+        CommandKind::MovePhase => log::Command::MovePhase,
     }
 }
 
@@ -4409,6 +5479,10 @@ fn refusal_of(refusal: Refusal) -> log::Refusal {
         Refusal::MeditationHeld => log::Refusal::MeditationHeld,
         Refusal::NothingHeld => log::Refusal::NothingHeld,
         Refusal::Restates => log::Refusal::Restates,
+        Refusal::NoVision => log::Refusal::NoVision,
+        Refusal::NotUnilateral => log::Refusal::NotUnilateral,
+        Refusal::AlreadyAsked => log::Refusal::AlreadyAsked,
+        Refusal::ProposalPending => log::Refusal::ProposalPending,
     }
 }
 
@@ -4433,8 +5507,8 @@ fn state_of(settlement: Settlement) -> log::State {
 
 /// One turn, on its own thread: a step per request, until the trunk answers
 /// or the loop ends (#29 D11: a step is a request).
-fn call<S: Streaming>(
-    shared: &Shared<S>,
+fn call<S: Streaming + 'static>(
+    shared: &Arc<Shared<S>>,
     shape: &RequestShape,
     cancel: &Cancel,
     opening: Vec<Message>,
@@ -4473,8 +5547,8 @@ fn capped(finish_reason: Option<&str>) -> bool {
 /// One step's request: stream it into the log, then settle the turn, or run
 /// the calls it made and return the next request's sequence number.
 #[allow(clippy::too_many_lines)]
-fn step<S: Streaming>(
-    shared: &Shared<S>,
+fn step<S: Streaming + 'static>(
+    shared: &Arc<Shared<S>>,
     shape: &mut RequestShape,
     cancel: &Cancel,
     exchange: &mut Vec<Message>,
@@ -4575,6 +5649,27 @@ fn step<S: Streaming>(
                 (partial, reasoning),
                 (finish_reason, timings, hosted),
             ) {
+                // The final answer is a step too (#783): its gates count, and
+                // its forks run in the gap, cut at the answer.
+                let answered = state
+                    .log
+                    .iter()
+                    .rev()
+                    .find_map(|logged| match &logged.event {
+                        Event::Answered {
+                            request: to,
+                            text,
+                            reasoning,
+                            ..
+                        } if *to == request => Some((text.clone(), reasoning.clone())),
+                        _ => None,
+                    });
+                if let Some((text, reasoning)) = answered {
+                    let mut said = Message::new(Role::Assistant, text);
+                    said.reasoning = reasoning;
+                    let content = content_firings(&mut state, (turn, request), &said, &[]);
+                    state.gap_firings.extend(content);
+                }
                 forked = gap(shared, &mut state, turn, request);
             }
         }
@@ -4717,6 +5812,12 @@ fn step<S: Streaming>(
     if let Some(forked) = forked {
         interview(shared, forked);
     }
+    // The turn over, its gap's forks done (#826): the forks cut during it
+    // that waited for room are sent.
+    let mut state = shared.lock();
+    pool_after_the_turn(shared, &mut state);
+    drop(state);
+    shared.changed.notify_all();
     None
 }
 
@@ -4743,8 +5844,9 @@ pub const UNRECORDED_CALL: &str = "Tool execution result was not recorded — li
 /// reached it, `failed` if a call named a tool the session did not declare
 /// (T13), `max_steps` if this was the last step (T8, Q12: the calls that ran
 /// stay on the trunk).
-fn run_calls<S: Streaming>(
-    shared: &Shared<S>,
+#[allow(clippy::too_many_lines)]
+fn run_calls<S: Streaming + 'static>(
+    shared: &Arc<Shared<S>>,
     (shape, exchange): (&mut RequestShape, &mut Vec<Message>),
     cancel: &Cancel,
     said: Message,
@@ -4759,6 +5861,8 @@ fn run_calls<S: Streaming>(
     let mut results = Vec::new();
     let mut unknown = false;
     let mut stopped = false;
+    // Where a fork the step warrants is cut (#782): its last `tool_call`.
+    let mut last_line = request;
     for call in calls {
         let (mut line, shown) = if stopped || cancel.is_asked() {
             (cancelled_line(shared, (turn, request), call), None)
@@ -4787,7 +5891,12 @@ fn run_calls<S: Streaming>(
         }
         let mut state = shared.lock();
         line.recovered_from = state.recovered.remove(&line.id);
-        state.push(Event::ToolCalled(Box::new(line)));
+        // Its touches, patched in as it settles (#784), logged after it.
+        let mechanical = mechanically_captured(shared, &mut state, &line, (turn, request, steps));
+        last_line = state.push(Event::ToolCalled(Box::new(line)));
+        for patch in mechanical {
+            state.push(patch);
+        }
         drop(state);
         shared.changed.notify_all();
     }
@@ -4801,6 +5910,48 @@ fn run_calls<S: Streaming>(
     } else {
         None
     };
+    // The forks this step warrants (#782).
+    cut_step(
+        shared,
+        &mut state,
+        (turn, request, last_line),
+        (shape, &said, &results, calls),
+        settled,
+    );
+    // A proposal of the model's own ends its turn after this step (#788):
+    // the step joins the trunk, the result saying so the last thing on it.
+    let proposed = state.proposal_ends_turn.take();
+    if let (Some(OwnProposal { reason }), None) = (proposed, settled) {
+        state.flight = None;
+        let mut ran = std::mem::take(exchange);
+        ran.push(said);
+        ran.extend(results);
+        state.trunk.extend(ran);
+        state.trunk_tokens = state.step_tokens.take();
+        state.ran.clear();
+        // The proposal, with the evidence of the trunk it ends the turn on.
+        if let Some(PendingProposal { call, from, to }) = state.proposal.clone() {
+            let evidence = evidence(&state, &shared.template);
+            state.push(Event::PhaseProposed {
+                by: Key::Model,
+                call: Some(call),
+                from,
+                to,
+                reason,
+                meditate: None,
+                evidence,
+            });
+        }
+        state.push(Event::TurnSettled {
+            turn,
+            reason: SettleReason::Final,
+        });
+        turn_over(&shared.template, &mut state);
+        pool_after_the_turn(shared, &mut state);
+        drop(state);
+        shared.changed.notify_all();
+        return None;
+    }
     if let Some(reason) = settled {
         state.flight = None;
         let measured = state.step_tokens.take();
@@ -4825,6 +5976,7 @@ fn run_calls<S: Streaming>(
         }
         state.push(Event::TurnSettled { turn, reason });
         turn_over(&shared.template, &mut state);
+        pool_after_the_turn(shared, &mut state);
         drop(state);
         shared.changed.notify_all();
         return None;
@@ -4837,12 +5989,14 @@ fn run_calls<S: Streaming>(
     // The automatic meditation (#617), between the turn's steps too.
     window_meditation(&shared.template, &mut state, shape, false);
     let max_tokens = state.sized(shape, shared.template.limits.max_output_tokens);
+    let beside = state.trunk_beside();
     let next = state.push(Event::Requested {
         turn,
         lane: Lane::Trunk,
         head_sha256: crate::client::head::Head::of(shape).digest().to_owned(),
         fork: None,
         max_tokens,
+        beside,
     });
     if let Some(flight) = state.flight.as_mut() {
         flight.request = next;
@@ -5155,6 +6309,129 @@ fn capture_call<S>(
     (line, Some(shown))
 }
 
+/// The id prefix of a mechanical entry (#784): `mechanical/<path>`.
+const MECHANICAL_ID: &str = "mechanical/";
+
+/// What tool call `line` touched, patched into working memory as it settles
+/// (#784), when the regimen turns `mechanical_capture` on: no model call and
+/// no fork. The mechanical lane reads the call as the shell would; each file
+/// read, written or edited becomes one entry per path -- `files: <path>`,
+/// id `mechanical/<path>` -- a later touch appending its provenance (lane
+/// `mechanical`, the turn, the step as its index), and a delete retiring it;
+/// a listed directory is `files: listed <dir>`. A path under the worktree is
+/// written relative to it. The operator's entries are theirs (#150): the
+/// guard refuses a patch on one. A path deleted and touched again stays
+/// retired: the object refuses to restate a retired entry. The `patch`
+/// lines to log, after the call's own.
+fn mechanically_captured<S>(
+    shared: &Shared<S>,
+    state: &mut State,
+    line: &ToolLine,
+    (turn, request, step): (u32, u64, u32),
+) -> Vec<Event> {
+    use crate::capture::mechanical::{LANE, Lane, TouchKind};
+    let on = state
+        .interview
+        .as_ref()
+        .is_some_and(|interview| interview.mechanical_capture);
+    let Some(tools) = shared.tools.as_ref().filter(|_| on) else {
+        return Vec::new();
+    };
+    if line.outcome != log::ToolOutcome::Ran {
+        return Vec::new();
+    }
+    let worktree = tools.worktree.clone();
+    let reader = state
+        .mechanical
+        .get_or_insert_with(|| Lane::starting_in(worktree.clone()));
+    let event = format!("r{request}/{}", line.id);
+    reader.observe(&crate::formats::record::Event::ToolCall {
+        id: event.clone(),
+        at_turn: turn,
+        tool: line.name.clone(),
+        args: crate::formats::record::json::line(&line.arguments).ok(),
+        exit: line.exit.and_then(|code| i64::try_from(code).ok()),
+        output: line.stdout.as_ref().map(|out| out.text.clone()),
+        exec: None,
+        lane: None,
+    });
+    let mut touched = reader.touched_by(&event);
+    touched.dedup();
+    let tangent = state
+        .tangent
+        .as_ref()
+        .map(|(tangent, _)| tangent.id().to_owned());
+    let Some(interview) = state.interview.as_mut() else {
+        return Vec::new();
+    };
+    let provenance = crate::object::Provenance {
+        turn,
+        lane: LANE.to_owned(),
+        fork: None,
+        tangent,
+        index: step,
+    };
+    let mut patches = Vec::new();
+    for (path, kind) in touched {
+        let shown = match path.strip_prefix(&worktree) {
+            Ok(under) if under.as_os_str().is_empty() => ".".to_owned(),
+            Ok(under) => under.display().to_string(),
+            Err(_) => path.display().to_string(),
+        };
+        let (id, content) = match kind {
+            TouchKind::Listed => (
+                format!("{MECHANICAL_ID}listed:{shown}"),
+                format!("files: listed {shown}"),
+            ),
+            TouchKind::Read | TouchKind::Written | TouchKind::Deleted => {
+                (format!("{MECHANICAL_ID}{shown}"), format!("files: {shown}"))
+            }
+        };
+        // The path's live entry, under whichever id it was born: `<id>`,
+        // or `<id>#2`, `#3` for a file deleted and touched again.
+        let object = &interview.object;
+        let held = object.live().find(|entry| entry.content == content);
+        match (kind, held) {
+            (TouchKind::Deleted, Some(entry)) => patches.push(Patch::Retire {
+                target: entry.id.clone(),
+                provenance: provenance.clone(),
+            }),
+            (TouchKind::Deleted, None) => {}
+            (_, Some(entry)) => patches.push(Patch::Add {
+                id: entry.id.clone(),
+                content,
+                provenance: provenance.clone(),
+            }),
+            (_, None) => {
+                let fresh = (1..=u32::MAX)
+                    .map(|n| {
+                        if n == 1 {
+                            id.clone()
+                        } else {
+                            format!("{id}#{n}")
+                        }
+                    })
+                    .filter_map(|id| crate::object::EntryId::new(&id).ok())
+                    .find(|id| object.entry(id).is_none());
+                if let Some(id) = fresh {
+                    patches.push(Patch::Add {
+                        id,
+                        content,
+                        provenance: provenance.clone(),
+                    });
+                }
+            }
+        }
+    }
+    let (kept, mut lines) = guarded(&patches, &interview.object, None);
+    for patch in &kept {
+        if interview.object.apply(patch).is_ok() {
+            lines.push(patched(None, patch, &interview.object));
+        }
+    }
+    lines
+}
+
 /// A self-capture call's patches (#609): its arguments through the contract
 /// and, for `update_record`, the groundedness gate against what the model
 /// saw by turn `turn` (`capture::tools::apply_call`), each stamped with an
@@ -5448,6 +6725,17 @@ fn one_call<S: Streaming>(
             return (refused(log::ToolRefusal::MaxSteps), None);
         }
         return prune_call(shared, (turn, request), call);
+    }
+    // The phase tool (#788), whenever the session's phases are active.
+    if declared
+        && call.name == PHASE_TOOL
+        && shared
+            .lock()
+            .interview
+            .as_ref()
+            .is_some_and(|interview| !interview.phases.is_empty())
+    {
+        return phase_call(shared, (turn, request), call);
     }
     // Self-capture (#609): the contract's tools write working memory and
     // nothing else, so no gate, no confinement and no approval decide them.
@@ -6129,17 +7417,19 @@ fn refill_trunk(
     meditation: (crate::meditation::Reason, Option<log::MeditationFired>),
     to: Option<String>,
 ) {
-    let meditated = refilled(template, state, meditation, to);
+    let meditated = refilled(template, state, meditation, to, (&[], &[]));
     state.push(meditated);
 }
 
 /// [`refill_trunk`]'s refill, its line returned rather than logged, so a
 /// pre-warm's timings can join it (#504).
+#[allow(clippy::too_many_lines)]
 fn refilled(
     template: &RequestShape,
     state: &mut State,
     (reason, fired): (crate::meditation::Reason, Option<log::MeditationFired>),
     to: Option<String>,
+    (steps, riding): (&[Message], &[Message]),
 ) -> Event {
     // The move the graph allowed, made before the render, so the refill
     // names the phase the session is now in (#563).
@@ -6150,13 +7440,16 @@ fn refilled(
     if let Some(moved) = &phase {
         state.phase = Some(moved.to.clone());
     }
+    // The phase's growth before this meditation replaces the trunk (#788).
+    let before = trunk_now(state, template);
+    state.phase_grown += before.saturating_sub(state.phase_floor);
     let Some(interview) = state.interview.as_ref() else {
         unreachable!("a meditation is refused or not due when the session keeps no working memory");
     };
     // The render, under the regimen's budget when it declares one (#565).
     let budget = interview.meditations.render_budget;
-    let rendered = marked_render(state, interview, budget);
-    let render_budget = budget.map(|budget| log::RenderBudget {
+    let mut rendered = marked_render(state, interview, budget);
+    let mut render_budget = budget.map(|budget| log::RenderBudget {
         tokens: budget.tokens,
         over: match budget.over {
             crate::meditation::render::OverBudget::Tier => "tier",
@@ -6166,8 +7459,8 @@ fn refilled(
         rendered: rendered.tokens,
         reduced: rendered.reduced,
         fits: Some(rendered.fits),
+        window_line: None,
     });
-    let render = rendered.text;
     let carried_entries = interview.object.live().count() as u64;
     // The head a trunk request on `messages` carries: `Head::of` leaves
     // out a request's last message, its ask, so one stands in for it.
@@ -6185,7 +7478,10 @@ fn refilled(
         .trunk
         .get(template.messages.len() + usize::from(state.refilled)..)
         .unwrap_or_default();
-    let on_trunk = prunes_on(&state.pruned, turns);
+    // A running turn's steps it drops (#813) are compacted with the turns
+    // before it: archived, their outputs carried, their prunes applied.
+    let mut on_trunk = prunes_on(&state.pruned, turns);
+    on_trunk.extend(prunes_on(&state.pruned, steps));
     let kept = crate::meditation::render::tail(turns, tail_tokens).to_vec();
     let (carried_turns, newest_turn_tokens) = tail_kept(&kept, turns, tail_tokens);
     let carried_tokens = kept
@@ -6195,7 +7491,12 @@ fn refilled(
     // What the refill carries of the outputs it compacts away (#553): those
     // before the kept tail, which stays as it sat.
     let tool_outputs = interview.meditations.outputs;
-    let compacted = &turns[..turns.len() - kept.len()];
+    let compacted: Vec<Message> = turns[..turns.len() - kept.len()]
+        .iter()
+        .chain(steps)
+        .cloned()
+        .collect();
+    let compacted = compacted.as_slice();
     let mut kept = kept;
     replaced_in_tail(&mut kept, &state.pruned);
     // The archive (#566): what this meditation drops from the trunk, and every
@@ -6211,19 +7512,66 @@ fn refilled(
             (state.recording.as_deref(), &state.pruned),
         ),
     );
-    let sent = outputs
-        .as_ref()
-        .map_or_else(|| render.clone(), |(text, _)| format!("{render}{text}"));
     // Each background command still running (#614), after the summary in
     // the refill's message, as Qwen Code places its list: the refill
     // compacts away the call that started it.
     let background = super::background::running_at_meditation(state.jobs.values_mut());
-    let mut refilled =
-        crate::meditation::render::refill_with(&template.messages, &sent, background.as_deref());
+    let (head, phase_document) = state.phase_head(&template.messages);
+    // The refill fits the window (#814): sized past its line, the render is
+    // elided, oldest first, to the room the rest leaves -- whatever the
+    // regimen's budget says, unless that is smaller.
+    // What rides after the refill counts too (#813): a running turn's ask
+    // and the steps it keeps.
+    let around = head
+        .iter()
+        .chain(&kept)
+        .chain(riding)
+        .map(crate::meditation::render::estimated_tokens)
+        .sum::<u64>()
+        + estimated_chars(
+            outputs.as_ref().map_or("", |(text, _)| text.as_str()),
+            background.as_deref().unwrap_or_default(),
+        );
+    if let Some(line) = window_line(template)
+        && rendered.tokens + around > line
+    {
+        let room = line.saturating_sub(around);
+        if budget.is_none_or(|budget| budget.tokens > room) {
+            let fitted = crate::meditation::render::Budget {
+                tokens: room,
+                over: crate::meditation::render::OverBudget::Elide,
+            };
+            let interview = state.interview.as_ref().expect("held above");
+            rendered = marked_render(state, interview, Some(fitted));
+            render_budget = Some(log::RenderBudget {
+                tokens: room,
+                over: "elide".to_owned(),
+                rendered: rendered.tokens,
+                reduced: rendered.reduced,
+                fits: Some(rendered.fits),
+                window_line: Some(line),
+            });
+        }
+    }
+    let render = rendered.text;
+    let sent = outputs
+        .as_ref()
+        .map_or_else(|| render.clone(), |(text, _)| format!("{render}{text}"));
+    let mut refilled = crate::meditation::render::refill_with(&head, &sent, background.as_deref());
     state.refilled = true;
     refilled.extend(kept);
     let prefix_hash_after = digest(&refilled);
     state.trunk = refilled;
+    // The refill is where the trunk's growth counts from again (#788), and
+    // a move made by this meditation enters its phase here.
+    state.trunk_tokens = None;
+    let after = trunk_now(state, template);
+    state.meditation_floor = after;
+    state.phase_floor = after;
+    if phase.is_some() {
+        state.phase_entered = state.log.len() as u64;
+        state.phase_grown = 0;
+    }
     for item in archived {
         state.archive.push(item);
     }
@@ -6243,6 +7591,7 @@ fn refilled(
         carried_turns,
         carried_tokens,
         phase,
+        phase_document,
         tool_outputs,
         outputs,
         background,
@@ -6254,7 +7603,146 @@ fn refilled(
         newest_turn_tokens,
         refilled_anyway: None,
         warm: None,
+        turn_steps: None,
+        audit_notes: state.audit_cut.take(),
     }
+}
+
+/// Where a meditation's audit is cut (#504): the latest turn that settled
+/// `final`, and its trunk request's sequence number.
+fn audit_cut_point(state: &State) -> Option<(u32, u64)> {
+    // The latest turn that settled `final` (#729): one that failed since
+    // has no answered request to cut from, and under `refuse` a meditation
+    // that could ask nothing would hold having asked nothing.
+    let turn = state
+        .log
+        .iter()
+        .rev()
+        .find_map(|logged| match &logged.event {
+            Event::TurnSettled {
+                turn: settled,
+                reason: SettleReason::Final,
+            } => Some(*settled),
+            _ => None,
+        })?;
+    let at = state
+        .log
+        .iter()
+        .rev()
+        .find_map(|logged| match &logged.event {
+            Event::Requested {
+                turn: asked,
+                lane: Lane::Trunk,
+                ..
+            } if *asked == turn => Some(logged.seq),
+            _ => None,
+        })?;
+    Some((turn, at))
+}
+
+/// A note an audit numbers: its entry and its text.
+type Note = (crate::object::EntryId, String);
+
+/// An audit fitted to the window (#821): the notes audited, those left out,
+/// the line.
+type AuditCut = (u64, u64, u64);
+
+/// The notes an audit asks over, fitted to the window (#821): with the
+/// trunk at the cut and every note numbered past the window's line, the
+/// newest that fit -- in their own order -- the rest left as they are,
+/// neither kept nor removed by an answer that never saw them; and the cut
+/// (audited, left, the line) when there was one. `None` notes when not
+/// even one fits.
+fn fitted_items(
+    template: &RequestShape,
+    trunk: &[Message],
+    object: &crate::object::WorkingObject,
+    items: Vec<Note>,
+    asking: &dyn Fn(&[Note]) -> Option<crate::meditation::Ask>,
+) -> (Option<Vec<Note>>, Option<AuditCut>) {
+    let trunk = trunk
+        .iter()
+        .map(crate::meditation::render::estimated_tokens)
+        .sum::<u64>();
+    let sized = |ask: &crate::meditation::Ask| {
+        trunk + u64::try_from(ask.text.chars().count().div_ceil(4)).unwrap_or(u64::MAX)
+    };
+    let Some(line) =
+        window_line(template).filter(|line| asking(&items).is_some_and(|ask| sized(&ask) > *line))
+    else {
+        return (Some(items), None);
+    };
+    let newest = newest_first(object, &items);
+    let fits = |kept: usize| {
+        asking(&chosen_of(&items, &newest[..kept])).is_some_and(|ask| sized(&ask) <= line)
+    };
+    // The most of the newest that fit, by halving: the ask grows with each
+    // note, so fitting is monotone in how many.
+    let (mut low, mut high) = (0, items.len());
+    while low < high {
+        let mid = (low + high).div_ceil(2);
+        if fits(mid) {
+            low = mid;
+        } else {
+            high = mid - 1;
+        }
+    }
+    let cut = Some((low as u64, (items.len() - low) as u64, line));
+    if low == 0 {
+        return (None, cut);
+    }
+    (Some(chosen_of(&items, &newest[..low])), cut)
+}
+
+/// `items`' positions, the newest first: by each entry's latest
+/// provenance, as a budgeted render reduces the oldest first (#565).
+fn newest_first(
+    object: &crate::object::WorkingObject,
+    items: &[(crate::object::EntryId, String)],
+) -> Vec<usize> {
+    let latest = |id: &crate::object::EntryId| {
+        object
+            .entry(id)
+            .and_then(|entry| entry.provenances.iter().max().cloned())
+    };
+    let mut order: Vec<usize> = (0..items.len()).collect();
+    order.sort_by(|a, b| {
+        latest(&items[*b].0)
+            .cmp(&latest(&items[*a].0))
+            .then_with(|| items[*b].0.cmp(&items[*a].0))
+    });
+    order
+}
+
+/// The `items` at `positions`, in `items`' own order: the notes an audit
+/// fitted to the window numbers (#821).
+fn chosen_of(
+    items: &[(crate::object::EntryId, String)],
+    positions: &[usize],
+) -> Vec<(crate::object::EntryId, String)> {
+    let mut kept: Vec<usize> = positions.to_vec();
+    kept.sort_unstable();
+    kept.into_iter().map(|at| items[at].clone()).collect()
+}
+
+/// The window's line (#617, #814): the window less its reserve -- the
+/// output cap, or [`crate::meditation::policy::WINDOW_RESERVE`] if more --
+/// when serve knows the window.
+fn window_line(template: &RequestShape) -> Option<u64> {
+    let reserve =
+        u64::from(template.limits.max_output_tokens).max(crate::meditation::policy::WINDOW_RESERVE);
+    template
+        .limits
+        .context_window
+        .map(|window| window.saturating_sub(reserve))
+}
+
+/// The estimated tokens of the refill message's text around its render:
+/// the tool-output section, the background list, and the `<summary>` tags.
+fn estimated_chars(outputs: &str, background: &str) -> u64 {
+    let wrapper = "<summary>\n\n</summary>".chars().count();
+    let chars = outputs.chars().count() + background.chars().count() + wrapper;
+    u64::try_from(chars.div_ceil(4)).unwrap_or(u64::MAX)
 }
 
 /// How many whole turns the tail `kept` of `turns` holds; and, when a tail
@@ -6283,6 +7771,8 @@ impl Event {
             wall_ms: None,
             refused: None,
             trailer: None,
+            pool: None,
+            not_run: None,
         }
     }
 }
@@ -6534,6 +8024,7 @@ fn meditation_work<S: Streaming>(shared: &Shared<S>) {
     let Some(PendingMeditation { reason, to, anyway }) = state.meditation_pending.take() else {
         return;
     };
+    state.meditating = Some(reason);
     if !anyway {
         state = audit_and_gate(shared, state, reason);
         if let Some(left) = left_unaddressed(&state)
@@ -6546,6 +8037,7 @@ fn meditation_work<S: Streaming>(shared: &Shared<S>) {
                 to,
                 anyway: false,
             });
+            state.meditating = None;
             state.move_to(Settlement::Awaiting);
             let at_turn = state.turns;
             state.push(Event::MeditationHeld {
@@ -6562,7 +8054,7 @@ fn meditation_work<S: Streaming>(shared: &Shared<S>) {
             return;
         }
     }
-    let mut meditated = refilled(&shared.template, &mut state, (reason, None), to);
+    let mut meditated = refilled(&shared.template, &mut state, (reason, None), to, (&[], &[]));
     if let Event::Meditated {
         refilled_anyway, ..
     } = &mut meditated
@@ -6596,6 +8088,7 @@ fn meditation_work<S: Streaming>(shared: &Shared<S>) {
     }
     // Back to `awaiting`, then the meditation's line, under one lock: a meditation is
     // logged while the session awaits, and nothing comes between.
+    state.meditating = None;
     state.move_to(Settlement::Awaiting);
     state.push(meditated);
     if state.ending {
@@ -6614,6 +8107,8 @@ fn audit_and_gate<'a, S: Streaming>(
     mut state: std::sync::MutexGuard<'a, State>,
     reason: crate::meditation::Reason,
 ) -> std::sync::MutexGuard<'a, State> {
+    // This meditation's own cut (#821), none carried from one that held.
+    state.audit_cut = None;
     if let Some(fired) = audit_fired(&shared.template, &mut state, reason, None) {
         drop(state);
         shared.changed.notify_all();
@@ -6685,6 +8180,8 @@ fn audit_fired(
         .filter(|entry| only.is_none_or(|only| only.iter().any(|id| id == entry.id.as_str())))
         .map(|entry| (entry.id.clone(), entry.content.clone()))
         .collect();
+    // Nothing to cut from, nothing asked -- and no cut recorded.
+    let (turn, at) = audit_cut_point(state)?;
     // #610: a session whose forks answer through the record tools audits
     // through them too, in the tools-route set. That set's words carry no
     // markers yet, so it marks nothing (#150), though its patches address
@@ -6696,11 +8193,20 @@ fn audit_fired(
     } else {
         operator_marks(&state.operator_pending)
     };
-    let ask = if tools {
-        crate::meditation::audit_ask_tools(reason, &items, crate::dogma::audits::DEFAULT)?
-    } else {
-        crate::meditation::audit_ask_marked(reason, &items, &marks)?
+    let asking = |items: &[(crate::object::EntryId, String)]| {
+        if tools {
+            crate::meditation::audit_ask_tools(reason, items, crate::dogma::audits::DEFAULT)
+        } else {
+            crate::meditation::audit_ask_marked(reason, items, &marks)
+        }
     };
+    // The audit fits the window (#821): the newest notes that fit.
+    let (chosen, cut) = fitted_items(template, &state.trunk, &interview.object, items, &asking);
+    let ask = chosen.and_then(|chosen| asking(&chosen));
+    if cut.is_some() {
+        state.audit_cut = cut;
+    }
+    let ask = ask?;
     // The notes with a pending change, on either route (#748): the tools
     // route's words carry no markers, but its patches can still act on them.
     let marked = ask
@@ -6714,32 +8220,6 @@ fn audit_fired(
         })
         .map(|id| id.as_str().to_owned())
         .collect();
-    // The latest turn that settled `final` (#729): one that failed since
-    // has no answered request to cut from, and under `refuse` a meditation
-    // that could ask nothing would hold having asked nothing.
-    let turn = state
-        .log
-        .iter()
-        .rev()
-        .find_map(|logged| match &logged.event {
-            Event::TurnSettled {
-                turn: settled,
-                reason: SettleReason::Final,
-            } => Some(*settled),
-            _ => None,
-        })?;
-    let at = state
-        .log
-        .iter()
-        .rev()
-        .find_map(|logged| match &logged.event {
-            Event::Requested {
-                turn: asked,
-                lane: Lane::Trunk,
-                ..
-            } if *asked == turn => Some(logged.seq),
-            _ => None,
-        })?;
     let mut shape = template.clone();
     shape.messages.clone_from(&state.trunk);
     shape
@@ -6767,6 +8247,7 @@ fn audit_fired(
         head_sha256: crate::client::head::Head::of(&shape).digest().to_owned(),
         fork: Some(fork),
         max_tokens,
+        beside: None,
     });
     let cancel = Cancel::new();
     state.flight = Some(Flight {
@@ -7117,19 +8598,31 @@ fn window_meditation(
         .trunk
         .get(template.messages.len() + usize::from(state.refilled)..)
         .unwrap_or_default();
+    let reserve =
+        u64::from(template.limits.max_output_tokens).max(crate::meditation::policy::WINDOW_RESERVE);
+    let (ask, steps, keep_from) = split_turn(
+        &shape.messages[state.trunk.len()..],
+        crate::meditation::policy::keep_recent_budget(window, reserve),
+    );
+    // Nothing to drop: no turn before this one past the tail, and none of
+    // this turn's steps past its budget (#813).
     if crate::meditation::render::tail(turns, interview.meditations.tail_tokens).len()
         == turns.len()
+        && keep_from <= ask
     {
         return false;
     }
     let prompt = state.prompt_of(shape);
-    let reserve =
-        u64::from(template.limits.max_output_tokens).max(crate::meditation::policy::WINDOW_RESERVE);
     if !forced && prompt <= window.saturating_sub(reserve) {
         return false;
     }
-    let own = shape.messages.split_off(state.trunk.len());
-    refill_trunk(
+    let mut own = shape.messages.split_off(state.trunk.len());
+    // The running turn split (#813): its ask, then its most recent whole
+    // steps within the budget; the steps before them are compacted.
+    let kept = own.split_off(keep_from);
+    let dropped = own.split_off(ask);
+    let riding: Vec<Message> = own.iter().chain(&kept).cloned().collect();
+    let mut meditated = refilled(
         template,
         state,
         (
@@ -7140,10 +8633,49 @@ fn window_meditation(
             }),
         ),
         None,
+        (&dropped, &riding),
     );
+    if let Event::Meditated { turn_steps, .. } = &mut meditated {
+        *turn_steps = (steps > 0).then(|| {
+            let compacted = dropped
+                .iter()
+                .filter(|message| message.role == Role::Assistant)
+                .count() as u64;
+            (steps - compacted, compacted)
+        });
+    }
+    state.push(meditated);
     shape.messages.clone_from(&state.trunk);
     shape.messages.extend(own);
+    shape.messages.extend(kept);
     true
+}
+
+/// Where the running turn's own messages `own` -- its ask, then its steps,
+/// each an assistant message and what follows it up to the next -- split
+/// (#813): the ask's length, the step count, and the index the kept steps
+/// start at: the most recent whole steps within `budget` tokens, the last
+/// always kept. A call is never parted from its result.
+fn split_turn(own: &[Message], budget: u64) -> (usize, u64, usize) {
+    let starts: Vec<usize> = own
+        .iter()
+        .enumerate()
+        .filter(|(_, message)| message.role == Role::Assistant)
+        .map(|(at, _)| at)
+        .collect();
+    let ask = starts.first().copied().unwrap_or(own.len());
+    let mut keep_from = own.len();
+    for (nth, start) in starts.iter().rev().enumerate() {
+        let tokens: u64 = own[*start..]
+            .iter()
+            .map(crate::meditation::render::estimated_tokens)
+            .sum();
+        if nth > 0 && tokens > budget {
+            break;
+        }
+        keep_from = *start;
+    }
+    (ask, starts.len() as u64, keep_from)
 }
 
 /// After a trunk request that overflowed the window (#616), the automatic
@@ -7164,12 +8696,14 @@ fn retried(
     }
     state.overflow_retried = Some(turn);
     let max_tokens = state.sized(shape, template.limits.max_output_tokens);
+    let beside = state.trunk_beside();
     let next = state.push(Event::Requested {
         turn,
         lane: Lane::Trunk,
         head_sha256: crate::client::head::Head::of(shape).digest().to_owned(),
         fork: None,
         max_tokens,
+        beside,
     });
     // In flight again (#728): the failed request cleared it, and a cancel,
     // an end or a drop must reach the retry as it reaches any request.
@@ -7454,8 +8988,34 @@ fn read_excerpts(log: &[Logged]) -> Vec<(u32, String)> {
 /// memory holds an entry to refill from. Not due with nothing to refill
 /// from: it stays due, and fires after the next turn that leaves an entry.
 fn turn_over(template: &RequestShape, state: &mut State) {
+    // The turn ends once the last fork cut during it settles (#782).
+    if state.pool_busy() {
+        state.deferred = Some(Deferred::TurnOver);
+        if state.settlement == Settlement::Turn {
+            state.move_to(Settlement::Capture);
+        }
+        return;
+    }
     state.after_the_turn();
     if state.settlement != Settlement::Awaiting {
+        return;
+    }
+    // The operator's meditation declared while the forks were in flight
+    // (#822), now they have settled and the turn is over.
+    if declared_now(template, state) {
+        return;
+    }
+    // A move the model accepted to meditate into (#788), now the turn is
+    // over; with nothing to refill from, the move is kept.
+    if let Some(to) = state.move_after_turn.take() {
+        if !meditation(
+            template,
+            state,
+            crate::meditation::Reason::Phase,
+            Some(to.clone()),
+        ) {
+            moved(template, state, &to, PhaseChoice::Keep);
+        }
         return;
     }
     // No derived meditation while a tangent is open (#22): its close restores the
@@ -7490,13 +9050,158 @@ pub const CLAMP_FLOOR: u64 = 4_000;
 /// is clamped from, in place of the session's.
 pub const FORK_TAIL_TOKENS: &str = "fork_tail_tokens";
 
+/// A fork's output cap unless the regimen declares one (#826): sized for
+/// what an interview answers. Across three agent-driven T1 runs (two on the
+/// floor, one on the 3090 line, 2026-10-11/12), 511 fork answers sent with
+/// the session's 32,768 used at most 7,627 tokens, p99 6,416, reasoning
+/// included; a cap of 32,768 only reserved pool room no answer used. Forks
+/// that settle `truncated` are counted on the record, so the default can be
+/// checked against live runs.
+pub const FORK_TAIL_DEFAULT: u32 = 8_192;
+
+/// A fork's output cap (#406, #826): the regimen's `fork_tail_tokens`,
+/// else [`FORK_TAIL_DEFAULT`], never more than the session's `cap` unless
+/// declared.
+fn fork_ceiling(declared: Option<u32>, cap: u32) -> u32 {
+    declared.unwrap_or_else(|| FORK_TAIL_DEFAULT.min(cap))
+}
+
 /// The fork tail the regimen declares (#406), leniently: a positive whole
-/// number, or else none, the session's output cap.
+/// number, or else none, [`FORK_TAIL_DEFAULT`] or the session's output cap
+/// if less.
 #[must_use]
 pub fn fork_tail(regimen: &Regimen) -> Option<u32> {
     match regimen.get(FORK_TAIL_TOKENS) {
         Some(crate::formats::regimen::Value::Integer(n)) if *n > 0 => u32::try_from(*n).ok(),
         _ => None,
+    }
+}
+
+/// A count as `GET /state` writes it (#756).
+fn status_number(n: u64) -> Value {
+    Value::Integer(i64::try_from(n).unwrap_or(i64::MAX))
+}
+
+/// Text as `GET /state` writes it (#756).
+fn status_text(s: &str) -> Value {
+    Value::String(s.to_owned())
+}
+
+/// An object of `pairs`, as `GET /state` writes it (#756).
+fn status_object(pairs: Vec<(&str, Value)>) -> Value {
+    Value::Object(
+        pairs
+            .into_iter()
+            .map(|(key, value)| (key.to_owned(), value))
+            .collect(),
+    )
+}
+
+/// What `GET /state` reads off the log (#756).
+struct LogRead<'a> {
+    /// The forks and audits with no `fork.settled` yet: each line's `seq`,
+    /// and whether it is an audit.
+    open: Vec<(u64, bool)>,
+    /// How the latest turn settled, once it has.
+    settled: Option<SettleReason>,
+    /// The last refusal: its `seq`, command and reason.
+    refusal: Option<(u64, CommandKind, Refusal)>,
+    /// What the latest hold left unaddressed.
+    unaddressed: Option<&'a Vec<String>>,
+}
+
+impl<'a> LogRead<'a> {
+    fn of(state: &'a State) -> Self {
+        let mut read = LogRead {
+            open: Vec::new(),
+            settled: None,
+            refusal: None,
+            unaddressed: None,
+        };
+        for logged in &state.log {
+            match &logged.event {
+                Event::Forked { .. } => read.open.push((logged.seq, false)),
+                Event::Audited { .. } => read.open.push((logged.seq, true)),
+                Event::ForkSettled { fork, .. } => read.open.retain(|(seq, _)| seq != fork),
+                Event::TurnSettled { turn, reason } if *turn == state.turns => {
+                    read.settled = Some(*reason);
+                }
+                Event::Refused {
+                    command, because, ..
+                } => read.refusal = Some((logged.seq, *command, *because)),
+                Event::MeditationHeld { unaddressed, .. } => read.unaddressed = Some(unaddressed),
+                _ => {}
+            }
+        }
+        read
+    }
+}
+
+/// A fork cut during the turn, in flight (#782).
+struct PoolFork {
+    /// Its fork line's `seq`.
+    fork: u64,
+    /// What it holds of the pool, in tokens: its reservation (#797) and
+    /// its output cap (#826).
+    held: u64,
+    /// Its call's stop.
+    cancel: Cancel,
+}
+
+/// A fork a step warranted, cut and waiting for a slot (#782).
+struct Cut {
+    /// The turn.
+    turn: u32,
+    /// The trunk request whose step warranted it.
+    at: u64,
+    /// The `seq` of the step's last `tool_call`.
+    line: u64,
+    firing: Firing,
+    /// The trunk as it stood after the step's results.
+    messages: Vec<Message>,
+}
+
+/// What waits for the last fork cut during the turn (#782).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Deferred {
+    /// The turn's end ([`turn_over`]).
+    TurnOver,
+    /// A move to `awaiting`.
+    Move,
+}
+
+/// An operator's meditation waiting for the forks cut during the turn
+/// (#822): the phase it moves to, if any.
+struct DeclaredMeditation {
+    to: Option<String>,
+}
+
+/// The forks cut during the turn that wait for a slot unless the regimen
+/// says otherwise (#822): one step's trouble trio (#783) -- every failing
+/// command fires all three asks -- so the newest step's full set is never
+/// cut short, and on a two-slot server (one spare) the queue drains in
+/// three fork calls after the turn.
+pub const FORK_BACKLOG_DEFAULT: usize = 3;
+
+/// The regimen key for [`FORK_BACKLOG_DEFAULT`]'s bound (#822).
+pub const FORK_BACKLOG: &str = "fork_backlog";
+
+/// The bound the regimen declares on the forks waiting for a slot (#822):
+/// a whole number, 0 or more; [`FORK_BACKLOG_DEFAULT`] when it declares
+/// none.
+///
+/// # Errors
+///
+/// Any other value, naming it.
+pub fn fork_backlog(regimen: &Regimen) -> Result<usize, String> {
+    match regimen.get(FORK_BACKLOG) {
+        None => Ok(FORK_BACKLOG_DEFAULT),
+        Some(crate::formats::regimen::Value::Integer(n)) if *n >= 0 => {
+            usize::try_from(*n).map_err(|_| format!("`{FORK_BACKLOG} = {n}` is too large"))
+        }
+        Some(other) => Err(format!(
+            "`{FORK_BACKLOG}` is {other:?}, not a whole number of forks"
+        )),
     }
 }
 
@@ -7532,14 +9237,259 @@ vocabulary! {
     PhaseChoice {
         /// Start the new phase from the summary: a meditation that moves to it.
         Meditation => "meditation",
-        /// Move to the new phase and keep the trunk.
-        Continue => "continue",
+        /// Move to the new phase and keep the trunk (#788; v7's `continue`).
+        Keep => "keep",
         /// Stay: the proposal is declined.
         Stay => "stay",
     }
 }
 
+/// A phase move as `choice` makes it (#124, #788): through a meditation that
+/// moves to `to`, queued; or kept, the trunk as it stands and the phase's
+/// ground rules a note on the next ask (#787); or none. Whether a meditation
+/// was queued.
+fn moved(template: &RequestShape, state: &mut State, to: &str, choice: PhaseChoice) -> bool {
+    match choice {
+        PhaseChoice::Meditation => meditation(
+            template,
+            state,
+            crate::meditation::Reason::Phase,
+            Some(to.to_owned()),
+        ),
+        PhaseChoice::Keep => {
+            state.phase = Some(to.to_owned());
+            // No meditation to carry its rules (#787): a note does.
+            state.phase_note_due = state.phase_note();
+            entered(template, state);
+            false
+        }
+        PhaseChoice::Stay => false,
+    }
+}
+
+/// The session entered its phase now (#788): its steps and tokens count
+/// from here.
+fn entered(template: &RequestShape, state: &mut State) {
+    state.phase_entered = state.log.len() as u64;
+    state.phase_grown = 0;
+    state.phase_floor = trunk_now(state, template);
+}
+
+/// The trunk's size now, in tokens (#788): as its latest call measured it,
+/// else as estimated.
+fn trunk_now(state: &State, template: &RequestShape) -> u64 {
+    state.trunk_tokens.unwrap_or_else(|| {
+        let mut shape = template.clone();
+        shape.messages.clone_from(&state.trunk);
+        estimate_of(&shape)
+    })
+}
+
+/// The evidence a phase move is proposed with (#788): the trunk steps since
+/// the session entered its phase and the tokens the trunk grew by in it,
+/// across any meditation; the tokens it grew by since the latest meditation;
+/// and whether that meditation was the operator's with no turn since.
+fn evidence(state: &State, template: &RequestShape) -> log::PhaseEvidence {
+    let now = trunk_now(state, template);
+    let phase_steps = state
+        .log
+        .iter()
+        .filter(|logged| {
+            logged.seq >= state.phase_entered
+                && matches!(
+                    logged.event,
+                    Event::Requested {
+                        lane: Lane::Trunk,
+                        ..
+                    }
+                )
+        })
+        .count() as u64;
+    let meditated_by_hand = state
+        .log
+        .iter()
+        .rev()
+        .take_while(|logged| !matches!(logged.event, Event::Asked { .. }))
+        .find_map(|logged| match &logged.event {
+            Event::Meditated { reason, .. } => Some(*reason == crate::meditation::Reason::Operator),
+            _ => None,
+        })
+        .unwrap_or(false);
+    log::PhaseEvidence {
+        phase_steps,
+        phase_tokens: state.phase_grown + now.saturating_sub(state.phase_floor),
+        tokens_since_meditation: now.saturating_sub(state.meditation_floor),
+        meditated_by_hand,
+    }
+}
+
+/// The phase tool's name (#124, #788).
+pub const PHASE_TOOL: &str = "propose_phase_transition";
+
+/// What the model is shown when its own proposal is pending (#788): the
+/// pinned `PHASE_PROPOSED`, its turn ending.
+///
+/// # Panics
+///
+/// Never: the template's one hole is `to`, which a test holds.
+#[must_use]
+pub fn proposal_result(to: &str) -> String {
+    crate::dogma::Template::PhaseProposed
+        .fill(&[(crate::dogma::Hole::To, to)])
+        .expect("PHASE_PROPOSED's one hole is `to`")
+}
+
+/// The note that puts the operator's proposal to the model at its next ask
+/// (#788): the pinned `PHASE_OPERATOR_PROPOSAL`.
+///
+/// # Panics
+///
+/// Never: the template's holes are `from` and `to`, which a test holds.
+#[must_use]
+pub fn operator_proposal_note(from: Option<&str>, to: &str) -> String {
+    crate::dogma::Template::PhaseOperatorProposal
+        .fill(&[
+            (crate::dogma::Hole::From, from.unwrap_or("none")),
+            (crate::dogma::Hole::To, to),
+        ])
+        .expect("PHASE_OPERATOR_PROPOSAL's holes are `from` and `to`")
+}
+
+/// The phase tool's definition (#788): `to` and `reason`, and `accept`, a
+/// boolean, when answering the operator.
+#[must_use]
+pub fn phase_tool() -> crate::client::shape::ToolDefinition {
+    use crate::formats::record::json::Value;
+    let text = |s: &str| Value::String(s.to_owned());
+    let typed = |kind: &str| Value::Object(BTreeMap::from([("type".to_owned(), text(kind))]));
+    crate::client::shape::ToolDefinition {
+        name: PHASE_TOOL.to_owned(),
+        description: Some(crate::dogma::Template::PhaseTool.text().to_owned()),
+        schema: Value::Object(BTreeMap::from([
+            (
+                "properties".to_owned(),
+                Value::Object(BTreeMap::from([
+                    ("to".to_owned(), typed("string")),
+                    ("reason".to_owned(), typed("string")),
+                    ("accept".to_owned(), typed("boolean")),
+                ])),
+            ),
+            (
+                "required".to_owned(),
+                Value::Array(vec![text("to"), text("reason")]),
+            ),
+            ("type".to_owned(), text("object")),
+        ])),
+    }
+}
+
+/// The phase tool on `shape`, offered whenever the session's phases are
+/// active (#788), in place of any self-capture set's own.
+pub fn declare_phase_tool(shape: &mut RequestShape, interview: Option<&Interview>) {
+    if interview.is_some_and(|interview| !interview.phases.is_empty()) {
+        shape.tools.retain(|tool| tool.name != PHASE_TOOL);
+        shape.tools.push(phase_tool());
+    }
+}
+
+/// The phase tool's call (#788): an answer to the operator's pending
+/// proposal when it carries `accept` -- logged, and accepted, the move
+/// kept -- else the model's own proposal, refused in the graph's word or
+/// held for the operator's ruling with its evidence, its turn ending after
+/// this step.
+fn phase_call<S>(
+    shared: &Shared<S>,
+    (turn, request): (u32, u64),
+    call: &Call,
+) -> (ToolLine, Option<String>) {
+    let line = ToolLine::of(request, turn, call, log::ToolOutcome::Ran);
+    let args: serde_json::Value = serde_json::from_str(&call.arguments).unwrap_or_default();
+    let to = args["to"].as_str().unwrap_or_default().to_owned();
+    let reason = args["reason"]
+        .as_str()
+        .filter(|why| !why.is_empty())
+        .map(str::to_owned);
+    let mut state = shared.lock();
+    let shown = if let Some(accept) = args["accept"].as_bool() {
+        let pending = state
+            .operator_proposal
+            .as_ref()
+            .filter(|(proposed, _)| *proposed == to)
+            .map(|(_, meditate)| *meditate);
+        if let Some(meditate) = pending {
+            state.operator_proposal = None;
+            state.push(Event::PhaseAnswered {
+                call: call.id.clone(),
+                accepted: accept,
+                reason,
+            });
+            if accept {
+                // The operator's choice (#788): through a meditation once
+                // this turn ends, or kept now.
+                let choice = if meditate {
+                    PhaseChoice::Meditation
+                } else {
+                    PhaseChoice::Keep
+                };
+                let from = state.phase.clone();
+                let phase_document = state.document_of(&to);
+                state.push(Event::PhaseRuled {
+                    call: Some(call.id.clone()),
+                    by: Some(Key::Model),
+                    choice,
+                    from,
+                    to: to.clone(),
+                    phase_document,
+                });
+                if meditate {
+                    state.move_after_turn = Some(to.clone());
+                } else {
+                    moved(&shared.template, &mut state, &to, PhaseChoice::Keep);
+                }
+                "accepted".to_owned()
+            } else {
+                "declined".to_owned()
+            }
+        } else {
+            format!("refused: {}", Refusal::NoProposal.tag())
+        }
+    } else if state.operator_proposal.is_some() {
+        format!("refused: {}", Refusal::ProposalPending.tag())
+    } else if let Some(refusal) = graph_refusal(&state, &to) {
+        format!("refused: {}", refusal.tag())
+    } else {
+        let from = state.phase.clone();
+        state.proposal = Some(PendingProposal {
+            call: call.id.clone(),
+            from,
+            to: to.clone(),
+        });
+        state.proposal_ends_turn = Some(OwnProposal { reason });
+        proposal_result(&to)
+    };
+    drop(state);
+    shared.changed.notify_all();
+    (line, Some(shown))
+}
+
+vocabulary! {
+    /// Which key turns a phase move (#788).
+    Key {
+        /// The model.
+        Model => "model",
+        /// The operator.
+        Operator => "operator",
+    }
+}
+
+/// A step's own phase proposal, held until the step settles (#788): why,
+/// in the model's words.
+struct OwnProposal {
+    reason: Option<String>,
+}
+
 /// The model's phase proposal the operator has not yet ruled on (#124).
+#[derive(Debug, Clone)]
 struct PendingProposal {
     /// Its `propose_phase_transition` call.
     call: String,
@@ -7547,6 +9497,55 @@ struct PendingProposal {
     from: Option<String>,
     /// The phase proposed.
     to: String,
+}
+
+impl State {
+    /// The document of the phase `name` (#787), under a phase library.
+    fn document_of(&self, name: &str) -> Option<log::PhaseDocument> {
+        self.interview
+            .as_ref()?
+            .phases
+            .document(name)
+            .map(crate::meditation::library::Document::logged)
+    }
+
+    /// The document of the phase the session is in (#787).
+    fn phase_document(&self) -> Option<log::PhaseDocument> {
+        self.document_of(self.phase.as_deref()?)
+    }
+
+    /// The head a meditation refills under (#787, refining #597): `head`
+    /// with the current phase's ground rules after its system prompt, and
+    /// that phase's document. The meditation carries them, so a note due
+    /// is spent -- unless the head has no system prompt to carry them.
+    fn phase_head(&mut self, head: &[Message]) -> (Vec<Message>, Option<log::PhaseDocument>) {
+        let document = self.phase_document();
+        if document.is_some() && crate::meditation::render::carries_ground_rules(head) {
+            self.phase_note_due = None;
+        }
+        (
+            crate::meditation::render::with_ground_rules(head, document.as_ref()),
+            document,
+        )
+    }
+
+    /// The phase note due at turn `turn`'s ask (#787), logged: first among
+    /// its notes, the frame the rest is read in.
+    fn noted(&mut self, turn: u32) -> Option<String> {
+        let text = self.phase_note_due.take()?;
+        self.push(Event::PhaseNoted {
+            turn,
+            text: text.clone(),
+        });
+        Some(text)
+    }
+
+    /// The note carrying the current phase's ground rules (#787).
+    fn phase_note(&self) -> Option<String> {
+        self.phase_document().map(|document| {
+            crate::meditation::render::phase_note(&document.name, &document.ground_rules)
+        })
+    }
 }
 
 /// The phase graph's ruling on a move from `from` to `to` (#563, #124),
@@ -7828,6 +9827,11 @@ fn gap<S>(shared: &Shared<S>, state: &mut State, turn: u32, at: u64) -> Option<F
     for skip in std::mem::take(&mut skipped) {
         state.push(skip);
     }
+    // Then what the turn's steps warranted by their output (#783).
+    let content = std::mem::take(&mut state.gap_firings);
+    if !state.ending {
+        fired.extend(content);
+    }
     let Some(first) = fired.pop_front() else {
         turn_over(&shared.template, state);
         return None;
@@ -7865,6 +9869,7 @@ fn fire<S>(
     let Firing {
         why,
         ask,
+        pinned,
         question,
         trigger,
     } = firing;
@@ -7894,13 +9899,15 @@ fn fire<S>(
             model: seat.model.clone(),
         }
     });
-    // Its tail: the output cap, or the regimen's, clamped as the trunk's is
-    // (#588); refused unsent when its window leaves less than the floor.
-    let ceiling = state
-        .interview
-        .as_ref()
-        .and_then(|interview| interview.fork_tail)
-        .unwrap_or(shared.template.limits.max_output_tokens);
+    // Its tail: the regimen's, or the default (#826), clamped as the trunk's
+    // is (#588); refused unsent when its window leaves less than the floor.
+    let ceiling = fork_ceiling(
+        state
+            .interview
+            .as_ref()
+            .and_then(|interview| interview.fork_tail),
+        shared.template.limits.max_output_tokens,
+    );
     let ForkFit {
         prompt,
         displaces,
@@ -7914,11 +9921,21 @@ fn fire<S>(
         view,
         trigger,
         ask,
+        pinned,
         role,
         seat,
         displaces,
+        cut: None,
+        timing: Timing::Gap,
+        view_overridden: None,
+        reserved: None,
     });
-    if refused {
+    // Beside the forks cut during the turn still in flight (#782), each
+    // prompt holds its own part of the pool.
+    let (room, crowded) = pool_room(state, shape.limits.context_window, (0, prompt), ceiling);
+    let room = room.filter(|room| room.beside > 0);
+    let crowded = crowded && room.is_some();
+    if refused || crowded {
         state.push(Event::ForkSettled {
             trailer: None,
             fork,
@@ -7926,6 +9943,8 @@ fn fire<S>(
             prompt_tokens: None,
             wall_ms: None,
             refused: Some(REFUSED_POOL.to_owned()),
+            pool: room,
+            not_run: None,
         });
         return None;
     }
@@ -7936,6 +9955,7 @@ fn fire<S>(
         head_sha256: crate::client::head::Head::of(&shape).digest().to_owned(),
         fork: Some(fork),
         max_tokens,
+        beside: None,
     });
     let cancel = Cancel::new();
     state.flight = Some(Flight {
@@ -7968,25 +9988,653 @@ fn fire<S>(
 fn interview<S: Streaming>(shared: &Shared<S>, forked: Fired) {
     let mut next = Some(forked);
     while let Some(forked) = next {
-        next = one_fork(shared, forked);
+        next = one_fork(shared, &forked);
     }
 }
 
-/// One of the gap's forks, run to its settling: then the next queued fork,
-/// fired, or -- none left, a stop, or an `end` -- back to `awaiting`.
-#[allow(clippy::too_many_lines)]
-fn one_fork<S: Streaming>(shared: &Shared<S>, forked: Fired) -> Option<Fired> {
-    let Fired {
+/// A step's forks, when they run during the turn (#782): cut as the trunk
+/// stands after the step's results -- `shape`'s messages, what it `said`,
+/// then its `results` -- and sent beside the trunk's next request.
+fn cut_step<S: Streaming + 'static>(
+    shared: &Arc<Shared<S>>,
+    state: &mut State,
+    at: (u32, u64, u64),
+    (shape, said, results, calls): (&RequestShape, &Message, &[Message], &[Call]),
+    settled: Option<SettleReason>,
+) {
+    // A cancelled step warrants none.
+    if settled == Some(SettleReason::Cancelled) {
+        return;
+    }
+    let ids: Vec<String> = calls.iter().map(|call| call.id.clone()).collect();
+    // What the step produced (#783): every step's gates count, either timing.
+    let content = content_firings(state, (at.0, at.1), said, &ids);
+    if !state
+        .interview
+        .as_ref()
+        .is_some_and(|interview| interview.timing == Timing::DuringTurn)
+    {
+        state.gap_firings.extend(content);
+        return;
+    }
+    let mut cut = shape.messages.clone();
+    cut.push(said.clone());
+    cut.extend(results.iter().cloned());
+    cut_forks(shared, state, at, &cut, ((&said.content, &ids), content));
+}
+
+/// The forks a trunk step's own output warrants (#783): the step's gates,
+/// read off what it said -- its reasoning, a line break, then its text --
+/// and its calls' lines of request `request`, each fired as its pinned
+/// template asks it. `ids` are the step's calls; none for a final answer.
+fn content_firings(
+    state: &mut State,
+    (turn, request): (u32, u64),
+    said: &Message,
+    ids: &[String],
+) -> Vec<Firing> {
+    use crate::drive::warrants::{Step, StepCall, gates, ident};
+    let Some(warrants) = state
+        .interview
+        .as_ref()
+        .map(|interview| interview.step)
+        .filter(crate::drive::warrants::StepWarrants::any)
+    else {
+        return Vec::new();
+    };
+    let listings: Vec<String> = routed(&state.log, turn)
+        .into_iter()
+        .filter(|call| call.class == Class::DirectoryListing)
+        .map(|call| call.id)
+        .collect();
+    let calls = state
+        .log
+        .iter()
+        .filter_map(|logged| match &logged.event {
+            Event::ToolCalled(line) if line.request == request && ids.contains(&line.id) => {
+                Some(line.as_ref())
+            }
+            _ => None,
+        })
+        .map(|line| StepCall {
+            id: line.id.clone(),
+            tool: line.name.clone(),
+            ident: ident(&line.name, &line.arguments),
+            shown: line.shown.clone().unwrap_or_default(),
+            errored: line.outcome == log::ToolOutcome::Ran
+                && (line.exit.is_some_and(|exit| exit != 0) || line.timeout_ms.is_some()),
+            excluded: matches!(
+                line.outcome,
+                log::ToolOutcome::Refused | log::ToolOutcome::Cancelled
+            ),
+            listing: listings.contains(&line.id),
+        })
+        .collect();
+    let step = Step {
+        said: format!(
+            "{}\n{}",
+            said.reasoning.as_deref().unwrap_or_default(),
+            said.content
+        ),
+        calls,
+    };
+    let mut counters = std::mem::take(&mut state.step_counters);
+    let fired = gates(&warrants, &mut counters, &step);
+    state.step_counters = counters;
+    pinned_firings(fired, request)
+}
+
+/// The forks the step gates `fired` for the trunk step of request
+/// `request` (#783), each asking its pinned template.
+fn pinned_firings(fired: Vec<crate::drive::warrants::Gate>, request: u64) -> Vec<Firing> {
+    use crate::dogma::{Hole, Template};
+    use crate::drive::warrants::Gate;
+    let pinned =
+        |why: log::Warrant, template: Template, question: String, trigger: String| Firing {
+            why,
+            ask: AskKind::Generic,
+            pinned: Some(template),
+            question,
+            trigger,
+        };
+    let mut out = Vec::new();
+    for gate in fired {
+        match gate {
+            Gate::Evidence { id, source, size } => {
+                let size = size.to_string();
+                if let Ok(question) =
+                    Template::Evidence.fill(&[(Hole::Source, &source), (Hole::Size, &size)])
+                {
+                    out.push(pinned(
+                        log::Warrant::Evidence,
+                        Template::Evidence,
+                        question,
+                        format!("evidence:{id}"),
+                    ));
+                }
+            }
+            Gate::Trouble => {
+                for template in [
+                    Template::Gotchas,
+                    Template::Decisions,
+                    Template::Constraints,
+                ] {
+                    if let Ok(question) = template.fill(&[]) {
+                        out.push(pinned(
+                            log::Warrant::Trouble,
+                            template,
+                            question,
+                            format!("trouble:{request}"),
+                        ));
+                    }
+                }
+            }
+            Gate::Open => {
+                if let Ok(question) = Template::OpenNext.fill(&[]) {
+                    out.push(pinned(
+                        log::Warrant::Open,
+                        Template::OpenNext,
+                        question,
+                        format!("open:{request}"),
+                    ));
+                }
+            }
+        }
+    }
+    out
+}
+
+/// The forks a step warranted during the turn (#782), cut as the trunk
+/// stood after the step's results -- `messages` -- and queued in step order
+/// behind the slots, then sent while a slot is free. `at` is the trunk
+/// request whose step it is, `cut` the `seq` of the step's last
+/// `tool_call`, `said` the step's own text, `ids` its calls.
+fn cut_forks<S: Streaming + 'static>(
+    shared: &Arc<Shared<S>>,
+    state: &mut State,
+    (turn, at, cut): (u32, u64, u64),
+    messages: &[Message],
+    ((said, ids), content): ((&str, &[String]), Vec<Firing>),
+) {
+    let Some(interview) = state.interview.as_ref().filter(|_| !state.ending) else {
+        return;
+    };
+    let (kept, skips) = screened(
+        interview,
+        &state.log,
+        turn,
+        step_firings(interview, &state.log, (turn, said), ids),
+    );
+    for skip in skips {
+        state.push(skip);
+    }
+    // The calls' forks, then what the step's output warrants (#783).
+    for firing in kept.into_iter().chain(content) {
+        state.pool_queue.push_back(Cut {
+            turn,
+            at,
+            line: cut,
+            firing,
+            messages: messages.to_vec(),
+        });
+    }
+    launch_pool(shared, state);
+    // The queue past its bound (#822): the oldest dropped, newest kept --
+    // a fork long after its step asks about a trunk that has moved on.
+    let bound = state
+        .interview
+        .as_ref()
+        .map_or(FORK_BACKLOG_DEFAULT, |interview| interview.fork_backlog);
+    let over = state.pool_queue.len().saturating_sub(bound);
+    let dropped: Vec<Cut> = state.pool_queue.drain(..over).collect();
+    backlogged(state, dropped);
+}
+
+/// Each of `dropped`, logged `fork.skipped` `backlog` (#822).
+fn backlogged(state: &mut State, dropped: impl IntoIterator<Item = Cut>) {
+    for cut in dropped {
+        let Firing {
+            ask,
+            pinned,
+            trigger,
+            ..
+        } = cut.firing;
+        state.push(Event::Backlogged {
+            of_turn: cut.turn,
+            trigger,
+            // As its fork line would name it (#783).
+            ask: pinned.map_or_else(|| ask.tag().to_owned(), |t| t.name().to_lowercase()),
+            cut: cut.line,
+        });
+    }
+}
+
+/// Send queued cut forks while a slot is free (#782), each on a thread of
+/// its own; one refused for the pool settles at once and the next is tried.
+fn launch_pool<S: Streaming + 'static>(shared: &Arc<Shared<S>>, state: &mut State) {
+    let slots = state
+        .interview
+        .as_ref()
+        .map_or(0, |interview| interview.fork_slots);
+    while state.pool.len() < usize::try_from(slots).unwrap_or(usize::MAX) {
+        let Some(cut) = state.pool_queue.pop_front() else {
+            return;
+        };
+        let fired = match fire_cut(shared, state, cut) {
+            Launched::Fired(fired) => fired,
+            Launched::Gone => continue,
+            Launched::Waits(cut) => {
+                state.pool_queue.push_front(cut);
+                return;
+            }
+        };
+        let (fork, request) = (fired.fork, fired.request);
+        let shared = Arc::clone(shared);
+        let spawned = std::thread::Builder::new()
+            .name("diet-fork".to_owned())
+            .spawn(move || pool_fork(&shared, &fired));
+        if let Err(why) = spawned {
+            // No thread, no call: the fork is failed, said so, and its slot
+            // freed.
+            state.pool.retain(|pool| pool.fork != fork);
+            state.push(Event::Failed {
+                request,
+                overflow: None,
+                failure: TransportFailure::Connect(format!(
+                    "the fork's thread could not start: {why}"
+                )),
+                partial: String::new(),
+            });
+            state.push(Event::settled(fork, log::ForkOutcome::Failed));
+        }
+    }
+}
+
+/// The turn over (#826): the trunk holds nothing of the pool now, so the
+/// forks that waited for room are sent; and if none is left in flight or
+/// queued -- each refused -- what waited for them runs.
+fn pool_after_the_turn<S: Streaming + 'static>(shared: &Arc<Shared<S>>, state: &mut State) {
+    if state.pool_queue.is_empty() {
+        return;
+    }
+    launch_pool(shared, state);
+    pool_settled(&shared.template, state);
+}
+
+/// The pool a fork of `prompt` would share with the trunk's `trunk` and the
+/// forks' in flight, in a `window` (#782): the four numbers, and whether
+/// they leave less than the clamp's floor (or `ceiling`, if less).
+fn pool_room(
+    state: &State,
+    window: Option<u64>,
+    (trunk, prompt): (u64, u64),
+    ceiling: u32,
+) -> (Option<log::PoolRoom>, bool) {
+    let beside: u64 = state.pool.iter().map(|pool| pool.held).sum();
+    let room = window.map(|window| log::PoolRoom {
+        window,
+        trunk,
+        beside,
+        prompt,
+    });
+    let short = room.is_some_and(|room| {
+        room.window
+            .saturating_sub(room.trunk + room.beside + room.prompt)
+            < u64::from(ceiling).min(CLAMP_FLOOR)
+    });
+    (room, short)
+}
+
+/// What a fork of `prompt` reserves of the pool (#797), and whether its
+/// prefix was counted as shared: all of it, unless the trunk's server
+/// shares a prefix's pages (`shared`), the fork sees the trunk (`view`),
+/// and the trunk holds a prompt -- then the part of its `prefix` the trunk
+/// holds, up to the trunk's resident prompt, is the trunk's and not the
+/// fork's. A fork that sees anything else counts in full.
+fn reservation(
+    prompt: u64,
+    (prefix, trunk): (u64, u64),
+    view: ForkView,
+    shared: bool,
+) -> (u64, bool) {
+    if shared && view == ForkView::Trunk && trunk > 0 {
+        (prompt.saturating_sub(prefix.min(trunk)), true)
+    } else {
+        (prompt, false)
+    }
+}
+
+/// What the trunk holds of the pool while a cut fork is sized (#782): its
+/// latest sized request's prompt and, since #826, its output cap -- the
+/// room its next request is sized into -- while the turn runs; else none.
+fn trunk_resident(state: &State) -> (u64, u64) {
+    if state.settlement == Settlement::Turn {
+        state
+            .last_sized
+            .map_or((0, 0), |(prompt, cap, _)| (prompt, u64::from(cap)))
+    } else {
+        (0, 0)
+    }
+}
+
+/// What a cut fork is asked and sized under (#782, #797): the interview's
+/// role, the view the regimen declared, the fork's tail, and whether the
+/// trunk's server shares a prefix's pages.
+fn cut_terms(state: &State, template: &RequestShape) -> (Role, Option<ForkView>, u32, bool) {
+    state.interview.as_ref().map_or(
+        (Role::User, None, template.limits.max_output_tokens, false),
+        |interview| {
+            (
+                interview.role,
+                interview.view,
+                fork_ceiling(interview.fork_tail, template.limits.max_output_tokens),
+                interview.prefix_pages == PrefixPages::Shared,
+            )
+        },
+    )
+}
+
+/// Where a cut fork stands in the pool (#826).
+struct Fit {
+    /// The pool's numbers.
+    room: Option<log::PoolRoom>,
+    /// Whether it leaves less than the clamp's floor now.
+    short: bool,
+    /// Whether it could never fit, the pool empty.
+    never: bool,
+    /// Its output cap, within what the pool leaves it.
+    ceiling: u32,
+}
+
+/// A cut fork of `reserved` tokens (`prompt` in full) beside the trunk's
+/// `held` -- its prompt and output cap -- and the forks in flight, in a
+/// `window` (#826): never more on the server than its pool holds. Short of
+/// room now, it waits; it is refused only when it could never fit; sent, its
+/// cap is what the pool leaves it, up to `ceiling`.
+fn fit_beside(
+    state: &State,
+    window: Option<u64>,
+    (held, reserved, prompt): (u64, u64, u64),
+    ceiling: u32,
+) -> Fit {
+    let (room, short) = pool_room(state, window, (held, reserved), ceiling);
+    let never = window
+        .is_some_and(|window| window.saturating_sub(prompt) < u64::from(ceiling).min(CLAMP_FLOOR));
+    let ceiling = room.map_or(ceiling, |room| {
+        let left = room
+            .window
+            .saturating_sub(room.trunk + room.beside + room.prompt);
+        ceiling.min(u32::try_from(left).unwrap_or(u32::MAX))
+    });
+    Fit {
+        room,
+        short,
+        never,
+        ceiling,
+    }
+}
+
+/// A cut fork's `shape` put on its server (#782): an offboard seat's model
+/// and window, when there is one; its prompt -- on the trunk's server its
+/// prefix is the trunk's, sized as the trunk's is; offboard, its estimate is
+/// all there is -- and what the trunk holds of that server's pool.
+fn seated<S>(
+    shared: &Shared<S>,
+    state: &State,
+    shape: &mut RequestShape,
+) -> (Option<log::ForkSeat>, u64, (u64, u64)) {
+    match shared.seat.as_ref() {
+        Some(seat) => {
+            shape.model.clone_from(&seat.model);
+            shape.limits.context_window = seat.context_window;
+            let at = log::ForkSeat {
+                substrate: seat.substrate.clone(),
+                model: seat.model.clone(),
+            };
+            (Some(at), estimate_of(shape), (0, 0))
+        }
+        None => (None, state.prompt_of(shape), trunk_resident(state)),
+    }
+}
+
+/// One cut fork, fired (#782): the trunk as it stood after its step's
+/// results, then the question, whatever `fork_view` says -- its warm
+/// prefix -- the view it overrode named on its line. Refused unsent when the
+/// trunk's prompt, the forks' in flight and its own [`reservation`] leave
+/// the pool less than the clamp's floor, the numbers on its `fork.settled`.
+fn fire_cut<S>(shared: &Shared<S>, state: &mut State, cut: Cut) -> Launched {
+    let (role, declared, ceiling, sharing) = cut_terms(state, &shared.template);
+    let mut shape = shared.template.clone();
+    shape.messages.clone_from(&cut.messages);
+    // The cut, sized as the fork's prompt is: the prefix it holds in
+    // common with the trunk's (#797).
+    let prefix = state.prompt_of(&shape);
+    shape
+        .messages
+        .push(Message::new(role, cut.firing.question.clone()));
+    let (seat, prompt, (trunk, trunk_cap)) = seated(shared, state, &mut shape);
+    let (reserved, counted_shared) = reservation(prompt, (prefix, trunk), ForkView::Trunk, sharing);
+    let Fit {
+        room,
+        short,
+        never,
+        ceiling,
+    } = fit_beside(
+        state,
+        shape.limits.context_window,
+        (trunk + trunk_cap, reserved, prompt),
+        ceiling,
+    );
+    if short && !never {
+        return Launched::Waits(cut);
+    }
+    let Cut {
+        turn,
+        at,
+        line,
+        firing:
+            Firing {
+                why,
+                ask,
+                pinned,
+                question,
+                trigger,
+            },
+        ..
+    } = cut;
+    let fork = state.push(Event::Forked {
+        of_turn: turn,
+        at,
+        why,
+        question,
+        view: ForkView::Trunk,
+        trigger,
+        ask,
+        pinned,
+        role,
+        seat,
+        displaces: false,
+        cut: Some(line),
+        timing: Timing::DuringTurn,
+        view_overridden: declared.filter(|view| *view != ForkView::Trunk),
+        reserved: Some((reserved, counted_shared)),
+    });
+    if short {
+        state.push(Event::ForkSettled {
+            trailer: None,
+            fork,
+            outcome: log::ForkOutcome::Refused,
+            prompt_tokens: None,
+            wall_ms: None,
+            refused: Some(REFUSED_POOL.to_owned()),
+            pool: room,
+            not_run: None,
+        });
+        return Launched::Gone;
+    }
+    let max_tokens = state.aside_sizing(|state| state.sized_at(&mut shape, ceiling, prompt));
+    let request = state.push(Event::Requested {
+        turn,
+        lane: Lane::Interview,
+        head_sha256: crate::client::head::Head::of(&shape).digest().to_owned(),
+        fork: Some(fork),
+        max_tokens,
+        beside: None,
+    });
+    let cancel = Cancel::new();
+    state.pool.push(PoolFork {
+        fork,
+        held: reserved + u64::from(max_tokens),
+        cancel: cancel.clone(),
+    });
+    Launched::Fired(Fired {
         turn,
         fork,
         request,
         shape,
         cancel,
+    })
+}
+
+/// What became of a queued cut fork (#826).
+enum Launched {
+    /// Sent.
+    Fired(Fired),
+    /// Refused for the pool, logged: it could never fit.
+    Gone,
+    /// Short of room now: back at the queue's head, to wait.
+    Waits(Cut),
+}
+
+/// A cut fork, on its own thread (#782): its call streamed beside the
+/// trunk's, then settled under one hold of the session's lock -- its patches
+/// folded into working memory, the trunk's sizing untouched -- its slot
+/// given to the next queued; and, the last one out, whatever waited for it.
+fn pool_fork<S: Streaming + 'static>(shared: &Arc<Shared<S>>, forked: &Fired) {
+    let run = stream_fork(shared, forked);
+    let mut state = shared.lock();
+    state.pool.retain(|pool| pool.fork != forked.fork);
+    state.aside_sizing(|state| settle_fork(shared, state, forked, run));
+    if state.ending {
+        state.pool_queue.clear();
+    }
+    launch_pool(shared, &mut state);
+    let due = pool_settled(&shared.template, &mut state);
+    drop(state);
+    shared.changed.notify_all();
+    // A meditation the turn's end made due runs here, its turn thread
+    // long gone (#504).
+    if due {
+        meditation_work(shared);
+    }
+}
+
+/// Once no cut fork is in flight or queued and the gap's own forks are
+/// done (#782): the turn's end, or the move to `awaiting`, that waited for
+/// them. Whether a meditation was queued for its audit or pre-warm.
+fn pool_settled(template: &RequestShape, state: &mut State) -> bool {
+    if state.pool_busy() || state.forking.is_some() || !state.queued.is_empty() {
+        return false;
+    }
+    match state.deferred.take() {
+        Some(Deferred::TurnOver) => turn_over(template, state),
+        Some(Deferred::Move) => {
+            state.move_to(Settlement::Awaiting);
+            if state.ending {
+                state.ending = false;
+                state.move_to(Settlement::Ended);
+            }
+        }
+        None => {}
+    }
+    if state.settlement == Settlement::Awaiting {
+        declared_now(template, state);
+    }
+    state.meditation_pending.is_some()
+}
+
+/// What refuses a meditation declared while only forks cut during the turn
+/// hold the session (#822): as in `awaiting` -- an open tangent, nothing to
+/// refill from, a move the graph does not allow.
+fn pool_refusal(state: &State, to: Option<&str>) -> Option<Refusal> {
+    if state.tangent.is_some() {
+        Some(Refusal::TangentOpen)
+    } else if state.turns == 0
+        || state
+            .interview
+            .as_ref()
+            .is_none_or(|interview| interview.object.live().next().is_none())
+    {
+        Some(Refusal::NothingToMeditate)
+    } else {
+        to.and_then(|to| graph_refusal(state, to))
+    }
+}
+
+/// The operator's meditation declared while forks were in flight (#822),
+/// run now the session awaits: refilled, or queued for its audit or warm.
+/// `true` when there was one; with nothing left to refill from, it is
+/// dropped, as a declaration then would have been refused.
+fn declared_now(template: &RequestShape, state: &mut State) -> bool {
+    let Some(DeclaredMeditation { to }) = state.declared_after_pool.take() else {
+        return false;
+    };
+    let has_memory = state
+        .interview
+        .as_ref()
+        .is_some_and(|interview| interview.object.live().next().is_some());
+    if has_memory && state.tangent.is_none() {
+        meditation(template, state, crate::meditation::Reason::Operator, to);
+    }
+    true
+}
+
+/// One of the gap's forks, run to its settling: then the next queued fork,
+/// fired, or -- none left, a stop, or an `end` -- back to `awaiting`.
+fn one_fork<S: Streaming>(shared: &Shared<S>, forked: &Fired) -> Option<Fired> {
+    let run = stream_fork(shared, forked);
+    let mut state = shared.lock();
+    state.flight = None;
+    state.forking = None;
+    let outcome = settle_fork(shared, &mut state, forked, run);
+    // The gap's next fork (#564), unless a stop or an `end` came meanwhile.
+    if outcome == log::ForkOutcome::Cancelled || state.ending {
+        state.queued.clear();
+    }
+    let next = fire_next(shared, &mut state);
+    if next.is_none() {
+        turn_over(&shared.template, &mut state);
+    }
+    drop(state);
+    shared.changed.notify_all();
+    next
+}
+
+/// A fork's call, streamed: what arrived, and how it ended.
+struct ForkRun {
+    result: Result<StreamEnded, TransportFailure>,
+    partial: String,
+    reasoning: String,
+    /// Every call it made, on either route (#610, #806): none of them runs.
+    calls: Calls,
+    tools: bool,
+    hosted: Hosted,
+    began: Instant,
+}
+
+/// A fork's one call, streamed into the log on the interview lane and never
+/// retried, holding the session's lock only to log each piece.
+fn stream_fork<S: Streaming>(shared: &Shared<S>, forked: &Fired) -> ForkRun {
+    let Fired {
+        request,
+        shape,
+        cancel,
+        ..
     } = forked;
+    let request = *request;
     let deadline = Instant::now() + shared.template.limits.call;
     let mut partial = String::new();
     let mut reasoning = String::new();
-    let mut called = false;
     let tools = shared
         .lock()
         .interview
@@ -8000,7 +10648,7 @@ fn one_fork<S: Streaming>(shared: &Shared<S>, forked: Fired) -> Option<Fired> {
     );
     let began = Instant::now();
     let mut hosted = Hosted::default();
-    let result = transport.stream(&shape, deadline, &cancel, &mut |piece: Piece<'_>| {
+    let result = transport.stream(shape, deadline, cancel, &mut |piece: Piece<'_>| {
         if hosted.took(&piece) {
             return;
         }
@@ -8020,12 +10668,15 @@ fn one_fork<S: Streaming>(shared: &Shared<S>, forked: Fired) -> Option<Fired> {
                 request,
                 progress: frame,
             },
+            // Every call is logged on either route (#806): a fork cut from
+            // the trunk carries the trunk's tools, and its answer may be a
+            // call. None runs.
             Piece::ToolCall {
                 index,
                 id,
                 name,
                 arguments,
-            } if tools => {
+            } => {
                 calls.piece(index, id, name, arguments);
                 Event::ToolCallPiece {
                     request,
@@ -8035,18 +10686,47 @@ fn one_fork<S: Streaming>(shared: &Shared<S>, forked: Fired) -> Option<Fired> {
                     arguments: arguments.to_owned(),
                 }
             }
-            Piece::ToolCall { .. } => {
-                called = true;
-                return;
-            }
             Piece::Signature(_) | Piece::Redacted(_) | Piece::Usage(_) => return,
         };
         shared.lock().push(event);
         shared.changed.notify_all();
     });
-    let mut state = shared.lock();
-    state.flight = None;
-    state.forking = None;
+    ForkRun {
+        result,
+        partial,
+        reasoning,
+        calls,
+        tools,
+        hosted,
+        began,
+    }
+}
+
+/// A fork's call, ended: how, and on `value` its patches, applied to the
+/// session's working object; its `fork.settled` line, then its patches'.
+#[allow(clippy::too_many_lines)]
+fn settle_fork<S>(
+    shared: &Shared<S>,
+    state: &mut State,
+    forked: &Fired,
+    run: ForkRun,
+) -> log::ForkOutcome {
+    let (turn, fork, request) = (forked.turn, forked.fork, forked.request);
+    let ForkRun {
+        result,
+        partial,
+        reasoning,
+        calls,
+        tools,
+        hosted,
+        began,
+    } = run;
+    let calls = calls.into_calls();
+    // What a fork calls runs nothing (#806); a record tool's call is read
+    // as its answer, and every other is counted on its settled line.
+    let not_run = u64::try_from(calls.iter().filter(|call| !record_tool(call)).count())
+        .ok()
+        .filter(|calls| *calls > 0);
     let reasoning = Some(reasoning).filter(|thought| !thought.is_empty());
     let mut patches = Vec::new();
     let mut trailer = None;
@@ -8078,24 +10758,40 @@ fn one_fork<S: Streaming>(shared: &Shared<S>, forked: Fired) -> Option<Fired> {
                     hosted,
                 }
             });
-            if cancel.is_asked() {
+            if forked.cancel.is_asked() {
                 log::ForkOutcome::Cancelled
             } else if cut {
                 log::ForkOutcome::Truncated
             } else if tools {
-                let (outcome, lines) =
-                    captured(&mut state, &calls.into_calls(), (turn, request), fork);
+                let (outcome, lines) = captured(state, &calls, (turn, request), fork);
                 patches = lines;
                 outcome
-            } else if called {
-                log::ForkOutcome::Unparseable
             } else {
-                // What trails the last field is no field (levers run A).
-                let (fields, after) = trailed(&text);
-                trailer = after;
-                let (outcome, lines) = folded(&mut state, &fields, turn, fork);
-                patches = lines;
-                outcome
+                // The fields route reads the prose and folds any record
+                // tool's call beside it (#806).
+                let recorded = calls.iter().any(record_tool);
+                let prose = if text.trim().is_empty() && (recorded || not_run.is_some()) {
+                    None
+                } else {
+                    // What trails the last field is no field (levers run A).
+                    let (fields, after) = trailed(&text);
+                    trailer = after;
+                    let (outcome, lines) = folded(state, &fields, turn, fork);
+                    patches = lines;
+                    Some(outcome)
+                };
+                let called = recorded.then(|| {
+                    let (outcome, lines) = captured(state, &calls, (turn, request), fork);
+                    patches.extend(lines);
+                    outcome
+                });
+                match (prose, called) {
+                    (Some(log::ForkOutcome::Value), _) | (_, Some(log::ForkOutcome::Value)) => {
+                        log::ForkOutcome::Value
+                    }
+                    (Some(outcome), _) | (None, Some(outcome)) => outcome,
+                    (None, None) => log::ForkOutcome::Unparseable,
+                }
             }
         }
         Ok(StreamEnded::Cancelled) => {
@@ -8121,6 +10817,7 @@ fn one_fork<S: Streaming>(shared: &Shared<S>, forked: Fired) -> Option<Fired> {
             log::ForkOutcome::Failed
         }
         Err(failure) => {
+            // A timeout too: logged as the call's failure, never silent.
             let overflow = state.failed_overflow(&failure);
             state.push(Event::Failed {
                 request,
@@ -8147,21 +10844,13 @@ fn one_fork<S: Streaming>(shared: &Shared<S>, forked: Fired) -> Option<Fired> {
         prompt_tokens,
         wall_ms,
         refused: None,
+        pool: None,
+        not_run,
     });
     for patch in patches {
         state.push(patch);
     }
-    // The gap's next fork (#564), unless a stop or an `end` came meanwhile.
-    if outcome == log::ForkOutcome::Cancelled || state.ending {
-        state.queued.clear();
-    }
-    let next = fire_next(shared, &mut state);
-    if next.is_none() {
-        turn_over(&shared.template, &mut state);
-    }
-    drop(state);
-    shared.changed.notify_all();
-    next
+    outcome
 }
 
 /// A fork's answer through the capture tools (#610): each capture call run
@@ -8182,6 +10871,14 @@ fn captured(
     captured_in(state, calls, (turn, request), (fork, Lane::Interview))
 }
 
+/// Whether `call` is a record tool's (`update_record`, `resolve_entry`): the
+/// calls a fork's or an audit's answer is read from (#610, #806). The phase
+/// tool is not one: a fork proposes nothing.
+fn record_tool(call: &Call) -> bool {
+    use crate::capture::tools::CaptureTool;
+    CaptureTool::from_tag(&call.name).is_some_and(|tool| CaptureTool::OFFERED.contains(&tool))
+}
+
 /// [`captured`], its patches on `lane`: `interview` for a fork's, `audit`
 /// for a meditation's audit's (#610).
 fn captured_in(
@@ -8190,13 +10887,9 @@ fn captured_in(
     (turn, request): (u32, u64),
     (fork, lane): (u64, Lane),
 ) -> (log::ForkOutcome, Vec<Event>) {
-    use crate::capture::tools::CaptureTool;
     let mut lines = Vec::new();
     let mut wrote = false;
-    let capture_calls: Vec<&Call> = calls
-        .iter()
-        .filter(|call| CaptureTool::from_tag(&call.name).is_some())
-        .collect();
+    let capture_calls: Vec<&Call> = calls.iter().filter(|call| record_tool(call)).collect();
     if capture_calls.is_empty() {
         let outcome = if calls.is_empty() {
             log::ForkOutcome::Decline
@@ -8350,7 +11043,7 @@ fn folded(state: &mut State, text: &str, turn: u32, fork: u64) -> (log::ForkOutc
         return (log::ForkOutcome::Unparseable, Vec::new());
     };
     let patches = unclashed(patches, &interview.object, (turn, fork));
-    let patches = cited(patches, &interview.object);
+    let Cited { patches, reasons } = cited(patches, &interview.object);
     // Made under an open tangent (#22): stamped with it from birth, so its
     // close finds them by provenance and never by recency.
     let patches: Vec<Patch> = match state.tangent.as_ref() {
@@ -8370,7 +11063,27 @@ fn folded(state: &mut State, text: &str, turn: u32, fork: u64) -> (log::ForkOutc
             })
             .collect(),
     };
-    applied(state, &patches, fork)
+    let (outcome, mut lines) = applied(state, &patches, fork);
+    // Each reasoned pair's reason, on the line that voided or retired the
+    // entry it cited (#812).
+    for line in &mut lines {
+        if let Event::Patched {
+            op,
+            entry,
+            supersedes,
+            reason,
+            ..
+        } = line
+        {
+            let cited = match op {
+                log::PatchOp::Supersede => supersedes.as_deref(),
+                log::PatchOp::Retire => Some(entry.id.as_str()),
+                _ => None,
+            };
+            *reason = cited.and_then(|cited| reasons.get(cited)).cloned();
+        }
+    }
+    (outcome, lines)
 }
 
 /// A fork's `patches`, applied to the working object (every op the format
@@ -8430,8 +11143,8 @@ const SUPERSEDE_FIELD: &str = "supersede: ";
 /// <id> <the entry that should stand>` voids `<id>`, linked, and records the
 /// rest under the field's own id. The meditation's render shows each entry as
 /// `<id>\t<content>`, so the id is what a model that saw it can cite; quotes,
-/// backticks and brackets around it, and a colon or dash after it, are read
-/// past. A field that cites nothing live, or names no entry to stand, stays
+/// backticks and brackets around it, and a colon or hyphen after it, are
+/// read past. An em dash after it is not: it opens the pair's reason (#812). A field that cites nothing live, or names no entry to stand, stays
 /// the addition [`super::fold`] made of it.
 ///
 /// One field may carry several pairs, `;` between them, and `→` or `->` may
@@ -8441,8 +11154,16 @@ const SUPERSEDE_FIELD: &str = "supersede: ";
 /// stand already does. Each pair after the first records under the field's
 /// id with its position after it, and a pair that cites nothing live stays
 /// an addition of its own text.
-fn cited(patches: Vec<Patch>, object: &WorkingObject) -> Vec<Patch> {
+///
+/// An em dash after the cited id makes the rest that pair's reason, not an
+/// entry (#812): `<id> — <reason>`, the audit grammar's `REMOVE — <reason>`
+/// shape, which a model answering the v4 ask writes. The answer's own
+/// DECISION then stands for the cited entry, superseding it, or with none
+/// the cited entry retires; either way the reason is recorded, by the
+/// voided entry's id, and never becomes an entry's text.
+fn cited(patches: Vec<Patch>, object: &WorkingObject) -> Cited {
     let fields = patches.len();
+    let mut reasons = BTreeMap::new();
     let mut read: Vec<Patch> = patches
         .into_iter()
         .flat_map(|patch| {
@@ -8461,7 +11182,8 @@ fn cited(patches: Vec<Patch>, object: &WorkingObject) -> Vec<Patch> {
             let pairs: Vec<&str> = pairs.iter().map(String::as_str).collect();
             if pairs.len() < 2 {
                 return vec![
-                    superseding(field.trim(), object, id.clone(), provenance).unwrap_or(patch),
+                    superseding(field.trim(), object, id.clone(), provenance)
+                        .map_or(patch, |pair| pair.patch(&mut reasons)),
                 ];
             }
             // Each pair on its own: one that cites nothing live stays the
@@ -8475,15 +11197,14 @@ fn cited(patches: Vec<Patch>, object: &WorkingObject) -> Vec<Patch> {
                     } else {
                         crate::object::EntryId::new(&format!("{}-{at}", id.as_str())).ok()?
                     };
-                    Some(
-                        superseding(pair, object, id.clone(), provenance).unwrap_or_else(|| {
-                            Patch::Add {
-                                id,
-                                content: format!("{SUPERSEDE_FIELD}{pair}"),
-                                provenance: provenance.clone(),
-                            }
-                        }),
-                    )
+                    Some(match superseding(pair, object, id.clone(), provenance) {
+                        Some(read) => read.patch(&mut reasons),
+                        None => Patch::Add {
+                            id,
+                            content: format!("{SUPERSEDE_FIELD}{pair}"),
+                            provenance: provenance.clone(),
+                        },
+                    })
                 })
                 .collect()
         })
@@ -8496,7 +11217,92 @@ fn cited(patches: Vec<Patch>, object: &WorkingObject) -> Vec<Patch> {
             provenance_of(patch).index = u32::try_from(index).unwrap_or(u32::MAX);
         }
     }
-    read
+    // A reasoned pair's entry stands in the answer's own DECISION, which
+    // supersedes the first entry cited so; any other is retired.
+    let mut decided = read.iter().position(
+        |patch| matches!(patch, Patch::Add { content, .. } if content.starts_with(DECISION_FIELD)),
+    );
+    for at in 0..read.len() {
+        let Patch::Retire { target, .. } = &read[at] else {
+            continue;
+        };
+        if !reasons.contains_key(target.as_str()) {
+            continue;
+        }
+        let Some(decision) = decided.take() else {
+            break;
+        };
+        let voids = target.clone();
+        if let Patch::Add {
+            id,
+            content,
+            provenance,
+        } = read[decision].clone()
+        {
+            read[decision] = Patch::Supersede {
+                id,
+                content,
+                voids,
+                provenance,
+            };
+            read.remove(at);
+        }
+        break;
+    }
+    Cited {
+        patches: read,
+        reasons,
+    }
+}
+
+/// [`cited`]'s reading: the patches, and the reason each `<id> — <reason>`
+/// pair gave, by the id it voided (#812).
+#[derive(Debug)]
+pub(crate) struct Cited {
+    /// The patches.
+    pub patches: Vec<Patch>,
+    /// Each reason, by the voided entry's id.
+    pub reasons: BTreeMap<String, String>,
+}
+
+/// The prefix [`super::fold`] gives a `DECISION` field's entry.
+const DECISION_FIELD: &str = "decision: ";
+
+/// One `SUPERSEDE` pair read (#562, #812): the patch it makes, or -- an em
+/// dash after the cited id -- the entry it voids and why.
+enum Pair {
+    /// A supersession, or a retirement in favour of a live entry.
+    Patch(Patch),
+    /// `<id> — <reason>`.
+    Reasoned {
+        /// The entry it voids.
+        voids: crate::object::EntryId,
+        /// Why.
+        reason: String,
+        /// Where it came from.
+        provenance: crate::object::Provenance,
+    },
+}
+
+impl Pair {
+    /// The patch: a reasoned pair's a retirement, its reason recorded in
+    /// `reasons` -- what [`cited`] turns into the DECISION's supersession.
+    fn patch(self, reasons: &mut BTreeMap<String, String>) -> Patch {
+        match self {
+            Self::Patch(patch) => patch,
+            Self::Reasoned {
+                voids,
+                reason,
+                provenance,
+            } => {
+                reasons.insert(voids.as_str().to_owned(), reason);
+                Patch::Retire {
+                    target: voids,
+                    provenance,
+                }
+            }
+        }
+    }
 }
 
 /// A `SUPERSEDE` field's pairs (#562): `;` starts a new pair only where a
@@ -8542,7 +11348,7 @@ fn superseding(
     object: &WorkingObject,
     id: crate::object::EntryId,
     provenance: &crate::object::Provenance,
-) -> Option<Patch> {
+) -> Option<Pair> {
     let quoted = |c: char| "`'\"[]()<>*:,—-".contains(c);
     // An arrow points from the cited id only when it follows the id itself:
     // one inside the text that stands is that text's (#730).
@@ -8554,6 +11360,8 @@ fn superseding(
         Some((cited, rest)) => (cited.trim(), rest),
         None => pair.split_once(char::is_whitespace).unwrap_or((pair, "")),
     };
+    // An em dash straight after the id, unarrowed, opens a reason (#812).
+    let reasoned = arrowed.is_none() && rest.trim_start().starts_with('—');
     let cited = cited.trim_matches(quoted);
     let rest = rest.trim_start_matches(|c: char| c.is_whitespace() || ":—-".contains(c));
     let rest = rest.trim();
@@ -8561,10 +11369,17 @@ fn superseding(
     let voids = crate::object::EntryId::new(cited)
         .ok()
         .filter(|voids| !rest.is_empty() && live(voids))?;
+    if reasoned {
+        return Some(Pair::Reasoned {
+            voids,
+            reason: rest.to_owned(),
+            provenance: provenance.clone(),
+        });
+    }
     let standing = crate::object::EntryId::new(rest.trim_matches(quoted))
         .ok()
         .filter(|standing| *standing != voids && live(standing));
-    Some(match standing {
+    Some(Pair::Patch(match standing {
         Some(_) => Patch::Retire {
             target: voids,
             provenance: provenance.clone(),
@@ -8575,7 +11390,7 @@ fn superseding(
             voids,
             provenance: provenance.clone(),
         },
-    })
+    }))
 }
 
 /// One applied patch as its log line: its op, its entry -- the patch's own
@@ -8613,6 +11428,7 @@ fn patched(fork: Option<u64>, patch: &Patch, object: &WorkingObject) -> Event {
         },
         supersedes,
         tangent: patch.provenance().tangent.clone(),
+        reason: None,
     }
 }
 
@@ -8823,6 +11639,7 @@ pub(in crate::drive) mod tests {
                     head_sha256: first_head("say hello"),
                     fork: None,
                     max_tokens: 64,
+                    beside: None,
                 },
                 Event::Delta {
                     request: 3,
@@ -9449,7 +12266,8 @@ pub(in crate::drive) mod tests {
                 "interview-t2-0 a tracker for two teams; interview-t2-1 no login after all",
             )],
             &object,
-        );
+        )
+        .patches;
         let read: Vec<(String, String)> = patches
             .iter()
             .map(|patch| match patch {
@@ -9547,9 +12365,12 @@ pub(in crate::drive) mod tests {
         reads_whole(&session);
     }
 
-    /// Levers run A: a `;` in a SUPERSEDE's prose is the prose's -- one
-    /// pair, voiding the one entry it cites, its whole reason the entry that
-    /// stands -- and never an addition of its fragments.
+    /// Levers run A, the hard case (#812): a `;` in a SUPERSEDE's prose is
+    /// the prose's -- one pair, never an addition of its fragments -- and
+    /// the em dash after the cited id makes the rest that pair's reason. The
+    /// answer's own DECISION supersedes the cited entry; the reason is
+    /// recorded, never an entry's text; and the second id the reason names
+    /// ("Also r4621/…") is prose, not a citation.
     #[test]
     fn a_semicolon_in_a_supersedes_prose_is_no_new_pair() {
         let object = object_of(&[
@@ -9560,7 +12381,7 @@ pub(in crate::drive) mod tests {
         assert_eq!(trailer.as_deref(), Some("-- checked against AGENTS.md"));
         let (patches, _) =
             super::super::fold(&fields, 7, super::super::INTERVIEW, Some("f/9")).expect("read");
-        let patches = cited(patches, &object);
+        let Cited { patches, reasons } = cited(patches, &object);
         let superseding: Vec<(&str, &str)> = patches
             .iter()
             .filter_map(|patch| match patch {
@@ -9572,19 +12393,100 @@ pub(in crate::drive) mod tests {
             panic!("{patches:?}");
         };
         assert_eq!(*voids, "r3421/call_22baf3929b944b80b538212e/decision");
-        assert!(content.starts_with("its `--quiet` clause"), "{content}");
         assert!(
-            content
-                .ends_with("the entry that should stand on that point is the file's actual state."),
+            content.starts_with("decision: Dropped `--quiet` entirely"),
             "{content}"
+        );
+        let reason = &reasons["r3421/call_22baf3929b944b80b538212e/decision"];
+        assert!(reason.starts_with("its `--quiet` clause"), "{reason}");
+        assert!(
+            reason
+                .ends_with("the entry that should stand on that point is the file's actual state."),
+            "{reason}"
         );
         assert!(
             !patches.iter().any(|patch| matches!(
                 patch,
-                Patch::Add { content, .. } if content.starts_with("supersede: ")
+                Patch::Add { content, .. } | Patch::Supersede { content, .. }
+                    if content.starts_with("supersede: ") || content.starts_with("its `--quiet`")
             )),
             "{patches:?}"
         );
+        assert!(
+            !patches.iter().any(|patch| matches!(
+                patch,
+                Patch::Retire { target, .. } if target.as_str().starts_with("r4621/")
+            )),
+            "an id inside a reason is not cited: {patches:?}"
+        );
+    }
+
+    /// #812, the levers run C re-fire (#811): `SUPERSEDE: <id> — <reason>`,
+    /// the audit grammar's `REMOVE — <reason>` shape, voids the cited entry
+    /// in favour of the answer's own DECISION, the reason recorded and never
+    /// an entry's text; with no DECISION to stand, the cited entry retires.
+    #[test]
+    fn a_supersede_pair_with_an_em_dash_reason_never_makes_the_reason_an_entry() {
+        const REFIRE: &str = "DECISION: Broken links are now reported as JSON Lines\n\
+                              PLAN: Nothing further unless the user requests changes.\n\
+                              SUPERSEDE: interview-t1-f1366-0 — replaced by this turn's DECISION \
+                              (output format is JSON Lines, not `file:line: target`).\n";
+        let object = object_of(&["interview-t1-f1366-0"]);
+        let (patches, _) =
+            super::super::fold(REFIRE, 2, super::super::INTERVIEW, Some("f/2053")).expect("read");
+        let Cited { patches, reasons } = cited(patches, &object);
+        assert!(
+            matches!(
+                patches.as_slice(),
+                [Patch::Supersede { content, voids, .. }, Patch::Add { content: plan, .. }]
+                    if content == "decision: Broken links are now reported as JSON Lines"
+                        && voids.as_str() == "interview-t1-f1366-0"
+                        && plan.starts_with("plan: ")
+            ),
+            "{patches:#?}"
+        );
+        assert_eq!(
+            reasons,
+            BTreeMap::from([(
+                "interview-t1-f1366-0".to_owned(),
+                "replaced by this turn's DECISION (output format is JSON Lines, not \
+                 `file:line: target`)."
+                    .to_owned()
+            )])
+        );
+        // No DECISION to stand: the cited entry retires, for the same reason.
+        let (patches, _) = super::super::fold(
+            "SUPERSEDE: interview-t1-f1366-0 — the format changed\n",
+            2,
+            super::super::INTERVIEW,
+            Some("f/2053"),
+        )
+        .expect("read");
+        let Cited { patches, reasons } = cited(patches, &object);
+        assert!(
+            matches!(
+                patches.as_slice(),
+                [Patch::Retire { target, .. }] if target.as_str() == "interview-t1-f1366-0"
+            ),
+            "{patches:#?}"
+        );
+        assert_eq!(reasons["interview-t1-f1366-0"], "the format changed");
+        // A plain hyphen or a colon still introduces the entry that stands.
+        for written in [
+            "interview-t1-f1366-0 - decision: JSON Lines",
+            "interview-t1-f1366-0: decision: JSON Lines",
+        ] {
+            let Cited { patches, reasons } =
+                cited(vec![supersede_field("interview-t2-0", written)], &object);
+            assert!(
+                matches!(
+                    patches.as_slice(),
+                    [Patch::Supersede { content, .. }] if content == "decision: JSON Lines"
+                ),
+                "{written}: {patches:#?}"
+            );
+            assert!(reasons.is_empty(), "{written}");
+        }
     }
 
     /// #562: `→` or `->` between the cited id and what replaces it.
@@ -9598,7 +12500,8 @@ pub(in crate::drive) mod tests {
                     &format!("interview-t2-0 {arrow} a tracker for two teams"),
                 )],
                 &object,
-            );
+            )
+            .patches;
             assert!(
                 matches!(
                     &patches[..],
@@ -9608,6 +12511,126 @@ pub(in crate::drive) mod tests {
                 "{arrow}: {patches:?}"
             );
         }
+    }
+
+    /// #812: a fork's `<id> — <reason>` reaches the log as the reason on
+    /// the line that voided the cited entry -- its DECISION's `supersede`
+    /// -- and no line's entry is the reason.
+    #[test]
+    fn a_forks_supersede_reason_is_logged_on_the_line_that_voids() {
+        let session = Session::open_with(
+            Canned::new(Vec::<Vec<Step>>::new()),
+            template(),
+            None,
+            None,
+            None,
+            Some(interviewing(&[log::Warrant::Scoping])),
+        );
+        let mut state = session.shared.lock();
+        let seed = Patch::Add {
+            id: entry_id("interview-t1-f1366-0"),
+            content: "decision: report broken links as `file:line: target`".to_owned(),
+            provenance: from_fork(0),
+        };
+        assert_eq!(applied(&mut state, &[seed], 1).0, log::ForkOutcome::Value);
+        let (outcome, lines) = folded(
+            &mut state,
+            "DECISION: report broken links as JSON Lines\n\
+             PLAN: NONE\n\
+             SUPERSEDE: interview-t1-f1366-0 — replaced by this turn's DECISION\n",
+            2,
+            2053,
+        );
+        assert_eq!(outcome, log::ForkOutcome::Value);
+        let logged: Vec<log::Event> = lines
+            .iter()
+            .map(|event| {
+                line_of(&Logged {
+                    seq: 0,
+                    t: 0,
+                    event: event.clone(),
+                })
+                .event
+            })
+            .collect();
+        assert!(
+            logged.iter().any(|line| matches!(
+                line,
+                log::Event::Patch {
+                    op: log::PatchOp::Supersede,
+                    supersedes: Some(voids),
+                    reason: Some(reason),
+                    entry,
+                    ..
+                } if voids == "interview-t1-f1366-0"
+                    && reason == "replaced by this turn's DECISION"
+                    && entry.text == "decision: report broken links as JSON Lines"
+            )),
+            "{logged:#?}"
+        );
+        assert!(
+            !logged.iter().any(|line| matches!(
+                line,
+                log::Event::Patch { entry, .. } if entry.text.contains("replaced by this turn")
+            )),
+            "{logged:#?}"
+        );
+    }
+
+    /// #815: a session serve opened on a substrate that takes no images
+    /// refuses an ask carrying one, `no-vision`, logged; its words alone
+    /// still go, and a session that takes images sends the picture.
+    #[test]
+    fn an_image_ask_to_a_substrate_without_vision_is_refused_no_vision() {
+        let bytes = b"\x89PNG\r\n\x1a\na picture".to_vec();
+        let sha256 = crate::digest::sha256_hex(&bytes);
+        let file = log::RecordedFile {
+            path: format!("files/{sha256}"),
+            sha256,
+            media_type: "image/png".to_owned(),
+            bytes: bytes.len() as u64,
+        };
+        let pictured = || super::super::attach::Attached {
+            message: crate::client::shape::attach(
+                Message::new(Role::User, "what is in it?"),
+                &file,
+                &bytes,
+            )
+            .expect("attached"),
+            files: vec![file.clone()],
+        };
+        let blind = Session::open_with(
+            Canned::new([deltas(&["just the words"])]),
+            template(),
+            None,
+            None,
+            None,
+            None,
+        )
+        .without_vision("a-text-only-substrate");
+        assert!(matches!(
+            blind.ask_attached(pictured(), None, false),
+            Err(Rejected::Refused(Refusal::NoVision))
+        ));
+        assert!(blind.events_from(0).iter().any(|logged| matches!(
+            logged.event,
+            Event::Refused {
+                because: Refusal::NoVision,
+                ..
+            }
+        )));
+        blind.ask("what is in it?", None).expect("words alone go");
+        let seeing = Session::open_with(
+            Canned::new([deltas(&["a picture"])]),
+            template(),
+            None,
+            None,
+            None,
+            None,
+        );
+        seeing
+            .ask_attached(pictured(), None, false)
+            .expect("a session that takes images sends one");
     }
 
     /// #562, from the meditation smoke run: a pair whose replacement is itself a
@@ -9627,7 +12650,8 @@ pub(in crate::drive) mod tests {
                 "interview-t2-0 → r1516/call-a/decision; interview-t2-1 → r1516/call-b/followup",
             )],
             &object,
-        );
+        )
+        .patches;
         let retired: Vec<&str> = patches
             .iter()
             .map(|patch| match patch {
@@ -10497,6 +13521,19 @@ pub(in crate::drive) mod tests {
         }
     }
 
+    /// A phase document, as a log line carries it (#787).
+    fn a_phase_document() -> log::PhaseDocument {
+        log::PhaseDocument {
+            name: "build".to_owned(),
+            digest: "b".repeat(64),
+            transitions: vec![log::PhaseOption {
+                to: "test".to_owned(),
+                kind: "suggested".to_owned(),
+            }],
+            ground_rules: "Make the change.".to_owned(),
+        }
+    }
+
     /// One of every event, and a match with no wildcard that names each
     /// variant: an event added to [`Event`] fails to compile here until it
     /// has a sample, and so a line. One entry per variant is its length.
@@ -10504,6 +13541,7 @@ pub(in crate::drive) mod tests {
     fn one_of_every_event() -> Vec<Logged> {
         let events = vec![
             Event::Started {
+                phase_document: None,
                 bash_timeout_ms: None,
                 opened: 1_790_000_000_000,
                 model: "a-model".to_owned(),
@@ -10537,6 +13575,7 @@ pub(in crate::drive) mod tests {
                 )])),
                 fork_asks: Some(&crate::dogma::asks::V4),
                 notes_in_the_ask: true,
+                build: Some(("a".repeat(40), false)),
             },
             Event::Asked {
                 turn: 1,
@@ -10554,6 +13593,7 @@ pub(in crate::drive) mod tests {
                 head_sha256: "a".repeat(64),
                 fork: None,
                 max_tokens: 8192,
+                beside: None,
             },
             Event::Refused {
                 command: CommandKind::Cancel,
@@ -10711,7 +13751,12 @@ pub(in crate::drive) mod tests {
                     model: "small".to_owned(),
                 }),
                 ask: AskKind::Judgment,
+                pinned: None,
                 displaces: false,
+                cut: None,
+                timing: Timing::Gap,
+                view_overridden: None,
+                reserved: None,
             },
             Event::Requested {
                 turn: 1,
@@ -10719,6 +13764,7 @@ pub(in crate::drive) mod tests {
                 head_sha256: "b".repeat(64),
                 fork: Some(20),
                 max_tokens: 8192,
+                beside: None,
             },
             Event::ForkSettled {
                 trailer: None,
@@ -10727,6 +13773,8 @@ pub(in crate::drive) mod tests {
                 prompt_tokens: Some(281),
                 wall_ms: Some(480),
                 refused: None,
+                pool: None,
+                not_run: None,
             },
             Event::Patched {
                 fork: Some(20),
@@ -10739,8 +13787,10 @@ pub(in crate::drive) mod tests {
                 },
                 supersedes: None,
                 tangent: Some("t/1".to_owned()),
+                reason: None,
             },
             Event::Meditated {
+                phase_document: None,
                 newest_turn_tokens: None,
                 refilled_anyway: None,
                 operator_changes: None,
@@ -10762,6 +13812,8 @@ pub(in crate::drive) mod tests {
                 fired: None,
                 pruned: None,
                 warm: None,
+                turn_steps: None,
+                audit_notes: None,
             },
             Event::Recalled {
                 turn: 2,
@@ -10860,15 +13912,51 @@ pub(in crate::drive) mod tests {
                 entry: "operator-9".to_owned(),
             },
             Event::PhaseRuled {
-                call: "call-p".to_owned(),
-                choice: PhaseChoice::Continue,
+                call: Some("call-p".to_owned()),
+                choice: PhaseChoice::Keep,
                 from: Some("plan".to_owned()),
                 to: "build".to_owned(),
+                phase_document: Some(a_phase_document()),
+                by: None,
             },
             Event::MeditationHeld {
                 at_turn: 2,
                 reason: crate::meditation::Reason::Operator,
                 unaddressed: vec!["interview-t1-0".to_owned()],
+            },
+            Event::PhaseNoted {
+                turn: 3,
+                text: "The session is now in the build phase.".to_owned(),
+            },
+            // #788's three.
+            Event::PhaseProposed {
+                by: Key::Model,
+                call: Some("call-p".to_owned()),
+                from: Some("plan".to_owned()),
+                to: "build".to_owned(),
+                reason: Some("the plan is settled".to_owned()),
+                meditate: None,
+                evidence: log::PhaseEvidence {
+                    phase_steps: 3,
+                    phase_tokens: 900,
+                    tokens_since_meditation: 900,
+                    meditated_by_hand: false,
+                },
+            },
+            Event::PhaseAnswered {
+                call: "call-a".to_owned(),
+                accepted: true,
+                reason: None,
+            },
+            Event::PhaseStarted {
+                phase: "plan".to_owned(),
+                phase_document: None,
+            },
+            Event::Backlogged {
+                of_turn: 2,
+                trigger: "call:document-read:call-a".to_owned(),
+                ask: "finding".to_owned(),
+                cut: 9,
             },
         ];
         let mut kinds = std::collections::BTreeSet::new();
@@ -10914,9 +14002,14 @@ pub(in crate::drive) mod tests {
                 Event::Flagged { .. } => 37,
                 Event::PatchRefused { .. } => 38,
                 Event::MeditationHeld { .. } => 39,
+                Event::PhaseNoted { .. } => 40,
+                Event::PhaseProposed { .. } => 41,
+                Event::PhaseAnswered { .. } => 42,
+                Event::PhaseStarted { .. } => 43,
+                Event::Backlogged { .. } => 44,
             });
         }
-        assert_eq!(kinds.len(), 40, "a variant has no sample");
+        assert_eq!(kinds.len(), 45, "a variant has no sample");
         events
             .into_iter()
             .enumerate()
@@ -10934,6 +14027,7 @@ pub(in crate::drive) mod tests {
     fn the_lines_of_every_event() -> Vec<log::Event> {
         vec![
             log::Event::SessionStart {
+                phase_document: None,
                 bash_timeout_ms: None,
                 version: log::VERSION,
                 opened: 1_790_000_000_000,
@@ -10979,6 +14073,8 @@ pub(in crate::drive) mod tests {
                     digest: Some(crate::dogma::asks::V4.digest()),
                 }),
                 notes_in_the_ask: Some(true),
+                build_commit: Some("a".repeat(40)),
+                build_dirty: Some(false),
             },
             log::Event::Ask {
                 turn: 1,
@@ -10996,6 +14092,7 @@ pub(in crate::drive) mod tests {
                 head_sha256: Some("a".repeat(64)),
                 fork: None,
                 max_tokens: Some(8192),
+                beside: None,
             },
             log::Event::Refused {
                 command: log::Command::Cancel,
@@ -11172,6 +14269,11 @@ pub(in crate::drive) mod tests {
                 }),
                 ask: Some("judgment".to_owned()),
                 hazard: None,
+                cut: None,
+                timing: None,
+                view_overridden: None,
+                prefix_shared: None,
+                reserved: None,
             },
             log::Event::Request {
                 turn: 1,
@@ -11179,6 +14281,7 @@ pub(in crate::drive) mod tests {
                 head_sha256: Some("b".repeat(64)),
                 fork: Some(20),
                 max_tokens: Some(8192),
+                beside: None,
             },
             log::Event::ForkSettled {
                 trailer: None,
@@ -11187,6 +14290,8 @@ pub(in crate::drive) mod tests {
                 prompt_tokens: Some(281),
                 wall_ms: Some(480),
                 refused: None,
+                pool: None,
+                not_run: None,
             },
             log::Event::Patch {
                 fork: Some(20),
@@ -11199,8 +14304,10 @@ pub(in crate::drive) mod tests {
                 },
                 supersedes: None,
                 tangent: Some("t/1".to_owned()),
+                reason: None,
             },
             log::Event::Meditation {
+                phase_document: None,
                 newest_turn_tokens: None,
                 refilled_anyway: None,
                 operator_changes: None,
@@ -11226,6 +14333,8 @@ pub(in crate::drive) mod tests {
                 fired: None,
                 pruned: None,
                 warm: None,
+                turn_steps: None,
+                audit_notes: None,
             },
             log::Event::Recalled {
                 turn: 2,
@@ -11287,8 +14396,10 @@ pub(in crate::drive) mod tests {
                 of_turn: 1,
                 trigger: "turn_end".to_owned(),
                 ask: "judgment".to_owned(),
-                call: "call-c".to_owned(),
-                field: "decision".to_owned(),
+                call: Some("call-c".to_owned()),
+                field: Some("decision".to_owned()),
+                reason: None,
+                cut: None,
             },
             log::Event::Capture {
                 request: 3,
@@ -11318,6 +14429,11 @@ pub(in crate::drive) mod tests {
                 seat: None,
                 ask: Some("audit_q_human".to_owned()),
                 hazard: None,
+                cut: None,
+                timing: None,
+                view_overridden: None,
+                prefix_shared: None,
+                reserved: None,
             },
             log::Event::Flag {
                 turn: 2,
@@ -11332,15 +14448,53 @@ pub(in crate::drive) mod tests {
                 reason: "operator-entry".to_owned(),
             },
             log::Event::PhaseRuled {
-                call: "call-p".to_owned(),
-                choice: "continue".to_owned(),
+                call: Some("call-p".to_owned()),
+                choice: "keep".to_owned(),
                 from: Some("plan".to_owned()),
                 to: "build".to_owned(),
+                phase_document: Some(a_phase_document()),
+                by: None,
             },
             log::Event::MeditationHeld {
                 at_turn: 2,
                 reason: log::MeditationReason::Operator,
                 unaddressed: vec!["interview-t1-0".to_owned()],
+            },
+            log::Event::PhaseNoted {
+                turn: 3,
+                text: "The session is now in the build phase.".to_owned(),
+            },
+            log::Event::PhaseProposed {
+                by: "model".to_owned(),
+                call: Some("call-p".to_owned()),
+                from: Some("plan".to_owned()),
+                to: "build".to_owned(),
+                reason: Some("the plan is settled".to_owned()),
+                meditate: None,
+                evidence: log::PhaseEvidence {
+                    phase_steps: 3,
+                    phase_tokens: 900,
+                    tokens_since_meditation: 900,
+                    meditated_by_hand: false,
+                },
+            },
+            log::Event::PhaseAnswered {
+                call: "call-a".to_owned(),
+                accepted: true,
+                reason: None,
+            },
+            log::Event::PhaseStarted {
+                phase: "plan".to_owned(),
+                phase_document: None,
+            },
+            log::Event::ForkSkipped {
+                of_turn: 2,
+                trigger: "call:document-read:call-a".to_owned(),
+                ask: "finding".to_owned(),
+                call: None,
+                field: None,
+                reason: Some(log::SKIPPED_BACKLOG.to_owned()),
+                cut: Some(9),
             },
         ]
     }
@@ -11808,12 +14962,12 @@ pub(in crate::drive) mod tests {
                     .collect::<Vec<_>>()
             ),
             "ask cancel declare-meditation end open-tangent close-tangent background ratify-phase \
-             edit-entry flag-entry refill-anyway"
+             edit-entry flag-entry refill-anyway start-phase propose-phase move-phase"
         );
         assert_eq!(
             tags(&Refusal::ALL.iter().map(|it| it.tag()).collect::<Vec<_>>()),
             "in-flight ended nothing-in-flight nothing-to-meditate no-phase-graph not-a-phase \
-             already-in-phase no-phase-edge stale tangent-open no-tangent bad-tangent not-the-scope nothing-running no-proposal unknown-entry not-live empty meditation-held nothing-held restates"
+             already-in-phase no-phase-edge stale tangent-open no-tangent bad-tangent not-the-scope nothing-running no-proposal unknown-entry not-live empty meditation-held nothing-held restates not-unilateral already-asked proposal-pending no-vision"
         );
         assert_eq!(
             tags(
@@ -14124,12 +17278,19 @@ pub(in crate::drive) mod tests {
             cadence: Cadence::Gap,
             threshold_bytes: None,
             skip_self_recorded: false,
+            mechanical_capture: false,
             prune: None,
             self_capture: None,
             capture_contract: crate::dogma::capture::DEFAULT,
             asks: &crate::dogma::asks::V3,
             capture: crate::dogma::asks::Modality::Fields,
             fork_tail: None,
+            fork_slots: 0,
+            fork_backlog: FORK_BACKLOG_DEFAULT,
+            prefix_pages: PrefixPages::Counted,
+            timing: Timing::Gap,
+            step: crate::drive::warrants::StepWarrants::DEFAULTS,
+            operator_unilateral: true,
         }
     }
 
@@ -14159,6 +17320,167 @@ pub(in crate::drive) mod tests {
             settled(log) && !fork_outcomes(log).is_empty()
         });
         session
+    }
+
+    /// #814: a working memory whose render, with the head, would pass the
+    /// window's line -- the window less its reserve -- is elided, oldest
+    /// first, to the room left, though the regimen declares no budget; the
+    /// meditation line names the line it was fitted to and how many entries
+    /// went.
+    #[test]
+    fn a_refill_past_the_windows_line_is_elided_to_fit_and_says_so() {
+        let mut shape = template();
+        shape.limits.context_window = Some(crate::meditation::policy::WINDOW_RESERVE + 600);
+        let session = Session::open_with(
+            Canned::new(vec![deltas(&[SCOPED]), deltas(&[DECIDED])]),
+            shape,
+            None,
+            None,
+            None,
+            Some(interviewing(&[log::Warrant::Scoping])),
+        );
+        session
+            .ask_marked("what are we building?", None, true)
+            .expect("accepted");
+        wait_until(&session, "the fork to settle", |log| {
+            settled(log) && !fork_outcomes(log).is_empty()
+        });
+        {
+            let mut state = session.shared.lock();
+            let object = &mut state.interview.as_mut().expect("memory").object;
+            for n in 0..60_u32 {
+                object
+                    .apply(&Patch::Add {
+                        id: crate::object::EntryId::new(&format!("bulk-{n:02}")).expect("an id"),
+                        content: format!("decision: {} {n}", "the long form of a fact ".repeat(8)),
+                        provenance: crate::object::Provenance {
+                            turn: 1,
+                            lane: "interview".to_owned(),
+                            fork: None,
+                            tangent: None,
+                            index: n,
+                        },
+                    })
+                    .expect("an entry");
+            }
+        }
+        session.declare_meditation(None).expect("admitted");
+        let log = wait_until(&session, "the meditation", meditated);
+        let (render, budget) = log
+            .iter()
+            .find_map(|logged| match &logged.event {
+                Event::Meditated {
+                    render,
+                    render_budget,
+                    ..
+                } => Some((render.clone(), render_budget.clone())),
+                _ => None,
+            })
+            .expect("a meditation");
+        let budget = budget.expect("the window set a budget");
+        assert_eq!(budget.window_line, Some(600), "{budget:?}");
+        assert_eq!(budget.over, "elide");
+        assert!(budget.reduced > 0, "{budget:?}");
+        assert!(budget.rendered <= budget.tokens, "{budget:?}");
+        assert!(render.contains("older entries elided"), "{render}");
+        let trunk: u64 = session
+            .shared
+            .lock()
+            .trunk
+            .iter()
+            .map(crate::meditation::render::estimated_tokens)
+            .sum();
+        assert!(trunk <= 600, "the refilled trunk is {trunk} tokens");
+        reads_whole(&session);
+        every_head_rebuilds(&log);
+    }
+
+    /// #821: an audit over every note that would pass the window's line asks
+    /// over the newest notes that fit; the rest are left as they are, and the
+    /// meditation line names both counts and the line.
+    #[test]
+    fn an_audit_past_the_windows_line_asks_over_the_newest_notes_that_fit() {
+        let mut shape = template();
+        shape.limits.context_window = Some(crate::meditation::policy::WINDOW_RESERVE + 2_000);
+        let mut interview = interviewing(&[log::Warrant::Scoping]);
+        interview.meditations.audit = true;
+        let session = Session::open_with(
+            Canned::new(vec![
+                deltas(&[SCOPED]),
+                deltas(&[DECIDED]),
+                deltas(&["1. KEEP\n"]),
+            ]),
+            shape,
+            None,
+            None,
+            None,
+            Some(interview),
+        );
+        session
+            .ask_marked("what are we building?", None, true)
+            .expect("accepted");
+        wait_until(&session, "the fork to settle", |log| {
+            settled(log) && !fork_outcomes(log).is_empty()
+        });
+        {
+            let mut state = session.shared.lock();
+            let object = &mut state.interview.as_mut().expect("memory").object;
+            for n in 0..60_u32 {
+                object
+                    .apply(&Patch::Add {
+                        id: crate::object::EntryId::new(&format!("bulk-{n:02}")).expect("an id"),
+                        content: format!("decision: {} {n}", "the long form of a fact ".repeat(8)),
+                        provenance: crate::object::Provenance {
+                            turn: 1,
+                            lane: "interview".to_owned(),
+                            fork: None,
+                            tangent: None,
+                            index: 100 + n,
+                        },
+                    })
+                    .expect("an entry");
+            }
+        }
+        let total = live_entries(&session).len() as u64;
+        session.declare_meditation(None).expect("admitted");
+        let log = wait_until(&session, "the meditation", meditated);
+        let question = log
+            .iter()
+            .find_map(|logged| match &logged.event {
+                Event::Audited { question, .. } => Some(question.clone()),
+                _ => None,
+            })
+            .expect("an audit");
+        let notes = log
+            .iter()
+            .find_map(|logged| match &logged.event {
+                Event::Meditated { audit_notes, .. } => Some(*audit_notes),
+                _ => None,
+            })
+            .expect("a meditation")
+            .expect("the audit was fitted");
+        let (audited, left, line) = notes;
+        assert_eq!(line, 2_000);
+        assert!(audited > 0 && left > 0, "{notes:?}");
+        assert_eq!(audited + left, total);
+        assert!(
+            question.contains(" 59"),
+            "the newest note is audited: {question}"
+        );
+        assert!(
+            !question.contains(" 0\n") && !question.contains(" 00"),
+            "the oldest is not"
+        );
+        assert!(
+            question.contains(&format!("{audited}. ")),
+            "numbered through {audited}: {question}"
+        );
+        assert!(
+            !question.contains(&format!("{}. ", audited + 1)),
+            "{question}"
+        );
+        reads_whole(&session);
+        every_head_rebuilds(&log);
     }
 
     fn meditated(log: &[Logged]) -> bool {
@@ -14571,6 +17893,252 @@ pub(in crate::drive) mod tests {
     }
 
     /// Each live entry's id and content.
+    /// A standard-surface session whose one turn reads `notes.md`, writes
+    /// then edits `out.txt`, and runs `ls` and `cat notes.md` through
+    /// `bash`, a step each, under `mechanical_capture` as `on` says (#784).
+    fn touching(tree: &Path, on: bool) -> Session<Canned> {
+        std::fs::write(tree.join("notes.md"), "line one\n").expect("the notes");
+        let mut shape = looping();
+        shape.tools = tool_loop::ToolSurface::Standard.tools_timed(false, None);
+        let mut tools = tools(
+            Confinement::Unconfined,
+            tree,
+            &["ls", "cat"],
+            None,
+            Decider::Decline,
+        );
+        tools.surface = tool_loop::ToolSurface::Standard;
+        tools.read_tool = tool_loop::ToolSurface::Standard.read_tool();
+        tools.approvals_off = true;
+        let mut interview = interviewing(&[log::Warrant::Scoping]);
+        interview.mechanical_capture = on;
+        let step = |id: &str, name: &str, args: serde_json::Value| {
+            vec![Step::call(0, id, name, &args.to_string())]
+        };
+        Session::open_with(
+            Canned::new([
+                step("c1", "read", serde_json::json!({"path": "notes.md"})),
+                step(
+                    "c2",
+                    "write",
+                    serde_json::json!({"path": "out.txt", "content": "one\n"}),
+                ),
+                step(
+                    "c3",
+                    "edit",
+                    serde_json::json!({"file_path": "out.txt", "old_string": "one", "new_string": "two"}),
+                ),
+                step("c4", "bash", serde_json::json!({"command": "ls"})),
+                step("c5", "bash", serde_json::json!({"command": "cat notes.md"})),
+                deltas(&["done"]),
+            ]),
+            shape,
+            None,
+            Some(tools),
+            None,
+            Some(interview),
+        )
+    }
+
+    /// Each mechanical `patch` line: its op, entry id and text.
+    fn mechanical_patches(log: &[Logged]) -> Vec<(log::PatchOp, String, String)> {
+        log.iter()
+            .filter_map(|logged| match &logged.event {
+                Event::Patched {
+                    fork: None,
+                    lane: Some(lane),
+                    op,
+                    entry,
+                    ..
+                } if lane == crate::capture::mechanical::LANE => {
+                    Some((*op, entry.id.clone(), entry.text.clone()))
+                }
+                _ => None,
+            })
+            .collect()
+    }
+
+    /// #784: under `mechanical_capture`, each settled call's touches go into
+    /// working memory with no model call -- a `read`, a `write`, an `edit`,
+    /// an `ls` and a `cat` through `bash` -- one entry per path, relative to
+    /// the worktree, a later touch appending its provenance (lane
+    /// `mechanical`, the turn, the step); each logged as a `patch` line; and
+    /// the log reads back and every head rebuilds.
+    #[test]
+    fn mechanical_capture_patches_each_calls_touches_one_entry_per_path() {
+        let tree = scratch("mechanical-on");
+        let session = touching(&tree, true);
+        session.ask("look around", None).expect("accepted");
+        let log = wait_until(&session, "the turn", settled);
+        let mut live = live_entries(&session);
+        live.sort();
+        assert_eq!(
+            live,
+            [
+                (
+                    "mechanical/listed:.".to_owned(),
+                    "files: listed .".to_owned()
+                ),
+                (
+                    "mechanical/notes.md".to_owned(),
+                    "files: notes.md".to_owned()
+                ),
+                ("mechanical/out.txt".to_owned(), "files: out.txt".to_owned()),
+            ]
+        );
+        let provenances = |id: &str| -> Vec<(String, u32, u32)> {
+            let state = session.shared.lock();
+            let object = &state.interview.as_ref().expect("memory").object;
+            object
+                .entry(&crate::object::EntryId::new(id).expect("an id"))
+                .expect("held")
+                .provenances
+                .iter()
+                .map(|at| (at.lane.clone(), at.turn, at.index))
+                .collect()
+        };
+        assert_eq!(
+            provenances("mechanical/notes.md"),
+            [
+                ("mechanical".to_owned(), 1, 1),
+                ("mechanical".to_owned(), 1, 5)
+            ]
+        );
+        assert_eq!(
+            provenances("mechanical/out.txt"),
+            [
+                ("mechanical".to_owned(), 1, 2),
+                ("mechanical".to_owned(), 1, 3)
+            ]
+        );
+        let patches = mechanical_patches(&log);
+        assert_eq!(patches.len(), 5, "{patches:?}");
+        assert!(
+            patches.iter().all(|(op, _, _)| *op == log::PatchOp::Add),
+            "{patches:?}"
+        );
+        reads_whole(&session);
+        every_head_rebuilds(&log);
+        tidy(&[&tree]);
+    }
+
+    /// #784: off, the default, nothing is written.
+    #[test]
+    fn mechanical_capture_off_writes_nothing() {
+        let tree = scratch("mechanical-off");
+        let session = touching(&tree, false);
+        session.ask("look around", None).expect("accepted");
+        let log = wait_until(&session, "the turn", settled);
+        assert!(live_entries(&session).is_empty());
+        assert!(mechanical_patches(&log).is_empty());
+        tidy(&[&tree]);
+    }
+
+    /// #784: a delete retires the path's entry.
+    #[test]
+    fn mechanical_capture_retires_a_deleted_files_entry() {
+        let tree = scratch("mechanical-rm");
+        std::fs::write(tree.join("gone.txt"), "x\n").expect("a file");
+        let mut tools = tools(
+            Confinement::Unconfined,
+            &tree,
+            &["cat", "rm"],
+            None,
+            Decider::Decline,
+        );
+        tools.approvals_off = true;
+        let mut interview = interviewing(&[log::Warrant::Scoping]);
+        interview.mechanical_capture = true;
+        let session = Session::open_with(
+            Canned::new([
+                vec![bash("c1", "cat gone.txt")],
+                vec![bash("c2", "rm gone.txt")],
+                deltas(&["done"]),
+            ]),
+            looping(),
+            None,
+            Some(tools),
+            None,
+            Some(interview),
+        );
+        session.ask("tidy up", None).expect("accepted");
+        let log = wait_until(&session, "the turn", settled);
+        assert!(
+            live_entries(&session).is_empty(),
+            "{:?}",
+            live_entries(&session)
+        );
+        let ops: Vec<log::PatchOp> = mechanical_patches(&log)
+            .iter()
+            .map(|(op, _, _)| *op)
+            .collect();
+        assert_eq!(ops, [log::PatchOp::Add, log::PatchOp::Retire]);
+        reads_whole(&session);
+        tidy(&[&tree]);
+    }
+
+    /// #784: a file deleted and then written again -- the model regenerating
+    /// it -- is back in working memory: a fresh entry under a fresh id, the
+    /// retired one left as it was.
+    #[test]
+    fn mechanical_capture_brings_back_a_file_deleted_and_written_again() {
+        let tree = scratch("mechanical-reborn");
+        std::fs::write(tree.join("gen.txt"), "x\n").expect("a file");
+        let mut tools = tools(
+            Confinement::Unconfined,
+            &tree,
+            &["cat", "rm", "echo"],
+            None,
+            Decider::Decline,
+        );
+        tools.approvals_off = true;
+        let mut interview = interviewing(&[log::Warrant::Scoping]);
+        interview.mechanical_capture = true;
+        let session = Session::open_with(
+            Canned::new([
+                vec![bash("c1", "cat gen.txt")],
+                vec![bash("c2", "rm gen.txt")],
+                vec![bash("c3", "echo y > gen.txt")],
+                vec![bash("c4", "cat gen.txt")],
+                vec![bash("c5", "rm gen.txt")],
+                vec![bash("c6", "echo z > gen.txt")],
+                deltas(&["done"]),
+            ]),
+            looping(),
+            None,
+            Some(tools),
+            None,
+            Some(interview),
+        );
+        session.ask("regenerate it", None).expect("accepted");
+        let log = wait_until(&session, "the turn", settled);
+        assert_eq!(
+            live_entries(&session),
+            [(
+                "mechanical/gen.txt#3".to_owned(),
+                "files: gen.txt".to_owned()
+            )]
+        );
+        let patches: Vec<(log::PatchOp, String)> = mechanical_patches(&log)
+            .into_iter()
+            .map(|(op, id, _)| (op, id))
+            .collect();
+        assert_eq!(
+            patches,
+            [
+                (log::PatchOp::Add, "mechanical/gen.txt".to_owned()),
+                (log::PatchOp::Retire, "mechanical/gen.txt".to_owned()),
+                (log::PatchOp::Add, "mechanical/gen.txt#2".to_owned()),
+                (log::PatchOp::Add, "mechanical/gen.txt#2".to_owned()),
+                (log::PatchOp::Retire, "mechanical/gen.txt#2".to_owned()),
+                (log::PatchOp::Add, "mechanical/gen.txt#3".to_owned()),
+            ]
+        );
+        reads_whole(&session);
+        every_head_rebuilds(&log);
+        tidy(&[&tree]);
+    }
+
     fn live_entries(session: &Session<Canned>) -> Vec<(String, String)> {
         session
             .shared
@@ -14764,6 +18332,7 @@ pub(in crate::drive) mod tests {
             },
             supersedes: None,
             tangent: None,
+            reason: None,
         };
         for op in [
             log::PatchOp::Park,
@@ -15417,6 +18986,804 @@ pub(in crate::drive) mod tests {
             .collect()
     }
 
+    // -----------------------------------------------------------------------
+    // warrants by what a step produced (#783)
+    // -----------------------------------------------------------------------
+
+    /// #783 in the gap: a step that read 3000 characters warrants the
+    /// EVIDENCE ask, filled with what it read and how much; a step whose
+    /// command failed warrants the trio, GOTCHAS, DECISIONS and CONSTRAINTS;
+    /// each fork names its warrant, its pinned ask and the step that fired
+    /// it, they run after the turn in step order, and the log reads.
+    #[test]
+    #[allow(clippy::too_many_lines)]
+    fn a_large_read_warrants_evidence_and_a_failed_command_the_trio() {
+        let tree = scratch("step-warrants");
+        std::fs::write(tree.join("big.txt"), "x".repeat(3000)).expect("a large file");
+        let replies = vec![
+            vec![bash("call-1", "cat big.txt")],
+            vec![bash("call-2", "cat missing.txt")],
+            deltas(&["Done."]),
+            deltas(&["EXCERPT: xxx\n"]),
+            deltas(&["GOTCHA: missing.txt is absent — IMPLICATION: create it first\n"]),
+            deltas(&["NONE"]),
+            deltas(&["NONE"]),
+        ];
+        let session = Session::open_with(
+            Canned::new(replies),
+            looping(),
+            None,
+            Some(tools(
+                Confinement::Unconfined,
+                &tree,
+                &["cat"],
+                None,
+                Decider::Decline,
+            )),
+            None,
+            Some(Interview {
+                step: crate::drive::warrants::StepWarrants {
+                    evidence: true,
+                    trouble: true,
+                    ..crate::drive::warrants::StepWarrants::DEFAULTS
+                },
+                ..interviewing(&[log::Warrant::Evidence, log::Warrant::Trouble])
+            }),
+        );
+        session.ask("look", None).expect("accepted");
+        let log = wait_until(&session, "the gap's forks", |log| {
+            settled(log) && fork_outcomes(log).len() == 4
+        });
+        let forked: Vec<(log::Warrant, Option<String>, String)> = session
+            .events_from(0)
+            .iter()
+            .filter_map(|logged| match line_of(logged).event {
+                log::Event::Fork {
+                    why, ask, trigger, ..
+                } => Some((why, ask, trigger.unwrap_or_default())),
+                _ => None,
+            })
+            .collect();
+        let request_of = |id: &str| {
+            log.iter()
+                .find_map(|logged| match &logged.event {
+                    Event::ToolCalled(line) if line.id == id => Some(line.request),
+                    _ => None,
+                })
+                .expect("the call")
+        };
+        let trouble = format!("trouble:{}", request_of("call-2"));
+        assert_eq!(
+            forked,
+            [
+                (
+                    log::Warrant::Evidence,
+                    Some("evidence".to_owned()),
+                    "evidence:call-1".to_owned()
+                ),
+                (
+                    log::Warrant::Trouble,
+                    Some("gotchas".to_owned()),
+                    trouble.clone()
+                ),
+                (
+                    log::Warrant::Trouble,
+                    Some("decisions".to_owned()),
+                    trouble.clone()
+                ),
+                (
+                    log::Warrant::Trouble,
+                    Some("constraints".to_owned()),
+                    trouble
+                ),
+            ]
+        );
+        let questions: Vec<String> = forks(&log).into_iter().map(|fork| fork.4).collect();
+        // Its size is what the model was shown, counted in characters.
+        let shown = log
+            .iter()
+            .find_map(|logged| match &logged.event {
+                Event::ToolCalled(line) if line.id == "call-1" => line.shown.clone(),
+                _ => None,
+            })
+            .expect("what call-1 showed");
+        assert!(
+            questions[0].contains(&format!(
+                "(bash of cat big.txt, roughly {} characters)",
+                shown.chars().count()
+            )),
+            "{}",
+            questions[0]
+        );
+        assert_eq!(
+            questions[1],
+            crate::dogma::Template::Gotchas.fill(&[]).expect("the ask")
+        );
+        assert!(
+            live_entries(&session)
+                .iter()
+                .any(|(_, content)| content.contains("missing.txt is absent")),
+            "{:?}",
+            live_entries(&session)
+        );
+        reads_whole(&session);
+        every_head_rebuilds(&log);
+        tidy(&[&tree]);
+    }
+
+    // -----------------------------------------------------------------------
+    // interviews during the turn (#782)
+    // -----------------------------------------------------------------------
+
+    /// A session whose trunk plays `trunk` and whose forks, on their own
+    /// transport, play `forks`; per-class under both warrants, its forks
+    /// cut during the turn with `slots` in flight at most.
+    fn during_turn(
+        tree: &Path,
+        trunk: Vec<Vec<Step>>,
+        forks: Vec<Vec<Step>>,
+        slots: u32,
+    ) -> Session<Canned> {
+        during_turn_in(tree, (trunk, forks), slots, (None, false, None))
+    }
+
+    /// [`during_turn`], its pool `window` tokens when given, on a server
+    /// that shares a prefix's pages when `shared` (#797), the trunk's
+    /// output `cap` when given (#826).
+    fn during_turn_in(
+        tree: &Path,
+        (trunk, forks): (Vec<Vec<Step>>, Vec<Vec<Step>>),
+        slots: u32,
+        (window, shared, cap): (Option<u64>, bool, Option<u32>),
+    ) -> Session<Canned> {
+        std::fs::write(tree.join("notes.md"), "a note\n").expect("a note");
+        std::fs::write(tree.join("lib.rs"), "pub fn f() {}\n").expect("a source");
+        let mut shape = looping();
+        shape.limits.context_window = window;
+        if let Some(cap) = cap {
+            shape.limits.max_output_tokens = cap;
+        }
+        Session::open_with(
+            Canned::new(trunk),
+            shape,
+            None,
+            Some(tools(
+                Confinement::Unconfined,
+                tree,
+                &["cat", "echo"],
+                None,
+                Decider::Decline,
+            )),
+            None,
+            Some(Interview {
+                cadence: Cadence::PerClass,
+                timing: Timing::DuringTurn,
+                fork_slots: slots,
+                prefix_pages: PrefixPages::of(shared),
+                ..interviewing(&[log::Warrant::Scoping, log::Warrant::Read])
+            }),
+        )
+        .forking_through(Canned::new(forks))
+    }
+
+    /// Each fork's line: its seq, its `cut` and its `timing`.
+    fn cuts(log: &[Logged]) -> Vec<(u64, Option<u64>, Timing)> {
+        log.iter()
+            .filter_map(|logged| match &logged.event {
+                Event::Forked { cut, timing, .. } => Some((logged.seq, *cut, *timing)),
+                _ => None,
+            })
+            .collect()
+    }
+
+    /// The seq of the `tool_call` line of the call `id`.
+    fn call_line(log: &[Logged], id: &str) -> u64 {
+        log.iter()
+            .find_map(|logged| match &logged.event {
+                Event::ToolCalled(line) if line.id == id => Some(logged.seq),
+                _ => None,
+            })
+            .expect("the call's line")
+    }
+
+    fn turn_settled_at(log: &[Logged]) -> Option<u64> {
+        log.iter().find_map(|logged| {
+            matches!(logged.event, Event::TurnSettled { .. }).then_some(logged.seq)
+        })
+    }
+
+    /// #782: a fork a step warrants is cut as the trunk stood after that
+    /// step's result and sent at once, beside the trunk's next request,
+    /// which names it; it settles, its patches folded into working memory,
+    /// while the trunk is still answering; the gap fires it no second time.
+    #[test]
+    fn a_fork_cut_at_a_step_settles_before_the_turn_does() {
+        let tree = scratch("during-turn-settles");
+        let gate = Gate::new();
+        let session = during_turn(
+            &tree,
+            vec![
+                vec![bash("call-1", "cat notes.md")],
+                vec![
+                    Step::Hold(gate.clone()),
+                    Step::Delta("Done. Next, I will write the schema.".to_owned()),
+                ],
+            ],
+            vec![deltas(&["LEARNED: notes.md holds a note\n"])],
+            1,
+        );
+        session.ask("look around", None).expect("accepted");
+        let log = wait_until(&session, "the fork to settle mid-turn", |log| {
+            !fork_outcomes(log).is_empty()
+        });
+        assert_eq!(turn_settled_at(&log), None, "the trunk is still answering");
+        assert!(
+            live_entries(&session)
+                .iter()
+                .any(|(_, content)| content.contains("notes.md holds a note")),
+            "{:?}",
+            live_entries(&session)
+        );
+        let [(fork, cut, timing)] = cuts(&log)[..] else {
+            panic!("one fork: {:?}", cuts(&log));
+        };
+        assert_eq!(cut, Some(call_line(&log, "call-1")));
+        assert_eq!(timing, Timing::DuringTurn);
+        assert!(fork > call_line(&log, "call-1"));
+        // The trunk's request after the step names the fork beside it.
+        let besides: Vec<Option<u32>> = log
+            .iter()
+            .filter_map(|logged| match &logged.event {
+                Event::Requested {
+                    lane: Lane::Trunk,
+                    beside,
+                    ..
+                } => Some(*beside),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(besides, [Some(0), Some(1)]);
+        gate.open();
+        let log = wait_until(&session, "the turn", settled);
+        assert_eq!(cuts(&log).len(), 1, "the gap fires no second fork");
+        assert!(turn_settled_at(&log) > Some(fork));
+        reads_whole(&session);
+        every_head_rebuilds(&log);
+        tidy(&[&tree]);
+    }
+
+    /// #782: at most `slots` forks in flight; the rest queue in step order,
+    /// unlogged until sent, and one still queued when the turn settles runs
+    /// in the gap -- the session not idle until it settles.
+    #[test]
+    fn a_fork_past_the_slots_queues_and_runs_in_the_gap() {
+        let tree = scratch("during-turn-queues");
+        let gate = Gate::new();
+        let session = during_turn(
+            &tree,
+            vec![
+                vec![
+                    bash("call-1", "cat notes.md"),
+                    Step::call(1, "call-2", "bash", r#"{"command":"cat lib.rs"}"#),
+                ],
+                deltas(&["Done. Next, I will write the schema."]),
+            ],
+            vec![
+                vec![
+                    Step::Hold(gate.clone()),
+                    Step::Delta("LEARNED: the first\n".to_owned()),
+                ],
+                deltas(&["LEARNED: the second\n"]),
+            ],
+            1,
+        );
+        session.ask("look around", None).expect("accepted");
+        assert!(gate.wait_for_a_waiter(Duration::from_secs(10)));
+        let log = wait_until(&session, "the turn to settle", |log| {
+            turn_settled_at(log).is_some()
+        });
+        assert_eq!(cuts(&log).len(), 1, "the second waits for the slot");
+        assert_ne!(session.settlement(), Settlement::Awaiting);
+        gate.open();
+        let log = wait_until(&session, "both forks", |log| {
+            settled(log) && fork_outcomes(log).len() == 2
+        });
+        let cut = cuts(&log);
+        assert_eq!(cut[1].1, Some(call_line(&log, "call-2")));
+        assert!(Some(cut[1].0) > turn_settled_at(&log), "it ran in the gap");
+        assert_eq!(fork_outcomes(&log), [log::ForkOutcome::Value; 2]);
+        reads_whole(&session);
+        tidy(&[&tree]);
+    }
+
+    /// [`during_turn`] with one slot, per call, and a queue of at most
+    /// `backlog` waiting (#822); the first fork held by `gate`.
+    fn backlogged_session(
+        tree: &Path,
+        trunk: Vec<Vec<Step>>,
+        gate: &Gate,
+        backlog: usize,
+    ) -> Session<Canned> {
+        let session = during_turn(
+            tree,
+            trunk,
+            vec![
+                vec![
+                    Step::Hold(gate.clone()),
+                    Step::Delta("LEARNED: the first\n".to_owned()),
+                ],
+                deltas(&["LEARNED: the last\n"]),
+            ],
+            1,
+        );
+        {
+            let mut state = session.shared.lock();
+            let interview = state.interview.as_mut().expect("an interview");
+            interview.cadence = Cadence::PerCall;
+            interview.fork_backlog = backlog;
+        }
+        session
+    }
+
+    /// The `fork.skipped` `backlog` lines: each one's trigger and cut.
+    fn backlog_skips(log: &[Logged]) -> Vec<(String, u64)> {
+        log.iter()
+            .filter_map(|logged| match &logged.event {
+                Event::Backlogged { trigger, cut, .. } => Some((trigger.clone(), *cut)),
+                _ => None,
+            })
+            .collect()
+    }
+
+    /// #822: a step that warrants more forks than the slot and the bound
+    /// hold keeps the newest queued and logs the older ones skipped,
+    /// `backlog`, naming the step they were cut at; the kept one runs.
+    #[test]
+    fn a_queue_past_its_bound_keeps_the_newest_and_logs_the_rest_skipped() {
+        let tree = scratch("during-turn-backlog");
+        let gate = Gate::new();
+        let session = backlogged_session(
+            &tree,
+            vec![
+                vec![
+                    bash("call-1", "cat notes.md"),
+                    Step::call(1, "call-2", "bash", r#"{"command":"cat lib.rs"}"#),
+                    Step::call(2, "call-3", "bash", r#"{"command":"cat notes.md"}"#),
+                ],
+                deltas(&["Done. Next, I will write the schema."]),
+            ],
+            &gate,
+            1,
+        );
+        session.ask("look around", None).expect("accepted");
+        assert!(gate.wait_for_a_waiter(Duration::from_secs(10)));
+        gate.open();
+        let log = wait_until(&session, "the turn and its forks", |log| {
+            settled(log) && fork_outcomes(log).len() == 2
+        });
+        let skips = backlog_skips(&log);
+        assert_eq!(skips.len(), 1, "{skips:?}");
+        assert!(
+            skips[0].0.ends_with(":call-2"),
+            "the older dropped: {skips:?}"
+        );
+        assert_eq!(
+            skips[0].1,
+            call_line(&log, "call-3"),
+            "the step it was cut at"
+        );
+        let triggers: Vec<String> = log
+            .iter()
+            .filter_map(|logged| match &logged.event {
+                Event::Forked { trigger, .. } => Some(trigger.clone()),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(triggers.len(), 2, "{triggers:?}");
+        assert!(
+            triggers[1].ends_with(":call-3"),
+            "the newest kept: {triggers:?}"
+        );
+        reads_whole(&session);
+        tidy(&[&tree]);
+    }
+
+    /// #822: a meditation the operator declares while a fork cut during
+    /// the turn is in flight and another queued is admitted, not refused
+    /// `in-flight`: the queued one is dropped, `backlog`, and the
+    /// meditation runs once the one in flight settles.
+    #[test]
+    fn a_declared_meditation_drops_the_queued_forks_and_waits_for_the_one_in_flight() {
+        let tree = scratch("during-turn-declared");
+        let gate = Gate::new();
+        let session = backlogged_session(
+            &tree,
+            vec![
+                vec![
+                    bash("call-1", "cat notes.md"),
+                    Step::call(1, "call-2", "bash", r#"{"command":"cat lib.rs"}"#),
+                ],
+                deltas(&["Done. Next, I will write the schema."]),
+            ],
+            &gate,
+            FORK_BACKLOG_DEFAULT,
+        );
+        {
+            let mut state = session.shared.lock();
+            let object = &mut state.interview.as_mut().expect("memory").object;
+            object
+                .apply(&Patch::Add {
+                    id: crate::object::EntryId::new("seeded").expect("an id"),
+                    content: "decision: notes.md holds one line per decision".to_owned(),
+                    provenance: crate::object::Provenance {
+                        turn: 0,
+                        lane: "interview".to_owned(),
+                        fork: None,
+                        tangent: None,
+                        index: 0,
+                    },
+                })
+                .expect("an entry");
+        }
+        session.ask("look around", None).expect("accepted");
+        assert!(gate.wait_for_a_waiter(Duration::from_secs(10)));
+        wait_until(&session, "the turn to settle", |log| {
+            turn_settled_at(log).is_some()
+        });
+        assert_eq!(session.settlement(), Settlement::Capture);
+        session
+            .declare_meditation(None)
+            .expect("admitted while a fork runs");
+        let log = session.events_from(0);
+        assert_eq!(backlog_skips(&log).len(), 1, "the queued fork dropped");
+        assert!(!meditated(&log), "it waits for the fork in flight");
+        gate.open();
+        let log = wait_until(&session, "the meditation", meditated);
+        assert_eq!(session.settlement(), Settlement::Awaiting);
+        assert_eq!(fork_outcomes(&log), [log::ForkOutcome::Value]);
+        let fork_settled = log
+            .iter()
+            .position(|logged| matches!(logged.event, Event::ForkSettled { .. }))
+            .expect("the fork settled");
+        let meditation = log
+            .iter()
+            .position(|logged| {
+                matches!(
+                    logged.event,
+                    Event::Meditated {
+                        reason: crate::meditation::Reason::Operator,
+                        ..
+                    }
+                )
+            })
+            .expect("the operator's meditation");
+        assert!(fork_settled < meditation, "after the fork in flight");
+        reads_whole(&session);
+        tidy(&[&tree]);
+    }
+
+    /// #822: the bound is a whole number, 3 unless the regimen says.
+    #[test]
+    fn the_fork_backlog_is_three_unless_the_regimen_says() {
+        let read = |text: &str| fork_backlog(&regimen::parse(text).expect("a regimen"));
+        assert_eq!(read(""), Ok(FORK_BACKLOG_DEFAULT));
+        assert_eq!(read("fork_backlog = 0\n"), Ok(0));
+        assert_eq!(read("fork_backlog = 8\n"), Ok(8));
+        assert!(read("fork_backlog = -1\n").is_err());
+        assert!(read("fork_backlog = \"many\"\n").is_err());
+    }
+
+    /// #782: the session's end cancels a fork in flight, logged
+    /// `cancelled`, and `ended` stays the log's last line.
+    #[test]
+    fn end_cancels_a_fork_in_flight() {
+        let tree = scratch("during-turn-end");
+        let gate = Gate::new();
+        let session = during_turn(
+            &tree,
+            vec![
+                vec![bash("call-1", "cat notes.md")],
+                deltas(&["Done. Next, I will write the schema."]),
+            ],
+            vec![vec![
+                Step::Hold(gate.clone()),
+                Step::Delta("LEARNED: never\n".to_owned()),
+            ]],
+            1,
+        );
+        session.ask("look around", None).expect("accepted");
+        assert!(gate.wait_for_a_waiter(Duration::from_secs(10)));
+        wait_until(&session, "the turn to settle", |log| {
+            turn_settled_at(log).is_some()
+        });
+        session.end(None).expect("an end while a fork runs");
+        let log = wait_until(&session, "the end", |log| {
+            matches!(
+                log.last(),
+                Some(Logged {
+                    event: Event::Settled {
+                        to: Settlement::Ended,
+                        ..
+                    },
+                    ..
+                })
+            )
+        });
+        assert_eq!(fork_outcomes(&log), [log::ForkOutcome::Cancelled]);
+        reads_whole(&session);
+        tidy(&[&tree]);
+    }
+
+    /// #782: a fork that would not fit the pool beside the trunk's prompt
+    /// and the forks in flight is refused unsent, the numbers logged.
+    #[test]
+    fn a_fork_that_will_not_fit_beside_the_trunk_is_refused_with_its_numbers() {
+        let tree = scratch("during-turn-pool");
+        // A pool the trunk and one fork cannot share.
+        let window = 4_500;
+        let session = during_turn_in(
+            &tree,
+            (
+                vec![
+                    vec![bash("call-1", "cat notes.md")],
+                    deltas(&["Done. Next, I will write the schema."]),
+                ],
+                Vec::new(),
+            ),
+            1,
+            (Some(window), false, None),
+        );
+        session.ask("look around", None).expect("accepted");
+        let log = wait_until(&session, "the turn", settled);
+        let refused: Vec<(Option<String>, Option<log::PoolRoom>)> = log
+            .iter()
+            .filter_map(|logged| match &logged.event {
+                Event::ForkSettled { refused, pool, .. } => Some((refused.clone(), *pool)),
+                _ => None,
+            })
+            .collect();
+        let [(Some(why), Some(room))] = &refused[..] else {
+            panic!("one fork, refused for the pool: {refused:?}");
+        };
+        assert_eq!(why, "pool");
+        assert_eq!(room.window, window);
+        assert!(room.trunk > 0 && room.prompt > 0, "{room:?}");
+        assert!(
+            room.window
+                .saturating_sub(room.trunk + room.beside + room.prompt)
+                < CLAMP_FLOOR,
+            "{room:?}"
+        );
+        reads_whole(&session);
+        tidy(&[&tree]);
+    }
+
+    /// The floor's pool (#797): one paged KV pool of 163,840 tokens.
+    const FLOOR_POOL: u64 = 163_840;
+
+    /// #797: a session asked ~100k tokens, whose trunk then reads a file and
+    /// ends its turn: its one read cut during the turn beside the trunk's
+    /// ~100k-token prompt, in the floor's pool, on a server that shares a
+    /// prefix's pages when `shared`. Its log and its forks' outcomes, once
+    /// the turn and the fork have settled.
+    fn beside_a_100k_trunk(name: &str, shared: bool) -> (Vec<Logged>, Vec<log::ForkOutcome>) {
+        beside_a_100k_trunk_capped(name, shared, (None, None))
+    }
+
+    /// [`beside_a_100k_trunk`], the trunk's output cap and the forks' tail
+    /// when given (#826).
+    fn beside_a_100k_trunk_capped(
+        name: &str,
+        shared: bool,
+        (cap, fork_tail): (Option<u32>, Option<u32>),
+    ) -> (Vec<Logged>, Vec<log::ForkOutcome>) {
+        let tree = scratch(name);
+        let session = during_turn_in(
+            &tree,
+            (
+                vec![vec![bash("call-1", "cat notes.md")], deltas(&["Done."])],
+                vec![deltas(&["LEARNED: a long note\n"])],
+            ),
+            1,
+            (Some(FLOOR_POOL), shared, cap),
+        );
+        if fork_tail.is_some() {
+            session
+                .shared
+                .lock()
+                .interview
+                .as_mut()
+                .expect("an interview")
+                .fork_tail = fork_tail;
+        }
+        // ~100k tokens at the estimate's four characters to one.
+        session
+            .ask(&"look around, ".repeat(31_000), None)
+            .expect("accepted");
+        let log = wait_until(&session, "the turn and its fork", |log| {
+            settled(log) && !fork_outcomes(log).is_empty()
+        });
+        let outcomes = fork_outcomes(&log);
+        reads_whole(&session);
+        tidy(&[&tree]);
+        (log, outcomes)
+    }
+
+    /// A cut fork's reservation and whether its prefix was counted shared.
+    fn reservations(log: &[Logged]) -> Vec<Option<(u64, bool)>> {
+        log.iter()
+            .filter_map(|logged| match &logged.event {
+                Event::Forked { reserved, .. } => Some(*reserved),
+                _ => None,
+            })
+            .collect()
+    }
+
+    /// #797: on a server that shares a prefix's pages, a fork cut beside a
+    /// ~100k-token trunk fits the floor's pool: it reserves only its tokens
+    /// beyond the trunk's prefix, and its line says so.
+    #[test]
+    fn a_fork_beside_a_100k_trunk_fits_the_floors_pool_when_its_prefix_is_shared() {
+        let (log, outcomes) = beside_a_100k_trunk("during-turn-shared", true);
+        assert_eq!(outcomes, [log::ForkOutcome::Value], "{log:#?}");
+        let [Some((reserved, true))] = reservations(&log)[..] else {
+            panic!("one cut fork, its prefix shared: {:?}", reservations(&log));
+        };
+        assert!(
+            reserved < 1_000,
+            "only the question is the fork's own: {reserved}"
+        );
+    }
+
+    /// Whether a fork's request went out while the trunk's turn was still
+    /// running: before the turn settled.
+    fn a_fork_sent_beside_the_trunk(log: &[Logged]) -> bool {
+        let settled_at = turn_settled_at(log).expect("the turn settled");
+        log.iter().any(|logged| {
+            matches!(
+                logged.event,
+                Event::Requested {
+                    lane: Lane::Interview,
+                    ..
+                }
+            ) && logged.seq < settled_at
+        })
+    }
+
+    /// #797, since #826: without the declaration the same fork counts a
+    /// second full copy of the trunk, so it does not go beside it; it waits
+    /// in the queue and runs once the turn is over, counted in full.
+    #[test]
+    fn without_the_declaration_the_same_fork_waits_for_the_turn_to_end() {
+        let (log, outcomes) = beside_a_100k_trunk("during-turn-unshared", false);
+        assert_eq!(outcomes, [log::ForkOutcome::Value], "{log:#?}");
+        assert!(!a_fork_sent_beside_the_trunk(&log), "it waited for room");
+        let [Some((reserved, false))] = reservations(&log)[..] else {
+            panic!("one cut fork, counted in full: {:?}", reservations(&log));
+        };
+        assert!(reserved > 100_000, "the whole prompt: {reserved}");
+    }
+
+    /// #826: never more on the server than its pool holds. A fork beside
+    /// a ~100k-token trunk whose output cap is 60,000 -- the room its next
+    /// request is sized into -- is sent with what the pool leaves it, not
+    /// the 32,768 its regimen declares: the trunk's prompt and cap, the
+    /// fork's new tokens and its cap, together within the window.
+    #[test]
+    fn a_fork_beside_the_trunk_is_capped_to_what_the_pool_leaves() {
+        let (log, outcomes) =
+            beside_a_100k_trunk_capped("during-turn-trunk-cap", true, (Some(60_000), Some(32_768)));
+        assert_eq!(outcomes, [log::ForkOutcome::Value], "{log:#?}");
+        assert!(a_fork_sent_beside_the_trunk(&log), "room enough beside it");
+        let caps = |lane: Lane| -> Vec<u32> {
+            log.iter()
+                .filter_map(|logged| match &logged.event {
+                    Event::Requested {
+                        lane: at,
+                        max_tokens,
+                        ..
+                    } if *at == lane => Some(*max_tokens),
+                    _ => None,
+                })
+                .collect()
+        };
+        let trunk = *caps(Lane::Trunk).iter().max().expect("a trunk request");
+        let [fork] = caps(Lane::Interview)[..] else {
+            panic!("one fork request: {:?}", caps(Lane::Interview));
+        };
+        assert!(fork < 32_768, "cut to the room left: {fork}");
+        // The trunk's prompt is over 100,000 tokens.
+        assert!(
+            100_000 + u64::from(trunk) + u64::from(fork) <= FLOOR_POOL,
+            "trunk cap {trunk}, fork cap {fork}"
+        );
+    }
+
+    /// #826: a fork's tail is 8,192 unless the regimen declares one, and
+    /// never more than the session's output cap unless declared.
+    #[test]
+    fn a_forks_tail_is_the_default_unless_declared() {
+        assert_eq!(fork_ceiling(None, 32_768), FORK_TAIL_DEFAULT);
+        assert_eq!(fork_ceiling(None, 512), 512);
+        assert_eq!(fork_ceiling(Some(32_768), 512), 32_768);
+    }
+
+    /// #797: a fork that does not see the trunk shares no prefix with it,
+    /// and counts in full whatever the server declares; nor does a trunk
+    /// that holds nothing lend its prefix.
+    #[test]
+    fn a_fork_that_does_not_see_the_trunk_counts_in_full() {
+        let at = (100_000, 100_500);
+        assert_eq!(reservation(100_200, at, ForkView::Trunk, true), (200, true));
+        assert_eq!(
+            reservation(100_200, at, ForkView::Trunk, false),
+            (100_200, false)
+        );
+        for view in [ForkView::Last(1), ForkView::Last(2)] {
+            assert_eq!(
+                reservation(100_200, at, view, true),
+                (100_200, false),
+                "{view:?}"
+            );
+        }
+        assert_eq!(
+            reservation(100_200, (100_000, 0), ForkView::Trunk, true),
+            (100_200, false)
+        );
+        // The trunk holds only part of the cut: the rest is the fork's.
+        assert_eq!(
+            reservation(100_200, (100_000, 60_000), ForkView::Trunk, true),
+            (40_200, true)
+        );
+    }
+
+    /// #782: serve's start reads the timing against the registry: refused
+    /// with no per-step source, or on a server whose slots are too few.
+    #[test]
+    fn during_turn_is_refused_at_start_without_a_per_step_source_or_slots() {
+        use crate::drive::registry::REGISTRY;
+        let read = |text: &str, trunk: &str| {
+            timing_and_slots(&regimen::parse(text).expect("a regimen"), (REGISTRY, trunk))
+        };
+        let per_class = "interview_timing = \"during_turn\"\ninterview_warrant = [\"read\"]\n\
+                         interview_cadence = \"per_class\"\n";
+        assert_eq!(
+            read(per_class, "accel24-beellama-qwen27b-q4kxl"),
+            Ok((Timing::DuringTurn, 1))
+        );
+        assert!(read(per_class, "canned").is_err_and(|why| why.contains("serving_slots")));
+        assert!(
+            read(
+                "interview_timing = \"during_turn\"\ninterview_warrant = [\"read\"]\n",
+                "accel24-beellama-qwen27b-q4kxl"
+            )
+            .is_err_and(|why| why.contains("per_class")),
+            "the gap cadence warrants nothing at a step"
+        );
+        assert_eq!(read("", "canned"), Ok((Timing::Gap, 0)));
+    }
+
+    /// #782: the forks in flight at once -- `slots − 1` on the trunk's
+    /// server, the seat's own count offboard -- and every start refused.
+    #[test]
+    fn the_fork_slots_are_the_servers_less_the_trunks_and_too_few_are_refused() {
+        assert_eq!(fork_slots(Timing::Gap, None, None), Ok(0));
+        assert_eq!(fork_slots(Timing::DuringTurn, Some(2), None), Ok(1));
+        assert_eq!(fork_slots(Timing::DuringTurn, Some(4), None), Ok(3));
+        assert!(fork_slots(Timing::DuringTurn, Some(1), None).is_err_and(|why| why.contains('1')));
+        assert!(
+            fork_slots(Timing::DuringTurn, None, None)
+                .is_err_and(|why| why.contains("serving_slots"))
+        );
+        // Offboard (#570): the seat's slots, and one is enough.
+        assert_eq!(
+            fork_slots(Timing::DuringTurn, Some(1), Some(Some(1))),
+            Ok(1)
+        );
+        assert_eq!(fork_slots(Timing::DuringTurn, None, Some(Some(4))), Ok(4));
+        assert!(fork_slots(Timing::DuringTurn, Some(2), Some(None)).is_err());
+    }
+
     /// Each fork's warrant and trigger, in order (#564).
     fn triggers(log: &[Logged]) -> Vec<(log::Warrant, String)> {
         log.iter()
@@ -15603,6 +19970,24 @@ pub(in crate::drive) mod tests {
             read("interview_cadence = \"per_call\"\n").0,
             Cadence::PerCall
         );
+    }
+
+    /// #782: the interview timing reads strictly: `gap`, the default, or
+    /// `during_turn`; any other word is refused, naming it.
+    #[test]
+    fn the_interview_timing_reads_strictly() {
+        let read = |text: &str| interview_timing(&regimen::parse(text).expect("a regimen"));
+        assert_eq!(read(""), Ok(Timing::Gap));
+        assert_eq!(read("interview_timing = \"gap\"\n"), Ok(Timing::Gap));
+        assert_eq!(
+            read("interview_timing = \"during_turn\"\n"),
+            Ok(Timing::DuringTurn)
+        );
+        assert!(
+            read("interview_timing = \"soon\"\n").is_err_and(|why| why.contains("soon")),
+            "an unknown word is refused"
+        );
+        assert!(read("interview_timing = 2\n").is_err());
     }
 
     fn fork_outcomes(log: &[Logged]) -> Vec<log::ForkOutcome> {
@@ -15830,7 +20215,7 @@ pub(in crate::drive) mod tests {
         ] {
             let (patches, _) = super::super::fold(answer, 2, super::super::INTERVIEW, Some("f/9"))
                 .expect("folded");
-            let patches = cited(patches, &object);
+            let patches = cited(patches, &object).patches;
             match (&patches[..], voids) {
                 (
                     [
@@ -16872,6 +21257,231 @@ pub(in crate::drive) mod tests {
         );
     }
 
+    /// #813: one turn of `steps` steps, each ~6k tokens of the model's words
+    /// and a fact it records from them, then its answer.
+    fn one_long_turn(steps: usize) -> Vec<Vec<Step>> {
+        let mut acts: Vec<Vec<Step>> = (0..steps)
+            .map(|step| {
+                let said = format!("Step {step} found the parser's rule number {step}.");
+                vec![
+                    Step::Delta(format!("{said} {}", "filler ".repeat(3_400))),
+                    record(&format!("call-{step}"), "fact", &said),
+                ]
+            })
+            .collect();
+        acts.push(deltas(&["The build is done."]));
+        acts
+    }
+
+    /// The meditation lines' kept and compacted steps of the running turn.
+    fn turn_steps(log: &[Logged]) -> Vec<Option<(u64, u64)>> {
+        log.iter()
+            .filter_map(|logged| match &logged.event {
+                Event::Meditated { turn_steps, .. } => Some(*turn_steps),
+                _ => None,
+            })
+            .collect()
+    }
+
+    /// #813: a turn whose own steps outgrow the window -- here its first
+    /// one, with nothing before it on the trunk to drop -- is split by the
+    /// window meditation: the refill, the turn's ask, then only its most
+    /// recent whole steps within the budget (`OpenCode` 2's: a quarter of
+    /// the usable window, at most 15,000 tokens). The turn goes on and
+    /// settles; the meditation line names the steps kept and compacted.
+    #[test]
+    fn a_turn_whose_steps_outgrow_the_window_keeps_only_its_recent_steps_and_settles() {
+        const STEPS: usize = 18;
+        let session = windowed(
+            one_long_turn(STEPS),
+            100_000,
+            crate::meditation::policy::Served::default(),
+        );
+        session.ask("build it", None).expect("accepted");
+        let log = wait_until(&session, "the turn", settled);
+        assert!(
+            log.iter().any(|logged| matches!(
+                logged.event,
+                Event::TurnSettled {
+                    reason: SettleReason::Final,
+                    ..
+                }
+            )),
+            "{log:#?}"
+        );
+        let meditations = window_meditations(&log);
+        assert!(
+            !meditations.is_empty(),
+            "a window meditation under the turn"
+        );
+        let split = turn_steps(&log);
+        let Some((kept, compacted)) = split[0] else {
+            panic!("the first meditation splits the turn: {split:?}");
+        };
+        assert_eq!(kept, 2, "two ~6k steps fit 15,000 tokens: {split:?}");
+        assert!(compacted >= 5, "{split:?}");
+        // The request after it: the refill, the ask, then the kept steps --
+        // the turn's first step is gone, its fact in working memory.
+        let sent = session.shared.transport.sent();
+        let last = &sent.last().expect("a request").messages;
+        assert!(last.iter().any(|message| message.content == "build it"));
+        assert!(
+            !last
+                .iter()
+                .any(|message| message.content.starts_with("Step 0 found")),
+            "{:#?}",
+            last.iter()
+                .map(|m| m.content.chars().take(40).collect::<String>())
+                .collect::<Vec<_>>()
+        );
+        let held = session.shared.lock();
+        let object = &held.interview.as_ref().expect("working memory").object;
+        assert!(
+            object
+                .live()
+                .any(|entry| entry.content.contains("rule number 0")),
+            "the first step's fact is kept in working memory"
+        );
+        drop(held);
+        reads_whole(&session);
+    }
+
+    /// #813 with #814: a window meditation under a running turn, over a
+    /// working memory too large for the window, elides the render to fit
+    /// the window's line counting what rides after the refill -- the turn's
+    /// ask and its kept steps -- so the request after it stays inside the
+    /// line.
+    #[test]
+    fn a_mid_turn_window_meditation_over_a_large_memory_fits_the_line_with_its_kept_steps() {
+        const LINE: u64 = 8_000;
+        let session = windowed(
+            one_long_turn(10)
+                .into_iter()
+                .map(|act| {
+                    // ~1,500 tokens a step: one kept within 2,000.
+                    act.into_iter()
+                        .map(|step| match step {
+                            Step::Delta(text) => Step::Delta(text.chars().take(6_000).collect()),
+                            other => other,
+                        })
+                        .collect()
+                })
+                .collect(),
+            crate::meditation::policy::WINDOW_RESERVE + LINE,
+            crate::meditation::policy::Served::default(),
+        );
+        {
+            let mut state = session.shared.lock();
+            let object = &mut state.interview.as_mut().expect("memory").object;
+            for n in 0..200_u32 {
+                object
+                    .apply(&Patch::Add {
+                        id: crate::object::EntryId::new(&format!("bulk-{n:03}")).expect("an id"),
+                        content: format!("decision: {} {n}", "the long form of a fact ".repeat(8)),
+                        provenance: crate::object::Provenance {
+                            turn: 0,
+                            lane: "interview".to_owned(),
+                            fork: None,
+                            tangent: None,
+                            index: n,
+                        },
+                    })
+                    .expect("an entry");
+            }
+        }
+        session.ask("build it", None).expect("accepted");
+        let log = wait_until(&session, "the turn", settled);
+        let at = log
+            .iter()
+            .position(|logged| {
+                matches!(
+                    &logged.event,
+                    Event::Meditated {
+                        turn_steps: Some(_),
+                        ..
+                    }
+                )
+            })
+            .unwrap_or_else(|| panic!("a split under the turn: {:?}", turn_steps(&log)));
+        let Event::Meditated { render_budget, .. } = &log[at].event else {
+            unreachable!()
+        };
+        let budget = render_budget.clone().expect("fitted to the window");
+        assert_eq!(budget.window_line, Some(LINE), "{budget:?}");
+        assert!(budget.reduced > 0, "{budget:?}");
+        // The trunk request after it, by its place among the trunk's.
+        let nth = log[..at]
+            .iter()
+            .filter(|logged| {
+                matches!(
+                    logged.event,
+                    Event::Requested {
+                        lane: Lane::Trunk,
+                        ..
+                    }
+                )
+            })
+            .count();
+        let sent = session.shared.transport.sent();
+        let after: u64 = sent[nth]
+            .messages
+            .iter()
+            .map(crate::meditation::render::estimated_tokens)
+            .sum();
+        assert!(
+            after <= LINE,
+            "the request after the refill is {after} tokens"
+        );
+        assert!(
+            sent[nth]
+                .messages
+                .iter()
+                .any(|message| message.content == "build it")
+        );
+        reads_whole(&session);
+    }
+
+    /// #813: the budget is `OpenCode` 2's -- a quarter of the usable window,
+    /// within 2,000 and 15,000 -- and the split keeps whole steps, the last
+    /// always, never parting a call from its result.
+    #[test]
+    fn the_running_turn_splits_at_whole_steps_within_opencodes_budget() {
+        use crate::meditation::policy::keep_recent_budget;
+        assert_eq!(keep_recent_budget(163_840, 20_000), 15_000);
+        assert_eq!(keep_recent_budget(32_768, 20_000), 3_192);
+        assert_eq!(keep_recent_budget(8_192, 20_000), 2_000);
+        let words = |n: usize| "word ".repeat(n);
+        let call = |id: &str| {
+            let mut message = Message::new(Role::Assistant, words(400));
+            message.tool_calls.push(ToolCall {
+                id: id.to_owned(),
+                name: "bash".to_owned(),
+                arguments: "{}".to_owned(),
+            });
+            message
+        };
+        let result = |id: &str| {
+            let mut message = Message::new(Role::Tool, words(400));
+            message.tool_call_id = Some(id.to_owned());
+            message
+        };
+        // The ask, then three steps of a call and its result, ~1,000 tokens
+        // each.
+        let own = vec![
+            Message::new(Role::User, "build it".to_owned()),
+            call("a"),
+            result("a"),
+            call("b"),
+            result("b"),
+            call("c"),
+            result("c"),
+        ];
+        assert_eq!(split_turn(&own, 2_200), (1, 3, 3), "the last two steps");
+        assert_eq!(split_turn(&own, 10_000), (1, 3, 1), "every step fits");
+        assert_eq!(split_turn(&own, 10), (1, 3, 5), "the last step, always");
+        assert_eq!(split_turn(&own[..1], 10), (1, 0, 1), "no step yet");
+    }
+
     /// #617: a request the engine refuses as an overflow is meditated once
     /// and sent again on the refilled trunk -- the refusal logged, then the
     /// meditation, then the same turn's request again -- and the turn goes on. A
@@ -17452,15 +22062,7 @@ pub(in crate::drive) mod tests {
         let mut on = before.clone();
         declare_self_capture(&mut on, Some(&on_interview));
         let names: Vec<&str> = on.tools.iter().map(|tool| tool.name.as_str()).collect();
-        assert_eq!(
-            names,
-            [
-                "bash",
-                "update_record",
-                "resolve_entry",
-                "propose_phase_transition"
-            ]
-        );
+        assert_eq!(names, ["bash", "update_record", "resolve_entry",]);
         assert_eq!(on.tools[0], before.tools[0]);
     }
 
@@ -17882,6 +22484,125 @@ pub(in crate::drive) mod tests {
         reads_whole(&bash);
     }
 
+    /// A session whose scoping forks answer in fields (the default) with
+    /// self-capture on, so a fork's request carries the record tools
+    /// (#806), playing `acts`.
+    fn forks_on_fields(acts: Vec<Vec<Step>>) -> Session<Canned> {
+        let mut interview = interviewing(&[log::Warrant::Scoping]);
+        interview.self_capture = Some(crate::capture::tools::Cadence::DEFAULT);
+        let mut shape = template();
+        declare_self_capture(&mut shape, Some(&interview));
+        Session::open_with(Canned::new(acts), shape, None, None, None, Some(interview))
+    }
+
+    /// The fork's settled line: its outcome and the calls it ran nothing
+    /// for.
+    fn fork_settled(log: &[Logged]) -> (log::ForkOutcome, Option<u64>) {
+        log.iter()
+            .find_map(|logged| match &logged.event {
+                Event::ForkSettled {
+                    outcome, not_run, ..
+                } => Some((*outcome, *not_run)),
+                _ => None,
+            })
+            .expect("a fork.settled")
+    }
+
+    /// The names of the calls a request's pieces logged.
+    fn called_names(log: &[Logged]) -> Vec<String> {
+        log.iter()
+            .filter_map(|logged| match &logged.event {
+                Event::ToolCallPiece {
+                    name: Some(name), ..
+                } => Some(name.clone()),
+                _ => None,
+            })
+            .collect()
+    }
+
+    /// #806: on the fields route, a fork that answers only through
+    /// `update_record` is folded as on the tools route: `value`, its call
+    /// logged, its patch the fork's.
+    #[test]
+    fn a_fields_fork_answering_only_through_update_record_settles_value_with_its_patches() {
+        const SAID: &str = "The parser drops blank lines before it tokenizes.";
+        let session = forks_on_fields(vec![
+            deltas(&[SAID]),
+            vec![record_at(0, "f-1", "fact", SAID)],
+        ]);
+        session
+            .ask_marked("how does the parser treat blank lines?", None, true)
+            .expect("accepted");
+        let log = wait_until(&session, "the fork to settle", |log| {
+            settled(log) && !fork_outcomes(log).is_empty()
+        });
+        reads_whole(&session);
+        assert_eq!(fork_settled(&log), (log::ForkOutcome::Value, None));
+        assert_eq!(called_names(&log), ["update_record"]);
+        let recorded = captures(&log);
+        assert_eq!(recorded.len(), 1, "{recorded:?}");
+        assert_eq!(recorded[0].0, "recorded");
+        assert_eq!(
+            patches(&log)
+                .into_iter()
+                .map(|patched| patched.id)
+                .collect::<Vec<_>>(),
+            recorded[0].1
+        );
+    }
+
+    /// #806: on the fields route, a fork that writes its fields and calls
+    /// `update_record` beside them has both folded.
+    #[test]
+    fn a_fields_fork_answering_in_prose_and_a_call_folds_both() {
+        const SAID: &str = "The parser drops blank lines before it tokenizes.";
+        let session = forks_on_fields(vec![
+            deltas(&[SAID]),
+            vec![
+                Step::Delta("DECISION: a tracker\n".to_owned()),
+                record_at(0, "f-1", "fact", SAID),
+            ],
+        ]);
+        session
+            .ask_marked("scope it", None, true)
+            .expect("accepted");
+        let log = wait_until(&session, "the fork to settle", |log| {
+            settled(log) && !fork_outcomes(log).is_empty()
+        });
+        reads_whole(&session);
+        assert_eq!(fork_settled(&log), (log::ForkOutcome::Value, None));
+        assert_eq!(patches(&log).len(), 2, "{:?}", patches(&log));
+        let held = session.shared.lock();
+        let object = &held.interview.as_ref().expect("working memory").object;
+        assert_eq!(object.live().count(), 2);
+    }
+
+    /// #806: on the fields route, a fork that calls `bash` has the call
+    /// logged and run nothing, and its settled line says how many calls
+    /// ran nothing; with no answer beside it, it is `unparseable`.
+    #[test]
+    fn a_fields_fork_calling_bash_logs_the_call_runs_nothing_and_says_so() {
+        let session = forks_on_fields(vec![
+            deltas(&["Scoped."]),
+            vec![Step::call(0, "f-1", "bash", r#"{"command":"ls"}"#)],
+        ]);
+        session
+            .ask_marked("scope it", None, true)
+            .expect("accepted");
+        let log = wait_until(&session, "the fork to settle", |log| {
+            settled(log) && !fork_outcomes(log).is_empty()
+        });
+        reads_whole(&session);
+        assert_eq!(called_names(&log), ["bash"]);
+        assert!(
+            !log.iter()
+                .any(|logged| matches!(logged.event, Event::ToolCalled(_))),
+            "nothing a fork calls runs"
+        );
+        assert_eq!(fork_settled(&log), (log::ForkOutcome::Unparseable, Some(1)));
+        assert!(patches(&log).is_empty());
+    }
+
     /// #610: the modality is `fields` unless the regimen says `tools`, and
     /// any other word is refused.
     #[test]
@@ -18114,6 +22835,297 @@ pub(in crate::drive) mod tests {
         }
     }
 
+    // -----------------------------------------------------------------------
+    // two keys (#788)
+    // -----------------------------------------------------------------------
+
+    /// A session under `phased()`'s graph with no self-capture, the phase
+    /// tool offered because phases are active, `unilateral` its operator's
+    /// setting, playing `acts`.
+    fn two_keys(acts: Vec<Vec<Step>>, unilateral: bool) -> Session<Canned> {
+        let interview = Interview {
+            operator_unilateral: unilateral,
+            ..phased()
+        };
+        let mut shape = template();
+        declare_phase_tool(&mut shape, Some(&interview));
+        Session::open_with(Canned::new(acts), shape, None, None, None, Some(interview))
+    }
+
+    fn propose(id: &str, args: &serde_json::Value) -> Step {
+        Step::call(0, id, "propose_phase_transition", &args.to_string())
+    }
+
+    /// A proposal as its line has it: who, the call, the move and the
+    /// evidence.
+    type Proposed = (
+        Key,
+        Option<String>,
+        Option<String>,
+        String,
+        log::PhaseEvidence,
+    );
+
+    fn proposed(log: &[Logged]) -> Vec<Proposed> {
+        log.iter()
+            .filter_map(|logged| match &logged.event {
+                Event::PhaseProposed {
+                    by,
+                    call,
+                    from,
+                    to,
+                    evidence,
+                    ..
+                } => Some((*by, call.clone(), from.clone(), to.clone(), *evidence)),
+                _ => None,
+            })
+            .collect()
+    }
+
+    fn trunk_requests(log: &[Logged], turn: u32) -> usize {
+        log.iter()
+            .filter(|logged| {
+                matches!(logged.event, Event::Requested { turn: at, lane: Lane::Trunk, .. } if at == turn)
+            })
+            .count()
+    }
+
+    /// #788: the model's proposal ends its turn -- one trunk request, the
+    /// tool's result saying so, the turn settled -- and is logged with its
+    /// evidence; it waits for the operator, whose `keep` moves the phase.
+    #[test]
+    fn a_model_proposal_ends_its_turn_with_its_evidence() {
+        let session = two_keys(
+            vec![
+                vec![
+                    Step::Delta("The plan is settled.".to_owned()),
+                    propose(
+                        "call-p",
+                        &serde_json::json!({"to": "build", "reason": "the plan is settled"}),
+                    ),
+                ],
+                deltas(&["never reached"]),
+            ],
+            true,
+        );
+        session.ask("plan it", None).expect("accepted");
+        let log = wait_until(&session, "the turn", settled);
+        assert_eq!(trunk_requests(&log, 1), 1, "the proposal ended the turn");
+        assert!(log.iter().any(|logged| matches!(
+            logged.event,
+            Event::TurnSettled {
+                turn: 1,
+                reason: SettleReason::Final
+            }
+        )));
+        let [(by, call, from, to, evidence)] = &proposed(&log)[..] else {
+            panic!("one proposal: {:?}", proposed(&log));
+        };
+        assert_eq!(*by, Key::Model);
+        assert_eq!(call.as_deref(), Some("call-p"));
+        assert_eq!((from.as_deref(), to.as_str()), (Some("plan"), "build"));
+        assert_eq!(evidence.phase_steps, 1);
+        assert!(evidence.phase_tokens > 0);
+        assert_eq!(evidence.tokens_since_meditation, evidence.phase_tokens);
+        assert!(!evidence.meditated_by_hand);
+        let shown = log
+            .iter()
+            .find_map(|logged| match &logged.event {
+                Event::ToolCalled(line) if line.id == "call-p" => line.shown.clone(),
+                _ => None,
+            })
+            .expect("the proposal's result");
+        assert_eq!(shown, proposal_result("build"));
+        session
+            .ratify_phase("call-p", PhaseChoice::Keep)
+            .expect("ruled");
+        assert_eq!(session.shared.lock().phase.as_deref(), Some("build"));
+        reads_whole(&session);
+    }
+
+    /// #788: the operator's proposal is put to the model in a note on its
+    /// next ask; the model accepts through the same tool and the phase
+    /// moves, its turn going on; or declines with its reason and nothing
+    /// moves.
+    #[test]
+    fn the_operators_proposal_is_accepted_or_declined_by_the_model() {
+        for accept in [true, false] {
+            let session = two_keys(
+                vec![
+                    vec![propose(
+                        "call-a",
+                        &serde_json::json!({"to": "build", "accept": accept, "reason": "the tests pass"}),
+                    )],
+                    deltas(&["Going on."]),
+                ],
+                true,
+            );
+            session.propose_phase("build", false).expect("proposed");
+            let log = session.events_from(0);
+            let [(by, call, ..)] = &proposed(&log)[..] else {
+                panic!("one proposal");
+            };
+            assert_eq!((*by, call.as_deref()), (Key::Operator, None));
+            session.ask("go on", None).expect("accepted");
+            let log = wait_until(&session, "the turn", settled);
+            assert_eq!(
+                trunk_requests(&log, 1),
+                2,
+                "an answer does not end the turn"
+            );
+            assert!(
+                log.iter().any(|logged| matches!(
+                    &logged.event,
+                    Event::Notified { turn: 1, text } if *text == operator_proposal_note(Some("plan"), "build")
+                )),
+                "the note rode the ask"
+            );
+            assert!(log.iter().any(|logged| matches!(
+                &logged.event,
+                Event::PhaseAnswered { call, accepted, reason: Some(reason) }
+                    if call == "call-a" && *accepted == accept && reason == "the tests pass"
+            )));
+            let moved = log.iter().any(|logged| matches!(
+                &logged.event,
+                Event::PhaseRuled { by: Some(Key::Model), choice: PhaseChoice::Keep, to, .. } if to == "build"
+            ));
+            assert_eq!(moved, accept, "accept {accept}");
+            assert_eq!(
+                session.shared.lock().phase.as_deref(),
+                Some(if accept { "build" } else { "plan" })
+            );
+            reads_whole(&session);
+        }
+    }
+
+    /// #788: the operator's proposal says whether the move it proposes
+    /// meditates -- on its line -- and when the model accepts, the
+    /// meditation that moves the phase runs once the turn has ended.
+    #[test]
+    fn an_accepted_proposal_to_meditate_moves_through_a_meditation_after_the_turn() {
+        const SAID: &str = "The schema has two tables.";
+        let mut interview = Interview {
+            self_capture: Some(crate::capture::tools::Cadence::DEFAULT),
+            ..phased()
+        };
+        interview.rules = Vec::new();
+        let mut shape = template();
+        declare_self_capture(&mut shape, Some(&interview));
+        let session = Session::open_with(
+            Canned::new(vec![
+                vec![
+                    Step::Delta(SAID.to_owned()),
+                    Step::call(
+                        0,
+                        "call-f",
+                        "update_record",
+                        &serde_json::json!({ "field": "fact", "content": SAID }).to_string(),
+                    ),
+                    Step::call(
+                        1,
+                        "call-a",
+                        PHASE_TOOL,
+                        &serde_json::json!({"to": "build", "accept": true, "reason": "planned"})
+                            .to_string(),
+                    ),
+                ],
+                deltas(&["Going on."]),
+            ]),
+            shape,
+            None,
+            None,
+            None,
+            Some(interview),
+        );
+        session.propose_phase("build", true).expect("proposed");
+        assert!(session.events_from(0).iter().any(|logged| matches!(
+            logged.event,
+            Event::PhaseProposed {
+                by: Key::Operator,
+                meditate: Some(true),
+                ..
+            }
+        )));
+        session.ask("plan it", None).expect("accepted");
+        let log = wait_until(&session, "the meditation", meditated);
+        assert!(log.iter().any(|logged| matches!(
+            &logged.event,
+            Event::PhaseRuled { by: Some(Key::Model), choice: PhaseChoice::Meditation, to, .. }
+                if to == "build"
+        )));
+        let settled_at = log
+            .iter()
+            .find_map(|logged| {
+                matches!(logged.event, Event::TurnSettled { .. }).then_some(logged.seq)
+            })
+            .expect("the turn");
+        let meditated_at = log
+            .iter()
+            .find_map(|logged| match &logged.event {
+                Event::Meditated {
+                    phase: Some(moved), ..
+                } if moved.to == "build" => Some(logged.seq),
+                _ => None,
+            })
+            .expect("a meditation that moved to build");
+        assert!(meditated_at > settled_at, "after the turn");
+        assert_eq!(session.shared.lock().phase.as_deref(), Some("build"));
+        reads_whole(&session);
+    }
+
+    /// #788: the operator moves alone only with `operator_unilateral`; a
+    /// move or proposal outside the phase's transitions is refused; the
+    /// starting phase is chosen only before the first ask; and the
+    /// operator's proposal waits while the model's does.
+    #[test]
+    fn the_operators_moves_and_their_refusals() {
+        let session = two_keys(vec![deltas(&["ok"])], false);
+        assert_eq!(
+            session.move_phase("build", false),
+            Err(Rejected::Refused(Refusal::NotUnilateral))
+        );
+        let session = two_keys(
+            vec![vec![propose(
+                "call-p",
+                &serde_json::json!({"to": "review", "reason": "the build is done"}),
+            )]],
+            true,
+        );
+        assert_eq!(
+            session.move_phase("review", false),
+            Err(Rejected::Refused(Refusal::NoPhaseEdge))
+        );
+        assert_eq!(
+            session.propose_phase("review", true),
+            Err(Rejected::Refused(Refusal::NoPhaseEdge))
+        );
+        session.start_phase("build").expect("before the first ask");
+        assert_eq!(session.shared.lock().phase.as_deref(), Some("build"));
+        assert!(session.events_from(0).iter().any(|logged| matches!(
+            &logged.event,
+            Event::PhaseStarted { phase, .. } if phase == "build"
+        )));
+        session.ask("build it", None).expect("accepted");
+        wait_until(&session, "the turn", settled);
+        assert_eq!(
+            session.start_phase("plan"),
+            Err(Rejected::Refused(Refusal::AlreadyAsked))
+        );
+        assert_eq!(
+            session.propose_phase("review", true),
+            Err(Rejected::Refused(Refusal::ProposalPending)),
+            "the model's proposal waits on a ruling"
+        );
+        session.move_phase("review", false).expect("unilateral");
+        let log = session.events_from(0);
+        assert!(log.iter().any(|logged| matches!(
+            &logged.event,
+            Event::PhaseRuled { call: None, by: Some(Key::Operator), choice: PhaseChoice::Keep, to, .. }
+                if to == "review"
+        )));
+        reads_whole(&session);
+    }
+
     /// An interview under a three-phase graph: plan to build to review.
     fn phased() -> Interview {
         let mut graph = crate::meditation::phase::PhaseGraph::of(&[
@@ -18133,8 +23145,16 @@ pub(in crate::drive) mod tests {
     /// A self-capturing session over `phased()`'s graph whose first turn
     /// records a fact and proposes `to` (#124); the log once it settled.
     fn proposing(to: &str, rest: Vec<Vec<Step>>) -> (Session<Canned>, Vec<Logged>) {
+        proposing_in(phased(), to, rest)
+    }
+
+    /// As [`proposing`], under `interview`'s phases.
+    fn proposing_in(
+        mut interview: Interview,
+        to: &str,
+        rest: Vec<Vec<Step>>,
+    ) -> (Session<Canned>, Vec<Logged>) {
         const SAID: &str = "The schema has two tables.";
-        let mut interview = phased();
         interview.rules = Vec::new();
         interview.self_capture = Some(crate::capture::tools::Cadence::DEFAULT);
         let mut shape = template();
@@ -18165,22 +23185,29 @@ pub(in crate::drive) mod tests {
         (session, log)
     }
 
+    /// The model's proposal as the log has it (#124, #788): its result's
+    /// outcome word and why, as the model was shown it, and the move -- from
+    /// the `phase.proposed` line, when it is pending, and the phase it named.
     fn proposal_line(log: &[Logged]) -> (String, Option<String>, Option<String>, Option<String>) {
-        log.iter()
+        let (shown, to) = log
+            .iter()
             .find_map(|logged| match &logged.event {
-                Event::Captured {
-                    tool,
-                    outcome,
-                    why,
-                    from,
-                    to,
-                    ..
-                } if tool == "propose_phase_transition" => {
-                    Some((outcome.clone(), why.clone(), from.clone(), to.clone()))
-                }
+                Event::ToolCalled(line) if line.name == PHASE_TOOL => Some((
+                    line.shown.clone().unwrap_or_default(),
+                    serde_json::from_str::<serde_json::Value>(&line.arguments)
+                        .ok()
+                        .and_then(|args| args["to"].as_str().map(str::to_owned)),
+                )),
                 _ => None,
             })
-            .expect("the proposal's capture line")
+            .expect("the proposal's call");
+        let (outcome, why) = shown.split_once(": ").unwrap_or((shown.as_str(), ""));
+        let why = (outcome == "refused").then(|| why.to_owned());
+        let from = log.iter().find_map(|logged| match &logged.event {
+            Event::PhaseProposed { from, .. } => from.clone(),
+            _ => None,
+        });
+        (outcome.to_owned(), why, from, to)
     }
 
     /// #124: a proposal the graph allows is pending -- `proposed`, its move
@@ -18206,22 +23233,22 @@ pub(in crate::drive) mod tests {
         );
         let trunk = session.trunk();
         session
-            .ratify_phase("call-p", PhaseChoice::Continue)
+            .ratify_phase("call-p", PhaseChoice::Keep)
             .expect("ruled");
         assert_eq!(session.shared.lock().phase.as_deref(), Some("build"));
         assert_eq!(session.trunk(), trunk, "the trunk is kept");
         let log = session.events_from(0);
         assert!(log.iter().any(|logged| matches!(
             &logged.event,
-            Event::PhaseRuled { call, choice: PhaseChoice::Continue, from: Some(from), to }
-                if call == "call-p" && from == "plan" && to == "build"
+            Event::PhaseRuled { call, choice: PhaseChoice::Keep, from: Some(from), to, .. }
+                if call.as_deref() == Some("call-p") && from == "plan" && to == "build"
         )));
         assert!(
             !log.iter()
                 .any(|logged| matches!(logged.event, Event::Meditated { .. }))
         );
         assert!(matches!(
-            session.ratify_phase("call-p", PhaseChoice::Continue),
+            session.ratify_phase("call-p", PhaseChoice::Keep),
             Err(Rejected::Refused(Refusal::NoProposal))
         ));
         reads_whole(&session);
@@ -18237,7 +23264,7 @@ pub(in crate::drive) mod tests {
             (
                 "refused".to_owned(),
                 Some("no-phase-edge".to_owned()),
-                Some("plan".to_owned()),
+                None,
                 Some("review".to_owned())
             )
         );
@@ -18249,6 +23276,152 @@ pub(in crate::drive) mod tests {
             session.ratify_phase("call-p", PhaseChoice::Meditation),
             Err(Rejected::Refused(Refusal::NoProposal))
         ));
+        reads_whole(&session);
+    }
+
+    /// An interview under the starter phase library (#787), opening in `plan`.
+    fn in_the_starter_library() -> Interview {
+        Interview {
+            phases: crate::meditation::phase::PhaseGraph::from_library(
+                &crate::meditation::library::Library::starter(),
+                "plan",
+            )
+            .expect("the starter library has a plan phase"),
+            ..interviewing(&[log::Warrant::Scoping])
+        }
+    }
+
+    /// The starter document of the phase `name` (#787).
+    fn starter_document(name: &str) -> log::PhaseDocument {
+        crate::meditation::library::Library::starter()
+            .document(name)
+            .expect("a starter phase")
+            .logged()
+    }
+
+    /// The phase notes the log carries, by turn (#787).
+    fn phase_notes(log: &[Logged]) -> Vec<(u32, String)> {
+        log.iter()
+            .filter_map(|logged| match &logged.event {
+                Event::PhaseNoted { turn, text } => Some((*turn, text.clone())),
+                _ => None,
+            })
+            .collect()
+    }
+
+    /// #787: a session opens in the phase its regimen names, logs that
+    /// phase's document, and -- the head being the session's own -- carries
+    /// its ground rules as a note on the first ask, the system prompt
+    /// untouched.
+    #[test]
+    fn a_session_opens_in_a_named_phase_and_notes_its_ground_rules_on_the_first_ask() {
+        let (session, log) = proposing_in(in_the_starter_library(), "build", Vec::new());
+        let plan = starter_document("plan");
+        assert!(log.iter().any(|logged| matches!(
+            &logged.event,
+            Event::Started { phase_document: Some(document), phases: Some((_, _, first)), .. }
+                if *document == plan && first == "plan"
+        )));
+        let note = crate::meditation::render::phase_note("plan", &plan.ground_rules);
+        assert_eq!(phase_notes(&log), [(1, note.clone())]);
+        let trunk = session.trunk();
+        assert_eq!(
+            trunk[0].content, HEAD,
+            "the system prompt is the head's own"
+        );
+        assert!(trunk[1].notes.contains(&note), "{:?}", trunk[1].notes);
+        reads_whole(&session);
+    }
+
+    /// #787: `continue` moves the phase with no meditation, so the new
+    /// phase's ground rules ride as a note on the next ask -- once -- and
+    /// the ruling names the document.
+    #[test]
+    fn a_continue_carries_the_new_phases_ground_rules_as_a_note_on_the_next_ask() {
+        let (session, _) = proposing_in(
+            in_the_starter_library(),
+            "build",
+            vec![deltas(&["built"]), deltas(&["tested"])],
+        );
+        session
+            .ratify_phase("call-p", PhaseChoice::Keep)
+            .expect("ruled");
+        let build = starter_document("build");
+        assert!(session.events_from(0).iter().any(|logged| matches!(
+            &logged.event,
+            Event::PhaseRuled { phase_document: Some(document), .. } if *document == build
+        )));
+        session.ask("build it", None).expect("accepted");
+        wait_until(&session, "turn two", |log| {
+            settled(log)
+                && log
+                    .iter()
+                    .filter(|l| matches!(l.event, Event::Asked { .. }))
+                    .count()
+                    == 2
+        });
+        session.ask("and again", None).expect("accepted");
+        let log = wait_until(&session, "turn three", |log| {
+            settled(log)
+                && log
+                    .iter()
+                    .filter(|l| matches!(l.event, Event::Asked { .. }))
+                    .count()
+                    == 3
+        });
+        let note = crate::meditation::render::phase_note("build", &build.ground_rules);
+        assert_eq!(
+            phase_notes(&log).last(),
+            Some(&(2, note)),
+            "the next ask, and only it"
+        );
+        assert_eq!(session.trunk()[0].content, HEAD);
+        reads_whole(&session);
+    }
+
+    /// #787, refining #597: at a meditation the system prompt becomes the
+    /// head's plus the current phase's ground rules, and they are nowhere
+    /// else -- not in the refill's summary, and no note follows.
+    #[test]
+    fn a_meditation_puts_the_phases_ground_rules_after_the_system_prompt_and_nowhere_else() {
+        let (session, _) =
+            proposing_in(in_the_starter_library(), "build", vec![deltas(&["built"])]);
+        session
+            .ratify_phase("call-p", PhaseChoice::Meditation)
+            .expect("ruled");
+        let log = wait_until(&session, "the meditation", |log| {
+            log.iter()
+                .any(|l| matches!(l.event, Event::Meditated { .. }))
+        });
+        let build = starter_document("build");
+        assert!(log.iter().any(|logged| matches!(
+            &logged.event,
+            Event::Meditated { phase_document: Some(document), .. } if *document == build
+        )));
+        let trunk = session.trunk();
+        assert_eq!(
+            trunk[0].content,
+            format!(
+                "{HEAD}\n\nGround rules for the build phase:\n\n{}",
+                build.ground_rules
+            )
+        );
+        assert!(
+            trunk[1..]
+                .iter()
+                .all(|message| !message.content.contains(&build.ground_rules)),
+            "the rules ride in the system prompt alone"
+        );
+        session.ask("build it", None).expect("accepted");
+        let log = wait_until(&session, "turn two", |log| {
+            settled(log)
+                && log
+                    .iter()
+                    .filter(|l| matches!(l.event, Event::Asked { .. }))
+                    .count()
+                    == 2
+        });
+        assert_eq!(phase_notes(&log).len(), 1, "the opening note, and no other");
         reads_whole(&session);
     }
 
@@ -19694,6 +24867,7 @@ pub(in crate::drive) mod tests {
         assert_eq!(
             line_of(&log[meditation]).event,
             log::Event::Meditation {
+                phase_document: None,
                 newest_turn_tokens: None,
                 refilled_anyway: None,
                 operator_changes: None,
@@ -19719,6 +24893,8 @@ pub(in crate::drive) mod tests {
                 fired: None,
                 pruned: None,
                 warm: None,
+                turn_steps: None,
+                audit_notes: None,
             }
         );
 
@@ -20355,7 +25531,7 @@ pub(in crate::drive) mod tests {
                 && session_settled_awaiting(log)
         });
         session
-            .ratify_phase("call-p", PhaseChoice::Continue)
+            .ratify_phase("call-p", PhaseChoice::Keep)
             .expect("continue, while the meditation holds");
         assert_eq!(session.shared.lock().phase.as_deref(), Some("build"));
         assert_eq!(
@@ -20702,7 +25878,7 @@ pub(in crate::drive) mod tests {
         for arrow in ["->", "→"] {
             let object = object_of(&["interview-t1-0"]);
             let text = format!("interview-t1-0 the pipeline is build {arrow} test {arrow} ship");
-            let patches = cited(vec![supersede_field("interview-t2-0", &text)], &object);
+            let patches = cited(vec![supersede_field("interview-t2-0", &text)], &object).patches;
             assert!(
                 matches!(
                     patches.as_slice(),

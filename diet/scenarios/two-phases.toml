@@ -1,0 +1,23 @@
+# Two phases of the starter library (#787) on the canned scenario substrate:
+# the session opens in `plan`, the model proposes `build` (its turn ends
+# there, #788), the operator rules `keep`, and a meditation later carries `build`'s ground rules in the
+# system prompt. Self-capture is on, declared, as every regimen with phases
+# declares it: it is how the model proposes a move.
+arm = "rehearsal"
+dogma_version = 0
+
+substrate = "canned-scenario"
+substrate_reasoning = "off"
+substrate_hardware = "b6bc80e9e8e4bc2342219f064dab89a8d17c02535600b32b84895fc0b9ba6513"
+
+self_capture = "on"
+# Serve keeps working memory for an interview; no ask here is marked
+# scoping, so no fork fires and self-capture alone fills it.
+interview_warrant = ["scoping"]
+phase_library = "starter"
+starting_phase = "plan"
+
+[sampler]
+temperature = 0.6
+top_p = 0.95
+seed = 7

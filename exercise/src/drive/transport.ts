@@ -47,6 +47,12 @@ export type Command =
   | { readonly kind: 'flag-entry'; readonly id: string; readonly note: string }
   /** The operator's ruling on the model's phase proposal (#124, #651): refill now, move without a meditation, or stay. */
   | { readonly kind: 'ratify-phase'; readonly call: string; readonly choice: PhaseChoice }
+  /** The starting phase, chosen before the first ask (#788). */
+  | { readonly kind: 'start-phase'; readonly phase: string }
+  /** The operator's proposal to the model (#788): it answers on its next ask; `meditate` absent is serve's default, true. */
+  | { readonly kind: 'propose-phase'; readonly to: string; readonly meditate?: boolean }
+  /** The operator's move alone (#788), under `operator_unilateral`. */
+  | { readonly kind: 'move-phase'; readonly to: string; readonly meditate: boolean }
   /** Move the running foreground command to the background (#614): it keeps running, and the turn goes on. */
   | { readonly kind: 'background' }
   /** Refill a meditation held for the operator over its unaddressed changes (#150's gate, #698). */
@@ -54,8 +60,8 @@ export type Command =
   /** The operator's answer to the call waiting on them (#389): `call` is its id as the model streamed it. */
   | { readonly kind: 'approve'; readonly call: string; readonly scope: Decision };
 
-/** How the operator rules on a proposed phase move (#651). */
-export type PhaseChoice = 'meditation' | 'continue' | 'stay';
+/** How the operator rules on a proposed phase move (#651, #788): `keep` moves without a meditation (v7's `continue`). */
+export type PhaseChoice = 'meditation' | 'keep' | 'stay';
 
 /** What a tangent's close does with one of its entries (#608): keeps it live, retires it, or parks it as the tangent's. */
 export type Disposition = 'keep' | 'drop' | 'park';

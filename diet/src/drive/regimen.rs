@@ -604,13 +604,20 @@ pub fn top_level_max_steps(regimen: &Regimen) -> Option<u32> {
 /// exists in docs/program.md §2, and this run cannot describe where it sat.
 pub const UNDECLARED: &str = "undeclared";
 /// The phase graph a served session moves on (#563), as the start row names
-/// it beside `meditation_trigger`: `none`, or its phases and allowed moves; a graph
-/// serve would refuse is undeclared.
+/// it beside `meditation_trigger`: `none`, or the library and the phase it
+/// starts in (#787), then its phases and allowed moves; a graph serve would
+/// refuse is undeclared.
 fn phase_graph_lever(regimen: &Regimen) -> String {
+    let word = |key: &str| match regimen.get(key) {
+        Some(regimen::Value::String(word)) => word.clone(),
+        _ => String::new(),
+    };
     match crate::meditation::policy::phase_graph(regimen) {
         Ok(graph) if graph.is_empty() => "none".to_owned(),
         Ok(graph) => format!(
-            "phases:{};transitions:{}",
+            "library:{};start:{};phases:{};transitions:{}",
+            word(crate::meditation::policy::PHASE_LIBRARY),
+            word(crate::meditation::policy::STARTING_PHASE),
             graph.phases().join(","),
             graph
                 .transitions()
@@ -619,6 +626,39 @@ fn phase_graph_lever(regimen: &Regimen) -> String {
                 .collect::<Vec<_>>()
                 .join(",")
         ),
+        Err(_) => UNDECLARED.to_owned(),
+    }
+}
+
+/// The fork warrant lever: the warrants, each step warrant with the numbers
+/// it fires by (#783); `none` without any.
+fn warrant_lever(regimen: &Regimen) -> String {
+    match crate::drive::session::interview_warrant(regimen) {
+        Ok(rules) if rules.is_empty() => "none".to_owned(),
+        Ok(rules) => {
+            // #783: each step warrant with the numbers it fires by.
+            let step = crate::drive::session::step_warrants(regimen, &rules)
+                .unwrap_or(crate::drive::warrants::StepWarrants::DEFAULTS);
+            format!(
+                "one-per-gap-gated:{}",
+                rules
+                    .iter()
+                    .map(|rule| match rule {
+                        crate::formats::log::Warrant::Evidence => format!(
+                            "evidence:{}-chars:{}-per-step",
+                            step.evidence_min_chars, step.evidence_per_step
+                        ),
+                        crate::formats::log::Warrant::Trouble => {
+                            format!("trouble:cooldown-{}-steps", step.trouble_cooldown_steps)
+                        }
+                        crate::formats::log::Warrant::Open =>
+                            format!("open:every-{}-steps", step.open_every_steps),
+                        _ => rule.tag().to_owned(),
+                    })
+                    .collect::<Vec<_>>()
+                    .join("+")
+            )
+        }
         Err(_) => UNDECLARED.to_owned(),
     }
 }
@@ -645,18 +685,7 @@ pub fn serve_levers(regimen: &Regimen, output_cap: (u32, &str)) -> BTreeMap<Stri
         _ => UNDECLARED.to_owned(),
     };
     let undeclared = || UNDECLARED.to_owned();
-    let warrant = match crate::drive::session::interview_warrant(regimen) {
-        Ok(rules) if rules.is_empty() => "none".to_owned(),
-        Ok(rules) => format!(
-            "one-per-gap-gated:{}",
-            rules
-                .iter()
-                .map(|rule| rule.tag())
-                .collect::<Vec<_>>()
-                .join("+")
-        ),
-        Err(_) => undeclared(),
-    };
+    let warrant = warrant_lever(regimen);
     let depth = match regimen.get(MEDITATION_TAIL_TOKENS) {
         None | Some(regimen::Value::Integer(0)) => "total".to_owned(),
         Some(regimen::Value::Integer(n)) => format!("tail:{n}"),
@@ -667,13 +696,7 @@ pub fn serve_levers(regimen: &Regimen, output_cap: (u32, &str)) -> BTreeMap<Stri
     let reasoning = reasoning_lever(regimen);
     let delivery = crate::drive::session::fork_delivery(regimen)
         .map_or_else(|_| undeclared(), |delivery| delivery.tag().to_owned());
-    // #560: whether a call written as text is recovered. `off` by default,
-    // as Pi and `OpenCode` 2 have it; a value serve refuses is undeclared.
-    let text_fallback = match regimen.get(crate::drive::tool_loop::TOOL_CALL_TEXT_FALLBACK) {
-        None => "off".to_owned(),
-        Some(regimen::Value::String(state)) if state == "off" || state == "on" => state.clone(),
-        Some(_) => undeclared(),
-    };
+    let text_fallback = text_fallback_lever(regimen);
     let pruning = crate::drive::prune::lever(regimen);
     BTreeMap::from([
         ("compaction_depth".to_owned(), depth),
@@ -688,11 +711,21 @@ pub fn serve_levers(regimen: &Regimen, output_cap: (u32, &str)) -> BTreeMap<Stri
         ),
         ("reconcile_gate".to_owned(), reconcile_gate_lever(regimen)),
         ("phase_graph".to_owned(), phase_graph_lever(regimen)),
+        // #788: whether the operator may move the phase alone.
+        (
+            "operator_unilateral".to_owned(),
+            crate::drive::session::operator_unilateral(regimen).map_or_else(
+                |_| undeclared(),
+                |on| if on { "on" } else { "off" }.to_owned(),
+            ),
+        ),
         (
             "archive_recall".to_owned(),
             crate::drive::archive::Recall::lever(regimen),
         ),
         ("fork_warrant".to_owned(), warrant.clone()),
+        // #784: each settled tool call's touches into working memory.
+        ("mechanical_capture".to_owned(), mechanical_lever(regimen)),
         ("fork_delivery".to_owned(), delivery),
         ("tool_output_disposition".to_owned(), disposition),
         (
@@ -727,6 +760,8 @@ pub fn serve_levers(regimen: &Regimen, output_cap: (u32, &str)) -> BTreeMap<Stri
             "interview_routing_and_cadence".to_owned(),
             cadence_lever(regimen),
         ),
+        // #822: the forks cut during the turn that may wait for a slot.
+        ("fork_backlog".to_owned(), fork_backlog_lever(regimen)),
         ("render_budget".to_owned(), render_budget_lever(regimen)),
         (
             "fork_memory_share".to_owned(),
@@ -742,6 +777,21 @@ pub fn serve_levers(regimen: &Regimen, output_cap: (u32, &str)) -> BTreeMap<Stri
         ("subagent".to_owned(), "harness".to_owned()),
         ("model_pruning".to_owned(), pruning),
     ])
+}
+
+/// The fork backlog lever's word (#822): `queued:<bound>`, with `:default`
+/// when the regimen declares none; undeclared for a value serve refuses.
+fn fork_backlog_lever(regimen: &Regimen) -> String {
+    crate::drive::session::fork_backlog(regimen).map_or_else(
+        |_| UNDECLARED.to_owned(),
+        |bound| {
+            if regimen.get(crate::drive::session::FORK_BACKLOG).is_some() {
+                format!("queued:{bound}")
+            } else {
+                format!("queued:{bound}:default")
+            }
+        },
+    )
 }
 
 /// The fork input view lever's word (#567): the regimen's `fork_view`, and
@@ -782,8 +832,29 @@ fn render_budget_lever(regimen: &Regimen) -> String {
     )
 }
 
-/// The interview routing and cadence lever (#564): the cadence's word, and
-/// the read fork's output threshold when one is declared.
+/// Whether a call written as text is recovered (#560). `off` by default,
+/// as Pi and `OpenCode` 2 have it; a value serve refuses is undeclared.
+fn text_fallback_lever(regimen: &Regimen) -> String {
+    match regimen.get(crate::drive::tool_loop::TOOL_CALL_TEXT_FALLBACK) {
+        None => "off".to_owned(),
+        Some(regimen::Value::String(state)) if state == "off" || state == "on" => state.clone(),
+        Some(_) => UNDECLARED.to_owned(),
+    }
+}
+
+/// The mechanical capture lever's word (#784): `on` or `off`.
+fn mechanical_lever(regimen: &Regimen) -> String {
+    if crate::drive::session::mechanical_capture(regimen) {
+        "on"
+    } else {
+        "off"
+    }
+    .to_owned()
+}
+
+/// The interview routing and cadence lever (#564): the cadence's word, the
+/// read fork's output threshold when one is declared, and `during-turn`
+/// when the forks are cut during the turn (#782).
 fn cadence_lever(regimen: &Regimen) -> String {
     let cadence = crate::drive::session::interview_cadence(regimen).word();
     let threshold = crate::drive::session::interview_threshold_bytes(regimen)
@@ -795,7 +866,15 @@ fn cadence_lever(regimen: &Regimen) -> String {
     } else {
         ""
     };
-    format!("{cadence}{threshold}{skip}")
+    // #782: forks cut during the turn; an unknown word is refused at start.
+    let timing = if crate::drive::session::interview_timing(regimen)
+        == Ok(crate::drive::session::Timing::DuringTurn)
+    {
+        ":during-turn"
+    } else {
+        ""
+    };
+    format!("{cadence}{threshold}{skip}{timing}")
 }
 
 /// The fork ask set lever's word (#595): the set's name and digest.
@@ -978,7 +1057,7 @@ fn reconcile_gate_lever(regimen: &Regimen) -> String {
 /// that would not fit its window is refused unsent either way.
 fn fork_memory_share_lever(regimen: &Regimen) -> String {
     crate::drive::session::fork_tail(regimen).map_or_else(
-        || "tail:output-cap".to_owned(),
+        || format!("tail:{}:default", crate::drive::session::FORK_TAIL_DEFAULT),
         |tokens| format!("tail:{tokens}"),
     )
 }
@@ -1131,6 +1210,22 @@ mod tests {
         assert_eq!(lever("capture_modality = \"tools\"\n"), "off");
     }
 
+    /// #787: the phase graph lever names the library and the starting phase
+    /// before the graph read from it; `none` without one, and undeclared for
+    /// one serve would refuse.
+    #[test]
+    fn the_phase_graph_lever_names_its_library_and_starting_phase() {
+        let lever =
+            |text: &str| super::phase_graph_lever(&regimen::parse(text).expect("a regimen"));
+        assert_eq!(
+            lever("phase_library = \"starter\"\nstarting_phase = \"test\"\n"),
+            "library:starter;start:test;phases:test,build,orient,plan,quick;\
+             transitions:test>build,build>plan,build>test,orient>plan,plan>build,plan>orient"
+        );
+        assert_eq!(lever(""), "none");
+        assert_eq!(lever("phases = [\"plan\"]\n"), super::UNDECLARED);
+    }
+
     /// #124: a regimen that declares phases and turns self-capture on arms
     /// the model's proposal, ratified by the operator; either alone does not.
     #[test]
@@ -1139,7 +1234,7 @@ mod tests {
             serve_levers(&regimen::parse(text).expect("a regimen"), (64, "default"))["meditation_trigger"]
                 .clone()
         };
-        let phased = "phases = [\"plan\", \"build\"]\n[phase_transitions]\nplan = [\"build\"]\n";
+        let phased = "phase_library = \"starter\"\nstarting_phase = \"plan\"\n";
         assert!(levers(&format!("self_capture = true\n{phased}")).contains("model-proposed"));
         assert!(!levers(phased).contains("model-proposed"));
         assert!(!levers("self_capture = true\n").contains("model-proposed"));
@@ -1202,6 +1297,29 @@ mod tests {
             "gap:skip-self-recorded"
         );
         assert_eq!(lever("interview_skip_self_recorded = \"maybe\"\n"), "gap");
+        // #783: the step warrants, each with its numbers.
+        let warrant = |text: &str| {
+            serve_levers(&regimen::parse(text).expect("a regimen"), (8192, "default"))
+                .get("fork_warrant")
+                .cloned()
+                .unwrap_or_default()
+        };
+        assert_eq!(
+            warrant("interview_warrant = [\"read\", \"evidence\", \"trouble\", \"open\"]\n"),
+            "one-per-gap-gated:read+evidence:3000-chars:2-per-step+trouble:cooldown-3-steps+open:every-10-steps"
+        );
+        assert_eq!(
+            warrant(
+                "interview_warrant = [\"evidence\"]\nevidence_min_chars = 5000\nevidence_per_step = 1\n"
+            ),
+            "one-per-gap-gated:evidence:5000-chars:1-per-step"
+        );
+        // #782: forks cut during the turn, named; the gap, the default, not.
+        assert_eq!(
+            lever("interview_cadence = \"per_class\"\ninterview_timing = \"during_turn\"\n"),
+            "per_class:during-turn"
+        );
+        assert_eq!(lever("interview_timing = \"gap\"\n"), "gap");
     }
 
     /// The tool-output disposition names the cap on arrival and, beside
@@ -1256,6 +1374,50 @@ mod tests {
             "off"
         );
         assert_eq!(lever(""), UNDECLARED);
+    }
+
+    /// Whether the operator may move the phase alone (#788): `on` unless
+    /// the regimen says `operator_unilateral = false`, and undeclared for a
+    /// value serve refuses at start.
+    #[test]
+    fn the_operator_unilateral_lever_is_on_unless_turned_off() {
+        let lever = |text: &str| {
+            serve_levers(&regimen::parse(text).expect("a regimen"), (8192, "default"))
+                .get("operator_unilateral")
+                .cloned()
+                .unwrap_or_default()
+        };
+        assert_eq!(lever(""), "on");
+        assert_eq!(
+            lever(
+                "operator_unilateral = true
+"
+            ),
+            "on"
+        );
+        assert_eq!(
+            lever(
+                "operator_unilateral = false
+"
+            ),
+            "off"
+        );
+        assert_eq!(lever("operator_unilateral = \"yes\"\n"), UNDECLARED);
+    }
+
+    /// The fork backlog (#822): the default bound, a declared one, or
+    /// undeclared for a value serve refuses.
+    #[test]
+    fn the_fork_backlog_lever_names_the_bound_and_its_source() {
+        let lever = |text: &str| {
+            serve_levers(&regimen::parse(text).expect("a regimen"), (8192, "default"))
+                .get("fork_backlog")
+                .cloned()
+                .unwrap_or_default()
+        };
+        assert_eq!(lever(""), "queued:3:default");
+        assert_eq!(lever("fork_backlog = 6\n"), "queued:6");
+        assert_eq!(lever("fork_backlog = \"lots\"\n"), UNDECLARED);
     }
 
     /// The default timeout (#613): 120000 ms unless the regimen says, 0

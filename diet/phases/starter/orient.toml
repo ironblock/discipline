@@ -1,0 +1,11 @@
+# A starter phase (#787). Copy the set to $XDG_CONFIG_HOME/discipline/phases/
+# and edit it there. Ground rules approved by the maintainer as a starting
+# point, 2026-10-11.
+name = "orient"
+ground_rules = """
+Discuss the user's intent, consider possible approaches, and provide multiple options with trade-offs when possible. When finished with orientation, call for a phase transition with propose_phase_transition.
+"""
+
+[[transitions]]
+to = "plan"
+kind = "suggested"

@@ -1,7 +1,8 @@
 import type { Meta, StoryObj } from '@storybook/react-vite';
-import { expect, userEvent, waitFor } from 'storybook/test';
+import { expect, userEvent, waitFor, within } from 'storybook/test';
 
 import capped from '../../../diet/drive/fixtures/a-capped-turn.jsonl?raw';
+import phaseLibrary from '../../../diet/formats/log/fixtures/valid/a-v8-session-in-a-phase-library.jsonl?raw';
 import toolCallFailed from '../../../diet/formats/log/fixtures/valid/a-v3-tool-call-failed-under-policy.jsonl?raw';
 import toolCallRefused from '../../../diet/formats/log/fixtures/valid/a-v3-tool-call-refused.jsonl?raw';
 import approvalsOff from '../../../diet/formats/log/fixtures/valid/a-v7-call-that-ran-with-approvals-off.jsonl?raw';
@@ -35,6 +36,8 @@ import rehearsal from '../drive/served/rehearsal-turns-1-4.log?raw';
 import { TANGENT_OPEN } from '../drive/served/tangent.ts';
 import { SELF_CAPTURE } from '../drive/served/self-capture.ts';
 import { PHASE_PROPOSED, PHASE_PROPOSED_WITH_MEMORY, PHASE_RULED_CONTINUE } from '../drive/served/phase-proposal.ts';
+import type { LogLine } from '../drive/log.ts';
+import { MODEL_PROPOSED, OPERATOR_ASKED, PHASE_IDLE, PHASE_OPENED } from '../drive/served/phase-keys.ts';
 import { NO_COMMANDS } from '../drive/served/no-commands.ts';
 import { STOPPED_IN_PREFILL, STOPPED_IN_PREFILL_AFTER } from '../drive/served/stopped-in-prefill.ts';
 
@@ -742,21 +745,103 @@ export const ServedPhaseProposal: Story = {
   name: '?drive: the model proposes a phase move, and the operator rules',
   args: { drive: true, web: posting(PHASE_PROPOSED.map((l) => JSON.stringify(l)).join('\n')) },
   play: async ({ canvasElement }) => {
-    const dock = await waitFor(async () => {
-      const found = canvasElement.querySelector<HTMLElement>('.ex-composer__proposal');
-      await expect(found).not.toBeNull();
-      return found!;
-    });
-    await expect(dock.querySelector('.ex-composer__proposal-move')?.textContent).toBe('plan → build');
-    await expect(dock.querySelector('.ex-composer__proposal-reason')?.textContent).toBe('the spec is settled');
-    await expect([...dock.querySelectorAll('button')].map((b) => b.textContent)).toEqual(['meditation', 'continue', 'stay']);
-    // Working memory holds nothing, so there is nothing to meditation: serve would refuse it (#685).
-    const meditation = [...dock.querySelectorAll('button')].find((b) => b.textContent === 'meditation')!;
-    await expect(meditation.disabled).toBe(true);
-    await expect(dock.querySelector('.ex-composer__proposal-why')?.textContent).toBe('no meditation: working memory holds nothing yet');
+    // One control for the model's key (#789), named with its target (#759).
+    const ruling = await within(canvasElement).findByRole('region', { name: 'the model proposes plan → build' });
+    await expect(ruling).toHaveTextContent('the spec is settled');
+    await expect(within(ruling).getAllByRole('button').map((b) => b.getAttribute('aria-label'))).toEqual(['Meditate and move to build', 'Keep, move to build', 'Stay in plan']);
+    // Working memory holds nothing, so there is nothing to meditate on: serve would refuse it (#685).
+    await expect(within(ruling).getByRole('button', { name: 'Meditate and move to build' })).toBeDisabled();
+    await expect(ruling).toHaveTextContent('no meditation: working memory holds nothing yet');
+    await expect(canvasElement.querySelector('.ex-composer__proposal')).toBeNull();
     posted.length = 0;
-    await userEvent.click([...dock.querySelectorAll('button')].find((b) => b.textContent === 'continue')!);
-    await waitFor(async () => expect(posted).toEqual([{ kind: 'ratify-phase', call: 'p1', choice: 'continue' }]));
+    // Keep is #788's word, and serve reads v7's `continue` as it.
+    await userEvent.click(within(ruling).getByRole('button', { name: 'Keep, move to build' }));
+    await waitFor(async () => expect(posted).toEqual([{ kind: 'ratify-phase', call: 'p1', choice: 'keep' }]));
+  },
+};
+
+/** `?drive` (#787, #789): the phase the log says is in force -- its moves with their kinds, its ground rules on asking. */
+const PHASE_LIBRARY = phaseLibrary.trim().split('\n');
+
+export const ServedPhaseDocument: Story = {
+  name: '?drive: the phase in force, its moves and its ground rules',
+  args: { drive: true, web: serving(PHASE_LIBRARY.slice(0, PHASE_LIBRARY.findIndex((l) => l.includes('"phase.ruled"'))).join('\n')) },
+  play: async ({ canvasElement }) => {
+    const page = within(canvasElement);
+    const moves = await page.findByRole('list', { name: 'moves from plan' });
+    await expect(within(moves).getAllByRole('listitem').map((li) => li.textContent)).toEqual(['build · suggested']);
+    await userEvent.click(page.getByRole('button', { name: 'Ground rules of plan' }));
+    await expect(page.getByText('Settle the approach before any change.', { selector: '.ex-phases__rules' })).toBeVisible();
+  },
+};
+
+const lines = (log: readonly LogLine[]) => log.map((l) => JSON.stringify(l)).join('\n');
+
+/** `?drive` (#788): the model's proposal from `phase.proposed`, ruled with the evidence it was logged with. */
+export const ServedPhaseEvidence: Story = {
+  name: '?drive: the model’s proposal is ruled with its evidence',
+  args: { drive: true, web: posting(lines(MODEL_PROPOSED)) },
+  play: async ({ canvasElement }) => {
+    const ruling = await within(canvasElement).findByRole('region', { name: 'the model proposes plan → build' });
+    await expect(within(ruling).getByRole('definition', { name: 'phase length' })).toHaveTextContent('6 steps · 12.4k tokens');
+    await expect(within(ruling).getByRole('definition', { name: 'since the last meditation' })).toHaveTextContent('12.4k tokens');
+    posted.length = 0;
+    await userEvent.click(within(ruling).getByRole('button', { name: 'Stay in plan' }));
+    await waitFor(async () => expect(posted).toEqual([{ kind: 'ratify-phase', call: 'p1', choice: 'stay' }]));
+  },
+};
+
+/** `?drive` (#788): the operator's key -- propose a move to the model, or take it alone, through a meditation or not. */
+export const ServedOperatorKey: Story = {
+  name: '?drive: the operator proposes a move, or takes it',
+  args: { drive: true, web: posting(lines(PHASE_IDLE)) },
+  play: async ({ canvasElement }) => {
+    const page = within(canvasElement);
+    await page.findByRole('region', { name: 'move from plan' });
+    posted.length = 0;
+    await userEvent.click(page.getByRole('button', { name: 'Propose build to the model' }));
+    await waitFor(async () => expect(posted).toEqual([{ kind: 'propose-phase', to: 'build' }]));
+    posted.length = 0;
+    await userEvent.click(page.getByRole('button', { name: 'Keep, move to test' }));
+    await waitFor(async () => expect(posted).toEqual([{ kind: 'move-phase', to: 'test', meditate: false }]));
+  },
+};
+
+/** `?drive` (#788, #805): a regimen with `operator_unilateral` off -- the operator only proposes; no move is offered. */
+export const ServedProposeOnly: Story = {
+  name: '?drive: with operator_unilateral off, the operator only proposes',
+  args: {
+    drive: true,
+    web: posting(lines(PHASE_IDLE.map((line) => (line.kind === 'session.start' ? { ...line, levers: { operator_unilateral: 'off' } } : line)))),
+  },
+  play: async ({ canvasElement }) => {
+    const page = within(canvasElement);
+    await page.findByRole('region', { name: 'move from plan' });
+    await expect(page.getByRole('button', { name: 'Propose build to the model' })).toBeEnabled();
+    await expect(page.queryByRole('button', { name: 'Keep, move to build' })).toBeNull();
+    await expect(page.queryByRole('button', { name: 'Meditate and move to build' })).toBeNull();
+  },
+};
+
+/** `?drive` (#788): the operator's proposal waits on the model's answer. */
+export const ServedOperatorAsked: Story = {
+  name: '?drive: the operator’s proposal waits on the model',
+  args: { drive: true, web: serving(lines(OPERATOR_ASKED)) },
+  play: async ({ canvasElement }) => {
+    await expect(await within(canvasElement).findByRole('status', { name: 'asked the model' })).toHaveTextContent('asked the model: plan → build, keeping the trunk');
+  },
+};
+
+/** `?drive` (#788): before the first ask, the session may start in any phase of its library. */
+export const ServedStartingPhase: Story = {
+  name: '?drive: the starting phase, chosen before the first ask',
+  args: { drive: true, web: posting(lines(PHASE_OPENED)) },
+  play: async ({ canvasElement }) => {
+    const picker = (await within(canvasElement).findByRole('combobox', { name: 'starting phase' })) as HTMLSelectElement;
+    await expect(picker.value).toBe('plan');
+    posted.length = 0;
+    await userEvent.selectOptions(picker, 'build');
+    await waitFor(async () => expect(posted).toEqual([{ kind: 'start-phase', phase: 'build' }]));
   },
 };
 
@@ -765,16 +850,12 @@ export const ServedPhaseProposalWithMemory: Story = {
   name: '?drive: a phase proposal offers the meditation when working memory has something to refill from',
   args: { drive: true, web: posting(PHASE_PROPOSED_WITH_MEMORY.map((l) => JSON.stringify(l)).join('\n')) },
   play: async ({ canvasElement }) => {
-    const dock = await waitFor(async () => {
-      const found = canvasElement.querySelector<HTMLElement>('.ex-composer__proposal');
-      await expect(found).not.toBeNull();
-      return found!;
-    });
-    const meditation = [...dock.querySelectorAll('button')].find((b) => b.textContent === 'meditation')!;
-    await expect(meditation.disabled).toBe(false);
-    await expect(dock.querySelector('.ex-composer__proposal-why')).toBeNull();
+    const ruling = await within(canvasElement).findByRole('region', { name: 'the model proposes plan → build' });
+    const meditate = within(ruling).getByRole('button', { name: 'Meditate and move to build' });
+    await expect(meditate).toBeEnabled();
+    await expect(ruling).not.toHaveTextContent('no meditation');
     posted.length = 0;
-    await userEvent.click(meditation);
+    await userEvent.click(meditate);
     await waitFor(async () => expect(posted).toEqual([{ kind: 'ratify-phase', call: 'p1', choice: 'meditation' }]));
   },
 };
@@ -925,6 +1006,52 @@ export const ServedNamedDrive: Story = {
   },
 };
 
+/** `?drive` (#759): an operator by keyboard or an agent -- each action named with its target, Return submits, the edit
+ * field opens on the entry's text, all of it selected, so typing replaces it. */
+export const ServedOperableByName: Story = {
+  name: '?drive: memory actions are named with their entry, and Return submits them',
+  args: { drive: true, web: posting(operatorEdits) },
+  play: async ({ canvasElement }) => {
+    const page = within(canvasElement);
+    const entry = await waitFor(async () => {
+      const found = canvasElement.querySelector<HTMLElement>('.ex-memory__entry[data-state="live"]');
+      await expect(found).not.toBeNull();
+      return found!;
+    });
+    const id = entry.id.replace('memory/', '');
+    // One query, one control, however long the list.
+    await userEvent.click(page.getByRole('button', { name: `Edit ${id}` }));
+    const field = page.getByRole('textbox', { name: `Edit ${id}` }) as HTMLInputElement;
+    await expect(field.tagName).toBe('INPUT');
+    await expect(document.activeElement).toBe(field);
+    await expect([field.selectionStart, field.selectionEnd]).toEqual([0, field.value.length]);
+    await userEvent.keyboard('a tracker for two teams');
+    posted.length = 0;
+    await userEvent.keyboard('{Enter}');
+    await waitFor(async () => expect(posted).toEqual([{ kind: 'edit-entry', id, content: 'a tracker for two teams' }]));
+    await userEvent.click(page.getByRole('button', { name: `Flag ${id}` }));
+    await userEvent.type(page.getByRole('textbox', { name: `Flag ${id}` }), 'check with the team');
+    posted.length = 0;
+    await userEvent.keyboard('{Enter}');
+    await waitFor(async () => expect(posted).toEqual([{ kind: 'flag-entry', id, note: 'check with the team' }]));
+  },
+};
+
+/** `?drive` (#759): Return sends the ask, Shift+Return breaks the line. */
+export const ServedReturnSends: Story = {
+  name: '?drive: Return sends the ask, Shift+Return breaks the line',
+  args: { drive: true, web: posting(operatorEdits) },
+  play: async ({ canvasElement }) => {
+    const input = await within(canvasElement).findByRole('textbox', { name: 'your ask' });
+    await userEvent.click(input);
+    await userEvent.keyboard('first line{Shift>}{Enter}{/Shift}second line');
+    await expect((input as HTMLTextAreaElement).value).toBe('first line\nsecond line');
+    posted.length = 0;
+    await userEvent.keyboard('{Enter}');
+    await waitFor(async () => expect(posted).toMatchObject([{ kind: 'ask', text: 'first line\nsecond line' }]));
+  },
+};
+
 /** `?drive` (#150): a live entry's edit and flag actions post the operator's commands. */
 export const ServedEditAndFlag: Story = {
   name: '?drive: edit and flag a working-memory entry',
@@ -937,14 +1064,14 @@ export const ServedEditAndFlag: Story = {
     });
     const id = entry.id.replace('memory/', '');
     await userEvent.click(entry.querySelector<HTMLButtonElement>('button[data-action="edit"]')!);
-    const field = entry.querySelector<HTMLTextAreaElement>('textarea[aria-label^="edit"]')!;
+    const field = entry.querySelector<HTMLInputElement>('input[aria-label^="Edit"]')!;
     await userEvent.clear(field);
     await userEvent.type(field, 'a tracker for two teams');
     posted.length = 0;
     await userEvent.click(entry.querySelector<HTMLButtonElement>('button[data-action="save"]')!);
     await waitFor(async () => expect(posted).toEqual([{ kind: 'edit-entry', id, content: 'a tracker for two teams' }]));
     await userEvent.click(entry.querySelector<HTMLButtonElement>('button[data-action="flag"]')!);
-    await userEvent.type(entry.querySelector<HTMLInputElement>('input[aria-label^="flag"]')!, 'check with the team');
+    await userEvent.type(entry.querySelector<HTMLInputElement>('input[aria-label^="Flag"]')!, 'check with the team');
     posted.length = 0;
     await userEvent.click(entry.querySelector<HTMLButtonElement>('button[data-action="send-flag"]')!);
     await waitFor(async () => expect(posted).toEqual([{ kind: 'flag-entry', id, note: 'check with the team' }]));
