@@ -623,6 +623,39 @@ fn phase_graph_lever(regimen: &Regimen) -> String {
     }
 }
 
+/// The fork warrant lever: the warrants, each step warrant with the numbers
+/// it fires by (#783); `none` without any.
+fn warrant_lever(regimen: &Regimen) -> String {
+    match crate::drive::session::interview_warrant(regimen) {
+        Ok(rules) if rules.is_empty() => "none".to_owned(),
+        Ok(rules) => {
+            // #783: each step warrant with the numbers it fires by.
+            let step = crate::drive::session::step_warrants(regimen, &rules)
+                .unwrap_or(crate::drive::warrants::StepWarrants::DEFAULTS);
+            format!(
+                "one-per-gap-gated:{}",
+                rules
+                    .iter()
+                    .map(|rule| match rule {
+                        crate::formats::log::Warrant::Evidence => format!(
+                            "evidence:{}-chars:{}-per-step",
+                            step.evidence_min_chars, step.evidence_per_step
+                        ),
+                        crate::formats::log::Warrant::Trouble => {
+                            format!("trouble:cooldown-{}-steps", step.trouble_cooldown_steps)
+                        }
+                        crate::formats::log::Warrant::Open =>
+                            format!("open:every-{}-steps", step.open_every_steps),
+                        _ => rule.tag().to_owned(),
+                    })
+                    .collect::<Vec<_>>()
+                    .join("+")
+            )
+        }
+        Err(_) => UNDECLARED.to_owned(),
+    }
+}
+
 /// The state of each lever (docs/program.md §2) a session `serve` runs
 /// under `regimen`, with `output_cap` its output cap and where that came
 /// from ([`output_cap`]), sits at, by
@@ -645,18 +678,7 @@ pub fn serve_levers(regimen: &Regimen, output_cap: (u32, &str)) -> BTreeMap<Stri
         _ => UNDECLARED.to_owned(),
     };
     let undeclared = || UNDECLARED.to_owned();
-    let warrant = match crate::drive::session::interview_warrant(regimen) {
-        Ok(rules) if rules.is_empty() => "none".to_owned(),
-        Ok(rules) => format!(
-            "one-per-gap-gated:{}",
-            rules
-                .iter()
-                .map(|rule| rule.tag())
-                .collect::<Vec<_>>()
-                .join("+")
-        ),
-        Err(_) => undeclared(),
-    };
+    let warrant = warrant_lever(regimen);
     let depth = match regimen.get(MEDITATION_TAIL_TOKENS) {
         None | Some(regimen::Value::Integer(0)) => "total".to_owned(),
         Some(regimen::Value::Integer(n)) => format!("tail:{n}"),
@@ -1227,6 +1249,23 @@ mod tests {
             "gap:skip-self-recorded"
         );
         assert_eq!(lever("interview_skip_self_recorded = \"maybe\"\n"), "gap");
+        // #783: the step warrants, each with its numbers.
+        let warrant = |text: &str| {
+            serve_levers(&regimen::parse(text).expect("a regimen"), (8192, "default"))
+                .get("fork_warrant")
+                .cloned()
+                .unwrap_or_default()
+        };
+        assert_eq!(
+            warrant("interview_warrant = [\"read\", \"evidence\", \"trouble\", \"open\"]\n"),
+            "one-per-gap-gated:read+evidence:3000-chars:2-per-step+trouble:cooldown-3-steps+open:every-10-steps"
+        );
+        assert_eq!(
+            warrant(
+                "interview_warrant = [\"evidence\"]\nevidence_min_chars = 5000\nevidence_per_step = 1\n"
+            ),
+            "one-per-gap-gated:evidence:5000-chars:1-per-step"
+        );
         // #782: forks cut during the turn, named; the gap, the default, not.
         assert_eq!(
             lever("interview_cadence = \"per_class\"\ninterview_timing = \"during_turn\"\n"),

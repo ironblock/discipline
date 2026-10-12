@@ -1207,6 +1207,8 @@ fn serving_interview(
         (diet::drive::registry::REGISTRY, &regime.substrates[0].id),
     )
     .map_err(|why| format!("{path}: {why}"))?;
+    // #783: the warrants that look at what a step produced.
+    let step = session::step_warrants(&read, &rules).map_err(|why| format!("{path}: {why}"))?;
     // The phase graph, by the scripted drive's own reader (#563).
     let phases =
         diet::meditation::policy::phase_graph(&read).map_err(|why| format!("{path}: {why}"))?;
@@ -1292,6 +1294,7 @@ fn serving_interview(
             fork_tail: session::fork_tail(&read),
             timing,
             fork_slots,
+            step,
         }),
     )
 }

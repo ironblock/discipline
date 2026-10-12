@@ -117,6 +117,7 @@ pub mod shell_gate;
 pub mod standard;
 pub mod template_roles;
 pub mod tool_loop;
+pub mod warrants;
 
 use std::cell::Cell;
 use std::collections::{BTreeMap, BTreeSet};

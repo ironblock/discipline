@@ -1,0 +1,210 @@
+{"error": false, "surprise": false, "text": ""}
+{"error": false, "surprise": false, "text": "Nothing to see here."}
+{"error": false, "surprise": false, "text": "wait, x"}
+{"error": false, "surprise": true, "text": "wait,x"}
+{"error": false, "surprise": false, "text": "wait."}
+{"error": false, "surprise": true, "text": "wait.x"}
+{"error": false, "surprise": false, "text": "Wait, really"}
+{"error": false, "surprise": false, "text": "wait ,"}
+{"error": false, "surprise": false, "text": "waited,"}
+{"error": false, "surprise": false, "text": "turns  out"}
+{"error": false, "surprise": false, "text": "turnsout"}
+{"error": false, "surprise": false, "text": "turns\tout"}
+{"error": false, "surprise": false, "text": "must  be"}
+{"error": false, "surprise": false, "text": "mustbe"}
+{"error": false, "surprise": false, "text": "must bee"}
+{"error": false, "surprise": false, "text": "expected"}
+{"error": false, "surprise": false, "text": "expectsx"}
+{"error": false, "surprise": false, "text": "required"}
+{"error": false, "surprise": false, "text": "requirement"}
+{"error": true, "surprise": false, "text": "errors"}
+{"error": true, "surprise": false, "text": "terror"}
+{"error": true, "surprise": false, "text": "error_code"}
+{"error": true, "surprise": false, "text": "_error"}
+{"error": true, "surprise": false, "text": "error_"}
+{"error": true, "surprise": true, "text": "Error"}
+{"error": true, "surprise": true, "text": "ERROR!"}
+{"error": false, "surprise": true, "text": "eRrOr"}
+{"error": false, "surprise": false, "text": "can’t"}
+{"error": false, "surprise": false, "text": "doesn’t support"}
+{"error": false, "surprise": false, "text": "it’s called"}
+{"error": false, "surprise": false, "text": "its called"}
+{"error": false, "surprise": true, "text": "renamed."}
+{"error": false, "surprise": false, "text": "renamedx"}
+{"error": false, "surprise": false, "text": "unsupportedly"}
+{"error": false, "surprise": false, "text": "notsupported"}
+{"error": true, "surprise": true, "text": "café error"}
+{"error": false, "surprise": true, "text": "naïve failure"}
+{"error": true, "surprise": false, "text": "éerror"}
+{"error": true, "surprise": false, "text": "erroré"}
+{"error": true, "surprise": false, "text": "1error"}
+{"error": true, "surprise": false, "text": "error1"}
+{"error": true, "surprise": false, "text": "Traceback (most recent call last):"}
+{"error": false, "surprise": false, "text": "traceback"}
+{"error": true, "surprise": true, "text": "FAILED"}
+{"error": false, "surprise": true, "text": "Failed"}
+{"error": true, "surprise": true, "text": "Cannot find module"}
+{"error": false, "surprise": true, "text": "cannot find module"}
+{"error": true, "surprise": false, "text": "not found"}
+{"error": false, "surprise": false, "text": "Not Found"}
+{"error": true, "surprise": false, "text": "EEXIST: file exists"}
+{"error": false, "surprise": false, "text": "eexist"}
+{"error": true, "surprise": false, "text": "ENOENT"}
+{"error": true, "surprise": true, "text": "TS2345: type mismatch"}
+{"error": false, "surprise": false, "text": "TS234"}
+{"error": false, "surprise": false, "text": "ts2345"}
+{"error": true, "surprise": false, "text": "TS23456"}
+{"error": true, "surprise": false, "text": "TS١٢٣٤"}
+{"error": false, "surprise": false, "text": "TS12a4"}
+{"error": true, "surprise": true, "text": "the build failed"}
+{"error": true, "surprise": false, "text": "no errors here"}
+{"error": true, "surprise": false, "text": "terrorism"}
+{"error": false, "surprise": false, "text": "mismatched"}
+{"error": false, "surprise": false, "text": "confirmed  via"}
+{"error": false, "surprise": true, "text": "confirmed via email"}
+{"error": false, "surprise": true, "text": "however,"}
+{"error": false, "surprise": false, "text": "nevertheless"}
+{"error": false, "surprise": true, "text": "actually"}
+{"error": false, "surprise": true, "text": "instead"}
+{"error": false, "surprise": true, "text": "turns out"}
+{"error": false, "surprise": true, "text": "however"}
+{"error": false, "surprise": true, "text": "doesn't support"}
+{"error": false, "surprise": true, "text": "not supported"}
+{"error": false, "surprise": true, "text": "unsupported"}
+{"error": false, "surprise": true, "text": "can't"}
+{"error": false, "surprise": true, "text": "cannot"}
+{"error": false, "surprise": true, "text": "must be"}
+{"error": false, "surprise": true, "text": "must use"}
+{"error": false, "surprise": true, "text": "must not"}
+{"error": false, "surprise": true, "text": "expect"}
+{"error": false, "surprise": true, "text": "expects"}
+{"error": false, "surprise": true, "text": "require"}
+{"error": false, "surprise": true, "text": "requires"}
+{"error": true, "surprise": true, "text": "error"}
+{"error": true, "surprise": true, "text": "failed"}
+{"error": false, "surprise": true, "text": "failure"}
+{"error": false, "surprise": true, "text": "mismatch"}
+{"error": false, "surprise": true, "text": "deprecated"}
+{"error": false, "surprise": true, "text": "confirmed via"}
+{"error": false, "surprise": true, "text": "it's called"}
+{"error": false, "surprise": true, "text": "renamed"}
+{"error": false, "surprise": true, "text": "ACTUALLY"}
+{"error": false, "surprise": true, "text": "INSTEAD"}
+{"error": false, "surprise": true, "text": "TURNS OUT"}
+{"error": false, "surprise": true, "text": "HOWEVER"}
+{"error": false, "surprise": true, "text": "DOESN'T SUPPORT"}
+{"error": false, "surprise": true, "text": "NOT SUPPORTED"}
+{"error": false, "surprise": true, "text": "UNSUPPORTED"}
+{"error": false, "surprise": true, "text": "CAN'T"}
+{"error": false, "surprise": true, "text": "CANNOT"}
+{"error": false, "surprise": true, "text": "MUST BE"}
+{"error": false, "surprise": true, "text": "MUST USE"}
+{"error": false, "surprise": true, "text": "MUST NOT"}
+{"error": false, "surprise": true, "text": "EXPECT"}
+{"error": false, "surprise": true, "text": "EXPECTS"}
+{"error": false, "surprise": true, "text": "REQUIRE"}
+{"error": false, "surprise": true, "text": "REQUIRES"}
+{"error": true, "surprise": true, "text": "ERROR"}
+{"error": true, "surprise": true, "text": "FAILED"}
+{"error": false, "surprise": true, "text": "FAILURE"}
+{"error": false, "surprise": true, "text": "MISMATCH"}
+{"error": false, "surprise": true, "text": "DEPRECATED"}
+{"error": false, "surprise": true, "text": "CONFIRMED VIA"}
+{"error": false, "surprise": true, "text": "IT'S CALLED"}
+{"error": false, "surprise": true, "text": "RENAMED"}
+{"error": false, "surprise": false, "text": "xactually"}
+{"error": false, "surprise": false, "text": "xinstead"}
+{"error": false, "surprise": false, "text": "xturns out"}
+{"error": false, "surprise": false, "text": "xhowever"}
+{"error": false, "surprise": false, "text": "xdoesn't support"}
+{"error": false, "surprise": false, "text": "xnot supported"}
+{"error": false, "surprise": false, "text": "xunsupported"}
+{"error": false, "surprise": false, "text": "xcan't"}
+{"error": false, "surprise": false, "text": "xcannot"}
+{"error": false, "surprise": false, "text": "xmust be"}
+{"error": false, "surprise": false, "text": "xmust use"}
+{"error": false, "surprise": false, "text": "xmust not"}
+{"error": false, "surprise": false, "text": "xexpect"}
+{"error": false, "surprise": false, "text": "xexpects"}
+{"error": false, "surprise": false, "text": "xrequire"}
+{"error": false, "surprise": false, "text": "xrequires"}
+{"error": true, "surprise": false, "text": "xerror"}
+{"error": true, "surprise": false, "text": "xfailed"}
+{"error": false, "surprise": false, "text": "xfailure"}
+{"error": false, "surprise": false, "text": "xmismatch"}
+{"error": false, "surprise": false, "text": "xdeprecated"}
+{"error": false, "surprise": false, "text": "xconfirmed via"}
+{"error": false, "surprise": false, "text": "xit's called"}
+{"error": false, "surprise": false, "text": "xrenamed"}
+{"error": false, "surprise": false, "text": "actuallyx"}
+{"error": false, "surprise": false, "text": "insteadx"}
+{"error": false, "surprise": false, "text": "turns outx"}
+{"error": false, "surprise": false, "text": "howeverx"}
+{"error": false, "surprise": false, "text": "doesn't supportx"}
+{"error": false, "surprise": false, "text": "not supportedx"}
+{"error": false, "surprise": false, "text": "unsupportedx"}
+{"error": false, "surprise": false, "text": "can'tx"}
+{"error": false, "surprise": false, "text": "cannotx"}
+{"error": false, "surprise": false, "text": "must bex"}
+{"error": false, "surprise": false, "text": "must usex"}
+{"error": false, "surprise": false, "text": "must notx"}
+{"error": false, "surprise": false, "text": "expectx"}
+{"error": false, "surprise": false, "text": "expectsx"}
+{"error": false, "surprise": false, "text": "requirex"}
+{"error": false, "surprise": false, "text": "requiresx"}
+{"error": true, "surprise": false, "text": "errorx"}
+{"error": true, "surprise": false, "text": "failedx"}
+{"error": false, "surprise": false, "text": "failurex"}
+{"error": false, "surprise": false, "text": "mismatchx"}
+{"error": false, "surprise": false, "text": "deprecatedx"}
+{"error": false, "surprise": false, "text": "confirmed viax"}
+{"error": false, "surprise": false, "text": "it's calledx"}
+{"error": false, "surprise": false, "text": "renamedx"}
+{"error": false, "surprise": true, "text": "(actually)"}
+{"error": false, "surprise": true, "text": "(instead)"}
+{"error": false, "surprise": true, "text": "(turns out)"}
+{"error": false, "surprise": true, "text": "(however)"}
+{"error": false, "surprise": true, "text": "(doesn't support)"}
+{"error": false, "surprise": true, "text": "(not supported)"}
+{"error": false, "surprise": true, "text": "(unsupported)"}
+{"error": false, "surprise": true, "text": "(can't)"}
+{"error": false, "surprise": true, "text": "(cannot)"}
+{"error": false, "surprise": true, "text": "(must be)"}
+{"error": false, "surprise": true, "text": "(must use)"}
+{"error": false, "surprise": true, "text": "(must not)"}
+{"error": false, "surprise": true, "text": "(expect)"}
+{"error": false, "surprise": true, "text": "(expects)"}
+{"error": false, "surprise": true, "text": "(require)"}
+{"error": false, "surprise": true, "text": "(requires)"}
+{"error": true, "surprise": true, "text": "(error)"}
+{"error": true, "surprise": true, "text": "(failed)"}
+{"error": false, "surprise": true, "text": "(failure)"}
+{"error": false, "surprise": true, "text": "(mismatch)"}
+{"error": false, "surprise": true, "text": "(deprecated)"}
+{"error": false, "surprise": true, "text": "(confirmed via)"}
+{"error": false, "surprise": true, "text": "(it's called)"}
+{"error": false, "surprise": true, "text": "(renamed)"}
+{"error": false, "surprise": true, "text": "a actually."}
+{"error": false, "surprise": true, "text": "a instead."}
+{"error": false, "surprise": true, "text": "a turns out."}
+{"error": false, "surprise": true, "text": "a however."}
+{"error": false, "surprise": true, "text": "a doesn't support."}
+{"error": false, "surprise": true, "text": "a not supported."}
+{"error": false, "surprise": true, "text": "a unsupported."}
+{"error": false, "surprise": true, "text": "a can't."}
+{"error": false, "surprise": true, "text": "a cannot."}
+{"error": false, "surprise": true, "text": "a must be."}
+{"error": false, "surprise": true, "text": "a must use."}
+{"error": false, "surprise": true, "text": "a must not."}
+{"error": false, "surprise": true, "text": "a expect."}
+{"error": false, "surprise": true, "text": "a expects."}
+{"error": false, "surprise": true, "text": "a require."}
+{"error": false, "surprise": true, "text": "a requires."}
+{"error": true, "surprise": true, "text": "a error."}
+{"error": true, "surprise": true, "text": "a failed."}
+{"error": false, "surprise": true, "text": "a failure."}
+{"error": false, "surprise": true, "text": "a mismatch."}
+{"error": false, "surprise": true, "text": "a deprecated."}
+{"error": false, "surprise": true, "text": "a confirmed via."}
+{"error": false, "surprise": true, "text": "a it's called."}
+{"error": false, "surprise": true, "text": "a renamed."}

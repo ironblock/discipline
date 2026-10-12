@@ -183,6 +183,9 @@ export type Warrant =
   | "read"
   | "scoping"
   | "meditation"
+  | "evidence"
+  | "trouble"
+  | "open"
 ;
 
 export type ForkOutcome =
