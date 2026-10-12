@@ -1207,6 +1207,14 @@ fn serving_interview(
         (diet::drive::registry::REGISTRY, &regime.substrates[0].id),
     )
     .map_err(|why| format!("{path}: {why}"))?;
+    // #797: whether the trunk's server shares a cut fork's prefix pages.
+    let prefix_pages = session::PrefixPages::of(
+        diet::drive::registry::served_prefix_shared(
+            diet::drive::registry::REGISTRY,
+            &regime.substrates[0].id,
+        )
+        .map_err(|why| format!("{path}: {why}"))?,
+    );
     // #783: the warrants that look at what a step produced.
     let step = session::step_warrants(&read, &rules).map_err(|why| format!("{path}: {why}"))?;
     // #788: whether the operator may move the phase alone.
@@ -1297,6 +1305,7 @@ fn serving_interview(
             fork_tail: session::fork_tail(&read),
             timing,
             fork_slots,
+            prefix_pages,
             step,
             operator_unilateral,
         }),

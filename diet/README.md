@@ -63,6 +63,7 @@ A `phase.ruled` line records every ruling and move.
 - **Folding:** a fork's patches fold into working memory as it settles, mid-turn. Nothing enters the trunk mid-turn.
 - **Ending:** the session's `end` cancels forks in flight; the turn's `cancel` lets them finish. The session awaits only once the last has settled.
 - **The pool:** a fork is refused unsent when the trunk's prompt, the forks' in flight and its own leave the window less than the clamp's floor. Its `fork.settled` carries the four numbers (`window`, `trunk_tokens`, `beside_tokens`, `fork_tokens`).
+- **A shared prefix:** on a server whose registry entry declares `served_prefix_shared = "true"`, measured to share a prefix's pages between concurrent requests, a fork cut from the trunk reserves only its tokens beyond the prefix the trunk holds (#797). Without the declaration every prompt counts in full. Each cut fork's line names its reservation (`reserved`) and whether its prefix was counted as shared (`prefix_shared`); a refusal's `fork_tokens` is that reservation.
 - **The log:** a fork's line names the step's `tool_call` it was `cut` at and `timing: during_turn`, and each trunk request names how many forks were in flight `beside` it.
 - **Refused at start:** serve refuses the timing when nothing warrants a fork at a step (a call's warrant, or a step warrant below), or when the registry declares fewer than 2 `serving_slots` for the trunk's server (or none for a seat). The start row's cadence names `during-turn`.
 

@@ -1059,6 +1059,8 @@ fn a_drive_server_confirms_a_declared_engines_model_settings_and_draft() {
             corroborated("served_max_batch_size", "2"),
             corroborated("served_max_seq_len", "163840"),
             corroborated("served_model", "Qwen3.8-27B-exl3-3.00bpw-img1024"),
+            // #797: measured, and reported by no engine, so declared.
+            {"field": "served_prefix_shared", "value": "true", "provenance": "declared"},
             corroborated("served_prompt_template", "chat_template"),
             corroborated("served_use_vision", "true"),
             {
