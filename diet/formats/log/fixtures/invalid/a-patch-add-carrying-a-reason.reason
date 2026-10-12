@@ -1,0 +1,2 @@
+A patch's `reason` says why the entry a `supersede` or a `retire` cited went
+(#812): an `add` cites nothing, so a reason on it explains nothing.

@@ -603,6 +603,7 @@ export type PatchLine = {
   entry: PatchEntry;
   supersedes?: string;
   tangent?: string;
+  reason?: string;
 } & ({ fork: number; lane?: never } | { lane: string; fork?: never });
 
 export type MeditationLine = {

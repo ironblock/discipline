@@ -1488,6 +1488,10 @@ pub enum Event {
         supersedes: Option<String>,
         /// The tangent it was made under (v7, #22), when one was open.
         tangent: Option<String>,
+        /// Why the entry it voided or retired went (v8, #812): a fork's
+        /// `SUPERSEDE: <id> — <reason>`. Only on a `supersede` or a
+        /// `retire`.
+        reason: Option<String>,
     },
     /// Forks' patches delivered to the trunk (v7, the fork delivery lever):
     /// one note at the tail of turn `turn`'s first request, after its ask,
@@ -3553,6 +3557,14 @@ fn from_object(object: &BTreeMap<String, Value>) -> Result<Line, String> {
                     }
                 ));
             }
+            let reason = fields.optional_string("reason")?;
+            if reason.is_some() && !matches!(op, PatchOp::Supersede | PatchOp::Retire) {
+                return Err(format!(
+                    "a patch whose `op` is `{}` carries a `reason`: only a `supersede` or a \
+                     `retire` says why the entry it cited went",
+                    op.tag()
+                ));
+            }
             Event::Patch {
                 fork,
                 lane,
@@ -3560,6 +3572,7 @@ fn from_object(object: &BTreeMap<String, Value>) -> Result<Line, String> {
                 entry: fields.entry("entry")?,
                 supersedes,
                 tangent: fields.optional_string("tangent")?,
+                reason,
             }
         }
         Kind::Capture => Event::Capture {
@@ -5166,6 +5179,7 @@ pub fn schema(kind: Kind) -> &'static [Field] {
                 must_v5("entry", Holds::Entry),
                 may_v5("supersedes", Text),
                 may_v7("tangent", Text),
+                may_v8("reason", Text),
             ];
             F
         }
@@ -6218,7 +6232,11 @@ fn to_value(line: &Line) -> Value {
             entry,
             supersedes,
             tangent,
+            reason,
         } => {
+            if let Some(reason) = reason {
+                put("reason", text(reason));
+            }
             if let Some(fork) = fork {
                 put("fork", count(*fork));
             }
@@ -8091,6 +8109,7 @@ mod tests {
                 },
                 supersedes: None,
                 tangent: Some("t/1".to_owned()),
+                reason: None,
             },
             // The trunk's own (#609): named by its lane, not a fork.
             Event::Patch {
@@ -8104,6 +8123,7 @@ mod tests {
                 },
                 supersedes: Some("d1".to_owned()),
                 tangent: None,
+                reason: Some("the scope narrowed to one team".to_owned()),
             },
             Event::TangentOpen {
                 id: "t/1".to_owned(),
@@ -8663,6 +8683,11 @@ mod tests {
                     // `op` is `supersede`: the reader's op rule, not the key
                     // beside it.
                     if kind == Kind::Patch && *absent == "supersedes" {
+                        continue;
+                    }
+                    // A patch says why only on a `supersede` or a `retire`
+                    // (v8, #812): the reader's op rule again.
+                    if kind == Kind::Patch && *absent == "reason" {
                         continue;
                     }
                     // A fork names why it was never sent exactly when it
