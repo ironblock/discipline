@@ -8,7 +8,7 @@
 {"reply":{"when":"Make a tiny PNG","text":"Making a small PNG.","calls":[{"id":"call-b1","name":"bash","arguments":"{\"command\": \"printf '\\\\211PNG\\\\r\\\\n\\\\032\\\\n0000' > shot.png && ls shot.png\"}"}],"delay_ms":500}}
 {"reply":{"when":"shot.png\n","text":"Reading the picture.","calls":[{"id":"call-rd2","name":"read","arguments":"{\"path\": \"shot.png\"}"}],"delay_ms":300}}
 {"reply":{"text":"shot.png is a PNG signature and four bytes: no picture to speak of.","delay_ms":300}}
-{"reply":{"when":"What is in the picture","text":"The picture you attached is the same eight-byte PNG signature: nothing drawn.","delay_ms":700}}
+{"reply":{"when":"What is in the picture","text":"The picture you attached is the same eight-byte PNG signature: nothing drawn.","delay_ms":700,"prompt_tokens":5000}}
 {"reply":{"when":"Find the decisions","text":"Searching.","calls":[{"id":"call-g1","name":"grep","arguments":"{\"pattern\": \"decision\", \"path\": \".\"}"}],"delay_ms":400}}
 {"reply":{"when":"Found 1 match for pattern","text":"Listing the Markdown files.","calls":[{"id":"call-g2","name":"glob","arguments":"{\"pattern\": \"*.md\"}"}],"delay_ms":300}}
 {"reply":{"when":"Found 2 file(s) matching","text":"Two Markdown files; notes.md holds the one decision.","delay_ms":300}}
@@ -18,7 +18,7 @@
 {"reply":{"when":"Background shell started","text":"And a long watcher.","calls":[{"id":"call-b6","name":"bash","arguments":"{\"command\": \"sleep 60\", \"is_background\": true}"}],"delay_ms":300}}
 {"reply":{"when":"Background shell started","text":"Stopping the watcher.","calls":[{"id":"call-s1","name":"task_stop","arguments":"{\"task_id\": \"$job\"}"}],"delay_ms":300}}
 {"reply":{"when":"Cancellation requested","text":"The build runs on; the watcher is stopped.","delay_ms":300}}
-{"reply":{"when":"Print a long line","text":"Printing it.","calls":[{"id":"call-b2","name":"bash","arguments":"{\"command\": \"python3 -c \\\"print('x' * 9000)\\\"\"}"}],"delay_ms":500}}
+{"reply":{"when":"Print a long line","text":"Printing it.","calls":[{"id":"call-b2","name":"bash","arguments":"{\"command\": \"python3 -c \\\"print('x' * 20000)\\\"\"}"}],"delay_ms":500}}
 {"reply":{"when":"xxxxxxxxxx","text":"Now a long listing.","calls":[{"id":"call-b3","name":"bash","arguments":"{\"command\": \"seq 1 2000\"}"}],"delay_ms":300}}
 {"reply":{"when":"Tool output was too large","text":"The listing was capped at 20 lines.","delay_ms":300}}
 {"reply":{"when":"Is notes.md still","text":"notes.md still holds the one decision.","delay_ms":400}}
@@ -48,11 +48,13 @@
 {"reply":{"text":"."}}
 {"reply":{"text":"."}}
 {"reply":{"text":"."}}
-{"reply":{"when":"phase boundary","text":"1. KEEP\n2. KEEP\n3. KEEP\n4. KEEP\n5. KEEP\n6. KEEP\n7. KEEP\n8. KEEP\n9. KEEP\n10. KEEP\n11. KEEP\n12. KEEP\n13. KEEP\n14. KEEP\n15. KEEP\n16. KEEP\n17. KEEP\n18. KEEP\n19. KEEP\n20. KEEP\n21. KEEP\n22. KEEP\n23. KEEP\n24. KEEP\n25. KEEP\n26. KEEP\n27. KEEP\n28. KEEP\n29. KEEP\n30. KEEP\n31. KEEP\n32. KEEP\n33. KEEP\n34. KEEP\n35. KEEP\n36. KEEP\n37. KEEP\n38. KEEP\n39. KEEP\n40. KEEP\n41. KEEP\n42. KEEP\n43. KEEP\n44. KEEP\n45. KEEP\n46. KEEP\n47. KEEP\n48. KEEP\n49. KEEP\n50. KEEP\n51. KEEP\n52. KEEP\n53. KEEP\n54. KEEP\n55. KEEP\n56. KEEP\n57. KEEP\n58. KEEP\n59. KEEP\n60. KEEP\n"}}
-{"reply":{"when":"phase boundary","text":"1. KEEP\n2. KEEP\n3. KEEP\n4. KEEP\n5. KEEP\n6. KEEP\n7. KEEP\n8. KEEP\n9. KEEP\n10. KEEP\n11. KEEP\n12. KEEP\n13. KEEP\n14. KEEP\n15. KEEP\n16. KEEP\n17. KEEP\n18. KEEP\n19. KEEP\n20. KEEP\n21. KEEP\n22. KEEP\n23. KEEP\n24. KEEP\n25. KEEP\n26. KEEP\n27. KEEP\n28. KEEP\n29. KEEP\n30. KEEP\n31. KEEP\n32. KEEP\n33. KEEP\n34. KEEP\n35. KEEP\n36. KEEP\n37. KEEP\n38. KEEP\n39. KEEP\n40. KEEP\n41. KEEP\n42. KEEP\n43. KEEP\n44. KEEP\n45. KEEP\n46. KEEP\n47. KEEP\n48. KEEP\n49. KEEP\n50. KEEP\n51. KEEP\n52. KEEP\n53. KEEP\n54. KEEP\n55. KEEP\n56. KEEP\n57. KEEP\n58. KEEP\n59. KEEP\n60. KEEP\n"}}
-{"reply":{"when":"phase boundary","text":"1. KEEP\n2. KEEP\n3. KEEP\n4. KEEP\n5. KEEP\n6. KEEP\n7. KEEP\n8. KEEP\n9. KEEP\n10. KEEP\n11. KEEP\n12. KEEP\n13. KEEP\n14. KEEP\n15. KEEP\n16. KEEP\n17. KEEP\n18. KEEP\n19. KEEP\n20. KEEP\n21. KEEP\n22. KEEP\n23. KEEP\n24. KEEP\n25. KEEP\n26. KEEP\n27. KEEP\n28. KEEP\n29. KEEP\n30. KEEP\n31. KEEP\n32. KEEP\n33. KEEP\n34. KEEP\n35. KEEP\n36. KEEP\n37. KEEP\n38. KEEP\n39. KEEP\n40. KEEP\n41. KEEP\n42. KEEP\n43. KEEP\n44. KEEP\n45. KEEP\n46. KEEP\n47. KEEP\n48. KEEP\n49. KEEP\n50. KEEP\n51. KEEP\n52. KEEP\n53. KEEP\n54. KEEP\n55. KEEP\n56. KEEP\n57. KEEP\n58. KEEP\n59. KEEP\n60. KEEP\n"}}
-{"reply":{"when":"phase boundary","text":"1. KEEP\n2. KEEP\n3. KEEP\n4. KEEP\n5. KEEP\n6. KEEP\n7. KEEP\n8. KEEP\n9. KEEP\n10. KEEP\n11. KEEP\n12. KEEP\n13. KEEP\n14. KEEP\n15. KEEP\n16. KEEP\n17. KEEP\n18. KEEP\n19. KEEP\n20. KEEP\n21. KEEP\n22. KEEP\n23. KEEP\n24. KEEP\n25. KEEP\n26. KEEP\n27. KEEP\n28. KEEP\n29. KEEP\n30. KEEP\n31. KEEP\n32. KEEP\n33. KEEP\n34. KEEP\n35. KEEP\n36. KEEP\n37. KEEP\n38. KEEP\n39. KEEP\n40. KEEP\n41. KEEP\n42. KEEP\n43. KEEP\n44. KEEP\n45. KEEP\n46. KEEP\n47. KEEP\n48. KEEP\n49. KEEP\n50. KEEP\n51. KEEP\n52. KEEP\n53. KEEP\n54. KEEP\n55. KEEP\n56. KEEP\n57. KEEP\n58. KEEP\n59. KEEP\n60. KEEP\n"}}
-{"reply":{"when":"scheduled","text":"1. KEEP\n2. KEEP\n3. KEEP\n4. KEEP\n5. KEEP\n6. KEEP\n7. KEEP\n8. KEEP\n9. KEEP\n10. KEEP\n11. KEEP\n12. KEEP\n13. KEEP\n14. KEEP\n15. KEEP\n16. KEEP\n17. KEEP\n18. KEEP\n19. KEEP\n20. KEEP\n21. KEEP\n22. KEEP\n23. KEEP\n24. KEEP\n25. KEEP\n26. KEEP\n27. KEEP\n28. KEEP\n29. KEEP\n30. KEEP\n31. KEEP\n32. KEEP\n33. KEEP\n34. KEEP\n35. KEEP\n36. KEEP\n37. KEEP\n38. KEEP\n39. KEEP\n40. KEEP\n41. KEEP\n42. KEEP\n43. KEEP\n44. KEEP\n45. KEEP\n46. KEEP\n47. KEEP\n48. KEEP\n49. KEEP\n50. KEEP\n51. KEEP\n52. KEEP\n53. KEEP\n54. KEEP\n55. KEEP\n56. KEEP\n57. KEEP\n58. KEEP\n59. KEEP\n60. KEEP\n"}}
+{"reply":{"text":"."}}
+{"reply":{"text":"."}}
+{"reply":{"when":"Output 15 lines and nothing else","text":"1. KEEP\n2. KEEP\n3. KEEP\n4. KEEP\n5. KEEP\n6. KEEP\n7. KEEP\n8. KEEP\n9. KEEP\n10. KEEP\n11. KEEP\n12. KEEP\n13. KEEP\n14. KEEP\n15. KEEP\n"}}
+{"reply":{"when":"Output 15 lines and nothing else","text":"1. KEEP\n2. KEEP\n3. KEEP\n4. KEEP\n5. KEEP\n6. KEEP\n7. KEEP\n8. KEEP\n9. KEEP\n10. KEEP\n11. KEEP\n12. KEEP\n13. KEEP\n14. KEEP\n15. KEEP\n"}}
+{"reply":{"when":"Output 16 lines and nothing else","text":"1. KEEP\n2. KEEP\n3. KEEP\n4. KEEP\n5. KEEP\n6. KEEP\n7. KEEP\n8. KEEP\n9. KEEP\n10. KEEP\n11. KEEP\n12. KEEP\n13. KEEP\n14. KEEP\n15. KEEP\n16. KEEP\n"}}
+{"reply":{"when":"Output 16 lines and nothing else","text":"1. KEEP\n2. KEEP\n3. KEEP\n4. KEEP\n5. KEEP\n6. KEEP\n7. KEEP\n8. KEEP\n9. KEEP\n10. KEEP\n11. KEEP\n12. KEEP\n13. KEEP\n14. KEEP\n15. KEEP\n16. KEEP\n"}}
+{"reply":{"when":"Output 1 lines and nothing else","text":"1. KEEP\n"}}
 {"reply":{"when":"The turn has ended","text":"DECISION: notes.md holds one line per decision\nPLAN: write it, then read it back\nSUPERSEDE: NONE"}}
 {"reply":{"when":"The turn has ended","text":"DECISION: NONE\nPLAN: NONE\nSUPERSEDE: interview-t1-0 decision: notes.md holds the decisions as a Markdown list"}}
 {"reply":{"when":"You just changed something","text":"LEARNED: notes.md now holds the first decision\nEVIDENCE: the write of notes.md\nSTUCK: NONE"}}
@@ -103,6 +105,11 @@
 {"step":"ask","text":"Change of scope: notes.md holds the decisions as a Markdown list.","scoping":true}
 {"step":"ask","text":"Oriented enough? Say if we should move on."}
 {"step":"rule-phase","call":"call-p1","choice":"meditation"}
+{"step":"edit","pick":"Markdown list","text":"decision: notes.md holds the decisions as a sorted Markdown list","as":"edited"}
+{"step":"open-tangent","id":"side"}
+{"step":"ask","text":"Side question: write side.md with a note on sorting."}
+{"step":"close-tangent","each":"keep"}
+{"step":"ask","text":"Back to the list."}
 {"step":"ask","text":"Ready to build? Say if we should move on."}
 {"step":"rule-phase","call":"call-p2","choice":"stay"}
 {"step":"ask","text":"Build now? Say if we should move on."}
@@ -113,11 +120,6 @@
 {"step":"propose-phase","to":"build","meditate":false}
 {"step":"ask","text":"Test it once more."}
 {"step":"move-phase","to":"build","meditate":false}
-{"step":"edit","pick":"Markdown list","text":"decision: notes.md holds the decisions as a sorted Markdown list","as":"edited"}
-{"step":"open-tangent","id":"side"}
-{"step":"ask","text":"Side question: write side.md with a note on sorting."}
-{"step":"close-tangent","each":"keep"}
-{"step":"ask","text":"Back to the list."}
 {"step":"flag","pick":"sorted","note":"still sorted?","as":"flagged"}
 {"step":"declare-meditation"}
 {"step":"ask","text":"go on","refused":"meditation-held"}
@@ -154,7 +156,9 @@
 {"expect":"capture","where":{"tool":"update_record","outcome":"recorded"}}
 {"expect":"capture","where":{"tool":"resolve_entry","outcome":"resolved"}}
 {"expect":"reminded","where":{"text~":"Anything you meant to record?"}}
-{"expect":"meditation","where":{"reason":"cadence","tail_tokens":"2000","carried_turns":"0","newest_turn_tokens~":"","tool_outputs":"reference","outputs~":"# tool outputs","render_budget_tokens":"120","warm.prompt_n":"600"}}
+{"expect":"meditation","where":{"reason":"budget","at_turn":"4"}}
+{"expect":"meditation","where":{"reason":"window","at_turn":"8","window":"24000","tail_tokens":"400","carried_turns":"0","newest_turn_tokens~":""}}
+{"expect":"meditation","where":{"reason":"cadence","tool_outputs":"reference","outputs~":"# tool outputs","render_budget_tokens":"120","warm.prompt_n":"600"}}
 {"expect":"fork","where":{"lane":"audit","why":"meditation"},"at_least":3}
 {"expect":"recalled","where":{"recall":"literal"}}
 {"expect":"patch","where":{"lane":"operator","op":"supersede","entry.id":"$edited"}}

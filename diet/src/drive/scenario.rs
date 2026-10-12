@@ -51,6 +51,9 @@ pub struct Reply {
     /// How long it holds its answer back, in milliseconds (#782): what
     /// orders a canned trunk's answer after a fork beside it.
     pub delay_ms: Option<u64>,
+    /// The prompt its usage reports, in tokens (#798); absent, the canned
+    /// server's own count.
+    pub prompt_tokens: Option<u64>,
 }
 
 /// One call a reply makes.
@@ -221,7 +224,9 @@ impl Scenario {
     #[must_use]
     pub fn routes(&self) -> Vec<crate::client::stub::Route> {
         use crate::client::stub::{Act, Route};
-        use crate::drive::canned::{StreamedCall, streamed, streamed_events};
+        use crate::drive::canned::{
+            PROMPT_TOKENS, StreamedCall, streamed_events_reporting, streamed_reporting,
+        };
         self.replies
             .iter()
             .map(|reply| {
@@ -236,12 +241,13 @@ impl Scenario {
                     .collect();
                 // Held back: the same events, chunked, the first after the
                 // delay (#782).
+                let prompt = reply.prompt_tokens.unwrap_or(PROMPT_TOKENS);
                 let act = match reply.delay_ms {
                     Some(ms) => Act::Trickle(
                         std::time::Duration::from_millis(ms),
-                        vec![streamed_events(&reply.text, &calls)],
+                        vec![streamed_events_reporting(&reply.text, &calls, prompt)],
                     ),
-                    None => Act::Raw(streamed(&reply.text, &calls)),
+                    None => Act::Raw(streamed_reporting(&reply.text, &calls, prompt)),
                 };
                 match &reply.when {
                     Some(text) => Route::when(text, act),
@@ -282,6 +288,12 @@ impl Scenario {
                 members.insert(
                     "delay_ms".to_owned(),
                     Value::Integer(i64::try_from(ms).unwrap_or(i64::MAX)),
+                );
+            }
+            if let Some(tokens) = reply.prompt_tokens {
+                members.insert(
+                    "prompt_tokens".to_owned(),
+                    Value::Integer(i64::try_from(tokens).unwrap_or(i64::MAX)),
                 );
             }
             json::render(&Value::Object(members), &mut out);
@@ -425,12 +437,14 @@ fn reply_of(mut fields: Fields) -> Result<Reply, ScenarioError> {
         Some(_) => return Err(fields.wrong("`calls` a list")),
     };
     let delay_ms = fields.maybe_count("delay_ms")?;
+    let prompt_tokens = fields.maybe_count("prompt_tokens")?;
     fields.done()?;
     Ok(Reply {
         when,
         text,
         calls,
         delay_ms,
+        prompt_tokens,
     })
 }
 
@@ -1355,6 +1369,7 @@ mod tests {
                     text: "DECISION: a tracker".to_owned(),
                     calls: Vec::new(),
                     delay_ms: None,
+                    prompt_tokens: None,
                 },
                 Reply {
                     when: None,
@@ -1365,12 +1380,14 @@ mod tests {
                         arguments: r#"{"path":"a.py","content":"x"}"#.to_owned(),
                     }],
                     delay_ms: None,
+                    prompt_tokens: None,
                 },
                 Reply {
                     when: None,
                     text: "Done.".to_owned(),
                     calls: Vec::new(),
                     delay_ms: Some(250),
+                    prompt_tokens: Some(1200),
                 },
             ]
         );

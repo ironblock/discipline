@@ -1,7 +1,7 @@
 {"scenario":"minimal","regimen":"minimal.toml","live_regimen":"../drive/floor.toml","head":"../drive/heads/floor.md","approvals":"session","seed":{"AGENTS.md":"minimal.agents.md"}}
 {"reply":{"when":"Record the decisions","text":"DECISION: a tracker"}}
 {"reply":{"text":"Writing it.","calls":[{"id":"call-w","name":"write","arguments":"{\"path\":\"a.py\",\"content\":\"x\"}"}]}}
-{"reply":{"text":"Done.","delay_ms":250}}
+{"reply":{"text":"Done.","delay_ms":250,"prompt_tokens":1200}}
 {"step":"start-phase","phase":"orient"}
 {"step":"ask","text":"write a.py","scoping":true}
 {"step":"ask","text":"what is in shot.png","attach":["shot.png"]}
