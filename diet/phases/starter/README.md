@@ -14,5 +14,15 @@ compiled in; `"user"` for `$XDG_CONFIG_HOME/discipline/phases/`
 phase it starts in with `starting_phase`. To make your own, copy these files
 there and edit them. A document's file is named for its phase.
 
-The ground rules are model-facing; these are drafts awaiting the
-maintainer's approval.
+A regimen that runs in phases declares self-capture on, explicitly: it is how
+the model proposes a move, and whether `update_record` is used unprompted is
+part of what a phased run shows. Nothing turns it on by default.
+
+```toml
+phase_library = "starter"
+starting_phase = "orient"
+self_capture = "on"
+```
+
+The ground rules are model-facing, approved by the maintainer as a starting
+point (2026-10-11).
