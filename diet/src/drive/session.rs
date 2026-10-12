@@ -809,6 +809,9 @@ pub enum Event {
         supersedes: Option<String>,
         /// The tangent it was made under (#22), when one was open.
         tangent: Option<String>,
+        /// Why the entry it voided or retired went (#812), when the fork
+        /// said so: a `SUPERSEDE: <id> — <reason>` pair's reason.
+        reason: Option<String>,
     },
     /// A self-capture call and what it came to (#609).
     /// The operator's ruling on the model's pending phase proposal (#124).
@@ -4983,6 +4986,7 @@ pub fn line_of(logged: &Logged) -> log::Line {
             entry,
             supersedes,
             tangent,
+            reason,
         } => log::Event::Patch {
             fork: *fork,
             lane: lane.clone(),
@@ -4990,6 +4994,7 @@ pub fn line_of(logged: &Logged) -> log::Line {
             entry: entry.clone(),
             supersedes: supersedes.clone(),
             tangent: tangent.clone(),
+            reason: reason.clone(),
         },
         Event::PhaseRuled {
             call,
@@ -10480,7 +10485,7 @@ fn folded(state: &mut State, text: &str, turn: u32, fork: u64) -> (log::ForkOutc
         return (log::ForkOutcome::Unparseable, Vec::new());
     };
     let patches = unclashed(patches, &interview.object, (turn, fork));
-    let patches = cited(patches, &interview.object);
+    let Cited { patches, reasons } = cited(patches, &interview.object);
     // Made under an open tangent (#22): stamped with it from birth, so its
     // close finds them by provenance and never by recency.
     let patches: Vec<Patch> = match state.tangent.as_ref() {
@@ -10500,7 +10505,27 @@ fn folded(state: &mut State, text: &str, turn: u32, fork: u64) -> (log::ForkOutc
             })
             .collect(),
     };
-    applied(state, &patches, fork)
+    let (outcome, mut lines) = applied(state, &patches, fork);
+    // Each reasoned pair's reason, on the line that voided or retired the
+    // entry it cited (#812).
+    for line in &mut lines {
+        if let Event::Patched {
+            op,
+            entry,
+            supersedes,
+            reason,
+            ..
+        } = line
+        {
+            let cited = match op {
+                log::PatchOp::Supersede => supersedes.as_deref(),
+                log::PatchOp::Retire => Some(entry.id.as_str()),
+                _ => None,
+            };
+            *reason = cited.and_then(|cited| reasons.get(cited)).cloned();
+        }
+    }
+    (outcome, lines)
 }
 
 /// A fork's `patches`, applied to the working object (every op the format
@@ -10560,8 +10585,8 @@ const SUPERSEDE_FIELD: &str = "supersede: ";
 /// <id> <the entry that should stand>` voids `<id>`, linked, and records the
 /// rest under the field's own id. The meditation's render shows each entry as
 /// `<id>\t<content>`, so the id is what a model that saw it can cite; quotes,
-/// backticks and brackets around it, and a colon or dash after it, are read
-/// past. A field that cites nothing live, or names no entry to stand, stays
+/// backticks and brackets around it, and a colon or hyphen after it, are
+/// read past. An em dash after it is not: it opens the pair's reason (#812). A field that cites nothing live, or names no entry to stand, stays
 /// the addition [`super::fold`] made of it.
 ///
 /// One field may carry several pairs, `;` between them, and `→` or `->` may
@@ -10571,8 +10596,16 @@ const SUPERSEDE_FIELD: &str = "supersede: ";
 /// stand already does. Each pair after the first records under the field's
 /// id with its position after it, and a pair that cites nothing live stays
 /// an addition of its own text.
-fn cited(patches: Vec<Patch>, object: &WorkingObject) -> Vec<Patch> {
+///
+/// An em dash after the cited id makes the rest that pair's reason, not an
+/// entry (#812): `<id> — <reason>`, the audit grammar's `REMOVE — <reason>`
+/// shape, which a model answering the v4 ask writes. The answer's own
+/// DECISION then stands for the cited entry, superseding it, or with none
+/// the cited entry retires; either way the reason is recorded, by the
+/// voided entry's id, and never becomes an entry's text.
+fn cited(patches: Vec<Patch>, object: &WorkingObject) -> Cited {
     let fields = patches.len();
+    let mut reasons = BTreeMap::new();
     let mut read: Vec<Patch> = patches
         .into_iter()
         .flat_map(|patch| {
@@ -10591,7 +10624,8 @@ fn cited(patches: Vec<Patch>, object: &WorkingObject) -> Vec<Patch> {
             let pairs: Vec<&str> = pairs.iter().map(String::as_str).collect();
             if pairs.len() < 2 {
                 return vec![
-                    superseding(field.trim(), object, id.clone(), provenance).unwrap_or(patch),
+                    superseding(field.trim(), object, id.clone(), provenance)
+                        .map_or(patch, |pair| pair.patch(&mut reasons)),
                 ];
             }
             // Each pair on its own: one that cites nothing live stays the
@@ -10605,15 +10639,14 @@ fn cited(patches: Vec<Patch>, object: &WorkingObject) -> Vec<Patch> {
                     } else {
                         crate::object::EntryId::new(&format!("{}-{at}", id.as_str())).ok()?
                     };
-                    Some(
-                        superseding(pair, object, id.clone(), provenance).unwrap_or_else(|| {
-                            Patch::Add {
-                                id,
-                                content: format!("{SUPERSEDE_FIELD}{pair}"),
-                                provenance: provenance.clone(),
-                            }
-                        }),
-                    )
+                    Some(match superseding(pair, object, id.clone(), provenance) {
+                        Some(read) => read.patch(&mut reasons),
+                        None => Patch::Add {
+                            id,
+                            content: format!("{SUPERSEDE_FIELD}{pair}"),
+                            provenance: provenance.clone(),
+                        },
+                    })
                 })
                 .collect()
         })
@@ -10626,7 +10659,92 @@ fn cited(patches: Vec<Patch>, object: &WorkingObject) -> Vec<Patch> {
             provenance_of(patch).index = u32::try_from(index).unwrap_or(u32::MAX);
         }
     }
-    read
+    // A reasoned pair's entry stands in the answer's own DECISION, which
+    // supersedes the first entry cited so; any other is retired.
+    let mut decided = read.iter().position(
+        |patch| matches!(patch, Patch::Add { content, .. } if content.starts_with(DECISION_FIELD)),
+    );
+    for at in 0..read.len() {
+        let Patch::Retire { target, .. } = &read[at] else {
+            continue;
+        };
+        if !reasons.contains_key(target.as_str()) {
+            continue;
+        }
+        let Some(decision) = decided.take() else {
+            break;
+        };
+        let voids = target.clone();
+        if let Patch::Add {
+            id,
+            content,
+            provenance,
+        } = read[decision].clone()
+        {
+            read[decision] = Patch::Supersede {
+                id,
+                content,
+                voids,
+                provenance,
+            };
+            read.remove(at);
+        }
+        break;
+    }
+    Cited {
+        patches: read,
+        reasons,
+    }
+}
+
+/// [`cited`]'s reading: the patches, and the reason each `<id> — <reason>`
+/// pair gave, by the id it voided (#812).
+#[derive(Debug)]
+pub(crate) struct Cited {
+    /// The patches.
+    pub patches: Vec<Patch>,
+    /// Each reason, by the voided entry's id.
+    pub reasons: BTreeMap<String, String>,
+}
+
+/// The prefix [`super::fold`] gives a `DECISION` field's entry.
+const DECISION_FIELD: &str = "decision: ";
+
+/// One `SUPERSEDE` pair read (#562, #812): the patch it makes, or -- an em
+/// dash after the cited id -- the entry it voids and why.
+enum Pair {
+    /// A supersession, or a retirement in favour of a live entry.
+    Patch(Patch),
+    /// `<id> — <reason>`.
+    Reasoned {
+        /// The entry it voids.
+        voids: crate::object::EntryId,
+        /// Why.
+        reason: String,
+        /// Where it came from.
+        provenance: crate::object::Provenance,
+    },
+}
+
+impl Pair {
+    /// The patch: a reasoned pair's a retirement, its reason recorded in
+    /// `reasons` -- what [`cited`] turns into the DECISION's supersession.
+    fn patch(self, reasons: &mut BTreeMap<String, String>) -> Patch {
+        match self {
+            Self::Patch(patch) => patch,
+            Self::Reasoned {
+                voids,
+                reason,
+                provenance,
+            } => {
+                reasons.insert(voids.as_str().to_owned(), reason);
+                Patch::Retire {
+                    target: voids,
+                    provenance,
+                }
+            }
+        }
+    }
 }
 
 /// A `SUPERSEDE` field's pairs (#562): `;` starts a new pair only where a
@@ -10672,7 +10790,7 @@ fn superseding(
     object: &WorkingObject,
     id: crate::object::EntryId,
     provenance: &crate::object::Provenance,
-) -> Option<Patch> {
+) -> Option<Pair> {
     let quoted = |c: char| "`'\"[]()<>*:,—-".contains(c);
     // An arrow points from the cited id only when it follows the id itself:
     // one inside the text that stands is that text's (#730).
@@ -10684,6 +10802,8 @@ fn superseding(
         Some((cited, rest)) => (cited.trim(), rest),
         None => pair.split_once(char::is_whitespace).unwrap_or((pair, "")),
     };
+    // An em dash straight after the id, unarrowed, opens a reason (#812).
+    let reasoned = arrowed.is_none() && rest.trim_start().starts_with('—');
     let cited = cited.trim_matches(quoted);
     let rest = rest.trim_start_matches(|c: char| c.is_whitespace() || ":—-".contains(c));
     let rest = rest.trim();
@@ -10691,10 +10811,17 @@ fn superseding(
     let voids = crate::object::EntryId::new(cited)
         .ok()
         .filter(|voids| !rest.is_empty() && live(voids))?;
+    if reasoned {
+        return Some(Pair::Reasoned {
+            voids,
+            reason: rest.to_owned(),
+            provenance: provenance.clone(),
+        });
+    }
     let standing = crate::object::EntryId::new(rest.trim_matches(quoted))
         .ok()
         .filter(|standing| *standing != voids && live(standing));
-    Some(match standing {
+    Some(Pair::Patch(match standing {
         Some(_) => Patch::Retire {
             target: voids,
             provenance: provenance.clone(),
@@ -10705,7 +10832,7 @@ fn superseding(
             voids,
             provenance: provenance.clone(),
         },
-    })
+    }))
 }
 
 /// One applied patch as its log line: its op, its entry -- the patch's own
@@ -10743,6 +10870,7 @@ fn patched(fork: Option<u64>, patch: &Patch, object: &WorkingObject) -> Event {
         },
         supersedes,
         tangent: patch.provenance().tangent.clone(),
+        reason: None,
     }
 }
 
@@ -11580,7 +11708,8 @@ pub(in crate::drive) mod tests {
                 "interview-t2-0 a tracker for two teams; interview-t2-1 no login after all",
             )],
             &object,
-        );
+        )
+        .patches;
         let read: Vec<(String, String)> = patches
             .iter()
             .map(|patch| match patch {
@@ -11678,9 +11807,12 @@ pub(in crate::drive) mod tests {
         reads_whole(&session);
     }
 
-    /// Levers run A: a `;` in a SUPERSEDE's prose is the prose's -- one
-    /// pair, voiding the one entry it cites, its whole reason the entry that
-    /// stands -- and never an addition of its fragments.
+    /// Levers run A, the hard case (#812): a `;` in a SUPERSEDE's prose is
+    /// the prose's -- one pair, never an addition of its fragments -- and
+    /// the em dash after the cited id makes the rest that pair's reason. The
+    /// answer's own DECISION supersedes the cited entry; the reason is
+    /// recorded, never an entry's text; and the second id the reason names
+    /// ("Also r4621/…") is prose, not a citation.
     #[test]
     fn a_semicolon_in_a_supersedes_prose_is_no_new_pair() {
         let object = object_of(&[
@@ -11691,7 +11823,7 @@ pub(in crate::drive) mod tests {
         assert_eq!(trailer.as_deref(), Some("-- checked against AGENTS.md"));
         let (patches, _) =
             super::super::fold(&fields, 7, super::super::INTERVIEW, Some("f/9")).expect("read");
-        let patches = cited(patches, &object);
+        let Cited { patches, reasons } = cited(patches, &object);
         let superseding: Vec<(&str, &str)> = patches
             .iter()
             .filter_map(|patch| match patch {
@@ -11703,19 +11835,100 @@ pub(in crate::drive) mod tests {
             panic!("{patches:?}");
         };
         assert_eq!(*voids, "r3421/call_22baf3929b944b80b538212e/decision");
-        assert!(content.starts_with("its `--quiet` clause"), "{content}");
         assert!(
-            content
-                .ends_with("the entry that should stand on that point is the file's actual state."),
+            content.starts_with("decision: Dropped `--quiet` entirely"),
             "{content}"
+        );
+        let reason = &reasons["r3421/call_22baf3929b944b80b538212e/decision"];
+        assert!(reason.starts_with("its `--quiet` clause"), "{reason}");
+        assert!(
+            reason
+                .ends_with("the entry that should stand on that point is the file's actual state."),
+            "{reason}"
         );
         assert!(
             !patches.iter().any(|patch| matches!(
                 patch,
-                Patch::Add { content, .. } if content.starts_with("supersede: ")
+                Patch::Add { content, .. } | Patch::Supersede { content, .. }
+                    if content.starts_with("supersede: ") || content.starts_with("its `--quiet`")
             )),
             "{patches:?}"
         );
+        assert!(
+            !patches.iter().any(|patch| matches!(
+                patch,
+                Patch::Retire { target, .. } if target.as_str().starts_with("r4621/")
+            )),
+            "an id inside a reason is not cited: {patches:?}"
+        );
+    }
+
+    /// #812, the levers run C re-fire (#811): `SUPERSEDE: <id> — <reason>`,
+    /// the audit grammar's `REMOVE — <reason>` shape, voids the cited entry
+    /// in favour of the answer's own DECISION, the reason recorded and never
+    /// an entry's text; with no DECISION to stand, the cited entry retires.
+    #[test]
+    fn a_supersede_pair_with_an_em_dash_reason_never_makes_the_reason_an_entry() {
+        const REFIRE: &str = "DECISION: Broken links are now reported as JSON Lines\n\
+                              PLAN: Nothing further unless the user requests changes.\n\
+                              SUPERSEDE: interview-t1-f1366-0 — replaced by this turn's DECISION \
+                              (output format is JSON Lines, not `file:line: target`).\n";
+        let object = object_of(&["interview-t1-f1366-0"]);
+        let (patches, _) =
+            super::super::fold(REFIRE, 2, super::super::INTERVIEW, Some("f/2053")).expect("read");
+        let Cited { patches, reasons } = cited(patches, &object);
+        assert!(
+            matches!(
+                patches.as_slice(),
+                [Patch::Supersede { content, voids, .. }, Patch::Add { content: plan, .. }]
+                    if content == "decision: Broken links are now reported as JSON Lines"
+                        && voids.as_str() == "interview-t1-f1366-0"
+                        && plan.starts_with("plan: ")
+            ),
+            "{patches:#?}"
+        );
+        assert_eq!(
+            reasons,
+            BTreeMap::from([(
+                "interview-t1-f1366-0".to_owned(),
+                "replaced by this turn's DECISION (output format is JSON Lines, not \
+                 `file:line: target`)."
+                    .to_owned()
+            )])
+        );
+        // No DECISION to stand: the cited entry retires, for the same reason.
+        let (patches, _) = super::super::fold(
+            "SUPERSEDE: interview-t1-f1366-0 — the format changed\n",
+            2,
+            super::super::INTERVIEW,
+            Some("f/2053"),
+        )
+        .expect("read");
+        let Cited { patches, reasons } = cited(patches, &object);
+        assert!(
+            matches!(
+                patches.as_slice(),
+                [Patch::Retire { target, .. }] if target.as_str() == "interview-t1-f1366-0"
+            ),
+            "{patches:#?}"
+        );
+        assert_eq!(reasons["interview-t1-f1366-0"], "the format changed");
+        // A plain hyphen or a colon still introduces the entry that stands.
+        for written in [
+            "interview-t1-f1366-0 - decision: JSON Lines",
+            "interview-t1-f1366-0: decision: JSON Lines",
+        ] {
+            let Cited { patches, reasons } =
+                cited(vec![supersede_field("interview-t2-0", written)], &object);
+            assert!(
+                matches!(
+                    patches.as_slice(),
+                    [Patch::Supersede { content, .. }] if content == "decision: JSON Lines"
+                ),
+                "{written}: {patches:#?}"
+            );
+            assert!(reasons.is_empty(), "{written}");
+        }
     }
 
     /// #562: `→` or `->` between the cited id and what replaces it.
@@ -11729,7 +11942,8 @@ pub(in crate::drive) mod tests {
                     &format!("interview-t2-0 {arrow} a tracker for two teams"),
                 )],
                 &object,
-            );
+            )
+            .patches;
             assert!(
                 matches!(
                     &patches[..],
@@ -11739,6 +11953,70 @@ pub(in crate::drive) mod tests {
                 "{arrow}: {patches:?}"
             );
         }
+    }
+
+    /// #812: a fork's `<id> — <reason>` reaches the log as the reason on
+    /// the line that voided the cited entry -- its DECISION's `supersede`
+    /// -- and no line's entry is the reason.
+    #[test]
+    fn a_forks_supersede_reason_is_logged_on_the_line_that_voids() {
+        let session = Session::open_with(
+            Canned::new(Vec::<Vec<Step>>::new()),
+            template(),
+            None,
+            None,
+            None,
+            Some(interviewing(&[log::Warrant::Scoping])),
+        );
+        let mut state = session.shared.lock();
+        let seed = Patch::Add {
+            id: entry_id("interview-t1-f1366-0"),
+            content: "decision: report broken links as `file:line: target`".to_owned(),
+            provenance: from_fork(0),
+        };
+        assert_eq!(applied(&mut state, &[seed], 1).0, log::ForkOutcome::Value);
+        let (outcome, lines) = folded(
+            &mut state,
+            "DECISION: report broken links as JSON Lines\n\
+             PLAN: NONE\n\
+             SUPERSEDE: interview-t1-f1366-0 — replaced by this turn's DECISION\n",
+            2,
+            2053,
+        );
+        assert_eq!(outcome, log::ForkOutcome::Value);
+        let logged: Vec<log::Event> = lines
+            .iter()
+            .map(|event| {
+                line_of(&Logged {
+                    seq: 0,
+                    t: 0,
+                    event: event.clone(),
+                })
+                .event
+            })
+            .collect();
+        assert!(
+            logged.iter().any(|line| matches!(
+                line,
+                log::Event::Patch {
+                    op: log::PatchOp::Supersede,
+                    supersedes: Some(voids),
+                    reason: Some(reason),
+                    entry,
+                    ..
+                } if voids == "interview-t1-f1366-0"
+                    && reason == "replaced by this turn's DECISION"
+                    && entry.text == "decision: report broken links as JSON Lines"
+            )),
+            "{logged:#?}"
+        );
+        assert!(
+            !logged.iter().any(|line| matches!(
+                line,
+                log::Event::Patch { entry, .. } if entry.text.contains("replaced by this turn")
+            )),
+            "{logged:#?}"
+        );
     }
 
     /// #562, from the meditation smoke run: a pair whose replacement is itself a
@@ -11758,7 +12036,8 @@ pub(in crate::drive) mod tests {
                 "interview-t2-0 → r1516/call-a/decision; interview-t2-1 → r1516/call-b/followup",
             )],
             &object,
-        );
+        )
+        .patches;
         let retired: Vec<&str> = patches
             .iter()
             .map(|patch| match patch {
@@ -12894,6 +13173,7 @@ pub(in crate::drive) mod tests {
                 },
                 supersedes: None,
                 tangent: Some("t/1".to_owned()),
+                reason: None,
             },
             Event::Meditated {
                 phase_document: None,
@@ -13401,6 +13681,7 @@ pub(in crate::drive) mod tests {
                 },
                 supersedes: None,
                 tangent: Some("t/1".to_owned()),
+                reason: None,
             },
             log::Event::Meditation {
                 phase_document: None,
@@ -17253,6 +17534,7 @@ pub(in crate::drive) mod tests {
             },
             supersedes: None,
             tangent: None,
+            reason: None,
         };
         for op in [
             log::PatchOp::Park,
@@ -18887,7 +19169,7 @@ pub(in crate::drive) mod tests {
         ] {
             let (patches, _) = super::super::fold(answer, 2, super::super::INTERVIEW, Some("f/9"))
                 .expect("folded");
-            let patches = cited(patches, &object);
+            let patches = cited(patches, &object).patches;
             match (&patches[..], voids) {
                 (
                     [
@@ -24323,7 +24605,7 @@ pub(in crate::drive) mod tests {
         for arrow in ["->", "→"] {
             let object = object_of(&["interview-t1-0"]);
             let text = format!("interview-t1-0 the pipeline is build {arrow} test {arrow} ship");
-            let patches = cited(vec![supersede_field("interview-t2-0", &text)], &object);
+            let patches = cited(vec![supersede_field("interview-t2-0", &text)], &object).patches;
             assert!(
                 matches!(
                     patches.as_slice(),

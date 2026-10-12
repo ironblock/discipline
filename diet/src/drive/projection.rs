@@ -2266,6 +2266,7 @@ mod tests {
             },
             supersedes: None,
             tangent: None,
+            reason: None,
         });
         let projection = project(&numbered(events), &regime(), None).expect("projected");
         let kinds: Vec<&str> = projection
@@ -3355,6 +3356,7 @@ mod tests {
             },
             supersedes: None,
             tangent: None,
+            reason: None,
         };
         let mut events = vec![start()];
         events.extend(answered(1, 3, Some(warm()), None));
