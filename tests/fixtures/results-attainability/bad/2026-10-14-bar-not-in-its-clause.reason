@@ -1,0 +1,2 @@
+results.attainability-bar-drift
+A row's declared bar (P@5 0.45) is in no comparison its clause states (P@5 >= 0.40): the checks would hold the declaration, not the rule. Each declared bar appears in its clause's text, under the comparison its `asks` names.

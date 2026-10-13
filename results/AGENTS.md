@@ -12,7 +12,7 @@
 **Every p-value ships with its attainable floor.** A sample size bounds the smallest p it can produce; report it.
 
 **A bar is checked against what can attain it, before a verdict** (ruled on #17; operative from 2026-10-13). A rule (`decision-rule*.toml`, `comparison-rule*.toml`) dated after that declares an `[[attainability]]` row for each supported and refuted clause, and a `[constructed]` table, and `scripts/check-results.py` holds them to six checks:
-- a `bar` row (`clause`, `statistic`, `asks` = `at_least` | `at_most` | `below` | `above`, `bar`, `best`, and `trivial` with `constant`, `random` and `lexical`, each an exact decimal or `not applicable: <why>`): the bar is attainable by a perfect scorer on the same pooling, and no trivial scorer clears it;
+- a `bar` row (`clause`, `statistic`, `asks` = `at_least` | `at_most` | `below` | `above`, `bar`, `best`, and `trivial` with `constant`, `random` and `lexical`, each an exact decimal or `not applicable: <why>`): the bar is the one its clause's text states, under the comparison `asks` names (`>=`, `<=`, `<`, `>`); it is attainable by a perfect scorer on the same pooling, and no trivial scorer clears it;
 - a `floor` or `control` row declares `fires_on_predicted_outcome = false`: a floor that fires when the hypothesis is right refutes it for being right;
 - no clause asks a p below its attainable floor, which no data can give;
 - a `margin` row reads an interval (`reads = "interval"`), never a point estimate;
