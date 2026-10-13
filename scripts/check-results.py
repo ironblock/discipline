@@ -639,6 +639,11 @@ ADJUDICATING = ("supported", "refuted")
 ROW_KINDS = ("bar", "margin", "floor", "control")
 ASKS = ("at_least", "at_most", "below", "above")
 TRIVIAL_SCORERS = ("constant", "random", "lexical")
+# A comparison a clause states, `>= 0.40`: the operator and its number. A
+# declared bar is held to one of these (the bar's drift from its rule, found
+# in review of #846), under the operator its `asks` names.
+COMPARISON = re.compile(r"(>=|<=|≥|≤|>|<)\s*(-?[0-9]+(?:\.[0-9]+)?)")
+ASKS_OPERATORS = {"at_least": (">=", "≥"), "at_most": ("<=", "≤"), "below": ("<",), "above": (">",)}
 P_BELOW_FLOOR = re.compile(r"\bp\b[^.;]*?\bbelow (?:the|its) attainable floor", re.IGNORECASE)
 NOT_APPLICABLE = re.compile(r"not applicable: .*[A-Za-z].*")
 REPORTED: list[str] = []
@@ -722,6 +727,7 @@ def attainability(directory: pathlib.Path) -> list[tuple[str, str]]:
             ))
             rows = []
         named = {clause for clause, _ in clauses}
+        texts = dict(clauses)
         covered = {row.get("clause") for row in rows}
         for clause in sorted(c for c in named if c.rsplit(".", 1)[-1] in ADJUDICATING and c not in covered):
             if rows:
@@ -742,6 +748,18 @@ def attainability(directory: pathlib.Path) -> list[tuple[str, str]]:
                         f"{where} a bar row states `asks` (one of {ASKS}), and `bar` and `best` as exact decimals",
                     ))
                     continue
+                # The bar is the rule's, not only the row's: it appears in
+                # the clause's text under the comparison `asks` names.
+                stated = [
+                    (operator, decimal.Decimal(number))
+                    for operator, number in COMPARISON.findall(texts.get(clause, ""))
+                ]
+                if not any(op in ASKS_OPERATORS[asks] and value == bar for op, value in stated):
+                    failures.append((
+                        "results.attainability-bar-drift",
+                        f"{where} declares {row.get('statistic', 'its statistic')} {asks} {bar}, and `{clause}` "
+                        f"states no such comparison ({', '.join(f'{op} {value}' for op, value in stated) or 'none'})",
+                    ))
                 # Check 1: attainable -- a perfect scorer can satisfy the
                 # clause (supported) or escape it (a refutation).
                 reachable = best >= bar if asks in ("at_least", "below") else best <= bar

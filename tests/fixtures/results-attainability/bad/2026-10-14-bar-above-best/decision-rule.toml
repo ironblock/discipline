@@ -5,7 +5,7 @@
 hypothesis = "the nominator ranks superseding turns into each drive's top 5"
 
 [rule]
-supported = "pooled P@5 >= 0.40, over-firing <= 0.30, and the lower bound of the margin's 95% interval over the floor >= 0.2"
+supported = "pooled P@5 >= 0.80, over-firing <= 0.30, and the lower bound of the margin's 95% interval over the floor >= 0.2"
 refuted = "pooled P@5 < 0.20"
 inconclusive = "neither clause holds"
 
