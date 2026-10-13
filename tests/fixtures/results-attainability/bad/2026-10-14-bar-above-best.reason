@@ -1,0 +1,2 @@
+results.attainability-unattainable
+The supported bar (P@5 >= 0.80) sits above the best any scorer reaches on its pooling (0.7667): no data could produce `supported` (#17, A1a).
