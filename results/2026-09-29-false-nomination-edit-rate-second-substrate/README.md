@@ -26,6 +26,7 @@ known_defects = [
   "pre-registration.json was written after the fire, summarising the text on #142; the operative rules and appliers are the four files whose digests were posted on #142 before any fork fired.",
   "The ladder is nominal, as in stage 2: the six rungs are six seeded false-nomination assignments over the same forks, read as replicate stability.",
   "The endpoint is partly compliance: the imperative line tells the consumer to state the correction, so the imperative edit rate measures, in part, instruction-following on a false entry -- which is the harm the claim is about.",
+  "erratum (construction audit of 2026-10-13, finding A6; it annotates, the word stands as adjudicated): the comparison word substrate_independent is |delta| < 0.05 on a point estimate, with no interval; a paired-fork bootstrap of delta (second substrate minus 27B) over the 72 shared forks (30 discordant, 16 against 14) gives a 95% interval of [-0.125, 0.181], which contains the 0.15 dependence margin, so neither independence nor dependence is excluded and 'imperative framing overrides capability' is not shown; endpoint 1's supported is unaffected"
 ]
 targets_checked = 252
 targets_matched = 252
