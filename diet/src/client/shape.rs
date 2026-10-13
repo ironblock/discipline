@@ -108,7 +108,27 @@ pub struct Message {
 pub struct Image {
     media_type: String,
     base64: String,
+    /// Its width and height in pixels, read from its header when it is
+    /// attached; `None` for an encoding whose header is not read.
+    pixels: Option<(u32, u32)>,
 }
+
+/// The pixels a vision token covers on a side: the registered vision lines
+/// (Qwen3.8) cut 16-pixel patches and merge them 2x2, one token a 32x32
+/// patch. Measured: a 4096x4096 image cost 16,461 prompt tokens and a
+/// 1024x1024 one 1,101 on the Flash-Next line, each the patches and the
+/// same 77 tokens of text (`substrates/measurements/2026-10-12-ada48-vision/`).
+pub const IMAGE_PATCH_SIDE: u32 = 32;
+
+/// The fewest tokens an image costs: the floor's preprocessor raises a
+/// smaller image to 1,048,576 pixels, 1,024 tokens
+/// (`substrates/measurements/2026-10-04-qwen38-27b-tabbyapi-vision/`).
+pub const IMAGE_MIN_TOKENS: u64 = 1_024;
+
+/// What an image whose size is not read is taken to cost: the largest the
+/// Flash-Next line takes, 4096x4096 (16,777,216 pixels, its
+/// `longest_edge`), in patches.
+pub const IMAGE_UNSIZED_TOKENS: u64 = 16_384;
 
 impl Image {
     /// The `data:` URI the wire carries it as:
@@ -129,6 +149,66 @@ impl Image {
     pub fn base64(&self) -> &str {
         &self.base64
     }
+
+    /// Its width and height in pixels, when its header was read.
+    #[must_use]
+    pub fn pixels(&self) -> Option<(u32, u32)> {
+        self.pixels
+    }
+
+    /// The prompt tokens it is estimated to cost: its pixels in 32x32
+    /// patches, never fewer than [`IMAGE_MIN_TOKENS`] -- never its encoded
+    /// bytes, which say nothing of what a vision model sees. Unsized,
+    /// [`IMAGE_UNSIZED_TOKENS`]. The served usage after the request corrects
+    /// it, as it corrects every estimate (#588).
+    #[must_use]
+    pub fn estimated_tokens(&self) -> u64 {
+        self.pixels.map_or(IMAGE_UNSIZED_TOKENS, |(width, height)| {
+            let side = |pixels: u32| u64::from(pixels.div_ceil(IMAGE_PATCH_SIDE));
+            (side(width) * side(height)).max(IMAGE_MIN_TOKENS)
+        })
+    }
+}
+
+/// An image's width and height from its header: PNG's `IHDR`, a JPEG's
+/// start-of-frame, a GIF's screen descriptor. `None` for anything else, or
+/// a header too short to read.
+fn dimensions(bytes: &[u8]) -> Option<(u32, u32)> {
+    let be16 = |at: usize| -> Option<u32> {
+        Some(u32::from(u16::from_be_bytes(
+            bytes.get(at..at + 2)?.try_into().ok()?,
+        )))
+    };
+    let be32 = |at: usize| -> Option<u32> {
+        Some(u32::from_be_bytes(bytes.get(at..at + 4)?.try_into().ok()?))
+    };
+    if bytes.starts_with(b"\x89PNG\r\n\x1a\n") && bytes.get(12..16) == Some(b"IHDR") {
+        return Some((be32(16)?, be32(20)?));
+    }
+    if bytes.starts_with(b"GIF8") {
+        let le16 = |at: usize| -> Option<u32> {
+            Some(u32::from(u16::from_le_bytes(
+                bytes.get(at..at + 2)?.try_into().ok()?,
+            )))
+        };
+        return Some((le16(6)?, le16(8)?));
+    }
+    if bytes.starts_with(&[0xFF, 0xD8]) {
+        // Each marker segment in turn, to the first start-of-frame (SOF0
+        // to SOF15, but not DHT, JPG or DAC).
+        let mut at = 2;
+        while at + 4 <= bytes.len() {
+            if bytes[at] != 0xFF {
+                return None;
+            }
+            let marker = bytes[at + 1];
+            if (0xC0..=0xCF).contains(&marker) && ![0xC4, 0xC8, 0xCC].contains(&marker) {
+                return Some((be16(at + 7)?, be16(at + 5)?));
+            }
+            at += 2 + usize::try_from(be16(at + 2)?).ok()?;
+        }
+    }
+    None
 }
 
 /// Why [`attach`] refused bytes: they are not the file the log names.
@@ -200,6 +280,7 @@ pub(crate) fn attach(
     message.images.push(Image {
         media_type: file.media_type.clone(),
         base64: crate::drive::serve::base64(bytes),
+        pixels: dimensions(bytes),
     });
     Ok(message)
 }
@@ -656,6 +737,74 @@ mod tests {
     use std::time::Duration;
 
     use super::{Limits, Message, Pin, RequestShape, Role, SamplerCard, SamplerSetting};
+
+    /// An image of `bytes`, attached as the log would name it.
+    fn attached(media_type: &str, bytes: &[u8]) -> super::Image {
+        let file = crate::formats::log::RecordedFile {
+            path: "files/x".to_owned(),
+            sha256: crate::digest::sha256_hex(bytes),
+            media_type: media_type.to_owned(),
+            bytes: bytes.len() as u64,
+        };
+        super::attach(Message::new(Role::Tool, ""), &file, bytes)
+            .expect("its own bytes")
+            .images
+            .remove(0)
+    }
+
+    /// A PNG's signature and header for `width` by `height`.
+    fn png(width: u32, height: u32) -> Vec<u8> {
+        let mut png = b"\x89PNG\r\n\x1a\n".to_vec();
+        png.extend_from_slice(&13_u32.to_be_bytes());
+        png.extend_from_slice(b"IHDR");
+        png.extend_from_slice(&width.to_be_bytes());
+        png.extend_from_slice(&height.to_be_bytes());
+        png.extend_from_slice(&[8, 6, 0, 0, 0, 0, 0, 0, 0]);
+        png
+    }
+
+    /// An image is estimated by its pixels, one token a 32x32 patch, never
+    /// by its encoding: the Flash-Next line's measured 4096x4096 and
+    /// 1024x1024 (16,461 and 1,101 prompt tokens, 77 of them text), the
+    /// live run's 2400x2950 screenshot, padded to 3.4 MB; at least 1,024, the
+    /// floor's minimum; an unsized one at the most a vision line takes.
+    #[test]
+    fn an_image_is_estimated_by_its_pixels_not_its_bytes() {
+        let mut shot = png(2_400, 2_950);
+        shot.resize(3_400_000, 0);
+        for (bytes, pixels, tokens) in [
+            (png(4_096, 4_096), Some((4_096, 4_096)), 16_461 - 77),
+            (png(1_024, 1_024), Some((1_024, 1_024)), 1_101 - 77),
+            (shot, Some((2_400, 2_950)), 75 * 93),
+            (png(100, 100), Some((100, 100)), super::IMAGE_MIN_TOKENS),
+            (
+                b"\x89PNG\r\n\x1a\nno header".to_vec(),
+                None,
+                super::IMAGE_UNSIZED_TOKENS,
+            ),
+        ] {
+            let image = attached("image/png", &bytes);
+            assert_eq!(image.pixels(), pixels);
+            assert_eq!(image.estimated_tokens(), tokens, "{pixels:?}");
+        }
+    }
+
+    /// A JPEG's size from its start-of-frame, past the segments before it;
+    /// a GIF's from its screen descriptor.
+    #[test]
+    fn a_jpeg_and_a_gif_are_sized_from_their_headers() {
+        let mut jpeg = vec![0xFF, 0xD8, 0xFF, 0xE0, 0x00, 0x10];
+        jpeg.extend_from_slice(&[0; 14]);
+        jpeg.extend_from_slice(&[0xFF, 0xC0, 0x00, 0x11, 0x08]);
+        jpeg.extend_from_slice(&1_080_u16.to_be_bytes());
+        jpeg.extend_from_slice(&1_920_u16.to_be_bytes());
+        jpeg.extend_from_slice(&[3, 1, 0x22, 0, 2, 0x11, 1, 3, 0x11, 1]);
+        assert_eq!(attached("image/jpeg", &jpeg).pixels(), Some((1_920, 1_080)));
+        let mut gif = b"GIF89a".to_vec();
+        gif.extend_from_slice(&640_u16.to_le_bytes());
+        gif.extend_from_slice(&480_u16.to_le_bytes());
+        assert_eq!(attached("image/gif", &gif).pixels(), Some((640, 480)));
+    }
 
     #[test]
     fn the_shapes_vocabularies_are_the_words_the_wire_carries() {
