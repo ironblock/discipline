@@ -706,6 +706,10 @@ pub fn serve_levers(regimen: &Regimen, output_cap: (u32, &str)) -> BTreeMap<Stri
             meditation_audit_lever(regimen),
         ),
         (
+            "meditation_audit_chunk".to_owned(),
+            meditation_audit_chunk_lever(regimen),
+        ),
+        (
             "meditation_warm".to_owned(),
             meditation_work_lever(regimen, crate::meditation::policy::MEDITATION_WARM),
         ),
@@ -1019,6 +1023,19 @@ fn meditation_audit_lever(regimen: &Regimen) -> String {
         format!("on:{}:{}", set.name, set.digest())
     } else {
         on
+    }
+}
+
+/// The audit chunk lever's word: `notes:<n>`, with `:default` when the
+/// regimen declares none; `off` with the audit.
+fn meditation_audit_chunk_lever(regimen: &Regimen) -> String {
+    use crate::meditation::policy::{AUDIT_CHUNK_NOTES_DEFAULT, MEDITATION_AUDIT_CHUNK_NOTES};
+    if meditation_work_lever(regimen, crate::meditation::policy::MEDITATION_AUDIT) == "off" {
+        return "off".to_owned();
+    }
+    match regimen.get(MEDITATION_AUDIT_CHUNK_NOTES) {
+        Some(regimen::Value::Integer(n)) if *n > 0 => format!("notes:{n}"),
+        _ => format!("notes:{AUDIT_CHUNK_NOTES_DEFAULT}:default"),
     }
 }
 
@@ -1418,6 +1435,24 @@ mod tests {
         assert_eq!(lever(""), "queued:3:default");
         assert_eq!(lever("fork_backlog = 6\n"), "queued:6");
         assert_eq!(lever("fork_backlog = \"lots\"\n"), UNDECLARED);
+    }
+
+    /// The audit chunk lever: off with the audit; the default chunk, or
+    /// the declared one.
+    #[test]
+    fn the_audit_chunk_lever_names_the_chunk_and_its_source() {
+        let lever = |text: &str| {
+            serve_levers(&regimen::parse(text).expect("a regimen"), (8192, "default"))
+                .get("meditation_audit_chunk")
+                .cloned()
+                .unwrap_or_default()
+        };
+        assert_eq!(lever(""), "off");
+        assert_eq!(lever("meditation_audit = \"on\"\n"), "notes:100:default");
+        assert_eq!(
+            lever("meditation_audit = \"on\"\nmeditation_audit_chunk_notes = 40\n"),
+            "notes:40"
+        );
     }
 
     /// The default timeout (#613): 120000 ms unless the regimen says, 0

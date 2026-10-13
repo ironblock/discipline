@@ -12,7 +12,7 @@
 {"entry":{"id":"d1","text":"a tracker"},"fork":7,"kind":"patch","op":"add","seq":11,"t":55}
 {"kind":"ask","seq":12,"t":60,"text":"build it","turn":2}
 {"from":"awaiting","kind":"settlement","seq":13,"t":65,"to":"turn"}
-{"at_turn":2,"audit_notes":12,"audit_notes_left":40,"audit_window_line":143840,"carried_entries":1,"carried_turns":0,"frame":"placeholder","kind":"meditation","prefix_hash_after":"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb","prefix_hash_before":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","prompt_tokens":150000,"reason":"window","render":"# regime\narm: diet\nsubstrate: a-substrate\ndogma_version: 1\nphase: -\nframe_version: placeholder\n\n# working set\nd1\ta tracker\n","seq":14,"t":70,"turn_steps_compacted":0,"turn_steps_kept":1,"window":163840}
+{"at_turn":2,"audit_notes":12,"audit_notes_left":40,"audit_notes_unreached":12,"audit_window_line":143840,"carried_entries":1,"carried_turns":0,"frame":"placeholder","kind":"meditation","prefix_hash_after":"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb","prefix_hash_before":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","prompt_tokens":150000,"reason":"window","render":"# regime\narm: diet\nsubstrate: a-substrate\ndogma_version: 1\nphase: -\nframe_version: placeholder\n\n# working set\nd1\ta tracker\n","seq":14,"t":70,"turn_steps_compacted":0,"turn_steps_kept":1,"window":163840}
 {"kind":"request","lane":"trunk","seq":15,"t":75,"turn":2}
 {"kind":"response","seq":16,"t":80,"text":"started on the schema","to_request":15}
 {"kind":"turn.settled","reason":"final","seq":17,"t":85,"turn":2}

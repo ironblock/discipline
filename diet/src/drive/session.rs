@@ -701,6 +701,9 @@ pub enum Event {
         /// Its audit fitted to the window (#821): the notes audited, those
         /// left out, and the window's line.
         audit_notes: Option<(u64, u64, u64)>,
+        /// The notes its audit asked over and never reached: its answer was
+        /// cut off by its cap, so it folded nothing.
+        audit_unreached: Option<u64>,
     },
     /// Forks' patches delivered at the tail of a trunk request, after its
     /// ask (the fork delivery lever): the note stays on the trunk.
@@ -2294,6 +2297,9 @@ struct State {
     /// The audit at the meditation in progress, fitted to the window (#821):
     /// the notes audited, those left out, the line; for its line.
     audit_cut: Option<(u64, u64, u64)>,
+    /// The notes the audit at the meditation in progress asked over and
+    /// never reached: its answer cut off by its cap.
+    audit_unreached: Option<u64>,
     /// Where each event is written as it is appended (see
     /// [`Session::write_through`]).
     sink: Option<Sink>,
@@ -2511,6 +2517,7 @@ impl State {
             recovered: BTreeMap::new(),
             mechanical: None,
             audit_cut: None,
+            audit_unreached: None,
             sink: None,
             allowed: tools
                 .as_ref()
@@ -5314,7 +5321,9 @@ pub fn line_of(logged: &Logged) -> log::Line {
             warm,
             turn_steps,
             audit_notes,
+            audit_unreached,
         } => log::Event::Meditation {
+            audit_notes_unreached: *audit_unreached,
             turn_steps: turn_steps.map(|(kept, compacted)| log::TurnSteps { kept, compacted }),
             audit_notes: audit_notes.map(|(audited, left, line)| log::AuditNotes {
                 audited,
@@ -7677,6 +7686,7 @@ fn refilled(
         warm: None,
         turn_steps: None,
         audit_notes: state.audit_cut.take(),
+        audit_unreached: state.audit_unreached.take(),
     }
 }
 
@@ -7720,31 +7730,43 @@ type Note = (crate::object::EntryId, String);
 type AuditCut = (u64, u64, u64);
 
 /// The notes an audit asks over, fitted to the window (#821): with the
-/// trunk at the cut and every note numbered past the window's line, the
-/// newest that fit -- in their own order -- the rest left as they are,
-/// neither kept nor removed by an answer that never saw them; and the cut
-/// (audited, left, the line) when there was one. `None` notes when not
-/// even one fits.
+/// trunk at the cut and every note numbered past the audit's line
+/// ([`audit_line`]), the notes the operator changed (`operator`) first --
+/// their explicit ask -- then the newest that fit, in their own order; the
+/// rest left as they are, neither kept nor removed by an answer that never
+/// saw them; and the cut (audited, left, the line) when there was one.
+/// `None` notes when not even one fits.
 fn fitted_items(
     template: &RequestShape,
-    trunk: &[Message],
-    object: &crate::object::WorkingObject,
+    state: &State,
     items: Vec<Note>,
     asking: &dyn Fn(&[Note]) -> Option<crate::meditation::Ask>,
 ) -> (Option<Vec<Note>>, Option<AuditCut>) {
-    let trunk = trunk
+    let Some(object) = state.interview.as_ref().map(|interview| &interview.object) else {
+        return (Some(items), None);
+    };
+    let operator: Vec<&str> = state
+        .operator_pending
         .iter()
-        .map(crate::meditation::render::estimated_tokens)
-        .sum::<u64>();
+        .map(|change| change.entry.as_str())
+        .collect();
+    // Sized as its request will be: the trunk's measure and the ask (#588).
     let sized = |ask: &crate::meditation::Ask| {
-        trunk + u64::try_from(ask.text.chars().count().div_ceil(4)).unwrap_or(u64::MAX)
+        let mut shape = template.clone();
+        shape.messages.clone_from(&state.trunk);
+        shape
+            .messages
+            .push(Message::new(Role::User, ask.text.clone()));
+        state.prompt_of(&shape)
     };
     let Some(line) =
-        window_line(template).filter(|line| asking(&items).is_some_and(|ask| sized(&ask) > *line))
+        audit_line(template).filter(|line| asking(&items).is_some_and(|ask| sized(&ask) > *line))
     else {
         return (Some(items), None);
     };
-    let newest = newest_first(object, &items);
+    // The operator's first, then the newest.
+    let mut newest = newest_first(object, &items);
+    newest.sort_by_key(|at| !operator.contains(&items[*at].0.as_str()));
     let fits = |kept: usize| {
         asking(&chosen_of(&items, &newest[..kept])).is_some_and(|ask| sized(&ask) <= line)
     };
@@ -7800,6 +7822,20 @@ fn chosen_of(
 /// The window's line (#617, #814): the window less its reserve -- the
 /// output cap, or [`crate::meditation::policy::WINDOW_RESERVE`] if more --
 /// when serve knows the window.
+/// The line an audit's prompt is fitted to: the window less the clamp's
+/// margin and the output cap, so the clamp leaves the answer its whole cap
+/// -- an audit fitted to the window's line alone left it what the margin
+/// did not take (11,765 of 32,768 on a 524,288 window, its answer cut off
+/// before the operator's flag); never above the window's line.
+fn audit_line(template: &RequestShape) -> Option<u64> {
+    let window = template.limits.context_window?;
+    let margin = u64::try_from(margin(i128::from(window))).unwrap_or(u64::MAX);
+    let room = window
+        .saturating_sub(margin)
+        .saturating_sub(u64::from(template.limits.max_output_tokens));
+    Some(window_line(template).map_or(room, |line| line.min(room)))
+}
+
 fn window_line(template: &RequestShape) -> Option<u64> {
     let reserve =
         u64::from(template.limits.max_output_tokens).max(crate::meditation::policy::WINDOW_RESERVE);
@@ -8181,11 +8217,17 @@ fn audit_and_gate<'a, S: Streaming>(
 ) -> std::sync::MutexGuard<'a, State> {
     // This meditation's own cut (#821), none carried from one that held.
     state.audit_cut = None;
-    if let Some(fired) = audit_fired(&shared.template, &mut state, reason, None) {
-        drop(state);
-        shared.changed.notify_all();
-        audited(shared, fired);
-        state = shared.lock();
+    state.audit_unreached = None;
+    // In chunks, each its own fork, so each one's reasoning and answer fit
+    // its cap: the operator's changed notes first, then the newest. One at a
+    // time, under the session's one flight.
+    for chunk in audit_chunks_of(&state) {
+        if let Some(fired) = audit_fired(&shared.template, &mut state, reason, Some(&chunk)) {
+            drop(state);
+            shared.changed.notify_all();
+            audited(shared, fired);
+            state = shared.lock();
+        }
     }
     let Some(left) = left_unaddressed(&state).filter(|_| refusing(&state)) else {
         return state;
@@ -8197,6 +8239,34 @@ fn audit_and_gate<'a, S: Streaming>(
         state = shared.lock();
     }
     state
+}
+
+/// The live notes an audit asks over, in chunks of the regimen's
+/// [`crate::meditation::policy::MEDITATION_AUDIT_CHUNK_NOTES`]: the notes the
+/// operator changed first, then the newest.
+fn audit_chunks_of(state: &State) -> Vec<Vec<String>> {
+    let Some(interview) = state.interview.as_ref() else {
+        return Vec::new();
+    };
+    let items: Vec<Note> = interview
+        .object
+        .live()
+        .map(|entry| (entry.id.clone(), entry.content.clone()))
+        .collect();
+    let mut order = newest_first(&interview.object, &items);
+    order.sort_by_key(|at| {
+        !state
+            .operator_pending
+            .iter()
+            .any(|change| change.entry == items[*at].0.as_str())
+    });
+    let ids: Vec<String> = order
+        .into_iter()
+        .map(|at| items[at].0.as_str().to_owned())
+        .collect();
+    ids.chunks(interview.meditations.audit_chunk())
+        .map(<[String]>::to_vec)
+        .collect()
 }
 
 /// Whether the session's regimen refuses to refill over an unaddressed
@@ -8273,10 +8343,13 @@ fn audit_fired(
         }
     };
     // The audit fits the window (#821): the newest notes that fit.
-    let (chosen, cut) = fitted_items(template, &state.trunk, &interview.object, items, &asking);
+    let (chosen, cut) = fitted_items(template, state, items, &asking);
     let ask = chosen.and_then(|chosen| asking(&chosen));
-    if cut.is_some() {
-        state.audit_cut = cut;
+    // Each chunk's cut, summed over the meditation's chunks.
+    if let Some((audited, left, line)) = cut {
+        state.audit_cut = Some(state.audit_cut.map_or((audited, left, line), |(a, l, _)| {
+            (a + audited, l + left, line)
+        }));
     }
     let ask = ask?;
     // The notes with a pending change, on either route (#748): the tools
@@ -8474,6 +8547,10 @@ fn audited<S: Streaming>(shared: &Shared<S>, fired: AuditFired) {
             if cancel.is_asked() {
                 log::ForkOutcome::Cancelled
             } else if cut {
+                // Cut off by its cap, it folds nothing: every note it asked
+                // over stands as it was, and the meditation line says so.
+                state.audit_unreached =
+                    Some(state.audit_unreached.unwrap_or(0) + items.len() as u64);
                 log::ForkOutcome::Truncated
             } else if tools {
                 // #610: each record-tool call run as a fork's is, its
@@ -14098,6 +14175,7 @@ pub(in crate::drive) mod tests {
                 warm: None,
                 turn_steps: None,
                 audit_notes: None,
+                audit_unreached: None,
             },
             Event::Recalled {
                 turn: 2,
@@ -14634,6 +14712,7 @@ pub(in crate::drive) mod tests {
                 warm: None,
                 turn_steps: None,
                 audit_notes: None,
+                audit_notes_unreached: None,
             },
             log::Event::Recalled {
                 turn: 2,
@@ -17810,7 +17889,10 @@ pub(in crate::drive) mod tests {
     #[test]
     fn an_audit_past_the_windows_line_asks_over_the_newest_notes_that_fit() {
         let mut shape = template();
-        shape.limits.context_window = Some(crate::meditation::policy::WINDOW_RESERVE + 2_000);
+        // Its prompt sized as its request is, with the pad an unmeasured
+        // prompt carries (#588): 2,000 tokens of room past it.
+        shape.limits.context_window =
+            Some(crate::meditation::policy::WINDOW_RESERVE + 2_000 + ESTIMATE_PAD);
         let mut interview = interviewing(&[log::Warrant::Scoping]);
         interview.meditations.audit = true;
         let session = Session::open_with(
@@ -17831,25 +17913,7 @@ pub(in crate::drive) mod tests {
         wait_until(&session, "the fork to settle", |log| {
             settled(log) && !fork_outcomes(log).is_empty()
         });
-        {
-            let mut state = session.shared.lock();
-            let object = &mut state.interview.as_mut().expect("memory").object;
-            for n in 0..60_u32 {
-                object
-                    .apply(&Patch::Add {
-                        id: crate::object::EntryId::new(&format!("bulk-{n:02}")).expect("an id"),
-                        content: format!("decision: {} {n}", "the long form of a fact ".repeat(8)),
-                        provenance: crate::object::Provenance {
-                            turn: 1,
-                            lane: "interview".to_owned(),
-                            fork: None,
-                            tangent: None,
-                            index: 100 + n,
-                        },
-                    })
-                    .expect("an entry");
-            }
-        }
+        add_notes(&session, 60, 8);
         let total = live_entries(&session).len() as u64;
         session.declare_meditation(None).expect("admitted");
         let log = wait_until(&session, "the meditation", meditated);
@@ -17869,7 +17933,7 @@ pub(in crate::drive) mod tests {
             .expect("a meditation")
             .expect("the audit was fitted");
         let (audited, left, line) = notes;
-        assert_eq!(line, 2_000);
+        assert_eq!(line, 2_000 + ESTIMATE_PAD);
         assert!(audited > 0 && left > 0, "{notes:?}");
         assert_eq!(audited + left, total);
         assert!(
@@ -17890,6 +17954,243 @@ pub(in crate::drive) mod tests {
         );
         reads_whole(&session);
         every_head_rebuilds(&log);
+    }
+
+    /// `count` notes added to working memory, `bulk-00` the oldest, each
+    /// `size` repeats of a phrase long.
+    fn add_notes(session: &Session<Canned>, count: u32, size: usize) {
+        let mut state = session.shared.lock();
+        let object = &mut state.interview.as_mut().expect("memory").object;
+        for n in 0..count {
+            object
+                .apply(&Patch::Add {
+                    id: crate::object::EntryId::new(&format!("bulk-{n:02}")).expect("an id"),
+                    content: format!("decision: {} {n}", "the long form of a fact ".repeat(size)),
+                    provenance: crate::object::Provenance {
+                        turn: 1,
+                        lane: "interview".to_owned(),
+                        fork: None,
+                        tangent: None,
+                        index: 100 + n,
+                    },
+                })
+                .expect("an entry");
+        }
+    }
+
+    /// A session auditing at its meditations, in a `window` with output cap
+    /// `cap`, past its first scoping turn: its fork answered.
+    fn auditing(window: u64, cap: u32) -> Session<Canned> {
+        auditing_with(Some(window), cap, deltas(&["1. KEEP\n"]))
+    }
+
+    /// [`auditing`], its audit answering `audit`, in a window when given.
+    fn auditing_with(window: Option<u64>, cap: u32, audit: Vec<Step>) -> Session<Canned> {
+        auditing_each(window, cap, vec![audit])
+    }
+
+    /// [`auditing`], its audits answering `audits` in turn.
+    fn auditing_each(window: Option<u64>, cap: u32, audits: Vec<Vec<Step>>) -> Session<Canned> {
+        let mut shape = template();
+        shape.limits.context_window = window;
+        shape.limits.max_output_tokens = cap;
+        let mut interview = interviewing(&[log::Warrant::Scoping]);
+        interview.meditations.audit = true;
+        let session = Session::open_with(
+            Canned::new(
+                [deltas(&[SCOPED]), deltas(&[DECIDED])]
+                    .into_iter()
+                    .chain(audits)
+                    .collect::<Vec<_>>(),
+            ),
+            shape,
+            None,
+            None,
+            None,
+            Some(interview),
+        );
+        session
+            .ask_marked("what are we building?", None, true)
+            .expect("accepted");
+        wait_until(&session, "the fork to settle", |log| {
+            settled(log) && !fork_outcomes(log).is_empty()
+        });
+        session
+    }
+
+    /// The audit's question and its request's output cap.
+    fn audit_asked(log: &[Logged]) -> (String, u32) {
+        let question = log
+            .iter()
+            .find_map(|logged| match &logged.event {
+                Event::Audited { question, .. } => Some(question.clone()),
+                _ => None,
+            })
+            .expect("an audit");
+        let cap = log
+            .iter()
+            .find_map(|logged| match &logged.event {
+                Event::Requested {
+                    lane: Lane::Audit,
+                    max_tokens,
+                    ..
+                } => Some(*max_tokens),
+                _ => None,
+            })
+            .expect("the audit's request");
+        (question, cap)
+    }
+
+    /// The operator's flag is their explicit ask: an audit fitted to the
+    /// window audits the flagged note, though it is the oldest, before any
+    /// of the newest.
+    #[test]
+    fn an_audit_fitted_to_the_window_audits_the_operators_flagged_note_first() {
+        let session = auditing(
+            crate::meditation::policy::WINDOW_RESERVE + 2_000 + ESTIMATE_PAD,
+            64,
+        );
+        add_notes(&session, 60, 8);
+        session
+            .flag_entry("bulk-00", "is this still true?")
+            .expect("flagged");
+        session.declare_meditation(None).expect("admitted");
+        let log = wait_until(&session, "the meditation", meditated);
+        let (question, _) = audit_asked(&log);
+        assert!(
+            question.contains("[flagged: is this still true?]"),
+            "the flagged note is audited: {question}"
+        );
+    }
+
+    /// An audit whose answer is cut off by its cap folds nothing, and the
+    /// meditation line says how many notes it never reached -- every one it
+    /// asked over -- rather than dropping them silently.
+    #[test]
+    fn a_truncated_audit_says_how_many_notes_it_never_reached() {
+        let session = auditing_with(
+            None,
+            64,
+            vec![
+                Step::Reasoning("Let me weigh each note in turn.".to_owned()),
+                Step::FinishReason("length".to_owned()),
+            ],
+        );
+        add_notes(&session, 5, 1);
+        let asked = live_entries(&session).len() as u64;
+        session.declare_meditation(None).expect("admitted");
+        let log = wait_until(&session, "the meditation", meditated);
+        let audits: Vec<log::ForkOutcome> = log
+            .iter()
+            .filter_map(|logged| match &logged.event {
+                Event::ForkSettled { outcome, .. } => Some(*outcome),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(audits.last(), Some(&log::ForkOutcome::Truncated));
+        let unreached = log
+            .iter()
+            .find_map(|logged| match &logged.event {
+                Event::Meditated {
+                    audit_unreached, ..
+                } => Some(*audit_unreached),
+                _ => None,
+            })
+            .expect("a meditation");
+        assert_eq!(unreached, Some(asked), "every note it asked over");
+        reads_whole(&session);
+    }
+
+    /// Each audit question's notes, by the highest number it asks over.
+    fn audit_chunks(log: &[Logged]) -> Vec<usize> {
+        log.iter()
+            .filter_map(|logged| match &logged.event {
+                Event::Audited { question, .. } => Some(
+                    question
+                        .lines()
+                        .filter_map(|line| line.split_once(". ")?.0.trim().parse::<usize>().ok())
+                        .max()
+                        .unwrap_or(0),
+                ),
+                _ => None,
+            })
+            .collect()
+    }
+
+    /// An audit over many notes -- 2,126, the live run's -- is split into
+    /// chunks of 100 (the default), each its own audit fork whose reasoning
+    /// and answer fit its cap, the operator's flagged note in the first.
+    #[test]
+    fn an_audit_over_many_notes_is_split_into_chunks_that_each_fit() {
+        // Enough answers for every chunk the notes could make.
+        let session = auditing_each(
+            Some(1_000_000),
+            32_768,
+            (0..30).map(|_| deltas(&["1. KEEP\n"])).collect(),
+        );
+        add_notes(&session, 2_126, 1);
+        session
+            .flag_entry("bulk-00", "still true?")
+            .expect("flagged");
+        let total = live_entries(&session).len();
+        let chunks = total.div_ceil(100);
+        session.declare_meditation(None).expect("admitted");
+        let log = wait_until(&session, "the meditation", meditated);
+        let sizes = audit_chunks(&log);
+        assert_eq!(sizes.len(), chunks, "{sizes:?}");
+        assert!(sizes.iter().all(|size| *size <= 100), "{sizes:?}");
+        assert_eq!(sizes.iter().sum::<usize>(), total);
+        let first = log
+            .iter()
+            .find_map(|logged| match &logged.event {
+                Event::Audited { question, .. } => Some(question.clone()),
+                _ => None,
+            })
+            .expect("an audit");
+        assert!(first.contains("[flagged: still true?]"), "{first}");
+    }
+
+    /// A chunk cut off by its cap folds nothing and its notes are named
+    /// unreached; the chunks after it still run.
+    #[test]
+    fn a_truncated_chunk_reports_its_notes_and_the_rest_still_run() {
+        let truncated = vec![
+            Step::Reasoning("Weighing each note.".to_owned()),
+            Step::FinishReason("length".to_owned()),
+        ];
+        let session = auditing_each(
+            None,
+            64,
+            vec![deltas(&["1. KEEP\n"]), truncated, deltas(&["1. KEEP\n"])],
+        );
+        add_notes(&session, 249, 1);
+        let total = live_entries(&session).len();
+        session.declare_meditation(None).expect("admitted");
+        let log = wait_until(&session, "the meditation", meditated);
+        assert_eq!(audit_chunks(&log), [100, 100, total - 200]);
+        let unreached = log
+            .iter()
+            .find_map(|logged| match &logged.event {
+                Event::Meditated {
+                    audit_unreached, ..
+                } => Some(*audit_unreached),
+                _ => None,
+            })
+            .expect("a meditation");
+        assert_eq!(unreached, Some(100), "the truncated chunk's notes");
+    }
+
+    /// An audit fitted to the window leaves its answer the whole output
+    /// cap: its prompt fits the window less the clamp's margin and the cap,
+    /// not the window's line, which the margin then cuts into.
+    #[test]
+    fn an_audit_fitted_to_the_window_leaves_its_answer_the_whole_cap() {
+        let session = auditing(100_000, 32_768);
+        add_notes(&session, 300, 20);
+        session.declare_meditation(None).expect("admitted");
+        let log = wait_until(&session, "the meditation", meditated);
+        let (_, cap) = audit_asked(&log);
+        assert_eq!(cap, 32_768, "the audit's answer gets the whole cap");
     }
 
     fn meditated(log: &[Logged]) -> bool {
@@ -24911,6 +25212,7 @@ pub(in crate::drive) mod tests {
                     window_off: false,
                     warm: false,
                     audit: false,
+                    audit_chunk_notes: None,
                 },
                 ..interviewing(&[log::Warrant::Read])
             }),
@@ -25251,6 +25553,7 @@ pub(in crate::drive) mod tests {
                 window_off: false,
                 warm: false,
                 audit: false,
+                audit_chunk_notes: None,
             })),
         );
         session
@@ -25321,6 +25624,7 @@ pub(in crate::drive) mod tests {
                     window_off: false,
                     warm: false,
                     audit: false,
+                    audit_chunk_notes: None,
                 })),
             )
         };
@@ -25423,6 +25727,7 @@ pub(in crate::drive) mod tests {
                 window_off: false,
                 warm: false,
                 audit: false,
+                audit_chunk_notes: None,
             })),
         );
         session
@@ -25461,6 +25766,7 @@ pub(in crate::drive) mod tests {
                 window_off: false,
                 warm: false,
                 audit: false,
+                audit_chunk_notes: None,
             })),
         );
         session
@@ -25511,6 +25817,7 @@ pub(in crate::drive) mod tests {
                 window_off: false,
                 warm: false,
                 audit: false,
+                audit_chunk_notes: None,
             })),
         );
         session
@@ -25563,6 +25870,7 @@ pub(in crate::drive) mod tests {
                 window_off: false,
                 warm: false,
                 audit: false,
+                audit_chunk_notes: None,
             })),
         );
         session.ask("hi", None).expect("accepted");
@@ -25604,6 +25912,7 @@ pub(in crate::drive) mod tests {
                 window_off: false,
                 warm: false,
                 audit: false,
+                audit_chunk_notes: None,
             })),
         );
         session
@@ -25791,6 +26100,7 @@ pub(in crate::drive) mod tests {
                 warm: None,
                 turn_steps: None,
                 audit_notes: None,
+                audit_notes_unreached: None,
             }
         );
 
