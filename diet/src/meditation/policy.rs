@@ -71,6 +71,17 @@ pub fn keep_recent_budget(window: u64, reserve: u64) -> u64 {
 /// ask over working memory before the refill and folds its answer; off by
 /// default.
 pub const MEDITATION_AUDIT: &str = "meditation_audit";
+/// The notes one audit fork asks over: an audit over more is split into
+/// chunks of this many, each its own fork, the operator's changed notes in
+/// the first. A whole number above 0; [`AUDIT_CHUNK_NOTES_DEFAULT`] unless
+/// declared.
+pub const MEDITATION_AUDIT_CHUNK_NOTES: &str = "meditation_audit_chunk_notes";
+/// The notes an audit fork asks over unless the regimen says: the most whose
+/// reasoning and answer fit a 32,768 cap in the T1 runs' audits (2026-10-11
+/// and 12). At 69 and 95 notes, reasoning ran 13-15k tokens and the answer
+/// 7-8 a note, inside the cap; at 231 to 517 notes, reasoning alone took the
+/// whole cap and four answers never began.
+pub const AUDIT_CHUNK_NOTES_DEFAULT: usize = 100;
 /// A meditation's pre-warm (#504): `"on"` (or `true`) sends the refilled trunk
 /// once, with an output cap of one, so the next ask finds it cached; off by
 /// default, and never after a `window` meditation, whose request warms it.
@@ -359,6 +370,20 @@ pub struct Served {
     /// Whether a meditation refills over an unaddressed operator change
     /// ([`RECONCILE_GATE`], #150).
     pub reconcile_gate: ReconcileGate,
+    /// The notes one audit fork asks over
+    /// ([`MEDITATION_AUDIT_CHUNK_NOTES`]), when declared.
+    pub audit_chunk_notes: Option<usize>,
+}
+
+impl Served {
+    /// The notes one audit fork asks over: the regimen's, else
+    /// [`AUDIT_CHUNK_NOTES_DEFAULT`].
+    #[must_use]
+    pub fn audit_chunk(&self) -> usize {
+        self.audit_chunk_notes
+            .unwrap_or(AUDIT_CHUNK_NOTES_DEFAULT)
+            .max(1)
+    }
 }
 
 /// What a meditation does about an operator change no audit addressed
@@ -451,6 +476,10 @@ impl Served {
             outputs: meditation_tool_outputs(regimen),
             render_budget: render_budget(regimen),
             audit: on(regimen, MEDITATION_AUDIT),
+            audit_chunk_notes: match regimen.get(MEDITATION_AUDIT_CHUNK_NOTES) {
+                Some(Value::Integer(n)) if *n > 0 => usize::try_from(*n).ok(),
+                _ => None,
+            },
             warm: on(regimen, MEDITATION_WARM),
             window_off: matches!(regimen.get(MEDITATION_WINDOW), Some(Value::String(word)) if word == "off")
                 || matches!(regimen.get(MEDITATION_WINDOW), Some(Value::Boolean(false))),
@@ -580,6 +609,7 @@ mod tests {
                 window_off: false,
                 warm: false,
                 audit: false,
+                audit_chunk_notes: None,
             })
         );
         assert_eq!(
@@ -594,6 +624,7 @@ mod tests {
                 window_off: false,
                 warm: false,
                 audit: false,
+                audit_chunk_notes: None,
             })
         );
         for bad in ["0.0", "1.5", "-0.2", "\"half\""] {
@@ -634,6 +665,7 @@ mod tests {
             window_off: false,
             warm: false,
             audit: false,
+            audit_chunk_notes: None,
         };
         assert_eq!(policy.due(2, Some(999)), None);
         assert_eq!(policy.due(2, None), None);

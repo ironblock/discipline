@@ -1898,6 +1898,10 @@ pub enum Event {
         /// they were. `audit_notes`, `audit_notes_left` and
         /// `audit_window_line`, all or none.
         audit_notes: Option<AuditNotes>,
+        /// The notes its audit asked over and never reached (v8): its answer
+        /// was cut off by its output cap, so it folded nothing, and they
+        /// stand as they were.
+        audit_notes_unreached: Option<u64>,
     },
 }
 
@@ -3894,6 +3898,7 @@ fn from_object(object: &BTreeMap<String, Value>) -> Result<Line, String> {
                 (Some(kept), Some(compacted)) => Some(TurnSteps { kept, compacted }),
                 _ => None,
             },
+            audit_notes_unreached: fields.optional_count("audit_notes_unreached")?,
             audit_notes: match (
                 fields.optional_count("audit_notes")?,
                 fields.optional_count("audit_notes_left")?,
@@ -5439,6 +5444,7 @@ pub fn schema(kind: Kind) -> &'static [Field] {
                 may_v8("turn_steps_kept", Count),
                 may_v8("audit_notes", Count),
                 may_v8("audit_notes_left", Count),
+                may_v8("audit_notes_unreached", Count),
                 may_v8("audit_window_line", Count),
                 may_v8("turn_steps_compacted", Count),
             ];
@@ -6584,8 +6590,12 @@ fn to_value(line: &Line) -> Value {
             warm,
             turn_steps,
             audit_notes,
+            audit_notes_unreached,
         } => {
             put("at_turn", count(u64::from(*at_turn)));
+            if let Some(unreached) = audit_notes_unreached {
+                put("audit_notes_unreached", count(*unreached));
+            }
             if let Some(steps) = turn_steps {
                 put("turn_steps_kept", count(steps.kept));
                 put("turn_steps_compacted", count(steps.compacted));

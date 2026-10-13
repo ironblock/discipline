@@ -118,6 +118,7 @@
       "at_turn": 2,
       "audit_notes": 12,
       "audit_notes_left": 40,
+      "audit_notes_unreached": 12,
       "audit_window_line": 143840,
       "carried_entries": 1,
       "carried_turns": 0,

@@ -2551,6 +2551,7 @@ mod tests {
             warm: None,
             turn_steps: None,
             audit_notes: None,
+            audit_notes_unreached: None,
         });
         let projection = project(
             &numbered(events),
@@ -2606,6 +2607,7 @@ mod tests {
             warm: None,
             turn_steps: None,
             audit_notes: None,
+            audit_notes_unreached: None,
         });
         let projection = project(
             &numbered(events),
