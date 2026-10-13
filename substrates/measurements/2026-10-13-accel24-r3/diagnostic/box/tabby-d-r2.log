@@ -1,0 +1,137 @@
+18:50:39.483 INFO:     Using config file ~/w-r3/cfg-r2.yml
+18:50:39.490 INFO:     The 'config.yml' file cannot be found
+18:50:39.854 INFO:     Sampler overrides (preset "qwen38_thinking"): temperature
+                       1.0, top_k 20, top_p 0.95, min_p 0.0, presence_penalty
+                       0.0, repetition_penalty 1.0
+18:50:39.856 INFO:     exllamav3 version: 1.5.4
+18:50:40.717 INFO:     Keeping vision model weights in system RAM
+                       (vision_offload).
+18:50:40.719 INFO:     Using draft model:
+                       ~/Models/Qwen3.8-27B-DFlash2-EXL3-4.00bpw-i
+                       gor255
+18:50:40.720 INFO:     Disabling GPU split because one GPU is in use.
+18:50:40.720 INFO:     Context: max_seq_len 163,840 tokens (configured),
+                       cache_size 163,840 tokens
+18:50:40.743 INFO:     Using template "chat_template" for chat completions.
+18:50:40.744 INFO:     Response parsing: tool format qwen3_coder (template,
+                       tokenizer, architecture), reasoning tags <think> </think>
+                       (template)
+18:50:44.563 INFO:     Loading model
+                       ~/Models/Qwen3.8-27B-exl3-3.00bpw-img1024
+                       (manual GPU split)
+Loading vision modules ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 100% 30/30 0:00:00
+Loading draft modules  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 100% 8/8   0:00:00
+Loading model modules  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 100% 67/67 0:00:00
+Warming up             ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 100% 18/18 0:00:00
+18:50:51.842 INFO:     Warmup finished in 3.9 s
+18:50:51.988 INFO:     Model loaded in 11.2 s
+
+18:50:51.988 WARNING:  Disabling authentication makes your instance vulnerable.
+                       Set the `disable_auth` flag to False in config.yml if you
+                       want to share this instance with others.
+18:50:51.989 WARNING:  With authentication disabled and `allowed_origins` left
+                       at ["*"], any website open in a browser on this machine
+                       can send requests to this instance and read the
+                       responses, including admin endpoints. Set
+                       `network.allowed_origins` to your own frontends (or [])
+                       unless you use a browser-based frontend that needs it.
+18:50:51.990 INFO:     Serving OAI API on http://0.0.0.0:<port> (docs at
+                       http://0.0.0.0:<port>/redoc)
+18:50:53.839 WARNING:  Unable to switch model to x because
+                       "inline_model_loading" is not True in config.yml.
+18:50:53.841 INFO:     #1 chat/completions: 53 prompt tokens · top_k: 20
+                       (preset), top_p: 0.95 (preset), max_tokens: 1 (req)
+18:50:53.972 INFO:     #1 chat/completions: 1 tokens generated at 22.9 T/s ·
+                       prompt 53 tokens, none cached, 53 new in 0.08 s · first
+                       token 0.08 s, total 0.13 s · draft 0/7 accepted (0%) ·
+                       max_tokens reached
+18:50:53.978 WARNING:  Unable to switch model to x because
+                       "inline_model_loading" is not True in config.yml.
+18:50:53.980 INFO:     #2 chat/completions: 53 prompt tokens · top_k: 20
+                       (preset), top_p: 0.95 (preset), max_tokens: 1 (req)
+18:50:54.090 INFO:     #2 chat/completions: 1 tokens generated at 29.6 T/s ·
+                       prompt 53 tokens, none cached, 53 new in 0.07 s · first
+                       token 0.07 s, total 0.11 s · draft 0/7 accepted (0%) ·
+                       max_tokens reached
+18:50:54.315 WARNING:  Unable to switch model to x because
+                       "inline_model_loading" is not True in config.yml.
+18:50:54.848 INFO:     #3 chat/completions (stream): 158,662 prompt tokens ·
+                       top_k: 20 (preset), top_p: 0.95 (preset), max_tokens:
+                       4000 (req), min_tokens: 4000 (req)
+18:54:52.567 WARNING:  #3 chat/completions (stream): generation stopped because
+                       a token loop was detected
+18:54:52.568 INFO:     #3 chat/completions (stream): 1,047 tokens generated at
+                       74.4 T/s · prompt 158,662 tokens, none cached, 158,662
+                       new in 223.6 s (709 T/s) · first token 223.6 s, total
+                       237.7 s · draft 849/1386 accepted (61%) · loop detected
+18:54:57.608 WARNING:  Unable to switch model to x because
+                       "inline_model_loading" is not True in config.yml.
+18:54:58.109 INFO:     #4 chat/completions (stream): 160,783 prompt tokens ·
+                       top_k: 20 (preset), top_p: 0.95 (preset), max_tokens:
+                       32768 (req)
+18:54:58.115 ERROR:    Error during chat completion
+                       Job requires 641 pages (only 640 available) and cannot be
+                       enqueued. Total cache allocated is 640 * 256 = 163840
+                       tokens
+18:54:58.119 ERROR:    Error Traceback (most recent call last):
+                         File
+                       "~/src/tabbyAPI/endpoints/OAI/utils/chat_comple
+                       tion.py", line 899, in stream_generate_chat_completion
+                           raise generation
+                         File
+                       "~/src/tabbyAPI/endpoints/OAI/utils/chat_comple
+                       tion.py", line 738, in _chat_stream_collector
+                           async for generation in new_generation:
+                         File
+                       "~/src/tabbyAPI/backends/exllamav3/model.py",
+                       line 1316, in stream_generate
+                           async for generation_chunk in self.generate_gen(
+                         File
+                       "~/src/tabbyAPI/backends/exllamav3/model.py",
+                       line 1706, in generate_gen
+                           job = AsyncJob(
+                                 ^^^^^^^^^
+                         File
+                       "~/venvs/tabby154/lib/python3.12/site-packages/
+                       exllamav3/generator/async_generator.py", line 152, in
+                       __init__
+                           self.generator.enqueue(self)
+                         File
+                       "~/venvs/tabby154/lib/python3.12/site-packages/
+                       exllamav3/generator/async_generator.py", line 91, in
+                       enqueue
+                           self.generator.enqueue(job.job)
+                         File
+                       "~/venvs/tabby154/lib/python3.12/site-packages/
+                       exllamav3/generator/generator.py", line 427, in enqueue
+                           job.prepare_for_queue(self, self.job_serial)
+                         File "~/w-r3/tabby_crashdiag.py", line 33, in
+                       _pfq
+                           return _orig_pfq(self, generator, serial_number, rq)
+                                  ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+                         File
+                       "~/venvs/tabby154/lib/python3.12/site-packages/
+                       exllamav3/generator/job.py", line 1297, in
+                       prepare_for_queue
+                           assert total_pages <= max_pages, \
+                                  ^^^^^^^^^^^^^^^^^^^^^^^^
+                       AssertionError: Job requires 641 pages (only 640
+                       available) and cannot be enqueued. Total cache allocated
+                       is 640 * 256 = 163840 tokens
+18:54:58.122 ERROR:    Sent to request: Chat completion aborted. Please check
+                       the server console.
+18:55:12.208 WARNING:  Unable to switch model to x because
+                       "inline_model_loading" is not True in config.yml.
+18:55:12.666 INFO:     #5 chat/completions (stream): 158,684 prompt tokens ·
+                       top_k: 20 (preset), top_p: 0.95 (preset), max_tokens:
+                       4000 (req), min_tokens: 4000 (req)
+18:55:42.329 ERROR:    FATAL ERROR with generation. Attempting to recreate the
+                       generator. If this fails, please restart the server.
+18:55:42.330 WARNING:  Immediately terminating all jobs. Clients will have their
+                       requests cancelled.
+18:55:42.335 ERROR:    Sent to request: Job requires 641 pages (only 640
+                       available) and cannot be enqueued. Total cache allocated
+                       is 640 * 256 = 163840 tokens. The request exceeds the
+                       available context size.
+18:56:05.377 WARNING:  Shutdown signal called. Exiting gracefully.
+18:56:06.460 INFO:     Model unloaded.

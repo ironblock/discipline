@@ -1,0 +1,158 @@
+18:25:46.772 INFO:     Using config file ~/w-r3/cfg-r3.yml
+18:25:46.780 INFO:     The 'config.yml' file cannot be found
+18:25:47.145 INFO:     Sampler overrides (preset "qwen38_thinking"): temperature
+                       1.0, top_k 20, top_p 0.95, min_p 0.0, presence_penalty
+                       0.0, repetition_penalty 1.0
+18:25:47.147 INFO:     exllamav3 version: 1.5.4
+18:25:48.014 INFO:     Keeping vision model weights in system RAM
+                       (vision_offload).
+18:25:48.016 INFO:     Using draft model:
+                       ~/Models/Qwen3.8-27B-DFlash2-EXL3-4.00bpw-i
+                       gor255
+18:25:48.016 INFO:     Disabling GPU split because one GPU is in use.
+18:25:48.016 INFO:     Context: max_seq_len 163,840 tokens (configured),
+                       cache_size 163,840 tokens
+18:25:48.040 INFO:     Using template "chat_template" for chat completions.
+18:25:48.041 INFO:     Response parsing: tool format qwen3_coder (template,
+                       tokenizer, architecture), reasoning tags <think> </think>
+                       (template)
+18:25:52.253 INFO:     Loading model
+                       ~/Models/Qwen3.8-27B-exl3-3.00bpw-img1024
+                       (manual GPU split)
+Loading vision modules ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 100% 30/30 0:00:00
+Loading draft modules  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 100% 8/8   0:00:00
+Loading model modules  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 100% 67/67 0:00:00
+Warming up             ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 100% 18/18 0:00:00
+18:26:00.824 INFO:     Warmup finished in 3.9 s
+18:26:00.828 INFO:     Using recurrent checkpoint intervals: 2048 tokens
+                       (generation), 8192 tokens (prompt ingestion).
+18:26:00.977 INFO:     Model loaded in 12.9 s
+
+18:26:00.978 WARNING:  Disabling authentication makes your instance vulnerable.
+                       Set the `disable_auth` flag to False in config.yml if you
+                       want to share this instance with others.
+18:26:00.979 WARNING:  With authentication disabled and `allowed_origins` left
+                       at ["*"], any website open in a browser on this machine
+                       can send requests to this instance and read the
+                       responses, including admin endpoints. Set
+                       `network.allowed_origins` to your own frontends (or [])
+                       unless you use a browser-based frontend that needs it.
+18:26:00.980 INFO:     Serving OAI API on http://0.0.0.0:<port> (docs at
+                       http://0.0.0.0:<port>/redoc)
+18:26:01.162 WARNING:  Unable to switch model to x because
+                       "inline_model_loading" is not True in config.yml.
+18:26:01.164 INFO:     #1 chat/completions: 53 prompt tokens · top_k: 20
+                       (preset), top_p: 0.95 (preset), max_tokens: 1 (req)
+18:26:02.308 INFO:     #1 chat/completions: 1 tokens generated at 1.9 T/s ·
+                       prompt 53 tokens, none cached, 53 new in 0.59 s · first
+                       token 0.61 s, total 1.13 s · draft 0/7 accepted (0%) ·
+                       max_tokens reached
+18:26:02.314 WARNING:  Unable to switch model to x because
+                       "inline_model_loading" is not True in config.yml.
+18:26:02.318 INFO:     #2 chat/completions: 53 prompt tokens · top_k: 20
+                       (preset), top_p: 0.95 (preset), max_tokens: 1 (req)
+18:26:03.022 INFO:     #2 chat/completions: 1 tokens generated at 5.8 T/s ·
+                       prompt 53 tokens, none cached, 53 new in 0.51 s · first
+                       token 0.53 s, total 0.70 s · draft 0/7 accepted (0%) ·
+                       max_tokens reached
+18:26:03.239 WARNING:  Unable to switch model to x because
+                       "inline_model_loading" is not True in config.yml.
+18:26:03.656 INFO:     #3 chat/completions (stream): 118,071 prompt tokens ·
+                       top_k: 20 (preset), top_p: 0.95 (preset), max_tokens:
+                       4096 (req), min_tokens: 4096 (req)
+18:29:22.623 INFO:     #3 chat/completions (stream): 4,096 tokens generated at
+                       80.6 T/s · prompt 118,071 tokens, none cached, 118,071
+                       new in 148.0 s (798 T/s) · first token 148.0 s, total
+                       198.9 s · draft 3283/5691 accepted (58%) · max_tokens
+                       reached
+18:29:22.640 WARNING:  Unable to switch model to x because
+                       "inline_model_loading" is not True in config.yml.
+18:29:23.027 INFO:     #4 chat/completions (stream): 122,206 prompt tokens ·
+                       top_k: 20 (preset), top_p: 0.95 (preset), max_tokens:
+                       8192 (req), min_tokens: 8192 (req)
+18:29:38.147 WARNING:  Unable to switch model to x because
+                       "inline_model_loading" is not True in config.yml.
+18:29:38.690 INFO:     #5 chat/completions (stream): 124,116 prompt tokens ·
+                       top_k: 20 (preset), top_p: 0.95 (preset), max_tokens:
+                       4096 (req), min_tokens: 4096 (req)
+18:30:52.161 INFO:     #5 chat/completions (stream): 4,096 tokens generated at
+                       59.6 T/s · prompt 124,116 tokens, 98% cached, 2,004 new
+                       in 4.39 s (456 T/s) · first token 4.43 s, total 73.1 s ·
+                       draft 3444/4564 accepted (75%) · max_tokens reached
+18:30:52.479 WARNING:  Unable to switch model to x because
+                       "inline_model_loading" is not True in config.yml.
+18:30:53.031 INFO:     #6 chat/completions (stream): 130,201 prompt tokens ·
+                       top_k: 20 (preset), top_p: 0.95 (preset), max_tokens:
+                       4096 (req), min_tokens: 4096 (req)
+18:32:11.445 INFO:     #6 chat/completions (stream): 4,096 tokens generated at
+                       57.6 T/s · prompt 130,201 tokens, 98% cached, 3,225 new
+                       in 6.96 s (463 T/s) · first token 7.00 s, total 78.1 s ·
+                       draft 3443/4571 accepted (75%) · max_tokens reached
+18:32:11.709 WARNING:  Unable to switch model to x because
+                       "inline_model_loading" is not True in config.yml.
+18:32:12.280 INFO:     #7 chat/completions (stream): 136,319 prompt tokens ·
+                       top_k: 20 (preset), top_p: 0.95 (preset), max_tokens:
+                       4096 (req), min_tokens: 4096 (req)
+18:32:33.229 INFO:     #4 chat/completions (stream): 8,192 tokens generated at
+                       43.9 T/s · prompt 122,206 tokens, 99% cached, 1,374 new
+                       in 2.86 s (480 T/s) · first token 2.93 s, total 189.7 s ·
+                       draft 6538/11578 accepted (56%) · max_tokens reached
+18:32:33.495 WARNING:  Unable to switch model to x because
+                       "inline_model_loading" is not True in config.yml.
+18:32:34.070 INFO:     #8 chat/completions (stream): 136,347 prompt tokens ·
+                       top_k: 20 (preset), top_p: 0.95 (preset), max_tokens:
+                       8192 (req), min_tokens: 8192 (req)
+18:33:28.540 INFO:     #7 chat/completions (stream): 4,096 tokens generated at
+                       59.1 T/s · prompt 136,319 tokens, 98% cached, 3,199 new
+                       in 6.61 s (484 T/s) · first token 6.65 s, total 75.9 s ·
+                       draft 3485/4277 accepted (81%) · max_tokens reached
+18:33:28.809 WARNING:  Unable to switch model to x because
+                       "inline_model_loading" is not True in config.yml.
+18:33:29.377 INFO:     #9 chat/completions (stream): 142,426 prompt tokens ·
+                       top_k: 20 (preset), top_p: 0.95 (preset), max_tokens:
+                       4096 (req), min_tokens: 4096 (req)
+18:34:48.540 INFO:     #9 chat/completions (stream): 4,096 tokens generated at
+                       56.9 T/s · prompt 142,426 tokens, 98% cached, 3,162 new
+                       in 6.77 s (467 T/s) · first token 6.81 s, total 78.8 s ·
+                       draft 3468/4396 accepted (79%) · max_tokens reached
+18:34:48.819 WARNING:  Unable to switch model to x because
+                       "inline_model_loading" is not True in config.yml.
+18:34:49.437 INFO:     #10 chat/completions (stream): 148,514 prompt tokens ·
+                       top_k: 20 (preset), top_p: 0.95 (preset), max_tokens:
+                       4096 (req), min_tokens: 4096 (req)
+18:35:09.345 INFO:     #8 chat/completions (stream): 8,192 tokens generated at
+                       53.3 T/s · prompt 136,347 tokens, 100% cached, 155 new in
+                       1.12 s · first token 1.20 s, total 154.8 s · draft
+                       6954/8666 accepted (80%) · max_tokens reached
+18:35:09.623 WARNING:  Unable to switch model to x because
+                       "inline_model_loading" is not True in config.yml.
+18:35:10.240 INFO:     #11 chat/completions (stream): 148,542 prompt tokens ·
+                       top_k: 20 (preset), top_p: 0.95 (preset), max_tokens:
+                       8192 (req), min_tokens: 8192 (req)
+18:36:07.829 INFO:     #10 chat/completions (stream): 4,096 tokens generated at
+                       57.3 T/s · prompt 148,514 tokens, 98% cached, 3,106 new
+                       in 6.56 s (473 T/s) · first token 6.61 s, total 78.1 s ·
+                       draft 3489/4249 accepted (82%) · max_tokens reached
+18:36:08.180 WARNING:  Unable to switch model to x because
+                       "inline_model_loading" is not True in config.yml.
+18:36:08.812 INFO:     #12 chat/completions (stream): 154,557 prompt tokens ·
+                       top_k: 20 (preset), top_p: 0.95 (preset), max_tokens:
+                       4096 (req), min_tokens: 4096 (req)
+18:37:48.504 INFO:     #11 chat/completions (stream): 8,192 tokens generated at
+                       52.0 T/s · prompt 148,542 tokens, 100% cached, 62 new in
+                       0.32 s · first token 0.41 s, total 157.9 s · draft
+                       6714/10346 accepted (65%) · max_tokens reached
+18:37:48.864 WARNING:  Unable to switch model to x because
+                       "inline_model_loading" is not True in config.yml.
+18:37:49.504 INFO:     #13 chat/completions (stream): 154,584 prompt tokens ·
+                       top_k: 20 (preset), top_p: 0.95 (preset), max_tokens:
+                       3038 (req), min_tokens: 3038 (req)
+18:38:04.280 INFO:     #12 chat/completions (stream): 4,096 tokens generated at
+                       57.7 T/s · prompt 154,557 tokens, 98% cached, 3,005 new
+                       in 7.19 s (418 T/s) · queued 36.9 s, first token 44.1 s,
+                       total 115.2 s · draft 3516/4060 accepted (87%) ·
+                       max_tokens reached
+18:38:04.433 WARNING:  #13 chat/completions: client disconnected, generation
+                       cancelled
+18:38:04.722 WARNING:  Shutdown signal called. Exiting gracefully.
+18:38:05.746 INFO:     Model unloaded.
