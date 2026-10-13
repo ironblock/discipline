@@ -10453,9 +10453,16 @@ impl State {
         let left = window.saturating_sub(forks);
         let cap = job_room(left, chunk).saturating_sub(prompt);
         let cap = u32::try_from(cap).unwrap_or(u32::MAX);
+        let floor = u64::from(window_cap).min(CLAMP_FLOOR);
+        // Not even alone in the pool: the forks are not why it does not
+        // fit, and waiting on them gains nothing. It goes, at the window's
+        // cap, for the server to refuse loudly if it truly overflows.
+        if (job_room(window, chunk).saturating_sub(prompt)) < floor {
+            return TrunkRoom::Free;
+        }
         if cap >= window_cap {
             TrunkRoom::Free
-        } else if u64::from(cap) >= u64::from(window_cap).min(CLAMP_FLOOR) {
+        } else if u64::from(cap) >= floor {
             TrunkRoom::Clamped(cap)
         } else {
             TrunkRoom::Waits
@@ -16811,6 +16818,101 @@ pub(in crate::drive) mod tests {
         tidy(&[&tree]);
     }
 
+    /// A PNG of `width` by `height` pixels, `bytes` long: its signature, its
+    /// header chunk, then filler -- what a screenshot's encoding weighs,
+    /// generated at run time.
+    fn png_of(width: u32, height: u32, bytes: usize) -> Vec<u8> {
+        let mut png = b"\x89PNG\r\n\x1a\n".to_vec();
+        png.extend_from_slice(&13_u32.to_be_bytes());
+        png.extend_from_slice(b"IHDR");
+        png.extend_from_slice(&width.to_be_bytes());
+        png.extend_from_slice(&height.to_be_bytes());
+        png.extend_from_slice(&[8, 6, 0, 0, 0, 0, 0, 0, 0]);
+        png.resize(bytes, 0x5a);
+        png
+    }
+
+    /// The live run's screenshot (the Flash-Next instance, 2026-10-12): the trunk far under
+    /// a 524,288-token window, then the model reads its own 2400x2950 PNG,
+    /// 3.4 MB. The image costs what its pixels do -- about 7,000 tokens at
+    /// the vision lines' one token a 32x32 patch -- not its base64 at four
+    /// characters a token (~1.1M), so no window meditation fires.
+    #[test]
+    fn a_large_screenshot_read_is_counted_by_its_pixels_and_fires_no_window_meditation() {
+        let tree = scratch("image-estimate");
+        let recording = scratch("image-estimate-recording");
+        let recording = std::fs::canonicalize(&recording).expect("the recording");
+        std::fs::write(tree.join("shot.png"), png_of(2_400, 2_950, 3_400_000)).expect("written");
+        let mut shape = looping();
+        shape.tools = tool_loop::ToolSurface::Standard.tools();
+        shape.limits.context_window = Some(524_288);
+        let mut tools = tools(Confinement::Unconfined, &tree, &[], None, Decider::Decline);
+        tools.surface = tool_loop::ToolSurface::Standard;
+        tools.read_tool = tool_loop::ToolSurface::Standard.read_tool();
+        tools.recording = Some(recording.clone());
+        let session = Session::open_with(
+            Canned::new(vec![
+                deltas(&["Ready."]),
+                vec![Step::call(0, "call-1", "read", r#"{"path":"shot.png"}"#)],
+                deltas(&["The terrain is green."]),
+            ]),
+            shape,
+            None,
+            Some(tools),
+            None,
+            Some(interviewing(&[])),
+        );
+        seed_working_memory(&session);
+        session.ask("get ready", None).expect("accepted");
+        wait_until(&session, "turn one", settled);
+        session
+            .ask("how does the terrain look?", None)
+            .expect("accepted");
+        let log = wait_until(&session, "turn two", |log| {
+            log.iter()
+                .filter(|logged| matches!(logged.event, Event::TurnSettled { .. }))
+                .count()
+                == 2
+        });
+        assert!(
+            !log.iter()
+                .any(|logged| matches!(logged.event, Event::Meditated { .. })),
+            "no window meditation for one screenshot"
+        );
+        let sent = session.shared.transport.sent();
+        let after: u64 = sent
+            .last()
+            .expect("the request after the read")
+            .messages
+            .iter()
+            .map(crate::meditation::render::estimated_tokens)
+            .sum();
+        assert!(
+            after < 20_000,
+            "the request after the read estimated at {after}"
+        );
+        tidy(&[&tree, &recording]);
+    }
+
+    /// One live working-memory entry, so a window meditation could fire.
+    fn seed_working_memory(session: &Session<Canned>) {
+        let mut state = session.shared.lock();
+        let object = &mut state.interview.as_mut().expect("memory").object;
+        object
+            .apply(&Patch::Add {
+                id: crate::object::EntryId::new("seeded").expect("an id"),
+                content: "decision: the terrain is generated per chunk".to_owned(),
+                provenance: crate::object::Provenance {
+                    turn: 0,
+                    lane: "interview".to_owned(),
+                    fork: None,
+                    tangent: None,
+                    index: 0,
+                },
+            })
+            .expect("an entry");
+    }
+
     /// `read` of an image (#557): the result goes back as an image part
     /// inside the tool message, with no words beside it, the image kept in
     /// the recording by digest and named on the line's `files`; every head
@@ -20270,6 +20372,95 @@ pub(in crate::drive) mod tests {
         );
         reads_whole(&session);
         tidy(&[&tree]);
+    }
+
+    /// The harnesses' convention past the window (#617; Qwen Code's
+    /// `clampOutputTokensToWindow` breaks the tie between `OpenCode` 2, which
+    /// passes the cap through, and Pi, which clamps it): a trunk whose prompt
+    /// passes its window is meditated whenever there is anything to meditate
+    /// from -- the window meditation fires at window less the reserve, long
+    /// before the cap is small -- and otherwise its request follows Qwen
+    /// Code's clamp, which bottoms out at 1 and leaves recovery to the
+    /// compaction.
+    #[test]
+    fn a_trunk_past_its_window_meditates_when_it_can_and_else_follows_qwens_clamp() {
+        let big = "look ".repeat(60_000 * 4 / 5);
+        // With working memory and a turn to drop: the window meditation.
+        let session = windowed(
+            vec![deltas(&["Ready."]), deltas(&["Read."])],
+            50_000,
+            crate::meditation::policy::Served::default(),
+        );
+        seed_working_memory(&session);
+        session.ask("get ready", None).expect("accepted");
+        wait_until(&session, "turn one", settled);
+        session.ask(&big, None).expect("accepted");
+        let log = wait_until(&session, "turn two", |log| {
+            log.iter()
+                .filter(|logged| matches!(logged.event, Event::TurnSettled { .. }))
+                .count()
+                == 2
+        });
+        assert_eq!(window_meditations(&log).len(), 1, "it meditates");
+        // With nothing to meditate from: Qwen Code's clamp, as it is.
+        let mut shape = template();
+        shape.limits.context_window = Some(50_000);
+        let cap = shape.limits.max_output_tokens;
+        let session = Session::open_with(
+            Canned::new(vec![deltas(&["Read."])]),
+            shape,
+            None,
+            None,
+            None,
+            None,
+        );
+        session.ask(&big, None).expect("accepted");
+        let log = wait_until(&session, "the turn", settled);
+        let caps: Vec<u32> = log
+            .iter()
+            .filter_map(|logged| match &logged.event {
+                Event::Requested {
+                    lane: Lane::Trunk,
+                    max_tokens,
+                    ..
+                } => Some(*max_tokens),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(caps, [clamped(cap, Some(50_000), 60_000 + ESTIMATE_PAD)]);
+    }
+
+    /// The live run's wait: a trunk request that does not fit its window
+    /// even with the pool empty waited on the forks in flight for room they
+    /// could never give it. It waits only when the forks are why it does
+    /// not fit.
+    #[test]
+    fn a_trunk_waits_on_forks_only_when_they_are_why_it_does_not_fit() {
+        const POOL: u64 = 163_840;
+        let mut state = State::opening(Vec::new(), None, None, None);
+        state.settlement = Settlement::Turn;
+        state.pool.push(PoolFork {
+            fork: 12,
+            held: 8_392,
+            whole: 8_392,
+            epoch: state.refills,
+            cancel: Cancel::new(),
+        });
+        // Fits alone, not beside the fork: it waits.
+        let prompt = 150_000;
+        let window_cap = clamped(32_768, Some(POOL), prompt);
+        assert_eq!(
+            state.trunk_room(Some(POOL), prompt, window_cap),
+            TrunkRoom::Waits
+        );
+        // Does not fit even alone: waiting on the fork gains nothing.
+        let prompt = 1_300_000;
+        let window_cap = clamped(32_768, Some(POOL), prompt);
+        assert_ne!(
+            state.trunk_room(Some(POOL), prompt, window_cap),
+            TrunkRoom::Waits,
+            "no wait for room that is never coming"
+        );
     }
 
     /// The floor's numbers (Track 6): a fork cut beside a trunk of 110,000,

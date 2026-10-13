@@ -396,10 +396,12 @@ pub fn refill_in_the_system_message(head: &[Message], render: &str) -> Vec<Messa
 }
 
 /// A message's estimated tokens: its characters -- content, reasoning, each
-/// tool call's name and arguments, each image's encoding, each note (#732)
-/// -- divided by four, rounded up. The harnesses compared estimate the same way, none with a
-/// tokenizer (#552; Pi `compaction.ts` 298-349, `OpenCode` 2 `util/token.ts`
-/// 3-5); Pi's rounding up, which never undercounts.
+/// tool call's name and arguments, each note (#732) -- divided by four,
+/// rounded up, and each image by its pixels
+/// ([`crate::client::shape::Image::estimated_tokens`]), never its encoding.
+/// The harnesses compared estimate text the same way, none with a tokenizer
+/// (#552; Pi `compaction.ts` 298-349, `OpenCode` 2 `util/token.ts` 3-5); Pi's
+/// rounding up, which never undercounts.
 #[must_use]
 pub fn estimated_tokens(message: &Message) -> u64 {
     let chars = message.content.chars().count()
@@ -409,11 +411,6 @@ pub fn estimated_tokens(message: &Message) -> u64 {
             .iter()
             .map(|call| call.name.chars().count() + call.arguments.chars().count())
             .sum::<usize>()
-        + message
-            .images
-            .iter()
-            .map(|image| image.data_uri().len())
-            .sum::<usize>()
         // The notes an ask carries go on the wire before its words (#609),
         // so they are counted (#732).
         + message
@@ -421,7 +418,14 @@ pub fn estimated_tokens(message: &Message) -> u64 {
             .iter()
             .map(|note| note.chars().count())
             .sum::<usize>();
-    u64::try_from(chars.div_ceil(4)).unwrap_or(u64::MAX)
+    let images: u64 = message
+        .images
+        .iter()
+        .map(crate::client::shape::Image::estimated_tokens)
+        .sum();
+    u64::try_from(chars.div_ceil(4))
+        .unwrap_or(u64::MAX)
+        .saturating_add(images)
 }
 
 /// The recent tail of `turns` -- the trunk after its head -- a meditation keeps
