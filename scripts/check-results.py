@@ -574,6 +574,265 @@ def rendered_headings(body: str) -> dict[int, str]:
     return headings
 
 
+# THE ATTAINABILITY RULE, OPERATIVE (ruled on #17 for one applier; generalised
+# from the construction audit of 2026-10-13, A19). A rule whose bar no data
+# could reach, or any scorer could, decides nothing; nor does a floor that
+# fires when the hypothesis is right, a p asked below its floor, a margin read
+# off a point estimate, a veto whose reach is unreported, or a word that hides
+# the planted rows carrying it. Six checks, each mechanical over what the
+# rule declares:
+#
+#   1. a `bar` row's bar against `best` -- the value a perfect scorer reaches
+#      on the same pooling -- and against each `trivial` scorer's (constant,
+#      random, a no-model lexical baseline): attainable, and not handed out;
+#   2. a `floor` or `control` row declares `fires_on_predicted_outcome`, and
+#      it is false;
+#   3. no clause asks a p below its attainable floor (read from the clause
+#      text, so it reaches every rule, declared or not);
+#   4. a `margin` row reads an interval (`reads = "interval"`);
+#   5. a cell-veto `control` (`veto = "cell"`) reports the share of rows that
+#      tripped it (`reports_tripped_share = true`);
+#   6. a verdict `[constructed]` rows carry (`carries_verdict = true`) says
+#      "planted" or "authored" in its word.
+#
+# A rule file dated after ATTAINABILITY_LANDED declares an `[[attainability]]`
+# row for each of its supported and refuted clauses and a `[constructed]`
+# table. One dated on or before it is held to check 3 only, and a failure is
+# reported, not failed, when the directory is listed in GRANDFATHERED beside
+# the audit row that found it; an unlisted failure still fails, so the list
+# is the record of what history carries, not a date that excuses it.
+ATTAINABILITY_LANDED = "2026-10-13"
+GRANDFATHERED: dict[str, tuple[str, tuple[tuple[str, str], ...]]] = {
+    # directory: (audit row, the checks it fails that its undeclared rule
+    # cannot show mechanically, each by class, as the audit measured them)
+    "2026-09-17-sense-bakeoff": ("A2", ()),
+    "2026-09-17-sense-bakeoff-adjudication": ("A2", (
+        ("results.attainability-veto-share", "a one-row cell veto removed embeddinggemma-300m/raw_cosine, which clears all three supported bounds on recomputation; the tripped share was never reported"),
+        ("results.attainability-trivial", "P@5 over one 244-row list moves in steps of 0.2, and a random ranking reaches 0.8 with p 0.080"),
+    )),
+    "2026-09-19-entry-to-turn-nomination": ("A1", ()),
+    "2026-09-19-entry-to-turn-nomination-adjudication": ("A1", (
+        ("results.attainability-unattainable", "the supported precision bar 0.80 is above the pooled ceiling 0.7667 (authored-sense register 0.344), and over-firing 0.10 is below the 0.146 a perfect similarity scorer must reach"),
+        ("results.attainability-floor-predicted", "the deciding refuted clause is the floor-equivalence test the pre-registration reads as 'not about instruction tuning'"),
+        ("results.attainability-margin-point", "the 0.2 separation margin was compared on the point 0.142, whose 95% interval is [-0.022, 0.322]"),
+        ("results.attainability-constructed", "102 of 110 positives are planted, and the word does not say so"),
+    )),
+    "2026-09-20-entry-to-turn-nomination-v2": ("A1", ()),
+    "2026-09-20-entry-to-turn-nomination-v2-adjudication": ("A1", (
+        ("results.attainability-floor-predicted", "the deciding refuted clause is v1's floor-equivalence test, unchanged"),
+        ("results.attainability-margin-point", "the 0.2 separation margin was compared on the point 0.142, whose 95% interval is [-0.022, 0.322]"),
+        ("results.attainability-constructed", "102 of 110 positives are planted, and the word does not say so; the pre-gate's supported sub-verdict rests on them"),
+    )),
+    "2026-09-20-false-nomination-framing": ("A3", (
+        ("results.attainability-floor-predicted", "the refuted clause fires when advisory changes false-nomination turns no more than the sham, the hypothesis's predicted limit"),
+    )),
+    "2026-09-21-false-nomination-framing-v2": ("A4", (
+        ("results.attainability-floor-predicted", "refuted fires only through the advisory floor arm, on the predicted outcome, under floor-first precedence"),
+    )),
+    "2026-09-29-false-nomination-edit-rate-second-substrate": ("A6", (
+        ("results.attainability-margin-point", "substrate_independent is |delta| < 0.05 on a point estimate; the paired-fork 95% interval [-0.125, 0.181] holds the 0.15 dependence margin"),
+    )),
+    "2026-10-01-extraction-acceptance-parity-candidate": ("A8", ()),
+}
+CLAUSE_WORDS = ("supported", "refuted", "inconclusive", "unadjudicated")
+ADJUDICATING = ("supported", "refuted")
+ROW_KINDS = ("bar", "margin", "floor", "control")
+ASKS = ("at_least", "at_most", "below", "above")
+TRIVIAL_SCORERS = ("constant", "random", "lexical")
+P_BELOW_FLOOR = re.compile(r"\bp\b[^.;]*?\bbelow (?:the|its) attainable floor", re.IGNORECASE)
+NOT_APPLICABLE = re.compile(r"not applicable: .*[A-Za-z].*")
+REPORTED: list[str] = []
+
+
+def rule_files(directory: pathlib.Path) -> list[pathlib.Path]:
+    """The directory's decision and comparison rules."""
+    return sorted([*directory.glob("decision-rule*.toml"), *directory.glob("comparison-rule*.toml")])
+
+
+def clause_texts(doc: dict) -> list[tuple[str, str]]:
+    """Each clause a rule states, by dotted path: a string under `[rule]` whose
+    key is a verdict word, and every string directly under `[comparison]`,
+    whose keys are its words. `[readings]` and the rest are notes about the
+    rule, not clauses of it."""
+    found: list[tuple[str, str]] = []
+
+    def walk(value: object, path: str) -> None:
+        if isinstance(value, dict):
+            for key, inner in value.items():
+                walk(inner, f"{path}.{key}")
+        elif isinstance(value, str) and path.rsplit(".", 1)[-1] in CLAUSE_WORDS:
+            found.append((path, value))
+
+    walk(doc.get("rule", {}), "rule")
+    for key, value in doc.get("comparison", {}).items() if isinstance(doc.get("comparison"), dict) else ():
+        if isinstance(value, str):
+            found.append((f"comparison.{key}", value))
+    return found
+
+
+def exact(value: object) -> decimal.Decimal | None:
+    """A declared figure as an exact decimal, written as a string."""
+    if not isinstance(value, str):
+        return None
+    try:
+        figure = decimal.Decimal(value)
+    except decimal.InvalidOperation:
+        return None
+    return figure if figure.is_finite() else None
+
+
+def attainability(directory: pathlib.Path) -> list[tuple[str, str]]:
+    """The attainability rule's failures for `directory`, as (class, message):
+    every check for a rule dated after ATTAINABILITY_LANDED, check 3 alone
+    for one dated on or before it."""
+    failures: list[tuple[str, str]] = []
+    match = DIR_NAME.fullmatch(directory.name)
+    operative = bool(match) and match.group(1) > ATTAINABILITY_LANDED
+    result = ""
+    readme = directory / "README.md"
+    if readme.is_file():
+        _, front_text, _, _ = split_front_matter(read_text(readme))
+        if front_text is not None:
+            try:
+                result = str(tomllib.loads(front_text).get("result", ""))
+            except tomllib.TOMLDecodeError:
+                result = ""
+    for path in rule_files(directory):
+        try:
+            doc = tomllib.loads(read_text(path))
+        except tomllib.TOMLDecodeError as err:
+            failures.append(("results.attainability-malformed", f"{path.name} does not parse: {err}"))
+            continue
+        clauses = clause_texts(doc)
+        # Check 3, over every rule.
+        for clause, text in clauses:
+            if P_BELOW_FLOOR.search(text):
+                failures.append((
+                    "results.attainability-p-floor",
+                    f"{path.name} `{clause}` asks a p below its attainable floor, which no data can give",
+                ))
+        if not operative:
+            continue
+        rows = doc.get("attainability")
+        if not isinstance(rows, list) or not rows or not all(isinstance(row, dict) for row in rows):
+            failures.append((
+                "results.attainability-undeclared",
+                f"{path.name} declares no `[[attainability]]` rows; a rule dated after "
+                f"{ATTAINABILITY_LANDED} declares one for each supported and refuted clause",
+            ))
+            rows = []
+        named = {clause for clause, _ in clauses}
+        covered = {row.get("clause") for row in rows}
+        for clause in sorted(c for c in named if c.rsplit(".", 1)[-1] in ADJUDICATING and c not in covered):
+            if rows:
+                failures.append(("results.attainability-undeclared", f"{path.name} declares no attainability row for `{clause}`"))
+        for at, row in enumerate(rows):
+            where = f"{path.name} attainability[{at}]"
+            clause, kind = row.get("clause"), row.get("kind")
+            if clause not in named:
+                failures.append(("results.attainability-malformed", f"{where} names `{clause}`, no clause of this rule"))
+            if kind not in ROW_KINDS:
+                failures.append(("results.attainability-malformed", f"{where} kind is {kind!r}, not one of {ROW_KINDS}"))
+                continue
+            if kind == "bar":
+                asks, bar, best = row.get("asks"), exact(row.get("bar")), exact(row.get("best"))
+                if asks not in ASKS or bar is None or best is None:
+                    failures.append((
+                        "results.attainability-malformed",
+                        f"{where} a bar row states `asks` (one of {ASKS}), and `bar` and `best` as exact decimals",
+                    ))
+                    continue
+                # Check 1: attainable -- a perfect scorer can satisfy the
+                # clause (supported) or escape it (a refutation).
+                reachable = best >= bar if asks in ("at_least", "below") else best <= bar
+                if not reachable:
+                    failures.append((
+                        "results.attainability-unattainable",
+                        f"{where} `{clause}` asks {row.get('statistic', 'its statistic')} {asks} {bar}, "
+                        f"and the best any scorer reaches on this pooling is {best}",
+                    ))
+                # ... and, for a clause that holds by clearing its bar, not
+                # handed out by a scorer that knows nothing.
+                if asks in ("at_least", "at_most"):
+                    trivial = row.get("trivial")
+                    if not isinstance(trivial, dict) or any(name not in trivial for name in TRIVIAL_SCORERS):
+                        failures.append((
+                            "results.attainability-malformed",
+                            f"{where} states `trivial` with {TRIVIAL_SCORERS} on the same pooling, "
+                            f"each an exact decimal or `not applicable: <why>`",
+                        ))
+                        continue
+                    for name in TRIVIAL_SCORERS:
+                        value = trivial[name]
+                        figure = exact(value)
+                        if figure is None:
+                            if not (isinstance(value, str) and NOT_APPLICABLE.fullmatch(value)):
+                                failures.append(("results.attainability-malformed", f"{where} trivial.{name} is {value!r}"))
+                            continue
+                        clears = figure >= bar if asks == "at_least" else figure <= bar
+                        if clears:
+                            failures.append((
+                                "results.attainability-trivial",
+                                f"{where} `{clause}`: the {name} scorer reaches {figure}, "
+                                f"which clears the bar {bar} with no model",
+                            ))
+            elif kind == "margin":
+                # Check 4.
+                if row.get("reads") != "interval":
+                    failures.append((
+                        "results.attainability-margin-point",
+                        f"{where} `{clause}` reads its margin as {row.get('reads')!r}; a margin clause reads an interval",
+                    ))
+            else:
+                # Check 2.
+                fires = row.get("fires_on_predicted_outcome")
+                if fires is not False:
+                    failures.append((
+                        "results.attainability-floor-predicted",
+                        f"{where} the {kind} under `{clause}` "
+                        + ("fires on the hypothesis's predicted outcome" if fires is True
+                           else "does not declare `fires_on_predicted_outcome = false`"),
+                    ))
+                # Check 5.
+                if kind == "control" and row.get("veto") == "cell" and row.get("reports_tripped_share") is not True:
+                    failures.append((
+                        "results.attainability-veto-share",
+                        f"{where} a cell-veto control under `{clause}` does not report the share of rows that tripped it",
+                    ))
+        # Check 6.
+        constructed = doc.get("constructed")
+        if not isinstance(constructed, dict) or not isinstance(constructed.get("carries_verdict"), bool) \
+                or exact(constructed.get("share_of_positives")) is None:
+            failures.append((
+                "results.attainability-undeclared",
+                f"{path.name} declares no `[constructed]` table with `share_of_positives` and `carries_verdict`",
+            ))
+        elif constructed["carries_verdict"] and not re.search(r"\b(planted|authored)\b", result, re.IGNORECASE):
+            failures.append((
+                "results.attainability-constructed",
+                f"{path.name}: planted or authored rows ({constructed['share_of_positives']} of positives) "
+                f"carry the verdict, and the word `{result}` does not say so",
+            ))
+    return failures
+
+
+def judged_attainability(directory: pathlib.Path) -> list[str]:
+    """[attainability] failures as `check_run` messages, a grandfathered
+    directory's moved to REPORTED instead."""
+    found = attainability(directory)
+    listed = GRANDFATHERED.get(directory.name)
+    match = DIR_NAME.fullmatch(directory.name)
+    if listed is not None and match and match.group(1) <= ATTAINABILITY_LANDED:
+        row, audited = listed
+        for failure_class, message in [*found, *((c, f"by the audit: {m}") for c, m in audited)]:
+            REPORTED.append(
+                f"{directory}: reported, not failed (predates the attainability rule; "
+                f"construction audit of 2026-10-13, {row}): {message}  [{failure_class}]"
+            )
+        return []
+    return [f"{directory}: {message}  [{failure_class}]" for failure_class, message in found]
+
+
 def check_run(directory: pathlib.Path) -> list[str]:
     """Lint one run directory. Returns a list of failure messages."""
     failures: list[str] = []
@@ -1012,6 +1271,10 @@ def check_run(directory: pathlib.Path) -> list[str]:
 
     # --- the claim's provenance fields (#32) ---------------------------------
     post_hoc = check_claim_fields(directory, front, fail) if name != TEMPLATE_DIR else None
+
+    # --- the attainability rule (A19) ------------------------------------------
+    if name != TEMPLATE_DIR:
+        failures += judged_attainability(directory)
 
     if LEDGER is not None and not failures and name != TEMPLATE_DIR:
         row = ledger_row(directory, front, claims)
@@ -1707,6 +1970,11 @@ def main(argv: list[str]) -> int:
         help="lint one directory and print its report with every figure rendered (#63)",
     )
     parser.add_argument(
+        "--attainability",
+        action="store_true",
+        help="hold only the attainability rule's six checks over the directories' rules; needs no diet",
+    )
+    parser.add_argument(
         "directories",
         nargs="*",
         type=pathlib.Path,
@@ -1721,6 +1989,19 @@ def main(argv: list[str]) -> int:
         args.directories = [args.render]
     if not args.root and not args.directories:
         parser.error("nothing to lint: pass --root DIR or one or more run directories")
+
+    if args.attainability:
+        if args.ledger is not None or args.render is not None:
+            parser.error("--attainability takes directories or --root and nothing else")
+        targets = [d for root in args.root for d in run_directories(root)] + list(args.directories)
+        failures = [message for directory in targets for message in judged_attainability(directory)]
+        for line in REPORTED:
+            print(line)
+        for message in failures:
+            print(message, file=sys.stderr)
+        print(f"check-results: attainability over {len(targets)} directory(ies): {len(failures)} failure(s), "
+              f"{len(REPORTED)} reported, not failed")
+        return 1 if failures else 0
 
     global DIET, LEDGER, RENDERED, FIGURES_SEEN
     if args.ledger is not None:
@@ -1780,6 +2061,10 @@ def main(argv: list[str]) -> int:
 
     for message in failures:
         print(message, file=sys.stderr)
+    # What history carries under the attainability rule, named beside its
+    # audit row on every sweep, to stderr under --render.
+    for line in REPORTED:
+        print(line, file=sys.stderr if args.render is not None else sys.stdout)
 
     checked = len(targets)
     if failures:

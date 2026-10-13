@@ -11,9 +11,10 @@
 **Claims** are what the program publishes. Claims publication is a `Later —` milestone that returns when claims are prepared for publication (#495), so claim work waits for that. The operative rules for a claim are not here:
 - the claim's words are `supported | refuted | inconclusive` (`.github/ISSUE_TEMPLATE/claim.md`); a results README may also read `unadjudicated` until it is adjudicated;
 - a rule ratified after its window opened makes the row post-hoc, derived and never written (`scripts/check-results.py`, `post_hoc`);
-- a results directory's contract is `results/_template/`, and `results/AGENTS.md` governs what goes in it.
+- a results directory's contract is `results/_template/`, and `results/AGENTS.md` governs what goes in it;
+- a rule's bars are checked against what its instrument can attain before a verdict (ruled on #17; operative from 2026-10-13): each clause declares its bar beside the best value a perfect scorer reaches and the values trivial scorers reach on the same pooling, its floor's stance on the predicted outcome, its margin read as an interval, a cell veto's reach and the share of constructed rows, and `scripts/check-results.py` holds them to six checks (`results/AGENTS.md`).
 
-`[unsettled]` Planning proposed four more claim rules: bars checked against the instrument's attainable ceiling before a verdict; parameters outside the recommended range make a row a characterisation; controls seen red before the run; one fire per row, the first. None of them is written in an operative file.
+`[unsettled]` Planning proposed three more claim rules: parameters outside the recommended range make a row a characterisation; controls seen red before the run; one fire per row, the first. None of them is written in an operative file.
 
 ## With a result
 

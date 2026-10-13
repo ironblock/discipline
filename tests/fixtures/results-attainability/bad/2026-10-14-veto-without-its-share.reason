@@ -1,0 +1,2 @@
+results.attainability-veto-share
+A cell-veto control must report the share of rows that tripped it: one positive under a noise string removed #24's best cell (A2a).
