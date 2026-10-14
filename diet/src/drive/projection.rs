@@ -1093,6 +1093,8 @@ impl<'a> Walk<'a> {
             // row names its cap.
             | Line::TrunkClamped { .. }
             | Line::TrunkWaited { .. }
+            // The step warrants' gate: its forks' rows name what fired.
+            | Line::WarrantGated { .. }
             // The operator's flag, and a model patch refused over the
             // operator's entry (#150): the meditation row names what was carried.
             | Line::Flag { .. }

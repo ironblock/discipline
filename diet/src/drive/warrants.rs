@@ -229,6 +229,9 @@ pub enum Gate {
     },
     /// The trio: GOTCHAS, DECISIONS and CONSTRAINTS.
     Trouble,
+    /// Those of the trio a classifier fired, each once, in the trio's
+    /// order: the fork asks only these.
+    TroubleOf(Vec<crate::drive::warrant_gate::GateClass>),
     /// `OPEN_NEXT`.
     Open,
 }
@@ -289,6 +292,49 @@ pub fn gates(warrants: &StepWarrants, counters: &mut Counters, step: &Step) -> V
         counters.since_open = 0;
     }
     fired
+}
+
+/// The gates one step fires under a classifier: `evidence` as [`gates`]
+/// fires it; the trio's classes that `fired` (no cooldown -- the thresholds
+/// govern), asking only those; and `open` when it `fired`, if a probe gates
+/// it (`open_gated`), else on [`gates`]'s cadence. The counters count as
+/// [`gates`] counts them.
+pub fn classified_gates(
+    warrants: &StepWarrants,
+    counters: &mut Counters,
+    step: &Step,
+    (fired, open_gated): (&[crate::drive::warrant_gate::GateClass], bool),
+) -> Vec<Gate> {
+    use crate::drive::warrant_gate::GateClass;
+    let patterned = StepWarrants {
+        trouble: false,
+        open: warrants.open && !open_gated,
+        ..*warrants
+    };
+    let mut out: Vec<Gate> = gates(&patterned, counters, step);
+    let cadence = out.contains(&Gate::Open);
+    out.retain(|gate| *gate != Gate::Open);
+    if warrants.trouble {
+        let trio: Vec<GateClass> = [
+            GateClass::Gotcha,
+            GateClass::Decision,
+            GateClass::Constraint,
+        ]
+        .into_iter()
+        .filter(|class| fired.contains(class))
+        .collect();
+        if !trio.is_empty() {
+            out.push(Gate::TroubleOf(trio));
+            counters.since_trio = 0;
+        }
+    }
+    if warrants.open && open_gated && fired.contains(&GateClass::Open) {
+        out.push(Gate::Open);
+        counters.since_open = 0;
+    } else if cadence {
+        out.push(Gate::Open);
+    }
+    out
 }
 
 /// The predecessor's `_tool_ident` for a call of `tool` with `arguments`:
@@ -543,5 +589,75 @@ mod tests {
             unbroken.contains(&format!("re.compile(r\"{ERROR_PATTERN}\")")),
             "ERROR_PATTERN has drifted from the generator's ERROR_RE"
         );
+    }
+    /// Under a classifier, the trouble fork asks only the classes that
+    /// fired, with no cooldown; `open` fires on its class when a probe gates
+    /// it, else on the cadence; `evidence` is unchanged.
+    #[test]
+    fn under_a_classifier_the_asks_follow_the_fired_classes() {
+        use crate::drive::warrant_gate::GateClass;
+        let warrants = all_on();
+        let mut counters = Counters::default();
+        let plain = Step {
+            said: "Read it.".to_owned(),
+            calls: vec![call("bash", "ok")],
+        };
+        // Errors and surprises are the classifier's now: nothing fired.
+        let errored = Step {
+            said: "It turns out it failed.".to_owned(),
+            calls: vec![StepCall {
+                errored: true,
+                ..call("bash", "Traceback (most recent call last):")
+            }],
+        };
+        assert!(classified_gates(&warrants, &mut counters, &errored, (&[], true)).is_empty());
+        assert_eq!(
+            classified_gates(
+                &warrants,
+                &mut counters,
+                &plain,
+                (&[GateClass::Constraint, GateClass::Gotcha], true)
+            ),
+            [Gate::TroubleOf(vec![
+                GateClass::Gotcha,
+                GateClass::Constraint
+            ])]
+        );
+        // No cooldown: the next step fires again.
+        assert_eq!(
+            classified_gates(
+                &warrants,
+                &mut counters,
+                &plain,
+                (&[GateClass::Decision], true)
+            ),
+            [Gate::TroubleOf(vec![GateClass::Decision])]
+        );
+        // A gated `open` fires on its class, never on the cadence.
+        assert_eq!(
+            classified_gates(&warrants, &mut counters, &plain, (&[GateClass::Open], true)),
+            [Gate::Open]
+        );
+        let mut counters = Counters::default();
+        for _ in 0..12 {
+            assert!(classified_gates(&warrants, &mut counters, &plain, (&[], true)).is_empty());
+        }
+        // Ungated, `open` keeps its 10-step cadence.
+        let mut counters = Counters::default();
+        let cadence: Vec<usize> = (1..=20)
+            .filter(|_| {
+                classified_gates(&warrants, &mut counters, &plain, (&[], false)) == [Gate::Open]
+            })
+            .collect();
+        assert_eq!(cadence, [10, 20]);
+        // `evidence` as the patterns fire it.
+        let big = Step {
+            said: String::new(),
+            calls: vec![call("read", &"x".repeat(3_000))],
+        };
+        assert!(matches!(
+            classified_gates(&warrants, &mut Counters::default(), &big, (&[], true))[..],
+            [Gate::Evidence { .. }]
+        ));
     }
 }

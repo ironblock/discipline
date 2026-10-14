@@ -48,6 +48,7 @@ export type Kind =
   | "phase.noted"
   | "trunk.clamped"
   | "trunk.waited"
+  | "warrant.gated"
 ;
 
 export type State =
@@ -870,6 +871,25 @@ export type TrunkWaitedLine = {
   cap: number;
 };
 
+export type WarrantGatedLine = {
+  seq: number;
+  t: number;
+  kind: "warrant.gated";
+  request: number;
+  outcome: string;
+  probe?: string;
+  class?: string;
+  score?: string;
+  threshold?: string;
+  fired?: boolean;
+  reason?: string;
+  model: string;
+  revision: string;
+  compute_units: string;
+  latency_ms: number;
+  replayed?: boolean;
+};
+
 export type LogLine =
   | SessionStartLine
   | AskLine
@@ -910,4 +930,5 @@ export type LogLine =
   | PhaseNotedLine
   | TrunkClampedLine
   | TrunkWaitedLine
+  | WarrantGatedLine
 ;
