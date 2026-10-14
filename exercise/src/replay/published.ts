@@ -14,7 +14,7 @@ export type PublishedName = (typeof PUBLISHED)[number];
  * sessions (the maintainer's ruling on #32, 2026-10-02; #272): each is listed
  * under its own heading and replayed under EXAMPLE_LABEL, which stays on the
  * page for the whole replay. Each is committed beside its admission in
- * src/drive/examples/, written from its source by scripts/write-examples.mjs.
+ * src/drive/examples/: the kitchen sink written there by scripts/kitchen-sink.mjs from its scenario (#798).
  */
 export const EXAMPLES = ['kitchen-sink'] as const;
 

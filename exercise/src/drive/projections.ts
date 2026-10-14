@@ -18,6 +18,9 @@ export function projections(): { readonly name: string; readonly lines: readonly
     { name: 'specimen', lines: projection(place(scriptAt(SPECIMEN, { beat: SPECIMEN.length })).log) },
     { name: 'approval', lines: projection(place(scriptAt(APPROVED, { beat: APPROVED.length })).log) },
     { name: 'screenshot', lines: projection(place(scriptAt(SCREENSHOT, { beat: SCREENSHOT.length })).log) },
-    ...Object.entries(SESSIONS).map(([name, session]) => ({ name, lines: projection(place(session.events).log, Object.keys(session.carried)) })),
+    ...Object.entries(SESSIONS).map(([name, session]) => ({
+      name,
+      lines: projection('log' in session ? session.log : place(session.events).log, Object.keys(session.carried)),
+    })),
   ];
 }

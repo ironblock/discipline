@@ -21,7 +21,13 @@ import type { EventOf, Unplaced } from './script.ts';
 import type { Ack, DriveTransport } from './transport.ts';
 import { respelled } from './spelling.ts';
 
-export interface Recording {
+/**
+ * A session to replay: a recording migrated into the script's vocabulary (`events`, placed here), or an example a
+ * scenario wrote (`log`, #798): `diet`'s own lines, already placed, on a clock that is ours (`timing`).
+ */
+export type Recording = ScriptedRecording | ServedRecording;
+
+interface RecordingHead {
   readonly title: string;
   /** What the migration decided, rather than the record. */
   readonly migration: readonly string[];
@@ -32,7 +38,17 @@ export interface Recording {
    * `migration`, whose prose says the same.
    */
   readonly carried: Readonly<Record<string, number>>;
+}
+
+export interface ScriptedRecording extends RecordingHead {
   readonly events: readonly Unplaced[];
+}
+
+export interface ServedRecording extends RecordingHead {
+  /** The log as `diet-drive scenario` wrote it, scrubbed of the run's paths (`scenario-log.ts`). */
+  readonly log: readonly LogLine[];
+  /** Its `t` is not measured: placed on assumed rates (`retime.ts`), and said so where it is shown. */
+  readonly timing: 'retimed';
 }
 
 /** Where a recording lives in the repository, by name: what a failure to read one names (#32, ruling 9). */
@@ -56,9 +72,12 @@ export function load(name: string, text: string, file = recordingPath(name)): Re
   } catch (err) {
     throw fail(`not JSON (${(err as Error).message})`);
   }
-  if (typeof parsed.title !== 'string' || !Array.isArray(parsed.migration) || !Array.isArray(parsed.events)) {
-    throw fail('expected title, migration and events');
+  const served = parsed as Partial<ServedRecording>;
+  const scripted = parsed as Partial<ScriptedRecording>;
+  if (typeof parsed.title !== 'string' || !Array.isArray(parsed.migration) || (!Array.isArray(scripted.events) && !Array.isArray(served.log))) {
+    throw fail('expected title, migration, and events or log');
   }
+  if (Array.isArray(served.log) && served.timing !== 'retimed') throw fail('a log carries its timing: retimed');
   const carried = parsed.carried as unknown;
   if (
     typeof carried !== 'object' || carried === null || Array.isArray(carried) ||
@@ -66,11 +85,19 @@ export function load(name: string, text: string, file = recordingPath(name)): Re
   ) {
     throw fail('expected carried: {kind: count}, each kind named and each count a whole number above 0');
   }
-  for (const [i, e] of parsed.events.entries()) {
+  const lines: readonly { kind?: unknown; t?: unknown }[] = scripted.events ?? served.log ?? [];
+  for (const [i, e] of lines.entries()) {
     if (typeof e?.kind !== 'string' || typeof e.t !== 'number') throw fail(`event ${i} has no kind or time`);
   }
+  if (Array.isArray(served.log)) return { ...served, log: served.log.map((line) => respelled(line)) } as ServedRecording;
   // A recording says `seam` where this vocabulary says `meditation` (#583).
-  return { ...parsed, events: parsed.events.map(respelled) } as Recording;
+  return { ...scripted, events: scripted.events!.map(respelled) } as ScriptedRecording;
+}
+
+/** A recording migrated into the script's vocabulary, or an error naming its file: what the recordings must be. */
+export function scripted(name: string, recording: Recording): ScriptedRecording {
+  if ('log' in recording) throw new Error(`${recordingPath(name)}: a recording carries events, not a log`);
+  return recording;
 }
 
 /** The whole log, with synthesized deltas, placed in order. */
@@ -83,7 +110,9 @@ export function labelsOf(recording: Recording): ReadonlyMap<string, number> {
   return placing(recording).labels;
 }
 
-function placing(recording: Recording) {
+function placing(recording: Recording): { readonly log: readonly LogLine[]; readonly labels: ReadonlyMap<string, number> } {
+  // A scenario's log is placed already: diet wrote it.
+  if ('log' in recording) return { log: recording.log, labels: new Map() };
   const requestAt = new Map<string, number>();
   const out: Unplaced[] = [];
   for (const event of recording.events) {

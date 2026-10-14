@@ -202,12 +202,15 @@ class Admission(unittest.TestCase):
 
     SHOT = b'\x89PNG\r\n\x1a\n a canvas, nothing in it'
 
-    def with_asset(self, *, header=(), body=None, extra=None, commit=True, kind='ask'):
+    def with_asset(self, *, header=(), body=None, extra=None, commit=True, kind='ask', key='events', media='image/png'):
         """The fixture recording with one line naming a PNG -- the operator's ask by default, T1's path -- the asset committed beside it under its digest."""
         import hashlib
         digest = hashlib.sha256(self.SHOT).hexdigest()
         recording = dict(FIXTURE, migration=[*FIXTURE['migration'], *(line.format(digest=digest) for line in header)])
-        recording['events'] = [{'kind': kind, 'seq': 1, 't': 5, 'files': [{'path': 'files/shot.png', 'sha256': digest, 'media_type': 'image/png', 'bytes': len(self.SHOT)}]}]
+        recording.pop('events', None)
+        recording[key] = [{'kind': kind, 'seq': 1, 't': 5, 'files': [{'path': 'files/shot.png', 'sha256': digest, 'media_type': media, 'bytes': len(self.SHOT)}]}]
+        if key == 'log':
+            recording['timing'] = 'retimed'
         self.recording.write_text(json.dumps(recording), encoding='utf-8')
         files = self.recording.parent / 'fixture/files'
         files.mkdir(parents=True, exist_ok=True)
@@ -264,6 +267,71 @@ class Admission(unittest.TestCase):
         run = self.run_admission('admit', 'fixture')
         self.assertEqual(run.returncode, 1)
         self.assertIn('fixture/files/stray.bin: no line\'s files names it', run.stderr)
+
+    # ---- #798: an example that is a scenario's log ----
+
+    def test_a_logs_image_is_admitted_as_an_events_image_is(self):
+        digest = self.with_asset(key='log', kind='ask', header=['Declared-clean: {digest} by the maintainer on 2026-10-04'])
+        run = self.run_admission('admit', 'fixture')
+        self.assertEqual(run.returncode, 0, run.stderr)
+        self.assertEqual([(row['sha256'], row['scrub']) for row in self.admitted_files()], [(digest, 'declared-clean')])
+
+    def test_a_logs_image_not_committed_is_refused(self):
+        digest = self.with_asset(key='log', commit=False)
+        run = self.run_admission('admit', 'fixture')
+        self.assertEqual(run.returncode, 1)
+        self.assertIn(f'fixture/files/{digest}: named by a line\'s files and not committed beside the recording', run.stderr)
+
+    def test_a_logs_output_saved_by_digest_is_recorded_unpublished_and_never_committed(self):
+        # A scenario's outputs hold its run's paths, and the page does not fetch them (#798): named, never published.
+        digest = self.with_asset(key='log', kind='tool_call', media='text/plain', commit=False)
+        run = self.run_admission('admit', 'fixture')
+        self.assertEqual(run.returncode, 0, run.stderr)
+        self.assertEqual([(row['sha256'], row['scrub']) for row in self.admitted_files()], [(digest, 'unpublished')])
+        self.with_asset(key='log', kind='tool_call', media='text/plain')
+        run = self.run_admission('admit', 'fixture')
+        self.assertEqual(run.returncode, 1)
+        self.assertIn(f'fixture/files/{digest}: a log\'s output saved by digest is not published', run.stderr)
+
+    # ---- the built site's asset modules (#372's layout, verified from #798) ----
+
+    def module(self, body):
+        import base64
+        return 'export default null\n' if body is None else 'export default ' + json.dumps(base64.b64encode(body).decode()) + '\n'
+
+    def site_with(self, assets):
+        data = self.site()
+        files = pathlib.Path(data) / 'fixture/files'
+        files.mkdir(parents=True)
+        for name, text in assets.items():
+            (files / name).write_text(text, encoding='utf-8')
+        return data
+
+    def test_verify_takes_a_withheld_asset_as_a_null_module(self):
+        digest = self.with_asset()
+        self.assertEqual(self.run_admission('admit', 'fixture').returncode, 0)
+        run = self.run_admission('verify', self.site_with({f'{digest}.js': self.module(None)}))
+        self.assertEqual(run.returncode, 0, run.stderr)
+
+    def test_verify_takes_a_declared_clean_asset_as_its_bytes(self):
+        digest = self.with_asset(header=['Declared-clean: {digest} by the maintainer on 2026-10-04'])
+        self.assertEqual(self.run_admission('admit', 'fixture').returncode, 0)
+        run = self.run_admission('verify', self.site_with({f'{digest}.js': self.module(self.SHOT)}))
+        self.assertEqual(run.returncode, 0, run.stderr)
+
+    def test_verify_refuses_a_withheld_asset_published_as_its_bytes(self):
+        digest = self.with_asset()
+        self.assertEqual(self.run_admission('admit', 'fixture').returncode, 0)
+        run = self.run_admission('verify', self.site_with({f'{digest}.js': self.module(self.SHOT)}))
+        self.assertEqual(run.returncode, 1)
+        self.assertIn(f'fixture/files/{digest}.js: not the asset its admission allows (withheld)', run.stderr)
+
+    def test_verify_refuses_an_asset_module_no_admission_names(self):
+        self.with_asset()
+        self.assertEqual(self.run_admission('admit', 'fixture').returncode, 0)
+        run = self.run_admission('verify', self.site_with({'stray.js': self.module(None)}))
+        self.assertEqual(run.returncode, 1)
+        self.assertIn('fixture/files/stray.js: no admitted asset is named so', run.stderr)
 
     def test_a_declaration_of_a_digest_no_line_names_is_refused(self):
         self.with_asset(header=['Declared-clean: ' + '0' * 64 + ' by the maintainer on 2026-10-04'])
