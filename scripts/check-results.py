@@ -596,8 +596,10 @@ def rendered_headings(body: str) -> dict[int, str]:
 #   4. a `margin` row reads an interval (`reads = "interval"`);
 #   5. a cell-veto `control` (`veto = "cell"`) reports the share of rows that
 #      tripped it (`reports_tripped_share = true`);
-#   6. a verdict `[constructed]` rows carry (`carries_verdict = true`) says
-#      "planted" or "authored" in its word; and when a contender is among
+#   6. when `[constructed]` rows carry the verdict (`carries_verdict =
+#      true`), every supported and refuted clause says "planted" or
+#      "authored" (the record's word is the claim's closed vocabulary, so the
+#      clause is where it can be said); and when a contender is among
 #      the scorers that chose the rows (`mined_by`), every supported and
 #      refuted clause says it is post hoc;
 #   7. a labelled class whose double-labelled agreement is below KAPPA_FLOOR
@@ -665,6 +667,7 @@ DEFAULT_ALPHA = decimal.Decimal("0.05")
 # "substantial", for the maintainer to move. Specimen: the trouble pilot's
 # gotcha class at 0.36.
 KAPPA_FLOOR = decimal.Decimal("0.60")
+PLANTED = re.compile(r"\b(planted|authored)\b", re.IGNORECASE)
 POST_HOC = re.compile(r"\bpost[ -]hoc\b", re.IGNORECASE)
 # A doc line's ledger words, and the records it links.
 LEDGER_WORDS = re.compile(r"\b(dead|closed|disproven|ruled out|refuted)\b", re.IGNORECASE)
@@ -716,7 +719,6 @@ def attainability(directory: pathlib.Path) -> list[tuple[str, str]]:
     failures: list[tuple[str, str]] = []
     match = DIR_NAME.fullmatch(directory.name)
     operative = bool(match) and match.group(1) > ATTAINABILITY_LANDED
-    result = str(front_of(directory).get("result", ""))
     for path in rule_files(directory):
         try:
             doc = tomllib.loads(read_text(path))
@@ -875,15 +877,18 @@ def attainability(directory: pathlib.Path) -> list[tuple[str, str]]:
                 f"(the text the scorer sees, against where the labels come from)",
             ))
         else:
-            if constructed["carries_verdict"] and not re.search(r"\b(planted|authored)\b", result, re.IGNORECASE):
-                failures.append((
-                    "results.attainability-constructed",
-                    f"{path.name}: planted or authored rows ({constructed['share_of_positives']} of positives) "
-                    f"carry the verdict, and the word `{result}` does not say so",
-                ))
-            # A contender that chose its own rows is graded on its choices.
+            # The acknowledgement is the clause's, not the word's: a record's
+            # word is the claim's closed vocabulary (results.verdict-disagrees-
+            # with-record), which has no room to say "planted".
             miners = sorted(set(names("mined_by")) & set(names("contenders")))
             for clause in sorted(c for c in named if c.rsplit(".", 1)[-1] in ADJUDICATING):
+                if constructed["carries_verdict"] and not PLANTED.search(texts[clause]):
+                    failures.append((
+                        "results.attainability-constructed",
+                        f"{path.name} `{clause}`: planted or authored rows ({constructed['share_of_positives']} "
+                        f"of positives) carry the verdict, and the clause does not say so",
+                    ))
+                # A contender that chose its own rows is graded on its choices.
                 if miners and not POST_HOC.search(texts[clause]):
                     failures.append((
                         "results.attainability-mined",

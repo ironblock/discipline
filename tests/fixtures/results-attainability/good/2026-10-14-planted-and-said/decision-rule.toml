@@ -1,0 +1,65 @@
+# A rule that declares its attainability (#17's attainability rule, operative): every clause's bar
+# against the computed best value and the trivial scorers on the same pooling, with the statistic's
+# resolution and the chance a trivial scorer reaches the bar; its floor's stance on the predicted outcome,
+# its margin read as an interval, the share of constructed rows, who mined them and what the scorer sees;
+# and each labelled class's agreement.
+[claim]
+hypothesis = "the nominator ranks superseding turns into each drive's top 5"
+
+[rule]
+supported = "on planted rows: pooled P@5 >= 0.40, over-firing <= 0.30, and the lower bound of the margin's 95% interval over the floor >= 0.2"
+refuted = "on planted rows: pooled P@5 < 0.20"
+inconclusive = "neither clause holds"
+
+[constructed]
+share_of_positives = "0.93"
+carries_verdict = true
+contenders = ["the nominator"]
+mined_by = []
+surface = "the scorer sees each turn's text; the labels come from the drive's recorded supersessions, which it never sees"
+
+[[attainability]]
+clause = "rule.supported"
+kind = "bar"
+statistic = "pooled P@5"
+asks = "at_least"
+bar = "0.40"
+best = "0.7667"
+trivial = { constant = "0.20", random = "0.39", lexical = "0.30" }
+resolution = "0.005"
+p_trivial = "0.003"
+
+[[attainability]]
+clause = "rule.supported"
+kind = "bar"
+statistic = "over-firing"
+asks = "at_most"
+bar = "0.30"
+best = "0.029"
+trivial = { constant = "0.40", random = "0.45", lexical = "not applicable: the register's hard negatives share the entry's identifiers by construction" }
+resolution = "0.01"
+p_trivial = "0.001"
+
+[[attainability]]
+clause = "rule.supported"
+kind = "margin"
+reads = "interval"
+
+[[attainability]]
+clause = "rule.refuted"
+kind = "bar"
+statistic = "pooled P@5"
+asks = "below"
+bar = "0.20"
+best = "0.7667"
+
+[[attainability]]
+clause = "rule.supported"
+kind = "floor"
+fires_on_predicted_outcome = false
+
+[[labels]]
+class = "superseding turn"
+double_labelled_n = 60
+kappa = "0.81"
+clauses = ["rule.supported", "rule.refuted", "rule.inconclusive"]
