@@ -200,3 +200,84 @@ fn a_windowed_canned_substrate_fires_the_budget_and_the_window_meditations() {
     assert_eq!(code, Some(0), "{said}");
     let _ = std::fs::remove_dir_all(&dir);
 }
+
+/// A file an ask attaches is kept in the assembled run (#372's layout,
+/// `files/<sha256>`), as serve's own recording keeps it: the work
+/// directory that held the copy goes once the run is assembled, and a
+/// replay fetches the file from the run.
+#[test]
+fn an_assembled_run_keeps_the_files_its_asks_attached() {
+    let dir = scratch("keeps-files");
+    let png: &[u8] = b"\x89PNG\r\n\x1a\n0000";
+    let sha256 = diet::digest::sha256_hex(png);
+    std::fs::write(dir.join("shot.png"), png).expect("the picture");
+    std::fs::write(
+        dir.join("tools.toml"),
+        concat!(
+            "arm = \"rehearsal\"\n",
+            "dogma_version = 0\n",
+            "substrate = \"canned-scenario-windowed\"\n",
+            "substrate_reasoning = \"off\"\n",
+            "substrate_hardware = \"b6bc80e9e8e4bc2342219f064dab89a8d17c02535600b32b84895fc0b9ba6513\"\n",
+            "isolation = \"none\"\n",
+            "approval = \"none\"\n",
+            "approval_policy = \"approvals are off: every command runs without a gate decision or a prompt\"\n",
+            "tool_surface = \"standard\"\n",
+            "[limits]\nmax_steps = 2\n",
+            "[sampler]\ntemperature = 0.6\ntop_p = 0.95\nseed = 7\n",
+        ),
+    )
+    .expect("the regimen");
+    let header = serde_json::json!({
+        "scenario": "attaches",
+        "regimen": "tools.toml",
+        "head": root().join("diet/drive/heads/floor.md"),
+        "seed": {"shot.png": "shot.png"},
+    });
+    let file = dir.join("attaches.jsonl");
+    std::fs::write(
+        &file,
+        format!(
+            "{header}\n{}",
+            concat!(
+                r#"{"reply":{"text":"A PNG signature and four bytes."}}"#,
+                "\n",
+                r#"{"step":"ask","text":"What is in the picture?","attach":["shot.png"]}"#,
+                "\n",
+                r#"{"step":"end"}"#,
+                "\n",
+                r#"{"expect":"turn.settled","where":{"reason":"final"}}"#,
+                "\n",
+            )
+        ),
+    )
+    .expect("the scenario");
+    let out = dir.join("out");
+    let ran = Command::new(DRIVE)
+        .current_dir(root())
+        .arg("scenario")
+        .arg(&file)
+        .arg("--out")
+        .arg(&out)
+        .output()
+        .expect("diet-drive runs");
+    let said = format!(
+        "{}{}",
+        String::from_utf8_lossy(&ran.stdout),
+        String::from_utf8_lossy(&ran.stderr)
+    );
+    assert_eq!(ran.status.code(), Some(0), "{said}");
+    let log = std::fs::read_to_string(out.join("session.log")).expect("the assembled log");
+    assert!(
+        log.contains(&format!("files/{sha256}")),
+        "the log names the copy: {said}"
+    );
+    assert_eq!(
+        std::fs::read(out.join("files").join(&sha256))
+            .ok()
+            .as_deref(),
+        Some(png),
+        "the copy is in the run under the digest the log names: {said}"
+    );
+    let _ = std::fs::remove_dir_all(&dir);
+}

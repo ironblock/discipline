@@ -1129,6 +1129,32 @@ fn fresh(what: &str) -> Result<std::path::PathBuf, Failure> {
     Ok(dir)
 }
 
+/// Copy `work/files/` into `out/files/`, name for name: the recording's
+/// copies of the files its asks attached. A partial copy serve never
+/// renamed into place (a dot-named temporary) is not one.
+fn kept_files(work: &std::path::Path, out: &std::path::Path) -> Result<(), Failure> {
+    let from = work.join("files");
+    let entries = match std::fs::read_dir(&from) {
+        Ok(entries) => entries,
+        Err(why) if why.kind() == std::io::ErrorKind::NotFound => return Ok(()),
+        Err(why) => return Err(Failure(format!("{} cannot be read: {why}", from.display()))),
+    };
+    let to = out.join("files");
+    std::fs::create_dir_all(&to)
+        .map_err(|why| Failure(format!("{} cannot be made: {why}", to.display())))?;
+    for entry in entries {
+        let entry =
+            entry.map_err(|why| Failure(format!("{} cannot be read: {why}", from.display())))?;
+        let name = entry.file_name();
+        if name.to_string_lossy().starts_with('.') || !entry.path().is_file() {
+            continue;
+        }
+        std::fs::copy(entry.path(), to.join(&name))
+            .map_err(|why| Failure(format!("{} cannot be kept: {why}", entry.path().display())))?;
+    }
+    Ok(())
+}
+
 #[allow(clippy::too_many_lines)]
 fn running(
     drive: &std::path::Path,
@@ -1332,6 +1358,10 @@ fn running(
         if !assembled.status.success() {
             return Ok(false);
         }
+        // The copies of the files its asks attached are the run's too, kept
+        // as serve's recording keeps them (`files/<sha256>`, #372): the log
+        // names them there and a replay fetches them from the run.
+        kept_files(&work, &options.out)?;
         // The assembled copies, scrubbed, are the run's; the work goes.
         said["log"] =
             serde_json::Value::String(options.out.join("session.log").display().to_string());
