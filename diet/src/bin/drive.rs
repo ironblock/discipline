@@ -1237,6 +1237,10 @@ fn serving_interview(
             .and_then(|identity| identity.served.get("chunk_size")?.parse::<u64>().ok())
             .filter(|chunk| *chunk > 0)
             .unwrap_or(session::POOL_CHUNK_DEFAULT);
+    // The step warrants' gate: the patterns, or a classifier the regimen
+    // names in full.
+    let warrant_gate =
+        diet::drive::warrant_gate::read(&read).map_err(|why| format!("{path}: {why}"))?;
     // #783: the warrants that look at what a step produced.
     let step = session::step_warrants(&read, &rules).map_err(|why| format!("{path}: {why}"))?;
     // #788: whether the operator may move the phase alone.
@@ -1330,6 +1334,7 @@ fn serving_interview(
             fork_slots,
             fork_backlog,
             prefix_pages,
+            warrant_gate,
             pool_chunk,
             step,
             operator_unilateral,

@@ -80,6 +80,33 @@ A `phase.ruled` line records every ruling and move.
 - **`trouble`:** a call that ran and exited non-zero or timed out, or whose shown result matches the predecessor's error pattern. Or: the step's reasoning and text matching its surprise pattern, at most once every `trouble_cooldown_steps` (3) steps. An error always fires. It fires three forks, the pinned GOTCHAS, DECISIONS and CONSTRAINTS asks.
 - **`open`:** every `open_every_steps` (10) steps, counted across the session, it fires the pinned OPEN_NEXT ask.
 
+**The step warrants' gate** (`warrant_gate`, approved for testing 2026-10-14). By default it is `regex`, #783's patterns, unchanged. With `warrant_gate = "classifier"`, a step's `trouble` and `open` forks fire on scores from a Sidekick classifier (`POST /v1/classify`, `format = "nli"`). The classifier only gates: it never writes into working memory.
+- **No product defaults.** `[warrant_classifier]` names all of these, or serve refuses to start:
+  - the endpoint;
+  - the model and its revision;
+  - the compute units;
+  - the truncation side;
+  - the timeout;
+  - the windowing (`prose_window_sentences`, `prose_window_chars`, `output_tail_chars`);
+  - the windows one request carries (`batch`, the model's `max_batch`).
+- **Probes.** Each `[warrant_classifier.<name>]` table is a probe. It names:
+  - its `class` (`gotcha`, `decision`, `constraint` or `open`);
+  - its `input`: `prose`, `output`, `both`, `previous_prose` or `previous_output`, the last being the output a step's prose answers;
+  - its `hypotheses`, sent whole as candidate labels with the template `{}`;
+  - its `aggregate` (`max` or `mean`);
+  - its `threshold`.
+- **Scoring.** Each hypothesis scores the max over the probe's windows, scored independently (`multi_label`). The probe's score is the max or mean over its hypotheses. Its class fires at or above the threshold.
+- **What fires.** A trouble fork asks only the trio classes that fired, with no cooldown. `open` fires on its class when a probe gates it; otherwise it fires on its cadence. `evidence` is unchanged.
+- **Windows.** They are the trouble-detector register's:
+  - prose split into sentences and packed into windows of at most 3 sentences and 400 characters;
+  - each call's output as `$ <arguments>` and its last 800 characters, plus the first error-looking line.
+- **Holding the session.** The classifier is called with the session's lock released. A stop meanwhile drops the decision as `stale`.
+- **Logging.** Every probe's decision is a `warrant.gated` line: the step's trunk request, the class, score and threshold, whether it fired, the model, revision and compute units, and the latency.
+- **Fallback.** A classifier that is unreachable, errors, times out or serves another model, revision or compute units than declared drops that step back to the patterns. The fallback is logged with its reason, and the turn never fails.
+- **Replay.** A recorded run's decisions replay from its log, keyed by the step's trunk request, without the classifier.
+- **No convention to follow.** No harness this one follows gates its side calls with a classifier.
+
+
 A step fires its evidence forks, then the trio, then open. They run in the gap, or, under `interview_timing = "during_turn"`, cut at the step; a final answer's always run in the gap. Each fork names its warrant (`why`), its pinned ask (`ask`) and the step or call that fired it (`trigger`: `evidence:<call>`, `trouble:<request>`, `open:<request>`). The start row's `fork_warrant` names each step warrant with its numbers.
 
 **Background commands** (#614): `bash` takes `is_background: true`, and the call returns at once with a job id, an output file and a status file, while the command keeps running under the session's confinement. `task_stop` stops a job's process group. When a job ends, its output is kept by digest, a `background.ended` line logs it, and Qwen Code's `<task-notification>` follows the next ask. The operator can move a running call to the background with `POST /commands {"kind":"background"}`, which answers with the job id or is refused `nothing-running`. A turn's cancel leaves jobs running, and the session's end kills them. The shape is Qwen Code's, the only compared harness whose shell has it. `background_commands = false` turns it off, and the start row names it.

@@ -728,6 +728,7 @@ pub fn serve_levers(regimen: &Regimen, output_cap: (u32, &str)) -> BTreeMap<Stri
             crate::drive::archive::Recall::lever(regimen),
         ),
         ("fork_warrant".to_owned(), warrant.clone()),
+        ("warrant_gate".to_owned(), warrant_gate_lever(regimen)),
         // #784: each settled tool call's touches into working memory.
         ("mechanical_capture".to_owned(), mechanical_lever(regimen)),
         ("fork_delivery".to_owned(), delivery),
@@ -796,6 +797,19 @@ fn fork_backlog_lever(regimen: &Regimen) -> String {
             }
         },
     )
+}
+
+/// The step warrants' gate lever's word: `regex`, or `classifier:` and the
+/// model and its revision; [`UNDECLARED`] for a gate serve refuses.
+fn warrant_gate_lever(regimen: &Regimen) -> String {
+    use crate::drive::warrant_gate::{WarrantGate, read};
+    match read(regimen) {
+        Ok(WarrantGate::Regex) => "regex".to_owned(),
+        Ok(WarrantGate::Classifier(classifier)) => {
+            format!("classifier:{}@{}", classifier.model, classifier.revision)
+        }
+        Err(_) => UNDECLARED.to_owned(),
+    }
 }
 
 /// The fork input view lever's word (#567): the regimen's `fork_view`, and
@@ -1453,6 +1467,20 @@ mod tests {
             lever("meditation_audit = \"on\"\nmeditation_audit_chunk_notes = 40\n"),
             "notes:40"
         );
+    }
+
+    /// The step warrants' gate: `regex` unless the regimen names the
+    /// classifier, then its model and revision; undeclared when refused.
+    #[test]
+    fn the_warrant_gate_lever_names_the_gate() {
+        let lever = |text: &str| {
+            serve_levers(&regimen::parse(text).expect("a regimen"), (8192, "default"))
+                .get("warrant_gate")
+                .cloned()
+                .unwrap_or_default()
+        };
+        assert_eq!(lever(""), "regex");
+        assert_eq!(lever("warrant_gate = \"classifier\"\n"), UNDECLARED);
     }
 
     /// The default timeout (#613): 120000 ms unless the regimen says, 0

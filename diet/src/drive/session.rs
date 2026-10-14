@@ -923,6 +923,24 @@ pub enum Event {
         /// The field that call recorded under.
         field: String,
     },
+    /// The step warrants' classifier gate on one step: a probe's decision,
+    /// the step's fallback to the patterns, or its decision dropped as stale.
+    WarrantGated {
+        /// The step's trunk request.
+        request: u64,
+        /// What the gate said.
+        outcome: WarrantOutcome,
+        /// The model Sidekick reported serving, or the declared one.
+        model: String,
+        /// The model's revision, as declared.
+        revision: String,
+        /// The compute units Sidekick reported, or the declared ones.
+        compute_units: String,
+        /// The step's calls to the classifier, wall time.
+        latency_ms: u64,
+        /// Replayed from a recorded run, the classifier not called.
+        replayed: bool,
+    },
     /// A trunk request's output cap cut to what the forks in flight leave
     /// of the pool, below what the window alone gives it.
     TrunkClamped {
@@ -1261,6 +1279,9 @@ pub struct Interview {
     /// concurrent requests (#797): its entry's `served_prefix_shared`.
     /// [`crate::drive::registry::served_prefix_shared`] reads it at start.
     pub prefix_pages: PrefixPages,
+    /// The step warrants' gate: the patterns, or a classifier
+    /// ([`crate::drive::warrant_gate`]).
+    pub warrant_gate: crate::drive::warrant_gate::WarrantGate,
     /// The chunk the trunk's server allocates its pool in: its entry's
     /// `served_chunk_size`, else [`POOL_CHUNK_DEFAULT`]. Every job on it is
     /// counted rounded up to whole chunks, and two more ([`footprint`]).
@@ -2413,6 +2434,11 @@ struct State {
     /// no queued fork is sent meanwhile, or it would take the room the trunk
     /// waits for.
     trunk_waiting: Option<Instant>,
+    /// The previous step's windows, for a classifier that scores them too.
+    gate_previous: Option<crate::drive::warrant_gate::Windows>,
+    /// A recorded run's gate decisions, by the step's trunk request `seq`:
+    /// replayed in place of the classifier, which is never called.
+    gate_replay: Option<BTreeMap<u64, crate::drive::warrant_gate::Gated>>,
     /// How many times the trunk has been refilled: a fork cut before the
     /// latest shares no prefix with the trunk now.
     refills: u64,
@@ -2552,6 +2578,8 @@ impl State {
             move_after_turn: None,
             declared_after_pool: None,
             trunk_waiting: None,
+            gate_previous: None,
+            gate_replay: None,
             refills: 0,
             operator_note_due: None,
             proposal_ends_turn: None,
@@ -3510,6 +3538,12 @@ impl<S: Streaming + 'static> Session<S> {
         drop(state);
         self.shared.changed.notify_all();
         Err(Rejected::Refused(refused))
+    }
+
+    /// Replay a recorded run's gate decisions ([`recorded_gates`]) in place
+    /// of the classifier, which this session then never calls.
+    pub fn replaying_gates(&self, recorded: BTreeMap<u64, crate::drive::warrant_gate::Gated>) {
+        self.shared.lock().gate_replay = Some(recorded);
     }
 
     /// Declare a meditation (#493): the trunk is refilled from working memory --
@@ -5228,6 +5262,46 @@ pub fn line_of(logged: &Logged) -> log::Line {
             reason: None,
             cut: None,
         },
+        Event::WarrantGated {
+            request,
+            outcome,
+            model,
+            revision,
+            compute_units,
+            latency_ms,
+            replayed,
+        } => {
+            let (word, decided, reason) = match outcome {
+                WarrantOutcome::Decided {
+                    probe,
+                    class,
+                    score,
+                    threshold,
+                    fired,
+                } => (
+                    "decided",
+                    Some((probe, class, score, threshold, *fired)),
+                    None,
+                ),
+                WarrantOutcome::Fallback(reason) => ("fallback", None, Some(reason.clone())),
+                WarrantOutcome::Stale(reason) => ("stale", None, Some(reason.clone())),
+            };
+            log::Event::WarrantGated {
+                request: *request,
+                outcome: word.to_owned(),
+                probe: decided.map(|(probe, ..)| probe.clone()),
+                class: decided.map(|(_, class, ..)| class.word().to_owned()),
+                score: decided.map(|(_, _, score, ..)| score.clone()),
+                threshold: decided.map(|(.., threshold, _)| threshold.clone()),
+                fired: decided.map(|(.., fired)| fired),
+                reason,
+                model: model.clone(),
+                revision: revision.clone(),
+                compute_units: compute_units.clone(),
+                latency_ms: *latency_ms,
+                replayed: replayed.then_some(true),
+            }
+        }
         Event::TrunkClamped {
             turn,
             window_cap,
@@ -5743,7 +5817,10 @@ fn step<S: Streaming + 'static>(
                 if let Some((text, reasoning)) = answered {
                     let mut said = Message::new(Role::Assistant, text);
                     said.reasoning = reasoning;
-                    let content = content_firings(&mut state, (turn, request), &said, &[]);
+                    let (held, verdict) = gate_step(shared, state, (request, &said, &[]), cancel);
+                    state = held;
+                    let content =
+                        content_firings(&mut state, (turn, request), (&said, &[]), &verdict);
                     state.gap_firings.extend(content);
                 }
                 forked = gap(shared, &mut state, turn, request);
@@ -5986,13 +6063,22 @@ fn run_calls<S: Streaming + 'static>(
     } else {
         None
     };
+    // The step's gate, a classifier called with the lock released.
+    let ids: Vec<String> = calls.iter().map(|call| call.id.clone()).collect();
+    let verdict = if settled == Some(SettleReason::Cancelled) {
+        Verdict::Patterns
+    } else {
+        let (held, verdict) = gate_step(shared, state, (request, &said, &ids), cancel);
+        state = held;
+        verdict
+    };
     // The forks this step warrants (#782).
     cut_step(
         shared,
         &mut state,
         (turn, request, last_line),
         (shape, &said, &results, calls),
-        settled,
+        (settled, &verdict),
     );
     // A proposal of the model's own ends its turn after this step (#788):
     // the step joins the trunk, the result saying so the last thing on it.
@@ -10189,7 +10275,7 @@ fn cut_step<S: Streaming + 'static>(
     state: &mut State,
     at: (u32, u64, u64),
     (shape, said, results, calls): (&RequestShape, &Message, &[Message], &[Call]),
-    settled: Option<SettleReason>,
+    (settled, verdict): (Option<SettleReason>, &Verdict),
 ) {
     // A cancelled step warrants none.
     if settled == Some(SettleReason::Cancelled) {
@@ -10197,7 +10283,7 @@ fn cut_step<S: Streaming + 'static>(
     }
     let ids: Vec<String> = calls.iter().map(|call| call.id.clone()).collect();
     // What the step produced (#783): every step's gates count, either timing.
-    let content = content_firings(state, (at.0, at.1), said, &ids);
+    let content = content_firings(state, (at.0, at.1), (said, &ids), verdict);
     if !state
         .interview
         .as_ref()
@@ -10212,6 +10298,264 @@ fn cut_step<S: Streaming + 'static>(
     cut_forks(shared, state, at, &cut, ((&said.content, &ids), content));
 }
 
+/// What a classifier gate said of one probe, or of the step.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum WarrantOutcome {
+    /// A probe's decision, its score written to six places.
+    Decided {
+        /// The probe.
+        probe: String,
+        /// Its class.
+        class: crate::drive::warrant_gate::GateClass,
+        /// Its aggregate score.
+        score: String,
+        /// Its threshold, as written.
+        threshold: String,
+        /// Whether it fired.
+        fired: bool,
+    },
+    /// The step fell back to the patterns, and why.
+    Fallback(String),
+    /// The decision came back after the turn moved on, and was dropped.
+    Stale(String),
+}
+
+/// A recorded run's gate decisions, by the step's trunk request `seq`, read
+/// back from its log's `warrant.gated` lines: each step's decisions, or its
+/// fallback. A stale line records no decision to replay.
+#[must_use]
+pub fn recorded_gates(lines: &[log::Line]) -> BTreeMap<u64, crate::drive::warrant_gate::Gated> {
+    use crate::drive::warrant_gate::{Decision, GateClass, Gated};
+    let mut out: BTreeMap<u64, Gated> = BTreeMap::new();
+    for line in lines {
+        let log::Event::WarrantGated {
+            request,
+            outcome,
+            probe,
+            class,
+            score,
+            threshold,
+            fired,
+            reason,
+            model,
+            compute_units,
+            latency_ms,
+            ..
+        } = &line.event
+        else {
+            continue;
+        };
+        match outcome.as_str() {
+            "decided" => {
+                let decision = Decision {
+                    probe: probe.clone().unwrap_or_default(),
+                    class: GateClass::ALL
+                        .into_iter()
+                        .find(|known| Some(known.word()) == class.as_deref())
+                        .unwrap_or(GateClass::Gotcha),
+                    score: score
+                        .as_deref()
+                        .and_then(|score| score.parse().ok())
+                        .unwrap_or(0.0),
+                    threshold: threshold.clone().unwrap_or_default(),
+                    fired: fired.unwrap_or(false),
+                };
+                match out.entry(*request).or_insert_with(|| Gated::Decided {
+                    decisions: Vec::new(),
+                    model: model.clone(),
+                    compute_units: compute_units.clone(),
+                    latency_ms: *latency_ms,
+                }) {
+                    Gated::Decided { decisions, .. } => decisions.push(decision),
+                    Gated::Fallback { .. } => {}
+                }
+            }
+            "fallback" => {
+                out.insert(
+                    *request,
+                    Gated::Fallback {
+                        reason: reason.clone().unwrap_or_default(),
+                        latency_ms: *latency_ms,
+                    },
+                );
+            }
+            _ => {}
+        }
+    }
+    out
+}
+
+/// How a step's `trouble` and `open` forks are gated.
+#[derive(Debug, Clone, PartialEq)]
+enum Verdict {
+    /// By the patterns: the regex gate, or a classifier's fallback.
+    Patterns,
+    /// By a classifier: the classes that fired, and whether a probe gates
+    /// `open`.
+    Classified(Vec<crate::drive::warrant_gate::GateClass>, bool),
+    /// Not at all: the decision was stale. Whether a probe gates `open`.
+    Dropped(bool),
+}
+
+/// The step of trunk request `request` gated (the step's `turn`, what it
+/// `said`, its calls `ids`): under the patterns, nothing to do; under a
+/// classifier, its windows built under the lock, the lock released for the
+/// call and taken again -- a stop or the session's end meanwhile drops the
+/// decision as stale -- and every probe's decision logged, or the fallback
+/// with its reason. A recorded run's decision is replayed instead, the
+/// classifier never called.
+fn gate_step<'a, S>(
+    shared: &'a Shared<S>,
+    mut state: std::sync::MutexGuard<'a, State>,
+    (request, said, ids): (u64, &Message, &[String]),
+    cancel: &Cancel,
+) -> (std::sync::MutexGuard<'a, State>, Verdict) {
+    use crate::drive::warrant_gate::{GateClass, Gated, WarrantGate, Windows};
+    let Some((classifier, step)) = state
+        .interview
+        .as_ref()
+        .and_then(|interview| match &interview.warrant_gate {
+            WarrantGate::Classifier(classifier)
+                if interview.step.trouble || interview.step.open =>
+            {
+                Some((classifier.as_ref().clone(), interview.step))
+            }
+            _ => None,
+        })
+    else {
+        return (state, Verdict::Patterns);
+    };
+    let open_gated = step.open
+        && classifier
+            .probes
+            .iter()
+            .any(|probe| probe.class == GateClass::Open);
+    let (gated, replayed) = if let Some(replay) = state.gate_replay.as_ref() {
+        let gated = replay.get(&request).cloned().unwrap_or(Gated::Fallback {
+            reason: "replay: no recorded decision for this step".to_owned(),
+            latency_ms: 0,
+        });
+        (gated, true)
+    } else {
+        let text = step_text(&state, (request, said, ids));
+        let windows = Windows::of(&classifier, &text);
+        let previous = state.gate_previous.replace(windows.clone());
+        drop(state);
+        let gated = crate::drive::warrant_gate::gate(&classifier, &windows, previous.as_ref());
+        state = shared.lock();
+        if cancel.is_asked() || state.ending {
+            let latency_ms = match &gated {
+                Gated::Decided { latency_ms, .. } | Gated::Fallback { latency_ms, .. } => {
+                    *latency_ms
+                }
+            };
+            state.push(Event::WarrantGated {
+                request,
+                outcome: WarrantOutcome::Stale(
+                    "the turn was stopped or the session ended".to_owned(),
+                ),
+                model: classifier.model.clone(),
+                revision: classifier.revision.clone(),
+                compute_units: classifier.compute_units.clone(),
+                latency_ms,
+                replayed: false,
+            });
+            return (state, Verdict::Dropped(open_gated));
+        }
+        (gated, false)
+    };
+    let verdict = logged_gate(
+        &mut state,
+        request,
+        (&classifier, &gated, replayed),
+        open_gated,
+    );
+    (state, verdict)
+}
+
+/// The step of trunk request `request` as a classifier reads it: what it
+/// `said` -- its reasoning, a newline, then its text -- and the arguments and
+/// shown output of each of its calls `ids`, those refused or cancelled too,
+/// as the register reads them.
+fn step_text(
+    state: &State,
+    (request, said, ids): (u64, &Message, &[String]),
+) -> crate::drive::warrant_gate::StepText {
+    let outputs = state
+        .log
+        .iter()
+        .filter_map(|logged| match &logged.event {
+            Event::ToolCalled(line) if line.request == request && ids.contains(&line.id) => Some((
+                line.arguments.clone(),
+                line.shown.clone().unwrap_or_default(),
+            )),
+            _ => None,
+        })
+        .collect();
+    crate::drive::warrant_gate::StepText {
+        said: format!(
+            "{}\n{}",
+            said.reasoning.as_deref().unwrap_or_default(),
+            said.content
+        ),
+        outputs,
+    }
+}
+
+/// A step's classifier result logged -- each probe's decision, or the
+/// fallback with its reason -- and the verdict it makes.
+fn logged_gate(
+    state: &mut State,
+    request: u64,
+    (classifier, gated, replayed): (
+        &crate::drive::warrant_gate::Classifier,
+        &crate::drive::warrant_gate::Gated,
+        bool,
+    ),
+    open_gated: bool,
+) -> Verdict {
+    use crate::drive::warrant_gate::Gated;
+    match gated {
+        Gated::Decided {
+            decisions,
+            model,
+            compute_units,
+            latency_ms,
+        } => {
+            for decision in decisions {
+                state.push(Event::WarrantGated {
+                    request,
+                    outcome: WarrantOutcome::Decided {
+                        probe: decision.probe.clone(),
+                        class: decision.class,
+                        score: format!("{:.6}", decision.score),
+                        threshold: decision.threshold.clone(),
+                        fired: decision.fired,
+                    },
+                    model: model.clone(),
+                    revision: classifier.revision.clone(),
+                    compute_units: compute_units.clone(),
+                    latency_ms: *latency_ms,
+                    replayed,
+                });
+            }
+            Verdict::Classified(gated.fired().unwrap_or_default(), open_gated)
+        }
+        Gated::Fallback { reason, latency_ms } => {
+            state.push(Event::WarrantGated {
+                request,
+                outcome: WarrantOutcome::Fallback(reason.clone()),
+                model: classifier.model.clone(),
+                revision: classifier.revision.clone(),
+                compute_units: classifier.compute_units.clone(),
+                latency_ms: *latency_ms,
+                replayed,
+            });
+            Verdict::Patterns
+        }
+    }
+}
+
 /// The forks a trunk step's own output warrants (#783): the step's gates,
 /// read off what it said -- its reasoning, a line break, then its text --
 /// and its calls' lines of request `request`, each fired as its pinned
@@ -10219,10 +10563,10 @@ fn cut_step<S: Streaming + 'static>(
 fn content_firings(
     state: &mut State,
     (turn, request): (u32, u64),
-    said: &Message,
-    ids: &[String],
+    (said, ids): (&Message, &[String]),
+    verdict: &Verdict,
 ) -> Vec<Firing> {
-    use crate::drive::warrants::{Step, StepCall, gates, ident};
+    use crate::drive::warrants::{Step, StepCall, ident};
     let Some(warrants) = state
         .interview
         .as_ref()
@@ -10268,9 +10612,30 @@ fn content_firings(
         calls,
     };
     let mut counters = std::mem::take(&mut state.step_counters);
-    let fired = gates(&warrants, &mut counters, &step);
+    let fired = verdict_gates(&warrants, &mut counters, &step, verdict);
     state.step_counters = counters;
     pinned_firings(fired, request)
+}
+
+/// The gates one step fires under `verdict`: the patterns'; a classifier's
+/// fired classes; or, its decision stale, none of the classifier's -- the
+/// step's `evidence` and `open`'s cadence still counting as they do.
+fn verdict_gates(
+    warrants: &crate::drive::warrants::StepWarrants,
+    counters: &mut crate::drive::warrants::Counters,
+    step: &crate::drive::warrants::Step,
+    verdict: &Verdict,
+) -> Vec<crate::drive::warrants::Gate> {
+    use crate::drive::warrants::{classified_gates, gates};
+    match verdict {
+        Verdict::Patterns => gates(warrants, counters, step),
+        Verdict::Classified(classes, open_gated) => {
+            classified_gates(warrants, counters, step, (classes, *open_gated))
+        }
+        Verdict::Dropped(open_gated) => {
+            classified_gates(warrants, counters, step, (&[], *open_gated))
+        }
+    }
 }
 
 /// The forks the step gates `fired` for the trunk step of request
@@ -10302,12 +10667,23 @@ fn pinned_firings(fired: Vec<crate::drive::warrants::Gate>, request: u64) -> Vec
                     ));
                 }
             }
-            Gate::Trouble => {
-                for template in [
-                    Template::Gotchas,
-                    Template::Decisions,
-                    Template::Constraints,
-                ] {
+            Gate::Trouble | Gate::TroubleOf(_) => {
+                let classes = match &gate {
+                    Gate::TroubleOf(classes) => classes.clone(),
+                    _ => vec![
+                        crate::drive::warrant_gate::GateClass::Gotcha,
+                        crate::drive::warrant_gate::GateClass::Decision,
+                        crate::drive::warrant_gate::GateClass::Constraint,
+                    ],
+                };
+                for template in classes.into_iter().filter_map(|class| match class {
+                    crate::drive::warrant_gate::GateClass::Gotcha => Some(Template::Gotchas),
+                    crate::drive::warrant_gate::GateClass::Decision => Some(Template::Decisions),
+                    crate::drive::warrant_gate::GateClass::Constraint => {
+                        Some(Template::Constraints)
+                    }
+                    crate::drive::warrant_gate::GateClass::Open => None,
+                }) {
                     if let Ok(question) = template.fill(&[]) {
                         out.push(pinned(
                             log::Warrant::Trouble,
@@ -14333,6 +14709,21 @@ pub(in crate::drive) mod tests {
                 window_cap: 4_540,
                 cap: 4_540,
             },
+            Event::WarrantGated {
+                request: 3,
+                outcome: WarrantOutcome::Decided {
+                    probe: "gotcha-prose".to_owned(),
+                    class: crate::drive::warrant_gate::GateClass::Gotcha,
+                    score: "0.912345".to_owned(),
+                    threshold: "0.8".to_owned(),
+                    fired: true,
+                },
+                model: "nli-test@abc1234".to_owned(),
+                revision: "abc1234".to_owned(),
+                compute_units: "cpu_and_gpu".to_owned(),
+                latency_ms: 48,
+                replayed: false,
+            },
         ];
         let mut kinds = std::collections::BTreeSet::new();
         for event in &events {
@@ -14384,9 +14775,10 @@ pub(in crate::drive) mod tests {
                 Event::Backlogged { .. } => 44,
                 Event::TrunkClamped { .. } => 45,
                 Event::TrunkWaited { .. } => 46,
+                Event::WarrantGated { .. } => 47,
             });
         }
-        assert_eq!(kinds.len(), 47, "a variant has no sample");
+        assert_eq!(kinds.len(), 48, "a variant has no sample");
         events
             .into_iter()
             .enumerate()
@@ -14886,6 +15278,21 @@ pub(in crate::drive) mod tests {
                 wait_ms: 4_100,
                 window_cap: 4_540,
                 cap: 4_540,
+            },
+            log::Event::WarrantGated {
+                request: 3,
+                outcome: "decided".to_owned(),
+                probe: Some("gotcha-prose".to_owned()),
+                class: Some("gotcha".to_owned()),
+                score: Some("0.912345".to_owned()),
+                threshold: Some("0.8".to_owned()),
+                fired: Some(true),
+                reason: None,
+                model: "nli-test@abc1234".to_owned(),
+                revision: "abc1234".to_owned(),
+                compute_units: "cpu_and_gpu".to_owned(),
+                latency_ms: 48,
+                replayed: None,
             },
         ]
     }
@@ -17775,6 +18182,7 @@ pub(in crate::drive) mod tests {
             fork_slots: 0,
             fork_backlog: FORK_BACKLOG_DEFAULT,
             prefix_pages: PrefixPages::Counted,
+            warrant_gate: crate::drive::warrant_gate::WarrantGate::Regex,
             pool_chunk: POOL_CHUNK_DEFAULT,
             timing: Timing::Gap,
             step: crate::drive::warrants::StepWarrants::DEFAULTS,
@@ -20004,6 +20412,223 @@ pub(in crate::drive) mod tests {
         assert_eq!(fork_outcomes(&log), [log::ForkOutcome::Value; 2]);
         reads_whole(&session);
         tidy(&[&tree]);
+    }
+
+    /// A session whose `trouble` warrant is gated by a classifier at
+    /// `endpoint` (the fake's), its probes: `gotcha` fires on the step's
+    /// output saying "a note", `decision` never. Its trunk reads `file`, then
+    /// answers; four slots hold every fork the step warrants.
+    fn classifier_gated(tree: &Path, endpoint: &str, file: &str) -> Session<Canned> {
+        use crate::drive::warrant_gate::{GateClass, Input, WarrantGate, tests};
+        let session = during_turn(
+            tree,
+            vec![
+                vec![bash("call-1", &format!("cat {file}"))],
+                deltas(&["Done."]),
+            ],
+            (0..8).map(|_| deltas(&["LEARNED: a fact\n"])).collect(),
+            4,
+        );
+        {
+            let mut state = session.shared.lock();
+            let interview = state.interview.as_mut().expect("an interview");
+            interview.step.trouble = true;
+            interview.warrant_gate = WarrantGate::Classifier(Box::new(tests::classifier_at(
+                endpoint,
+                vec![
+                    tests::probe(GateClass::Gotcha, Input::Output, &["G"], "0.5"),
+                    tests::probe(GateClass::Decision, Input::Output, &["D"], "0.5"),
+                ],
+            )));
+        }
+        session
+    }
+
+    /// Scores "G" 0.9 on a window saying "a note", every other pair 0.1.
+    fn notes_gotcha(label: &str, text: &str) -> f64 {
+        if label == "G" && text.contains("a note") {
+            0.9
+        } else {
+            0.1
+        }
+    }
+
+    /// A stale step drops the classifier's decision but not `open`'s
+    /// cadence when no probe gates `open`: the tenth step still fires it.
+    #[test]
+    fn a_stale_step_keeps_opens_cadence_when_no_probe_gates_it() {
+        use crate::drive::warrants::{Counters, Gate, Step, StepWarrants};
+        let warrants = StepWarrants {
+            trouble: true,
+            open: true,
+            ..StepWarrants::DEFAULTS
+        };
+        let mut counters = Counters::default();
+        let step = Step::default();
+        let opens: Vec<usize> = (1..=10)
+            .filter(|_| {
+                verdict_gates(&warrants, &mut counters, &step, &Verdict::Dropped(false))
+                    .contains(&Gate::Open)
+            })
+            .collect();
+        assert_eq!(opens, [10]);
+        // A probe that gates `open`: no cadence, stale or not.
+        let mut counters = Counters::default();
+        assert!((1..=10).all(|_| {
+            !verdict_gates(&warrants, &mut counters, &step, &Verdict::Dropped(true))
+                .contains(&Gate::Open)
+        }));
+    }
+
+    /// The templates the trouble forks asked, in order.
+    fn trouble_asks(log: &[Logged]) -> Vec<String> {
+        log.iter()
+            .filter_map(|logged| match &logged.event {
+                Event::Forked {
+                    why: log::Warrant::Trouble,
+                    pinned: Some(template),
+                    ..
+                } => Some(template.name().to_lowercase()),
+                _ => None,
+            })
+            .collect()
+    }
+
+    /// The `warrant.gated` lines: each outcome's word, and whether replayed.
+    fn gate_lines(log: &[Logged]) -> Vec<(String, bool)> {
+        log.iter()
+            .filter_map(|logged| match &logged.event {
+                Event::WarrantGated {
+                    outcome, replayed, ..
+                } => Some((
+                    match outcome {
+                        WarrantOutcome::Decided { class, fired, .. } => {
+                            format!("{}:{fired}", class.word())
+                        }
+                        WarrantOutcome::Fallback(reason) => format!("fallback:{reason}"),
+                        WarrantOutcome::Stale(reason) => format!("stale:{reason}"),
+                    },
+                    *replayed,
+                )),
+                _ => None,
+            })
+            .collect()
+    }
+
+    /// Under a classifier, a step's trouble fork fires on the classes whose
+    /// probes reached their thresholds, and asks only those: `gotcha` fired
+    /// on the read's output, `decision` did not. Every decision is logged,
+    /// the final answer's too.
+    #[test]
+    fn a_classifier_gate_fires_the_classes_over_their_thresholds_and_asks_only_those() {
+        let tree = scratch("warrant-gate-classified");
+        let sidekick = crate::drive::warrant_gate::tests::FakeSidekick::serving(
+            crate::drive::warrant_gate::tests::MODEL_AT,
+            "cpu_and_gpu",
+            notes_gotcha,
+        );
+        let session = classifier_gated(&tree, &sidekick.endpoint, "notes.md");
+        session.ask("look around", None).expect("accepted");
+        let log = wait_until(&session, "the turn and its forks", |log| {
+            settled(log) && fork_outcomes(log).len() >= 2
+        });
+        assert_eq!(trouble_asks(&log), ["gotchas"]);
+        let lines = gate_lines(&log);
+        assert_eq!(
+            lines,
+            [
+                ("gotcha:true".to_owned(), false),
+                ("decision:false".to_owned(), false),
+                ("gotcha:false".to_owned(), false),
+                ("decision:false".to_owned(), false),
+            ]
+        );
+        reads_whole(&session);
+        tidy(&[&tree]);
+    }
+
+    /// A classifier that cannot be reached: the step falls back to the
+    /// patterns, logged with its reason, and the turn goes on -- the read of
+    /// a missing file fires the whole trio, as the patterns do.
+    #[test]
+    fn an_unreachable_classifier_falls_back_to_the_patterns_and_says_why() {
+        let tree = scratch("warrant-gate-fallback");
+        let port = std::net::TcpListener::bind("127.0.0.1:0")
+            .expect("a port")
+            .local_addr()
+            .expect("an address")
+            .port();
+        let session = classifier_gated(&tree, &format!("http://127.0.0.1:{port}"), "missing.md");
+        session.ask("look around", None).expect("accepted");
+        let log = wait_until(&session, "the turn and its forks", |log| {
+            settled(log) && fork_outcomes(log).len() >= 3
+        });
+        assert_eq!(trouble_asks(&log), ["gotchas", "decisions", "constraints"]);
+        let lines = gate_lines(&log);
+        // The read's step falls back; the final answer gives the output
+        // probes nothing to read, so it calls nothing and scores 0.
+        assert!(lines[0].0.starts_with("fallback:unreachable"), "{lines:?}");
+        assert_eq!(
+            lines[1..],
+            [
+                ("gotcha:false".to_owned(), false),
+                ("decision:false".to_owned(), false)
+            ]
+        );
+        assert!(
+            log.iter().any(|logged| matches!(
+                logged.event,
+                Event::TurnSettled {
+                    reason: SettleReason::Final,
+                    ..
+                }
+            )),
+            "the turn was not failed"
+        );
+        reads_whole(&session);
+        tidy(&[&tree]);
+    }
+
+    /// A recorded run's gate decisions replay from its log, keyed by each
+    /// step's trunk request: the same forks fire, every line says it was
+    /// replayed, and the classifier -- here nothing listening -- is never
+    /// called.
+    #[test]
+    fn a_recorded_runs_gate_decisions_replay_without_a_classifier() {
+        let tree = scratch("warrant-gate-recorded");
+        let sidekick = crate::drive::warrant_gate::tests::FakeSidekick::serving(
+            crate::drive::warrant_gate::tests::MODEL_AT,
+            "cpu_and_gpu",
+            notes_gotcha,
+        );
+        let live = classifier_gated(&tree, &sidekick.endpoint, "notes.md");
+        live.ask("look around", None).expect("accepted");
+        let recorded = wait_until(&live, "the live run", |log| {
+            settled(log) && fork_outcomes(log).len() >= 2
+        });
+        let lines: Vec<log::Line> = recorded.iter().map(line_of).collect();
+        let tree_again = scratch("warrant-gate-replayed");
+        let port = std::net::TcpListener::bind("127.0.0.1:0")
+            .expect("a port")
+            .local_addr()
+            .expect("an address")
+            .port();
+        let replay = classifier_gated(&tree_again, &format!("http://127.0.0.1:{port}"), "notes.md");
+        replay.replaying_gates(recorded_gates(&lines));
+        replay.ask("look around", None).expect("accepted");
+        let log = wait_until(&replay, "the replay", |log| {
+            settled(log) && fork_outcomes(log).len() >= 2
+        });
+        assert_eq!(trouble_asks(&log), trouble_asks(&recorded));
+        let replayed = gate_lines(&log);
+        let live_lines = gate_lines(&recorded);
+        assert_eq!(replayed.len(), live_lines.len());
+        for ((line, was), (live_line, _)) in replayed.iter().zip(&live_lines) {
+            assert_eq!(line, live_line);
+            assert!(*was, "replayed: {line}");
+        }
+        reads_whole(&replay);
+        tidy(&[&tree, &tree_again]);
     }
 
     /// [`during_turn`] with one slot, per call, and a queue of at most

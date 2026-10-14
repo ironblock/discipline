@@ -275,6 +275,10 @@ vocabulary! {
         /// A trunk request held until the forks in flight settled: even its
         /// prompt and the clamp's floor did not fit beside them (v8).
         TrunkWaited => "trunk.waited",
+        /// The step warrants' classifier gate on a step: a probe's
+        /// decision, the step's fallback to the patterns, or a stale
+        /// decision dropped (v8).
+        WarrantGated => "warrant.gated",
     }
 }
 
@@ -1650,6 +1654,40 @@ pub enum Event {
         accepted: bool,
         /// Why, in the model's words.
         reason: Option<String>,
+    },
+    /// The step warrants' classifier gate on the step of trunk request
+    /// `request` (v8): with outcome `decided`, one probe's decision; with
+    /// `fallback`, the step fell back to the patterns, and `reason` says
+    /// why; with `stale`, the decision came back after the turn moved on and
+    /// was dropped. Every line names the model, its revision and compute
+    /// units, and the step's call latency; a replayed one says so.
+    WarrantGated {
+        /// The step's trunk request.
+        request: u64,
+        /// `decided`, `fallback` or `stale`.
+        outcome: String,
+        /// The probe, on a decision.
+        probe: Option<String>,
+        /// Its class, on a decision.
+        class: Option<String>,
+        /// Its aggregate score, on a decision.
+        score: Option<String>,
+        /// Its threshold, as written, on a decision.
+        threshold: Option<String>,
+        /// Whether it fired, on a decision.
+        fired: Option<bool>,
+        /// Why, on a fallback or a stale decision.
+        reason: Option<String>,
+        /// The model served, as Sidekick reported it, or the declared one.
+        model: String,
+        /// The model's revision, as declared.
+        revision: String,
+        /// The compute units, as Sidekick reported them, or the declared.
+        compute_units: String,
+        /// The step's calls, wall time.
+        latency_ms: u64,
+        /// Replayed from a recorded run.
+        replayed: Option<bool>,
     },
     /// A trunk request's output cap cut to what the forks in flight leave
     /// of the pool (v8): below what the window alone gives it. Every job is
@@ -3777,6 +3815,54 @@ fn from_object(object: &BTreeMap<String, Value>) -> Result<Line, String> {
             phase: fields.string("phase")?,
             phase_document: fields.optional_phase_document("phase_document")?,
         },
+        Kind::WarrantGated => {
+            let outcome = fields.string("outcome")?;
+            let (probe, class, score, threshold, fired, reason) = (
+                fields.optional_string("probe")?,
+                fields.optional_string("class")?,
+                fields.optional_string("score")?,
+                fields.optional_string("threshold")?,
+                fields.optional_flag("fired")?,
+                fields.optional_string("reason")?,
+            );
+            let decided = probe.is_some()
+                && class.is_some()
+                && score.is_some()
+                && threshold.is_some()
+                && fired.is_some();
+            let none = probe.is_none()
+                && class.is_none()
+                && score.is_none()
+                && threshold.is_none()
+                && fired.is_none();
+            let shaped = match outcome.as_str() {
+                "decided" => decided && reason.is_none(),
+                "fallback" | "stale" => none && reason.is_some(),
+                _ => false,
+            };
+            if !shaped {
+                return Err(
+                    "a `warrant.gated` is `decided` with its probe, class, score, threshold \
+                     and fired, or `fallback` or `stale` with its reason, and nothing else"
+                        .to_owned(),
+                );
+            }
+            Event::WarrantGated {
+                request: fields.count("request")?,
+                outcome,
+                probe,
+                class,
+                score,
+                threshold,
+                fired,
+                reason,
+                model: fields.string("model")?,
+                revision: fields.string("revision")?,
+                compute_units: fields.string("compute_units")?,
+                latency_ms: fields.count("latency_ms")?,
+                replayed: fields.optional_flag("replayed")?,
+            }
+        }
         Kind::TrunkClamped => Event::TrunkClamped {
             turn: fields.turn("turn")?,
             window_cap: fields.count("window_cap")?,
@@ -4967,7 +5053,8 @@ pub fn introduced(kind: Kind) -> i64 {
         | Kind::PhaseAnswered
         | Kind::PhaseStarted
         | Kind::TrunkClamped
-        | Kind::TrunkWaited => 8,
+        | Kind::TrunkWaited
+        | Kind::WarrantGated => 8,
         _ => 0,
     }
 }
@@ -5477,6 +5564,26 @@ pub fn schema(kind: Kind) -> &'static [Field] {
             const F: &[Field] = &[
                 must_v8("phase", Text),
                 may_v8("phase_document", Holds::PhaseDocument),
+            ];
+            F
+        }
+        Kind::WarrantGated => {
+            const F: &[Field] = &[
+                must_v8("request", Count),
+                must_v8("outcome", Text),
+                // On a decision; absent on a fallback or a stale one: the
+                // reader checks which.
+                may_v8("probe", Text),
+                may_v8("class", Text),
+                may_v8("score", Text),
+                may_v8("threshold", Text),
+                may_v8("fired", Holds::Flag),
+                may_v8("reason", Text),
+                must_v8("model", Text),
+                must_v8("revision", Text),
+                must_v8("compute_units", Text),
+                must_v8("latency_ms", Count),
+                may_v8("replayed", Holds::Flag),
             ];
             F
         }
@@ -6873,6 +6980,46 @@ fn to_value(line: &Line) -> Value {
                 put("phase_document", phase_document_value(document));
             }
             Kind::PhaseStarted
+        }
+        Event::WarrantGated {
+            request,
+            outcome,
+            probe,
+            class,
+            score,
+            threshold,
+            fired,
+            reason,
+            model,
+            revision,
+            compute_units,
+            latency_ms,
+            replayed,
+        } => {
+            put("request", count(*request));
+            put("outcome", text(outcome));
+            for (key, value) in [
+                ("probe", probe),
+                ("class", class),
+                ("score", score),
+                ("threshold", threshold),
+                ("reason", reason),
+            ] {
+                if let Some(value) = value {
+                    put(key, text(value));
+                }
+            }
+            if let Some(fired) = fired {
+                put("fired", Value::Boolean(*fired));
+            }
+            put("model", text(model));
+            put("revision", text(revision));
+            put("compute_units", text(compute_units));
+            put("latency_ms", count(*latency_ms));
+            if let Some(replayed) = replayed {
+                put("replayed", Value::Boolean(*replayed));
+            }
+            Kind::WarrantGated
         }
         Event::TrunkClamped {
             turn,
@@ -8519,6 +8666,36 @@ mod tests {
                 cap: 6_144,
                 forks: vec!["f/12".to_owned()],
             },
+            Event::WarrantGated {
+                request,
+                outcome: "decided".to_owned(),
+                probe: Some("gotcha-output".to_owned()),
+                class: Some("gotcha".to_owned()),
+                score: Some("0.912345".to_owned()),
+                threshold: Some("0.8".to_owned()),
+                fired: Some(true),
+                reason: None,
+                model: "nli-test@abc1234".to_owned(),
+                revision: "abc1234".to_owned(),
+                compute_units: "cpu_and_gpu".to_owned(),
+                latency_ms: 48,
+                replayed: None,
+            },
+            Event::WarrantGated {
+                request,
+                outcome: "fallback".to_owned(),
+                probe: None,
+                class: None,
+                score: None,
+                threshold: None,
+                fired: None,
+                reason: Some("timeout: reading".to_owned()),
+                model: "nli-test".to_owned(),
+                revision: "abc1234".to_owned(),
+                compute_units: "cpu_and_gpu".to_owned(),
+                latency_ms: 2_000,
+                replayed: Some(true),
+            },
             Event::TrunkWaited {
                 turn: 5,
                 forks: vec!["f/12".to_owned()],
@@ -8992,6 +9169,14 @@ mod tests {
                     // and `cut` (v8, #822): the reader's shape rule.
                     if kind == Kind::ForkSkipped
                         && ["call", "field", "reason", "cut"].contains(absent)
+                    {
+                        continue;
+                    }
+                    // A gate line names a decision's keys, or a reason (v8):
+                    // the reader's shape rule.
+                    if kind == Kind::WarrantGated
+                        && ["probe", "class", "score", "threshold", "fired", "reason"]
+                            .contains(absent)
                     {
                         continue;
                     }
@@ -9862,7 +10047,7 @@ mod tests {
             tags(Kind::ALL.iter().map(|it| it.tag()).collect()),
             "session.start ask settlement request refused delta stop.asked response \
              cancelled request.failed turn.settled idle.gap progress tool_call fork \
-             fork.settled patch meditation delivered recalled flag meditation.held patch.refused pruned phase.ruled phase.proposed phase.answered phase.started tangent.open tangent.close capture reminded background.ended notice timeout.near fork.skipped phase.noted trunk.clamped trunk.waited"
+             fork.settled patch meditation delivered recalled flag meditation.held patch.refused pruned phase.ruled phase.proposed phase.answered phase.started tangent.open tangent.close capture reminded background.ended notice timeout.near fork.skipped phase.noted trunk.clamped trunk.waited warrant.gated"
         );
         assert_eq!(
             tags(FailReason::ALL.iter().map(|it| it.tag()).collect()),
