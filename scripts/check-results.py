@@ -579,12 +579,16 @@ def rendered_headings(body: str) -> dict[int, str]:
 # could reach, or any scorer could, decides nothing; nor does a floor that
 # fires when the hypothesis is right, a p asked below its floor, a margin read
 # off a point estimate, a veto whose reach is unreported, or a word that hides
-# the planted rows carrying it. Six checks, each mechanical over what the
-# rule declares:
+# the planted rows carrying it, nor a verdict on a class its labellers do not
+# agree on, nor a test set its own contender chose. Eight checks, each
+# mechanical over what the rule declares:
 #
 #   1. a `bar` row's bar against `best` -- the value a perfect scorer reaches
 #      on the same pooling -- and against each `trivial` scorer's (constant,
-#      random, a no-model lexical baseline): attainable, and not handed out;
+#      random, a no-model lexical baseline): attainable, and not handed out,
+#      neither cleared by a trivial scorer, nor within one `resolution` step
+#      of one (one item would decide), nor reached by chance with a
+#      `p_trivial` above the rule's `alpha` (0.05 unless it says);
 #   2. a `floor` or `control` row declares `fires_on_predicted_outcome`, and
 #      it is false;
 #   3. no clause asks a p below its attainable floor (read from the clause
@@ -592,12 +596,22 @@ def rendered_headings(body: str) -> dict[int, str]:
 #   4. a `margin` row reads an interval (`reads = "interval"`);
 #   5. a cell-veto `control` (`veto = "cell"`) reports the share of rows that
 #      tripped it (`reports_tripped_share = true`);
-#   6. a verdict `[constructed]` rows carry (`carries_verdict = true`) says
-#      "planted" or "authored" in its word.
+#   6. when `[constructed]` rows carry the verdict (`carries_verdict =
+#      true`), every supported and refuted clause says "planted" or
+#      "authored" (the record's word is the claim's closed vocabulary, so the
+#      clause is where it can be said); and when a contender is among
+#      the scorers that chose the rows (`mined_by`), every supported and
+#      refuted clause says it is post hoc;
+#   7. a labelled class whose double-labelled agreement is below KAPPA_FLOOR
+#      feeds no clause but `inconclusive`;
+#   8. (over docs, not rules: `ledger_words`) a doc line that links a record
+#      and calls it dead, closed, disproven, ruled out or refuted links only
+#      records the word holds for.
 #
 # A rule file dated after ATTAINABILITY_LANDED declares an `[[attainability]]`
-# row for each of its supported and refuted clauses and a `[constructed]`
-# table. One dated on or before it is held to check 3 only, and a failure is
+# row for each of its supported and refuted clauses, a `[constructed]` table
+# (`share_of_positives`, `carries_verdict`, `contenders`, `mined_by`,
+# `surface`), and `[[labels]]` rows or `labels = "not applicable: <why>"`. One dated on or before it is held to check 3 only, and a failure is
 # reported, not failed, when the directory is listed in GRANDFATHERED beside
 # the audit row that found it; an unlisted failure still fails, so the list
 # is the record of what history carries, not a date that excuses it.
@@ -646,6 +660,18 @@ COMPARISON = re.compile(r"(>=|<=|≥|≤|>|<)\s*(-?[0-9]+(?:\.[0-9]+)?)")
 ASKS_OPERATORS = {"at_least": (">=", "≥"), "at_most": ("<=", "≤"), "below": ("<",), "above": (">",)}
 P_BELOW_FLOOR = re.compile(r"\bp\b[^.;]*?\bbelow (?:the|its) attainable floor", re.IGNORECASE)
 NOT_APPLICABLE = re.compile(r"not applicable: .*[A-Za-z].*")
+# A rule's alpha when it states none.
+DEFAULT_ALPHA = decimal.Decimal("0.05")
+# The agreement below which a labelled class carries only `inconclusive`:
+# Dispatch's choice (2026-10-14), the lower edge of Landis and Koch's
+# "substantial", for the maintainer to move. Specimen: the trouble pilot's
+# gotcha class at 0.36.
+KAPPA_FLOOR = decimal.Decimal("0.60")
+PLANTED = re.compile(r"\b(planted|authored)\b", re.IGNORECASE)
+POST_HOC = re.compile(r"\bpost[ -]hoc\b", re.IGNORECASE)
+# A doc line's ledger words, and the records it links.
+LEDGER_WORDS = re.compile(r"\b(dead|closed|disproven|ruled out|refuted)\b", re.IGNORECASE)
+RESULTS_LINK = re.compile(r"\bresults/(\d{4}-\d{2}-\d{2}-[a-z0-9]+(?:-[a-z0-9]+)*)")
 REPORTED: list[str] = []
 
 
@@ -693,15 +719,6 @@ def attainability(directory: pathlib.Path) -> list[tuple[str, str]]:
     failures: list[tuple[str, str]] = []
     match = DIR_NAME.fullmatch(directory.name)
     operative = bool(match) and match.group(1) > ATTAINABILITY_LANDED
-    result = ""
-    readme = directory / "README.md"
-    if readme.is_file():
-        _, front_text, _, _ = split_front_matter(read_text(readme))
-        if front_text is not None:
-            try:
-                result = str(tomllib.loads(front_text).get("result", ""))
-            except tomllib.TOMLDecodeError:
-                result = ""
     for path in rule_files(directory):
         try:
             doc = tomllib.loads(read_text(path))
@@ -728,6 +745,10 @@ def attainability(directory: pathlib.Path) -> list[tuple[str, str]]:
             rows = []
         named = {clause for clause, _ in clauses}
         texts = dict(clauses)
+        alpha = DEFAULT_ALPHA if "alpha" not in doc else exact(doc.get("alpha"))
+        if alpha is None:
+            failures.append(("results.attainability-malformed", f"{path.name} `alpha` is {doc.get('alpha')!r}, not an exact decimal"))
+            alpha = DEFAULT_ALPHA
         covered = {row.get("clause") for row in rows}
         for clause in sorted(c for c in named if c.rsplit(".", 1)[-1] in ADJUDICATING and c not in covered):
             if rows:
@@ -780,6 +801,16 @@ def attainability(directory: pathlib.Path) -> list[tuple[str, str]]:
                             f"each an exact decimal or `not applicable: <why>`",
                         ))
                         continue
+                    # The metric's smallest step on its pooling unit, and
+                    # the chance a trivial scorer reaches the bar anyway.
+                    resolution, p_trivial = exact(row.get("resolution")), exact(row.get("p_trivial"))
+                    if resolution is None or resolution <= 0 or p_trivial is None:
+                        failures.append((
+                            "results.attainability-malformed",
+                            f"{where} states `resolution` (the statistic's smallest step on its pooling, > 0) and "
+                            f"`p_trivial` (the chance a trivial scorer reaches the bar), each an exact decimal",
+                        ))
+                        continue
                     for name in TRIVIAL_SCORERS:
                         value = trivial[name]
                         figure = exact(value)
@@ -794,6 +825,18 @@ def attainability(directory: pathlib.Path) -> list[tuple[str, str]]:
                                 f"{where} `{clause}`: the {name} scorer reaches {figure}, "
                                 f"which clears the bar {bar} with no model",
                             ))
+                        elif abs(bar - figure) <= resolution:
+                            failures.append((
+                                "results.attainability-trivial",
+                                f"{where} `{clause}`: the {name} scorer's {figure} is within one step "
+                                f"({resolution}) of the bar {bar}, so one item decides the verdict",
+                            ))
+                    if p_trivial > alpha:
+                        failures.append((
+                            "results.attainability-trivial",
+                            f"{where} `{clause}`: a trivial scorer reaches the bar {bar} with p {p_trivial}, "
+                            f"above the rule's alpha {alpha}",
+                        ))
             elif kind == "margin":
                 # Check 4.
                 if row.get("reads") != "interval":
@@ -819,18 +862,70 @@ def attainability(directory: pathlib.Path) -> list[tuple[str, str]]:
                     ))
         # Check 6.
         constructed = doc.get("constructed")
+
+        def names(key: str) -> list[str] | None:
+            value = constructed.get(key)
+            return value if isinstance(value, list) and all(isinstance(v, str) and v for v in value) else None
+
         if not isinstance(constructed, dict) or not isinstance(constructed.get("carries_verdict"), bool) \
-                or exact(constructed.get("share_of_positives")) is None:
+                or exact(constructed.get("share_of_positives")) is None \
+                or names("contenders") is None or names("mined_by") is None or not has_text(constructed.get("surface")):
             failures.append((
                 "results.attainability-undeclared",
-                f"{path.name} declares no `[constructed]` table with `share_of_positives` and `carries_verdict`",
+                f"{path.name} declares no `[constructed]` table with `share_of_positives`, `carries_verdict`, "
+                f"`contenders` and `mined_by` (each a list of scorers, which may be empty), and `surface` "
+                f"(the text the scorer sees, against where the labels come from)",
             ))
-        elif constructed["carries_verdict"] and not re.search(r"\b(planted|authored)\b", result, re.IGNORECASE):
+        else:
+            # The acknowledgement is the clause's, not the word's: a record's
+            # word is the claim's closed vocabulary (results.verdict-disagrees-
+            # with-record), which has no room to say "planted".
+            miners = sorted(set(names("mined_by")) & set(names("contenders")))
+            for clause in sorted(c for c in named if c.rsplit(".", 1)[-1] in ADJUDICATING):
+                if constructed["carries_verdict"] and not PLANTED.search(texts[clause]):
+                    failures.append((
+                        "results.attainability-constructed",
+                        f"{path.name} `{clause}`: planted or authored rows ({constructed['share_of_positives']} "
+                        f"of positives) carry the verdict, and the clause does not say so",
+                    ))
+                # A contender that chose its own rows is graded on its choices.
+                if miners and not POST_HOC.search(texts[clause]):
+                    failures.append((
+                        "results.attainability-mined",
+                        f"{path.name} `{clause}`: the rows were mined by the contender(s) {', '.join(miners)}, "
+                        f"and the clause does not say it is post hoc",
+                    ))
+        # Check 7.
+        labels = doc.get("labels")
+        if isinstance(labels, str) and NOT_APPLICABLE.fullmatch(labels):
+            labels = []
+        elif not isinstance(labels, list) or not labels or not all(isinstance(row, dict) for row in labels):
             failures.append((
-                "results.attainability-constructed",
-                f"{path.name}: planted or authored rows ({constructed['share_of_positives']} of positives) "
-                f"carry the verdict, and the word `{result}` does not say so",
+                "results.attainability-undeclared",
+                f"{path.name} declares no `[[labels]]` rows (each labelled class: `class`, `double_labelled_n`, "
+                f"`kappa`, and the `clauses` it feeds) and no `labels = \"not applicable: <why>\"`",
             ))
+            labels = []
+        for at, row in enumerate(labels):
+            where = f"{path.name} labels[{at}]"
+            n, kappa, fed = row.get("double_labelled_n"), exact(row.get("kappa")), row.get("clauses")
+            if not has_text(row.get("class")) or not isinstance(n, int) or isinstance(n, bool) or n <= 0 \
+                    or kappa is None or not isinstance(fed, list) or not fed:
+                failures.append((
+                    "results.attainability-malformed",
+                    f"{where} states `class`, `double_labelled_n` (> 0), `kappa` as an exact decimal, and the `clauses` it feeds",
+                ))
+                continue
+            for clause in fed:
+                if clause not in named:
+                    failures.append(("results.attainability-malformed", f"{where} feeds `{clause}`, no clause of this rule"))
+            carried = sorted(c for c in fed if c in named and c.rsplit(".", 1)[-1] != "inconclusive")
+            if kappa < KAPPA_FLOOR and carried:
+                failures.append((
+                    "results.attainability-label-agreement",
+                    f"{where} the class `{row['class']}` was double-labelled at kappa {kappa} (n {n}), below "
+                    f"{KAPPA_FLOOR}, and feeds {', '.join(f'`{c}`' for c in carried)}; it may carry only inconclusive",
+                ))
     return failures
 
 
@@ -849,6 +944,55 @@ def judged_attainability(directory: pathlib.Path) -> list[str]:
             )
         return []
     return [f"{directory}: {message}  [{failure_class}]" for failure_class, message in found]
+
+
+def front_of(directory: pathlib.Path) -> dict:
+    """A record's README front matter, or nothing when it has none to read."""
+    readme = directory / "README.md"
+    if not readme.is_file():
+        return {}
+    front_text, _, _, _ = split_front_matter(read_text(readme))
+    try:
+        return tomllib.loads(front_text) if front_text is not None else {}
+    except tomllib.TOMLDecodeError:
+        return {}
+
+
+def ledger_words(doc: pathlib.Path, records: pathlib.Path) -> list[str]:
+    """Check 8: a doc may not strengthen a ledger word. A line that links a
+    `results/<dir>` and calls something dead, closed, disproven, ruled out or
+    refuted links only records whose word is `refuted` and whose rule holds
+    under the attainability rule -- or, from before it, is GRANDFATHERED and
+    carries an erratum. Lines that link no record ("closed PR") are their
+    own. Specimen: program.md's "dead in both framings", struck in #845."""
+    failures: list[str] = []
+    for number, line in enumerate(read_text(doc).splitlines(), start=1):
+        # The words the line says, not the ones in the names it links.
+        said = sorted({word.lower() for word in LEDGER_WORDS.findall(RESULTS_LINK.sub("", line))})
+        if not said:
+            continue
+        for name in dict.fromkeys(RESULTS_LINK.findall(line)):
+            directory = records / name
+            front = front_of(directory)
+            word = front.get("result")
+            if word != "refuted":
+                why = f"its word is {word!r}" if directory.is_dir() else "no such record"
+            elif name in GRANDFATHERED:
+                defects = front.get("known_defects")
+                erratum = isinstance(defects, list) and any(isinstance(d, str) and "erratum" in d for d in defects)
+                if erratum:
+                    continue
+                why = "it predates the attainability rule, which found it wanting, and carries no erratum"
+            else:
+                found = attainability(directory)
+                if not found:
+                    continue
+                why = f"its rule fails the attainability rule ({', '.join(sorted({c for c, _ in found}))})"
+            failures.append(
+                f"{doc}:{number}: says {', '.join(repr(w) for w in said)} of results/{name}, and {why}  "
+                f"[results.attainability-ledger-word]"
+            )
+    return failures
 
 
 def check_run(directory: pathlib.Path) -> list[str]:
@@ -1990,7 +2134,15 @@ def main(argv: list[str]) -> int:
     parser.add_argument(
         "--attainability",
         action="store_true",
-        help="hold only the attainability rule's six checks over the directories' rules; needs no diet",
+        help="hold only the attainability rule's checks over the directories' rules; needs no diet",
+    )
+    parser.add_argument(
+        "--docs",
+        type=pathlib.Path,
+        action="append",
+        default=[],
+        metavar="PATH",
+        help="hold a doc's ledger words (a file, or a directory's *.md) to the records under --root it links; needs no diet",
     )
     parser.add_argument(
         "directories",
@@ -2005,6 +2157,15 @@ def main(argv: list[str]) -> int:
         if args.root or args.directories or args.ledger is not None:
             parser.error("--render takes one directory and nothing else")
         args.directories = [args.render]
+    if args.docs:
+        if args.attainability or args.ledger is not None or args.render is not None or args.directories or len(args.root) != 1:
+            parser.error("--docs takes one --root, the records its docs link, and nothing else")
+        docs = [p for path in args.docs for p in (sorted(path.glob("*.md")) if path.is_dir() else [path])]
+        failures = [message for doc in docs for message in ledger_words(doc, args.root[0])]
+        for message in failures:
+            print(message, file=sys.stderr)
+        print(f"check-results: ledger words over {len(docs)} doc(s): {len(failures)} failure(s)")
+        return 1 if failures else 0
     if not args.root and not args.directories:
         parser.error("nothing to lint: pass --root DIR or one or more run directories")
 

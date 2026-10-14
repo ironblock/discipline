@@ -1,0 +1,2 @@
+results.attainability-undeclared
+The rule declares no `[[labels]]` rows and does not say `labels = "not applicable: <why>"`, so nothing shows how well its labelled classes agree.
