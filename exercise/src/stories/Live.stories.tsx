@@ -77,13 +77,22 @@ export const Driven: Story = {
   play: async ({ canvasElement }) => {
     await waitFor(async () => expect(says(canvasElement)).toBe('your turn'));
     const blocks = () => canvasElement.querySelectorAll('.ex-trunk .ex-block').length;
+    const answers = () => canvasElement.querySelectorAll('.ex-trunk [data-tone="assistant"]').length;
     const before = blocks();
+    const answered = answers();
     await userEvent.type(canvasElement.querySelector('textarea') as HTMLTextAreaElement, 'Where is the output format decided?{Enter}');
-    await waitFor(async () => expect(says(canvasElement)).not.toBe('your turn'));
-    // Under the browser project's 15 s test timeout, so a turn that never settles fails here, saying so.
-    await waitFor(async () => expect(says(canvasElement)).toBe('your turn'), { timeout: 10_000 });
+    // Ordered by events, not caught in passing: a new answer exists only once the ask's turn ran, so it stands in for
+    // seeing the turn start -- a transient state a loaded browser can stall past. The turn is over when that answer is
+    // drawn and the turn is handed back. Under the browser project's 15 s test timeout, so a turn that never runs or
+    // never settles fails here, saying so.
+    await waitFor(
+      async () => {
+        await expect(answers()).toBeGreaterThan(answered);
+        await expect(says(canvasElement)).toBe('your turn');
+      },
+      { timeout: 10_000 },
+    );
     await expect(blocks()).toBeGreaterThan(before + 1);
-    await expect(canvasElement.querySelector('.ex-trunk [data-tone="assistant"]')).not.toBeNull();
   },
 };
 
