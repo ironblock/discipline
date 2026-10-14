@@ -1,0 +1,2 @@
+results.attainability-trivial
+P@5 over one list of five moves in steps of 0.2, and the random scorer's 0.39 sits within one step of the bar 0.40: one item decides the verdict (#17's P@5, A2b).

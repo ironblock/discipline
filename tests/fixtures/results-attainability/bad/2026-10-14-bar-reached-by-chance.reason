@@ -1,0 +1,2 @@
+results.attainability-trivial
+A random ranking reaches the supported bar with p 0.08, above the rule's alpha 0.05: the bar is clear of every trivial scorer's expected value and still handed out by chance one time in twelve (#17's P@5, A2b).

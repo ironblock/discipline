@@ -1,10 +1,12 @@
 //! The attainability rule, operative (ruled on #17; the construction audit
 //! of 2026-10-13, A19): `scripts/check-results.py --attainability` holds a
-//! decision rule's clauses to six mechanical checks. Each failing fixture
+//! decision rule's clauses to its mechanical checks. Each failing fixture
 //! under `tests/fixtures/results-attainability/bad/` fails exactly its own
-//! check, named on its `.reason`'s first line; the passing one passes; and
+//! check, named on its `.reason`'s first line; each passing one passes; and
 //! the committed results that predate the rule are reported, not failed,
-//! each beside its audit row.
+//! each beside its audit row. `--docs` holds a doc's ledger words to the
+//! records it links: each failing doc under `docs/bad/` fails, each under
+//! `docs/good/` passes, and the program's own docs pass.
 
 use std::path::{Path, PathBuf};
 use std::process::{Command, Output};
@@ -76,8 +78,84 @@ fn each_failing_fixture_fails_its_own_check_and_no_other() {
 }
 
 #[test]
-fn a_rule_that_declares_its_attainability_passes() {
-    let ran = attainability(&fixtures("good").join("2026-10-14-attainable"));
+fn each_rule_that_declares_its_attainability_passes() {
+    let mut cases: Vec<PathBuf> = std::fs::read_dir(fixtures("good"))
+        .expect("the passing fixtures")
+        .filter_map(Result::ok)
+        .map(|entry| entry.path())
+        .filter(|path| path.is_dir())
+        .collect();
+    cases.sort();
+    assert!(
+        cases.len() >= 3,
+        "a passing fixture per declaration: {cases:?}"
+    );
+    for case in cases {
+        let ran = attainability(&case);
+        assert_eq!(
+            ran.status.code(),
+            Some(0),
+            "{}: {}",
+            case.display(),
+            said(&ran)
+        );
+    }
+}
+
+fn ledger_words(doc: &Path, records: &Path) -> Output {
+    Command::new("python3")
+        .current_dir(root())
+        .args(["scripts/check-results.py", "--docs"])
+        .arg(doc)
+        .arg("--root")
+        .arg(records)
+        .output()
+        .expect("python3 runs the checker")
+}
+
+fn docs(kind: &str, extension: &str) -> Vec<PathBuf> {
+    let mut found: Vec<PathBuf> = std::fs::read_dir(fixtures("docs").join(kind))
+        .expect("the doc fixtures")
+        .filter_map(Result::ok)
+        .map(|entry| entry.path())
+        .filter(|path| path.extension().is_some_and(|e| e == extension))
+        .collect();
+    found.sort();
+    found
+}
+
+#[test]
+fn a_doc_that_strengthens_a_ledger_word_fails_and_one_that_keeps_it_passes() {
+    let records = fixtures("docs").join("results");
+    let bad = docs("bad", "md");
+    assert!(bad.len() >= 2, "{bad:?}");
+    for doc in bad {
+        let reason = std::fs::read_to_string(doc.with_extension("reason")).expect("a .reason");
+        let class = reason.lines().next().expect("the class line").trim();
+        let ran = ledger_words(&doc, &records);
+        let out = said(&ran);
+        assert_eq!(ran.status.code(), Some(1), "{}: {out}", doc.display());
+        assert!(
+            out.contains(&format!("[{class}]")),
+            "{}: wants [{class}]: {out}",
+            doc.display()
+        );
+    }
+    for doc in docs("good", "md") {
+        let ran = ledger_words(&doc, &records);
+        assert_eq!(
+            ran.status.code(),
+            Some(0),
+            "{}: {}",
+            doc.display(),
+            said(&ran)
+        );
+    }
+}
+
+#[test]
+fn the_programs_docs_say_no_ledger_word_their_records_do_not() {
+    let ran = ledger_words(&root().join("docs"), &root().join("results"));
     assert_eq!(ran.status.code(), Some(0), "{}", said(&ran));
 }
 
