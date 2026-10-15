@@ -1120,13 +1120,19 @@ fn fresh(what: &str) -> Result<std::path::PathBuf, Failure> {
     let stamp = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .map_or(0, |since| since.as_nanos());
-    let dir = std::env::temp_dir().join(format!(
-        "diet-scenario-{what}-{}-{stamp}",
-        std::process::id()
-    ));
+    let dir = std::env::temp_dir().join(named(what, std::process::id(), stamp));
     std::fs::create_dir_all(&dir)
         .map_err(|why| Failure(format!("{} cannot be made: {why}", dir.display())))?;
     Ok(dir)
+}
+
+/// A fresh directory's name, from this process's id and the time, each
+/// zero-padded to its widest (a `u32`'s ten digits; nanoseconds since the
+/// epoch, nineteen today, given twenty), so the name -- printed into the
+/// model's context wherever a kept output is "saved at" it -- is one length
+/// for every run.
+fn named(what: &str, pid: u32, stamp: u128) -> String {
+    format!("diet-scenario-{what}-{pid:010}-{stamp:020}")
 }
 
 /// Copy `work/files/` into `out/files/`, name for name: the recording's
@@ -1507,6 +1513,23 @@ mod tests {
                 },
             ]
         );
+    }
+
+    /// A fresh directory's name is as long whatever the process id and the
+    /// time: the work directory's path is printed into the model's context
+    /// (a kept output is "saved at" it), so a longer name moved `reserved`
+    /// and every `*_tokens` and `*_bytes` after it by one or two.
+    #[test]
+    fn a_fresh_directorys_name_is_as_long_whatever_its_pid_and_time() {
+        let names = [
+            named("work", 7, 0),
+            named("work", 78_357, 1_792_012_742_438_612_000),
+            named("work", 123_456, 1_792_012_742_438_612_000),
+            named("work", u32::MAX, u128::from(u64::MAX)),
+        ];
+        let lengths: Vec<usize> = names.iter().map(String::len).collect();
+        assert!(lengths.iter().all(|&l| l == lengths[0]), "{names:?}");
+        assert_ne!(names[1], names[2], "distinct processes, distinct names");
     }
 
     /// The replies' digest moves with any reply and with nothing else.
