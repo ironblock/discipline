@@ -1,0 +1,19 @@
+{
+ "at": "2026-10-16T09:30:00Z",
+ "instruction_files": [
+  {
+   "path": "AGENTS.md",
+   "sha256": "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff"
+  },
+  {
+   "path": "results/AGENTS.md",
+   "sha256": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"
+  }
+ ],
+ "instrument": "reader",
+ "memory": "none",
+ "system_line": "You label each segment with one category.",
+ "tools": [
+  "Read"
+ ]
+}

@@ -30,6 +30,13 @@ A rule from before the date is held to the p-floor check only, and its failures,
 - **One fire per row, the first.** A row is (`claim_issue`, `rule_ratified.digest`). A fire is a directory that derives from no sibling; an adjudication belongs to the fire whose product it derives from. The first fire, by directory date and then `window_start`, carries the row's word. A later fire declares `repeats = "<the first fire's product_sha256>"`, never `supersedes` it, and is marked `repeat` in the ledger. A revised rule is a new digest, and so a new row.
 
 History reports its one repeat, #17's second draw, against `GRANDFATHERED_CLAIMS`. Fixtures: `tests/fixtures/results-claims/`, with their own registry.
+
+**An instrument run through an agent harness declares its ambient context** (taken by the maintainer 2026-10-15; operative from 2026-10-15; `scripts/check-results.py --claims`, and every full sweep). In Planning's words: "an instrument run through an agent harness declares its ambient context — instruction files, system line, tools, memory — the way a measurement declares its sampler state." An instrument is any judge, labeller, reader or coder run inside a harness that can load context on its own: a subagent, `claude -p`, and the like. What a harness loads unasked is a treatment the instrument shares with every reading it makes. It can move what the instrument reports, and readers who share it agree more, so a shared prior raises κ without making the labels more valid. A directory dated after that date declares one `[[ambient]]` row per instrument in its README:
+- **`instrument` and `harness`:** what read or labelled, and what ran it.
+- **What it carried:** `instruction_files` (each `{ path, sha256 }`, possibly none), `system_line` (the text, possibly empty), `tools` and `memory`.
+- **`probe = { evidence, sha256 }`:** a committed JSON file here, recorded by asking the instrument or reading its harness's own record. It names the `instrument` and the UTC time `at`, and shows the same four fields. The row is what the probe saw, never what was intended.
+
+A directory with no such instrument says `ambient = "not applicable: <why>"`. A rule that declares `[[labels]]` cannot: its labellers are instruments. A diet-driven session is its own probe. Its log's `session.start` records the system message it sent (`head`, instruction files' text included), `instruction_files` by path and digest, and `tools` by name. Working memory reaches the model only through that head and the logged refills. A driven instrument's row cites its committed log's start line, copied into the probe.
  
 **Under concurrency, every throughput figure declares its question** — per-stream or aggregate.
 
@@ -37,7 +44,7 @@ History reports its one repeat, #17's second draw, against `GRANDFATHERED_CLAIMS
 **Unregistered artifacts accumulate authority by presence.** Everything in results has a manifest row or it doesn't exist. *Specimen: 1,019 committed data artifacts; 11 cited.*
 **Artifacts store what recomputation consumes.** The answer, not its character count. Recompute-sufficiency is a property of the storage schema, not a hope.
 **Evidence cited by the record lives in the repo.** External attachments are pointers, never primary storage. *Specimen: three of the program's most-cited findings had their only evidence attached to tickets in a system a reader can't open.*
-**Every result carries its full regime.** Model, quantization, sampler settings, reasoning state, dogma version, substrate. A temperature-0, thinking-off result does not generalize to the configuration you actually code in.
+**Every result carries its full regime.** Model, quantization, sampler settings, reasoning state, dogma version, substrate. A temperature-0, thinking-off result does not generalize to the configuration you actually code in. An instrument run through an agent harness carries its ambient context the same way (above).
 **Defect disclosure rides the artifact.** `known_defects` lives in the manifest, machine-readable, not in a methodology doc nobody greps.
 
 # INTERPRETING

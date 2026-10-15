@@ -13,6 +13,8 @@ seen_red = [{ control = "shuffled-label-null", at = "2026-10-15T09:00:00Z", evid
 repeats = "1111111111111111111111111111111111111111111111111111111111111111"
 supersedes = "1111111111111111111111111111111111111111111111111111111111111111"
 
+ambient = "not applicable: a fixture; no judge, labeller, reader or coder runs in it"
+
 [regime]
 arm = "fixture"
 substrates = ["fixture-carded"]

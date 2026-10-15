@@ -1,0 +1,5 @@
+[[labels]]
+class = "gotcha"
+double_labelled_n = 40
+kappa = "0.81"
+clauses = ["rule.supported"]

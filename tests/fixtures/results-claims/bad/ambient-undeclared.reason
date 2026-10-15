@@ -1,0 +1,2 @@
+results.ambient-undeclared
+A directory dated after 2026-10-15 declares neither `[[ambient]]` rows nor `ambient = "not applicable: <why>"`.
