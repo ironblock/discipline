@@ -425,6 +425,8 @@ check_exercise() {
       pnpm exec playwright install chromium &&
       pnpm test &&
       check_exercise_projections &&
+      # The published kitchen sink is what diet/scenarios/kitchen-sink.jsonl writes today, lane by lane (#798).
+      node scripts/kitchen-sink.mjs check &&
       python3 scripts/test_render_ledger.py &&
       python3 scripts/test_admission.py &&
       pnpm build:replay &&

@@ -1,4 +1,4 @@
-import { KITCHEN_SINK } from './kitchen-sink.ts';
+import { AUTHORED } from './examples.ts';
 import { RECORDINGS } from './recordings.ts';
 
 /**
@@ -6,6 +6,6 @@ import { RECORDINGS } from './recordings.ts';
  * which happened, and the kitchen sink, which is authored -- the cadence a
  * working drive should have, to hold the recordings up against.
  */
-export const SESSIONS = { ...RECORDINGS, 'kitchen-sink': KITCHEN_SINK } as const;
+export const SESSIONS = { ...RECORDINGS, 'kitchen-sink': AUTHORED['kitchen-sink'] } as const;
 
 export type SessionName = keyof typeof SESSIONS;

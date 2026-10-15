@@ -224,9 +224,16 @@ def assets_of(name: str, kind: dict, recording: dict, header: list[str]) -> tupl
     digest, and `undeclared` otherwise (5977059903) -- the bytes to scan, and
     every problem: an asset missing or not its digest, a file there that no
     line names, a declaration of a digest no line names.
+
+    An example that is a scenario's log (#798, `log` where a recording has
+    `events`) publishes only the images its lines name: the page draws them.
+    Every other file it names -- an output saved by digest -- holds the run's
+    own paths, and the page never fetches it: it is a row `unpublished`, and
+    committing it is a problem.
     """
+    is_log = isinstance(recording.get('log'), list)
     named: dict[str, dict] = {}
-    for event in recording.get('events', []):
+    for event in recording.get('log' if is_log else 'events', []):
         if isinstance(event, dict) and event.get('kind') in ('ask', 'tool_call') and isinstance(event.get('files'), list):
             for entry in event['files']:
                 if isinstance(entry, dict) and isinstance(entry.get('sha256'), str):
@@ -234,8 +241,13 @@ def assets_of(name: str, kind: dict, recording: dict, header: list[str]) -> tupl
     directory = kind['dir'] / name / 'files'
     rel = directory.relative_to(ROOT).as_posix()
     problems, found = [], {}
+    unpublished = {digest for digest, entry in named.items() if is_log and not str(entry.get('media_type', '')).startswith('image/')}
     for digest, entry in sorted(named.items()):
         asset = directory / digest
+        if digest in unpublished:
+            if asset.exists():
+                problems.append(f'admission: {rel}/{digest}: a log\'s output saved by digest is not published; remove it')
+            continue
         if not asset.is_file() or asset.is_symlink():
             problems.append(f'admission: {rel}/{digest}: named by a line\'s files and not committed beside the recording')
             continue
@@ -264,7 +276,7 @@ def assets_of(name: str, kind: dict, recording: dict, header: list[str]) -> tupl
             'path': entry.get('path'),
             'media_type': entry.get('media_type'),
             'bytes': entry.get('bytes'),
-            'scrub': 'declared-clean' if digest in declared else 'undeclared',
+            'scrub': 'unpublished' if digest in unpublished else 'declared-clean' if digest in declared else 'undeclared',
             **({'declared': declared[digest]} if digest in declared else {}),
         }
         for digest, entry in sorted(named.items())
@@ -343,7 +355,7 @@ def admissions(directory: str) -> tuple[list, list[str]]:
     if not data_dir.is_dir():
         return [], []
     names = published_names()
-    expected = {f'{n}.js' for n in names} | {f'{n}.admission.json' for n in names}
+    expected = {f'{n}.js' for n in names} | {f'{n}.admission.json' for n in names} | {n for n in names if (data_dir / n).is_dir()}
     problems = [f'admission: {data_dir / f.name}: not a published recording or example, or its admission; nothing else is published here' for f in sorted(data_dir.iterdir()) if f.name not in expected]
     found = []
     for name in names:
@@ -367,8 +379,39 @@ def admissions(directory: str) -> tuple[list, list[str]]:
         if set(admission.get('table', {})) != {'id', *SNAPSHOT}:
             problems.append(f'admission: {rel}: its admission does not name an admitted genesis table (patterns, exceptions, hashes)')
             continue
+        problems.extend(asset_problems(data_dir / name, kind['dir'] / name / 'files', admission))
         found.append((payload, admission, kind['key']))
     return found, problems
+
+
+def asset_module(body: bytes | None) -> str:
+    """What the build writes for an asset (src/drive/files.ts `assetModule`): its bytes as base64, or withheld."""
+    import base64
+    return 'export default null\n' if body is None else 'export default ' + json.dumps(base64.b64encode(body).decode()) + '\n'
+
+
+def asset_problems(built: pathlib.Path, committed: pathlib.Path, admission: dict) -> list[str]:
+    """
+    A published name's asset modules on the site (#372's layout, src/replay/assets.ts): `<name>/files/<sha256>.js`,
+    one for each asset its admission names and the tree commits -- its bytes only where the admission says
+    `declared-clean`, and withheld (a null module) otherwise -- and nothing else beside them.
+    """
+    if not built.exists():
+        return []
+    rows = {row['sha256']: row for row in admission.get('files', []) if isinstance(row, dict) and row.get('scrub') in ('declared-clean', 'undeclared')}
+    problems = [f'admission: {built / f.name}: not an asset directory; only files/ is published here' for f in sorted(built.iterdir()) if f.name != 'files']
+    files = built / 'files'
+    for module in sorted(files.iterdir()) if files.is_dir() else []:
+        digest = module.name[:-3] if module.name.endswith('.js') else ''
+        row = rows.get(digest)
+        if row is None:
+            problems.append(f'admission: {module}: no admitted asset is named so')
+            continue
+        clean = row['scrub'] == 'declared-clean'
+        allowed = asset_module((committed / digest).read_bytes() if clean else None)
+        if module.read_text(encoding='utf-8') != allowed:
+            problems.append(f'admission: {module}: not the asset its admission allows ({"its bytes" if clean else "withheld"})')
+    return problems
 
 
 def tables(directory: str) -> int:

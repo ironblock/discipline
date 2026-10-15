@@ -39,6 +39,8 @@ export const Example: Story = {
     const lines = [...canvasElement.querySelectorAll('.ex-replay__source li')].map((li) => li.textContent ?? '');
     await expect(lines).toContain(`Authored: ${EXAMPLE_LABEL}`);
     await expect(lines.some((line) => line.startsWith('Scrubbed:'))).toBe(false);
+    // Its times are ours (#798): said where the viewer reads where it came from.
+    await expect(lines.filter((line) => line.startsWith('retimed:'))).toHaveLength(1);
     await waitFor(async () => expect(canvasElement.querySelector('.ex-trunk .ex-block')).not.toBeNull());
     // Still there once the session has played: the label is the page's, not the opening moment's.
     await expect(canvasElement.querySelector('.ex-replay__label')?.textContent).toBe(EXAMPLE_LABEL);

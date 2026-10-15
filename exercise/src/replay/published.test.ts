@@ -49,10 +49,12 @@ describe('the authored examples it publishes apart from the recordings (#272)', 
     expect(migration.filter((line) => line.startsWith('Scrubbed:'))).toEqual([]);
   });
 
-  it.each(EXAMPLES)('%s: the committed file is its source, serialized (node scripts/write-examples.mjs)', (name) => {
+  it.each(EXAMPLES)('%s: is a scenario’s log, serialized as written, and says its times are placed, not measured (#798)', (name) => {
     const committed = readFileSync(path.join(examples, `${name}.json`), 'utf8');
-    expect(committed).toBe(serialize(AUTHORED[name]));
-    expect(load(name, committed, examplePath(name))).toEqual(AUTHORED[name]);
+    const example = load(name, committed, examplePath(name));
+    expect(committed).toBe(serialize(JSON.parse(committed)));
+    expect('log' in example && example.timing).toBe('retimed');
+    expect(example.migration.filter((line) => line.startsWith('retimed:'))).toHaveLength(1);
   });
 
   it('publishes no example that was not admitted: each has its admission beside it', () => {

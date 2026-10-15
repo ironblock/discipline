@@ -1,18 +1,18 @@
 {
   "example": "exercise/src/drive/examples/kitchen-sink.json",
-  "example_sha256": "5a43f98cc0eec76a06349e18731bbea00149cef7e23bd88672b406a13f88e28f",
+  "example_sha256": "94c300da13d703e4f0027551b9d09173604c1f7ff165dd899f9ba31cb87d8ad2",
   "table": {
-    "id": "458141273d2f",
+    "id": "6e8394f66ec4",
     "patterns": {
-      "path": "scripts/hygiene-admitted-458141273d2f-patterns.tsv",
+      "path": "scripts/hygiene-admitted-6e8394f66ec4-patterns.tsv",
       "sha256": "938e6be7675e09e848d780415303face2dd31a8ef8564d3cacc39536fbe13179"
     },
     "exceptions": {
-      "path": "scripts/hygiene-admitted-458141273d2f-exceptions.tsv",
-      "sha256": "12d42a833904ae369e326b1e1151e0ebc17526ec49dcd9a2bf7095dbf3217c5b"
+      "path": "scripts/hygiene-admitted-6e8394f66ec4-exceptions.tsv",
+      "sha256": "94b54cdb9e4a00d73eea34dfc90622559d7e3441d7820a95115fe30ed1840ec8"
     },
     "hashes": {
-      "path": "scripts/hygiene-admitted-458141273d2f-hashes.txt",
+      "path": "scripts/hygiene-admitted-6e8394f66ec4-hashes.txt",
       "sha256": "3d0d8da5e532e11723bf71a5c218812fce29fd6322c126f11386683a5b58bdb3"
     }
   },
@@ -23,7 +23,7 @@
     },
     "exceptions": {
       "path": "scripts/hygiene-exceptions.tsv",
-      "sha256": "12d42a833904ae369e326b1e1151e0ebc17526ec49dcd9a2bf7095dbf3217c5b"
+      "sha256": "94b54cdb9e4a00d73eea34dfc90622559d7e3441d7820a95115fe30ed1840ec8"
     },
     "hashes": {
       "path": "scripts/hygiene-hashes.txt",
@@ -31,5 +31,22 @@
     }
   },
   "cites": "the snapshot (table): the rule this example was admitted under. At admission it was the live genesis table (taken_from), byte for byte; the live table may move on, and this example stays under its snapshot until it is admitted again.",
-  "authored": "Authored: this is an example of everything working the way we think it should, not a real session"
+  "authored": "Authored: this is an example of everything working the way we think it should, not a real session",
+  "files": [
+    {
+      "sha256": "6251e5743b6fd6a7d606130bdf7c15077ce85ebd3a0fdee284d15a46df199e38",
+      "path": "files/6251e5743b6fd6a7d606130bdf7c15077ce85ebd3a0fdee284d15a46df199e38",
+      "media_type": "text/plain",
+      "bytes": 8893,
+      "scrub": "unpublished"
+    },
+    {
+      "sha256": "7343d363d427f598455ae5f102d2f7e8c95efa14a6f454b8acc352c9458cac11",
+      "path": "files/7343d363d427f598455ae5f102d2f7e8c95efa14a6f454b8acc352c9458cac11",
+      "media_type": "image/png",
+      "bytes": 12,
+      "scrub": "declared-clean",
+      "declared": "Declared-clean: 7343d363d427f598455ae5f102d2f7e8c95efa14a6f454b8acc352c9458cac11 by Corey Vixie on 2026-10-15"
+    }
+  ]
 }

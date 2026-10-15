@@ -1,15 +1,16 @@
 import { describe, expect, it } from 'vitest';
 
-import { compose } from './compose.ts';
-import { KITCHEN_SINK_SCRIPT } from './kitchen-sink.ts';
+import { scriptAt } from './canned.ts';
 import type { LineOf, LogLine } from './log.ts';
 import { place, Placer } from './place.ts';
 import type { Unplaced } from './script.ts';
+import { SPECIMEN } from './specimen.ts';
 import { fold } from '../session/fold.ts';
 
 /** A placed log is served-shaped (ruled on #300, 5974672622): one order, the one a server writes. */
 describe('a placed tool call', () => {
-  const script = compose(KITCHEN_SINK_SCRIPT);
+  // The specimen whole: the one authored script left (#798 retired the kitchen sink's), with calls and forks at them.
+  const script = scriptAt(SPECIMEN, { beat: SPECIMEN.length });
   const { log, labels } = place(script);
   const fragments = log.filter((l): l is Extract<LineOf<'delta'>, { tool_call: unknown }> => l.kind === 'delta' && 'tool_call' in l && l.tool_call !== undefined);
   const seqOf = (kind: LogLine['kind'], test: (l: LogLine) => boolean) => log.find((l) => l.kind === kind && test(l))?.seq ?? Number.NaN;

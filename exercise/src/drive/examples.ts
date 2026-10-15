@@ -1,13 +1,13 @@
 import type { ExampleName } from '../replay/published.ts';
-import { KITCHEN_SINK } from './kitchen-sink.ts';
+import kitchenSink from './examples/kitchen-sink.json?raw';
+import { examplePath, load } from './recorded.ts';
 import type { Recording } from './recorded.ts';
 
 /**
- * Each published example's source (#272): authored here, in TypeScript, and
- * committed as src/drive/examples/<name>.json by scripts/write-examples.mjs,
- * which is what the replay page publishes and what was admitted. The JSON is
- * this, serialized; published.test.ts fails when the two differ.
+ * Each published example (#272), read from its committed file: the file the replay page publishes and
+ * `scripts/admission.py admit <name>` admits. The kitchen sink is what `diet/scenarios/kitchen-sink.jsonl` writes
+ * (#798), written there by `node exercise/scripts/kitchen-sink.mjs write` and held to the scenario by its `check`.
  */
 export const AUTHORED: Readonly<Record<ExampleName, Recording>> = {
-  'kitchen-sink': KITCHEN_SINK,
+  'kitchen-sink': load('kitchen-sink', kitchenSink, examplePath('kitchen-sink')),
 };

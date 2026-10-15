@@ -7,7 +7,7 @@
  * (`log.ts`), and only the log is folded.
  *
  * What authors or replays a session reads it -- the canned transport, the
- * recordings, `compose.ts`, `progress.ts` -- and `place.ts` turns it into
+ * recordings, `progress.ts` -- and `place.ts` turns it into
  * the log. A session run against `diet` never passes through here.
  */
 

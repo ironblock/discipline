@@ -2,7 +2,7 @@ import { describe, expect, it, vi } from 'vitest';
 
 import { fold } from '../session/fold.ts';
 import type { LogLine } from './log.ts';
-import { type Recording, ReplayTransport, load, placed, recordedAt } from './recorded.ts';
+import { type Recording, type ScriptedRecording, ReplayTransport, load, placed, recordedAt } from './recorded.ts';
 import { RECORDINGS } from './recordings.ts';
 import { SPECIMEN } from './specimen.ts';
 
@@ -79,7 +79,9 @@ describe('reading a recording', () => {
     expect(load('x', good).title).toBe('t');
     expect(() => load('x', JSON.stringify({ title: 't', migration: [], carried: {}, events: [{ t: 0 }] }))).toThrow('exercise/src/drive/recorded/x.json: not a recording: event 0 has no kind or time');
     expect(() => load('x', '{"title":')).toThrow(/^exercise\/src\/drive\/recorded\/x\.json: not a recording: not JSON/);
-    expect(() => load('x', '{}')).toThrow('exercise/src/drive/recorded/x.json: not a recording: expected title, migration and events');
+    expect(() => load('x', '{}')).toThrow('exercise/src/drive/recorded/x.json: not a recording: expected title, migration, and events or log');
+    // A scenario's log says its times are ours (#798).
+    expect(() => load('x', '{"title":"t","migration":[],"carried":{},"log":[]}')).toThrow('exercise/src/drive/recorded/x.json: not a recording: a log carries its timing: retimed');
     // `carried` is the count a fold is checked against (#173): absent, or not {kind: count}, is no recording.
     const carrying = (carried: unknown) => JSON.stringify({ title: 't', migration: [], carried, events: [{ kind: 'ask', t: 0 }] });
     const noCarried = 'exercise/src/drive/recorded/x.json: not a recording: expected carried: {kind: count}, each kind named and each count a whole number above 0';
@@ -123,7 +125,7 @@ describe('a recording\'s carried field', () => {
     const base = RECORDINGS['cancelled-capture'];
     const at = base.events.findIndex((e) => e.kind === 'session.start') + 1;
     const events = [...base.events.slice(0, at), { kind: 'zz.newer', t: base.events[at - 1]!.t }, ...base.events.slice(at)];
-    const recording: Recording = { ...base, carried: { 'capture.cancelled': 1, 'zz.newer': 1 }, events: events as Recording['events'] };
+    const recording: ScriptedRecording = { ...base, carried: { 'capture.cancelled': 1, 'zz.newer': 1 }, events: events as ScriptedRecording['events'] };
     expect([...fold(placed(recording)).unknown.keys()]).toEqual(['zz.newer', 'capture.cancelled']);
     expectCarried('two kinds', recording, placed(recording));
     expect(() => expectCarried('two kinds', { ...recording, carried: { 'capture.cancelled': 1, 'zz.newer': 2 } }, placed(recording))).toThrow(

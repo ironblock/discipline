@@ -13,8 +13,7 @@ export const wrap = (json: string) => PREFIX + json;
 export const unwrap = (js: string) => (js.startsWith(PREFIX) ? js.slice(PREFIX.length) : undefined);
 
 /**
- * An authored example's committed text, from its source (#272): what
- * scripts/write-examples.mjs writes to src/drive/examples/<name>.json, and
- * what published.test.ts holds that file to, so the source stays the one copy.
+ * An example's committed text (#272): what scripts/kitchen-sink.mjs writes to src/drive/examples/<name>.json (#798),
+ * and what published.test.ts holds that file's layout to.
  */
 export const serialize = (value: unknown) => JSON.stringify(value, null, 2) + '\n';
