@@ -1,0 +1,6 @@
+arm = "fixture"
+substrates = ["fixture-carded"]
+dogma_version = 0
+substrate_reasoning = "on"
+[sampler]
+temperature = 1.0

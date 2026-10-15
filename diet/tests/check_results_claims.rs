@@ -127,3 +127,55 @@ fn the_committed_results_pass_and_the_one_repeat_is_reported() {
         "#17's second draw reported as a repeat: {out}"
     );
 }
+
+/// What the ledger derives for one fixture root: `--claims --flags` prints
+/// each directory's derived fields as one JSON line.
+fn flags(case: &str) -> serde_json::Value {
+    let ran = Command::new("python3")
+        .current_dir(root())
+        .args(["scripts/check-results.py", "--claims", "--flags", "--root"])
+        .arg(fixtures().join("good").join(case))
+        .arg("--registry")
+        .arg(fixtures().join("registry.toml"))
+        .output()
+        .expect("python3 runs the checker");
+    let out = said(&ran);
+    assert_eq!(ran.status.code(), Some(0), "{out}");
+    let line = out
+        .lines()
+        .find(|line| line.starts_with('{'))
+        .unwrap_or_else(|| panic!("no flags line: {out}"));
+    serde_json::from_str(line).expect("the flags are JSON")
+}
+
+/// A carded field the regimen leaves to the server's default is not checked
+/// against the card -- the server's default may be off it -- so the ledger
+/// names it `unstated`, and the gap is visible rather than read as in range.
+#[test]
+fn a_carded_field_the_regimen_leaves_to_the_server_is_named_unstated() {
+    let left = flags("unstated-left-to-server");
+    assert_eq!(left["characterisation"], false, "{left}");
+    let names: Vec<&str> = left["unstated"]
+        .as_array()
+        .unwrap_or_else(|| panic!("a list: {left}"))
+        .iter()
+        .filter_map(|row| row["parameter"].as_str())
+        .collect();
+    assert_eq!(
+        names,
+        ["presence_penalty", "repetition_penalty", "top_k", "top_p"],
+        "{left}"
+    );
+    let stated = flags("repeat-penalty-on-card");
+    let names: Vec<&str> = stated["unstated"]
+        .as_array()
+        .unwrap_or_else(|| panic!("a list: {stated}"))
+        .iter()
+        .filter_map(|row| row["parameter"].as_str())
+        .collect();
+    assert_eq!(
+        names,
+        ["presence_penalty"],
+        "diet's repeat_penalty is the card's repetition_penalty: {stated}"
+    );
+}
