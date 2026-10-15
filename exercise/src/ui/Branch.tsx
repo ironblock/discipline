@@ -49,6 +49,11 @@ export function Branch({ node, open: initiallyOpen = false }: { readonly node: F
             title: [`kept: ${node.audit.kept.join(', ') || 'none'}`, `updated: ${node.audit.updated.join(', ') || 'none'}`, `removed: ${node.audit.removed.join(', ') || 'none'}`].join('\n'),
           },
           node.trigger !== undefined && { value: <span className="ex-branch__trigger">{node.trigger}</span>, title: 'what triggered this fork' },
+          // One chunk of an audit run in several at once (#854): which, and whether another ran beside it.
+          node.chunk && {
+            value: <span className="ex-branch__chunk">{`chunk ${node.chunk.n} of ${node.chunk.of}${node.chunk.overlapped ? ' · overlapped' : ''}`}</span>,
+            title: node.chunk.overlapped ? 'one chunk of this meditation’s audit, run while another chunk of it was running' : 'one chunk of this meditation’s audit',
+          },
           // A hazard it was sent knowing (#637).
           node.hazard !== undefined && { value: <span className="ex-branch__hazard" data-level={hazardOf(node.hazard).level}>{hazardOf(node.hazard).label}</span>, title: `a hazard this fork was sent knowing: ${node.hazard}` },
           node.seat && {

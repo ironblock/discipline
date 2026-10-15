@@ -95,3 +95,31 @@ export const Condensed: Story = {
     await expect(canvasElement.querySelectorAll('.ex-bar')).toHaveLength(forks.length);
   },
 };
+
+/** The warrant gate on each step (#850, #862): which probes fired and how strongly, or that none did -- as logged. */
+export const WarrantGate: Story = {
+  name: '4 · the warrant gate on each step',
+  play: async ({ canvasElement }) => {
+    const gate = (step: string) => canvasElement.querySelector<HTMLElement>(`.ex-trunk [data-id="${step}"] .ex-gate`);
+    await waitFor(async () => expect(canvasElement.querySelectorAll('.ex-trunk .ex-gate')).toHaveLength(new Set(log.filter((line) => line.kind === 'warrant.gated').map((line) => (line as { request: number }).request)).size));
+    // The missing-file step: three probes fired, strongest first; the background build's: one.
+    await expect([gate('184')?.textContent, gate('184')?.dataset['fired']]).toEqual(['gate · gotcha 0.93 · decision 0.71 · constraint 0.64', '']);
+    await expect(gate('184')?.closest<HTMLElement>('.ex-stat')?.title).toBe('decided by canned-scenario-classifier@0000000000000000000000000000000000000000 · threshold 0.5 · compute none · 1 ms\nconstraint 0.64 fired · decision 0.71 fired · gotcha 0.93 fired · open 0.04');
+    await expect(gate('227')?.textContent).toBe('gate · open 0.88');
+    // A quiet step: decided, nothing fired.
+    await expect([gate('5')?.textContent, gate('5')?.dataset['fired']]).toEqual(['gate · quiet · ≤ 0.04', undefined]);
+  },
+};
+
+/** A meditation's audit in two chunks at once (#854, #862): each numbered, each overlapping the other, both answers reconciled. */
+export const AuditChunks: Story = {
+  name: '5 · an audit in concurrent chunks',
+  play: async ({ canvasElement }) => {
+    const chunk = (fork: string) => canvasElement.querySelector(`[data-branch="${fork}"] .ex-branch__chunk`)?.textContent;
+    await waitFor(async () => expect(chunk('496')).toBe('chunk 1 of 2 · overlapped'));
+    await expect(['498', '639', '641', '683', '685'].map(chunk)).toEqual(['chunk 2 of 2 · overlapped', 'chunk 1 of 2 · overlapped', 'chunk 2 of 2 · overlapped', 'chunk 1 of 2 · overlapped', 'chunk 2 of 2 · overlapped']);
+    await expect(chunk('693')).toBeUndefined();
+    const answers = [...canvasElement.querySelectorAll('.ex-meditation__reconcile [data-part="answer"] pre')].map((pre) => pre.textContent ?? '');
+    await expect(answers.filter((answer) => answer.includes('chunk 1 of 2\n') && answer.includes('chunk 2 of 2\n'))).toHaveLength(2);
+  },
+};

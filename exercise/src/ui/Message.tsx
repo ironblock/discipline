@@ -1,6 +1,6 @@
 import { useState } from 'react';
 
-import type { AssistantNode, Folded, OffTrunk, SettledNode, SystemNode, ToolNode, UserNode } from '../session/fold.ts';
+import type { AssistantNode, Folded, Gate, OffTrunk, SettledNode, SystemNode, ToolNode, UserNode } from '../session/fold.ts';
 import { Block } from './Block.tsx';
 import { tokens, took } from './format.ts';
 import { Copy } from './Copy.tsx';
@@ -9,7 +9,7 @@ import { Flowing } from './Flowing.tsx';
 import { FileResults } from './Files.tsx';
 import { Prose } from './Prose.tsx';
 import { alarmOf, failOf, settleOf, stopOf } from './sets.ts';
-import { elapsed, useNow } from './surface.tsx';
+import { elapsed, useNow, useSurface } from './surface.tsx';
 import './message.css';
 
 /**
@@ -131,7 +131,33 @@ function HarnessNote({ note, label, text }: { readonly note: string; readonly la
  * began, and nothing where it did not -- the whole closes the first call.
  * Having written no text, it is one row: what it read.
  */
+/**
+ * The warrant gate on a step (#850): the probes that fired, strongest first, or that none did and the highest score; a
+ * gate that did not decide says what it did instead. Its title has every probe, the threshold, and who scored them.
+ */
+const gateStat = (gate: Gate) => {
+  const score = (n: number) => n.toFixed(2);
+  const fired = gate.probes.filter((p) => p.fired).sort((a, b) => b.score - a.score);
+  const label =
+    gate.outcome !== 'decided'
+      ? `gate · ${gate.outcome}`
+      : fired.length > 0
+        ? ['gate', ...fired.map((p) => `${p.probe} ${score(p.score)}`)].join(' · ')
+        : `gate · quiet · ≤ ${score(Math.max(0, ...gate.probes.map((p) => p.score)))}`;
+  const head = [`${gate.outcome} by ${gate.model}`, ...(gate.threshold !== undefined ? [`threshold ${gate.threshold}`] : []), `compute ${gate.computeUnits}`, `${gate.latencyMs} ms`].join(' · ');
+  const probes = gate.probes.map((p) => `${p.probe} ${score(p.score)}${p.fired ? ' fired' : ''}`).join(' · ');
+  return {
+    value: (
+      <span className="ex-gate" data-fired={fired.length > 0 ? '' : undefined} data-outcome={gate.outcome}>
+        {label}
+      </span>
+    ),
+    title: [head, ...(probes !== '' ? [probes] : []), ...(gate.reason !== undefined ? [gate.reason] : [])].join('\n'),
+  };
+};
+
 export function AssistantMessage({ node, calls = [] }: { readonly node: Folded<AssistantNode>; readonly calls?: readonly Folded<ToolNode>[] }) {
+  const { curtain } = useSurface();
   const [thinking, setThinking] = useState(false);
   const live = node.progress === 'prefill' || node.progress === 'streaming';
   const long = node.reasoning.length > 280;
@@ -182,6 +208,8 @@ export function AssistantMessage({ node, calls = [] }: { readonly node: Folded<A
             title: 'why generation stopped',
           },
         node.outOfContext && outOfContext(node.outOfContext),
+        // The warrant gate's decision on this step (#850): behind the curtain, with the side calls it warrants.
+        curtain && node.gate && gateStat(node.gate),
       ]}
       provenance={node}
       id={node.id}

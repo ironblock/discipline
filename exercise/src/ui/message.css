@@ -25,6 +25,10 @@
 /* A cancelled turn's ask and answer: gone from what the model reads next (#289). */
 .ex-context-out { color: var(--warn); }
 .ex-scope-answer { color: var(--ink-interview); }
+/* The warrant gate on a step (#850): quiet when nothing fired; a probe that fired warrants the interview fork, so its ink. */
+.ex-gate { color: var(--ink-faint); }
+.ex-gate[data-fired] { color: var(--ink-interview); }
+.ex-gate:not([data-outcome='decided']) { color: var(--warn); }
 
 /* Where a turn stopped without finishing: a quiet rule across the trunk, the reason in its level's colour. */
 .ex-turnend {

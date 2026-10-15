@@ -146,11 +146,35 @@ export interface Meter {
   readonly ppRate?: number;
 }
 
+/** One probe of the warrant gate on a step (#850): its score, and whether it cleared the threshold. */
+export interface GateProbe {
+  readonly probe: string;
+  readonly score: number;
+  readonly fired: boolean;
+}
+
+/**
+ * The warrant gate's decision on a step (#850, `warrant.gated`): each probe the classifier scored, against the
+ * threshold, and who scored it. `fallback` or `stale` in place of `decided`: the classifier did not decide, and why.
+ */
+export interface Gate {
+  readonly outcome: string;
+  readonly probes: readonly GateProbe[];
+  readonly threshold?: number;
+  readonly reason?: string;
+  readonly model: string;
+  readonly computeUnits: string;
+  /** The slowest probe's. */
+  readonly latencyMs: number;
+}
+
 export interface AssistantNode extends Provenance, Generation {
   readonly kind: 'assistant';
   /** Its request's `seq`: what its answer, its tool calls and its side calls name. */
   readonly id: string;
   readonly turn: number;
+  /** The warrant gate's decision on this step (#850), when the regimen gates with a classifier. */
+  readonly gate?: Gate;
   /**
    * Not in what the model reads from here on (#289): its turn failed or timed out before any step finished, or was
    * cancelled before anything was said -- a failed or timed-out turn keeps its ask and every finished step on the trunk
@@ -265,6 +289,8 @@ export interface BranchNode extends Provenance, Partial<Generation> {
   readonly hazard?: string;
   /** A meditation's audit (#646): of the entries live when it opened, those it kept, updated (superseded) and removed (retired). */
   readonly audit?: { readonly kept: readonly string[]; readonly updated: readonly string[]; readonly removed: readonly string[] };
+  /** One chunk of an audit run in several at once (#854): which, of how many, and whether it ran while another did. */
+  readonly chunk?: { readonly n: number; readonly of: number; readonly overlapped: boolean };
   readonly patches: readonly Folded<PatchNode>[];
 }
 
@@ -537,6 +563,22 @@ interface GenerationBuilder {
 }
 
 /** G, drawn; a request that names no slot (v0's never do) is on UNNAMED: the trunk's, or its fork's side slot. */
+/** A step's gate lines, one per probe (#850), as the step's gate: the scores are the classifier's decimal strings. */
+function gateOf(lines: readonly LineOf<'warrant.gated'>[]): Gate {
+  const first = lines[0]!;
+  const threshold = lines.find((l) => l.threshold !== undefined)?.threshold;
+  const reason = lines.find((l) => l.reason !== undefined)?.reason;
+  return {
+    outcome: first.outcome,
+    probes: lines.flatMap((l) => (l.probe !== undefined && l.score !== undefined ? [{ probe: l.probe, score: Number(l.score), fired: l.fired === true }] : [])),
+    ...(threshold !== undefined ? { threshold: Number(threshold) } : {}),
+    ...(reason !== undefined ? { reason } : {}),
+    model: first.model,
+    computeUnits: first.compute_units,
+    latencyMs: Math.max(...lines.map((l) => l.latency_ms)),
+  };
+}
+
 function generation(g: GenerationBuilder, unnamed: number): Generation {
   const { request, response, cancelled, failed } = g;
   const streamed = (piece: 'text' | 'reasoning') => g.deltas.map((d) => d[piece] ?? '').join('');
@@ -645,6 +687,8 @@ export function fold(written: readonly LogLine[]): Session {
   // Background jobs' ends, by job (#614); calls warned near their timeout, by `<request>/<call id>` (#613).
   const backgroundEnds = new Map<string, LineOf<'background.ended'>>();
   const nearTimeouts = new Map<string, LineOf<'timeout.near'>>();
+  // The warrant gate's lines (#850), by the request of the step they decided.
+  const gated = new Map<number, LineOf<'warrant.gated'>[]>();
   const prunes = new Map<number, LineOf<'pruned'>[]>();
   // The calls whose output a meditation replaced by its pointer (#630): every meditation's `pruned`.
   const replacedByMeditation = new Set<string>();
@@ -907,8 +951,9 @@ export function fold(written: readonly LogLine[]): Session {
       // A fork screened out of its gap (#611): no branch to draw; folded into no node yet.
       case 'fork.skipped':
         break;
-      // A step's warrant-gate decision (#850): folded into no node yet; the kitchen sink writes them (#862).
+      // A step's warrant-gate decision (#850): one line per probe, onto the step it decided (#862).
       case 'warrant.gated':
+        gated.set(e.request, [...(gated.get(e.request) ?? []), e]);
         break;
       // A meditation held for the operator (#150's gate): it waits on them until the next meditation line, the refill.
       case 'meditation.held':
@@ -994,8 +1039,17 @@ export function fold(written: readonly LogLine[]): Session {
                 return { entry: change.entry, kind: change.kind, ...(detail !== undefined ? { detail } : {}) };
               }),
               ...(() => {
-                const text = audit.request !== undefined ? generations.get(audit.request)?.response?.text : undefined;
-                return text !== undefined ? { answer: text.trim() } : {};
+                const answerOf = (f: { request?: number }) => (f.request !== undefined ? generations.get(f.request)?.response?.text?.trim() : undefined);
+                // An audit run in chunks (#854) answers in each: every chunk's answer, in chunk order, each under its number.
+                if (audit.fork.chunk !== undefined) {
+                  const chunks = [...forks.values()]
+                    .filter((f) => f.fork.lane === 'audit' && f.fork.at === audit.fork.at && f.fork.chunk !== undefined && f.fork.seq > lastMeditation)
+                    .sort((a, b) => a.fork.chunk! - b.fork.chunk!);
+                  const answers = chunks.flatMap((f) => (answerOf(f) !== undefined ? [`chunk ${f.fork.chunk} of ${chunks.length}\n${answerOf(f)!}`] : []));
+                  return answers.length > 0 ? { answer: answers.join('\n') } : {};
+                }
+                const text = answerOf(audit);
+                return text !== undefined ? { answer: text } : {};
               })(),
               after: live(),
             }
@@ -1124,6 +1178,7 @@ export function fold(written: readonly LogLine[]): Session {
             turn: g.request.turn,
             ...generation(g, trunkSlot),
             ...(outOf(g.request.turn, g.request.seq) ? { outOfContext: outOf(g.request.turn, g.request.seq)! } : {}),
+            ...(gated.has(g.request.seq) ? { gate: gateOf(gated.get(g.request.seq)!) } : {}),
             ...provenance(g.request, ...g.deltas.slice(0, 1), g.response, g.cancelled, g.failed),
           };
           return brand(node);
@@ -1238,6 +1293,20 @@ export function fold(written: readonly LogLine[]): Session {
     return { index, system: brand(raw.system), nodes, ...(meditation ? { meditation } : {}) };
   });
 
+  // An audit's chunks (#854): the forks of one meditation's audit, each with when it ran -- its request to its settling.
+  const chunksOf = (fork: LineOf<'fork'>) =>
+    [...forks.values()].filter((f) => f.fork.lane === fork.lane && f.fork.at === fork.at && f.fork.chunk !== undefined);
+  const ran = (f: { request?: number; settled?: { t: number } }) => ({ from: f.request !== undefined ? generations.get(f.request)?.request.t : undefined, to: f.settled?.t });
+  const chunkOf = (fork: LineOf<'fork'>, from: number | undefined, to: number | undefined) => {
+    const siblings = chunksOf(fork);
+    const overlapped = siblings.some((other) => {
+      if (other.fork.seq === fork.seq) return false;
+      const them = ran(other);
+      return from !== undefined && them.from !== undefined && from < (them.to ?? Infinity) && them.from < (to ?? Infinity);
+    });
+    return { n: fork.chunk!, of: siblings.length, overlapped };
+  };
+
   // Branches, keyed by the trunk node they came from.
   const branches = new Map<string, Folded<BranchNode>[]>();
   const openForks: LineOf<'fork'>[] = [];
@@ -1271,6 +1340,7 @@ export function fold(written: readonly LogLine[]): Session {
       ...(settled ? { outcome: settled.outcome, endedAt: settled.t } : {}),
       ...(settled?.refused !== undefined ? { refused: settled.refused } : {}),
       ...(fork.hazard !== undefined ? { hazard: fork.hazard } : {}),
+      ...(fork.chunk !== undefined ? { chunk: chunkOf(fork, g?.request.t, settled?.t) } : {}),
       ...(audited !== undefined && settled?.outcome === 'value'
         ? (() => {
             const updated = patches.filter((p) => p.op === 'supersede' && p.supersedes !== undefined).map((p) => p.supersedes!);
