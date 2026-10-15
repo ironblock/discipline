@@ -28260,7 +28260,9 @@ pub(in crate::drive) mod tests {
     }
 
     /// PROBE: #632's start text tells the model to read the output and
-    /// status files; under the default sandbox, can it?
+    /// status files; under the default sandbox, can it? The first turn's
+    /// answer is held until the job has ended, so the job's end comes first,
+    /// as a loaded machine can order them: the second ask waits for the turn.
     #[test]
     fn probe_background_files_are_readable_under_the_default_sandbox() {
         if crate::isolation::Platform::here() != crate::isolation::Platform::MacOs {
@@ -28283,10 +28285,14 @@ pub(in crate::drive) mod tests {
         tools.recording = Some(recording.clone());
         let mut shape = looping();
         shape.tools = tool_loop::ToolSurface::Bash.tools_with(true);
+        let answered = crate::client::stream::Gate::new();
         let session = Session::open_looping(
             Canned::new(vec![
                 vec![in_the_background("call-1", "echo ready")],
-                deltas(&["started"]),
+                vec![
+                    Step::Hold(answered.clone()),
+                    Step::Delta("started".to_owned()),
+                ],
                 vec![bash("call-2", &look)],
                 deltas(&["looked"]),
             ]),
@@ -28296,6 +28302,21 @@ pub(in crate::drive) mod tests {
         );
         session.ask("start it", None).expect("accepted");
         let _ = wait_until(&session, "the job's end", |log| ended_jobs(log).len() == 1);
+        answered.open();
+        // The turn's end, not the job's: an ask while it runs is refused.
+        let _ = wait_until(&session, "the first turn", |log| {
+            log.iter()
+                .skip_while(|logged| !matches!(logged.event, Event::TurnSettled { turn: 1, .. }))
+                .any(|logged| {
+                    matches!(
+                        logged.event,
+                        Event::Settled {
+                            to: Settlement::Awaiting,
+                            ..
+                        }
+                    )
+                })
+        });
         session.ask("look", None).expect("accepted");
         let log = wait_until(&session, "the second turn", |log| turns_settled(log) == 2);
         let written = lines(&log);
