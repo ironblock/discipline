@@ -1,0 +1,26 @@
+# A registry for the claim-rule fixtures: one carded sampled substrate, one
+# that samples nothing, and one sampled substrate with no card.
+
+[substrate.fixture-carded]
+sampler_card = "none on the serving line; each request sets its own"
+recommended_is = "a fixture card, standing for a model card cited by URL and revision: thinking and instruct sets, and a presence_penalty range the card states"
+
+[[substrate.fixture-carded.recommended]]
+mode = "thinking"
+temperature = "1.0"
+top_p = "0.95"
+top_k = "20"
+presence_penalty = ["0.0", "2.0"]
+
+[[substrate.fixture-carded.recommended]]
+mode = "instruct"
+temperature = "0.7"
+top_p = "0.8"
+top_k = "20"
+
+[substrate.fixture-unsampled]
+sampler_card = "none: one forward per input"
+recommended_absent = "an embedder: one forward per input, nothing sampled"
+
+[substrate.fixture-uncarded]
+sampler_card = "temperature 0.6"

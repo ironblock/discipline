@@ -1,0 +1,6 @@
+{
+ "control": "shuffled-label-null",
+ "input": "labels shuffled across the register; the null must not separate them",
+ "outcome": "red",
+ "at": "2026-10-15T11:00:00Z"
+}

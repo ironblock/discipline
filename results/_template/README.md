@@ -55,6 +55,16 @@ where that time was read. `rule_ratified_note` carries a caveat the three
 values cannot. Whether the rule is post-hoc is derived -- ratified after the
 window opened -- and never written.
 
+A copy dated after the claim rules landed is held to them as well
+(`results/AGENTS.md`):
+- `regimen.toml` states `substrate_reasoning` and `[sampler]`, and the README
+  lists in `characterisation` any field outside the registry's recommended
+  sets;
+- every `controls_run` name has a `seen_red` row whose committed evidence
+  shows it red before the window, or `controls_run_absent` says why there is
+  none;
+- a later fire of the same claim under the same rule declares `repeats`.
+
 ## Observation
 
 What was seen that prompted the test. No interpretation.

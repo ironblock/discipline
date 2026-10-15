@@ -478,6 +478,34 @@ engine_libraries_read = "process"
 engine_libraries_is = "read from the running production process on 2026-10-01T05:12Z, minutes after its restore (started 05:05:20Z): the same 29 files and fingerprint as the directory read from disk, and all of them equal to the members of the pinned release tarball (engine_release_tarball_sha256; measurements/2026-10-01-engine-libraries/tie.py). The process maps 9 of the 29 (ggml loads its backends by dlopen; libggml-cpu-haswell.so is this CPU's variant), each the same inode it hashed; measurements/2026-10-01-engine-libraries/beellama-floor-process.json"
 engine_fingerprint = "8973ae1c11282f4c9ffc81f6e7821b0dcf14599a630ffe3812d6d7e24ba528a4"
 engine_fingerprint_is = "sha256 of the exe digest and every library digest, canonically serialised (check-fingerprints.py, engine_fingerprint)"
+recommended_is = "the base model's card, Qwen/Qwen3.6-27B at revision 6a9e13bd6fc8f0983b9b99948120bc37f49c13e9 (https://huggingface.co/Qwen/Qwen3.6-27B/blob/6a9e13bd6fc8f0983b9b99948120bc37f49c13e9/README.md, \"We recommend using the following set of sampling parameters\", read 2026-10-14): thinking for general tasks, thinking for precise coding, and instruct; these weights quantize that model"
+
+[[substrate.accel24-beellama-qwen27b-q4kxl.recommended]]
+mode = "thinking"
+temperature = "1.0"
+top_p = "0.95"
+top_k = "20"
+min_p = "0.0"
+presence_penalty = "0.0"
+repetition_penalty = "1.0"
+
+[[substrate.accel24-beellama-qwen27b-q4kxl.recommended]]
+mode = "thinking"
+temperature = "0.6"
+top_p = "0.95"
+top_k = "20"
+min_p = "0.0"
+presence_penalty = "0.0"
+repetition_penalty = "1.0"
+
+[[substrate.accel24-beellama-qwen27b-q4kxl.recommended]]
+mode = "instruct"
+temperature = "0.7"
+top_p = "0.80"
+top_k = "20"
+min_p = "0.0"
+presence_penalty = "1.5"
+repetition_penalty = "1.0"
 
 [substrate.accel24-beellama-qwen27b-q4kxl.engine_libraries]
 "libggml-base.so.0.14.0" = "8afbf3aad3719a82b0bba029720cef5845e6a2c75afe00cc878804940c9f2851"
@@ -766,6 +794,23 @@ engine_libraries_read = "disk"
 engine_libraries_is = "read from disk: the same release directory as accel24-beellama-qwen27b-q4kxl, whose process read it equals, tied to the pinned release tarball (tie.py); the seat-B server ran this executable on the CPU and is not running between fires; measurements/2026-10-01-engine-libraries/beellama-preview-v0.3.2-disk.json"
 engine_fingerprint = "8973ae1c11282f4c9ffc81f6e7821b0dcf14599a630ffe3812d6d7e24ba528a4"
 engine_fingerprint_is = "sha256 of the exe digest and every library digest, canonically serialised (check-fingerprints.py, engine_fingerprint)"
+recommended_is = "the base model's card, Qwen/Qwen3-1.7B at revision 70d244cc86ccca08cf5af4e1e306ecf908b1ad5e (https://huggingface.co/Qwen/Qwen3-1.7B/blob/70d244cc86ccca08cf5af4e1e306ecf908b1ad5e/README.md, Best Practices, read 2026-10-14): thinking and instruct, and presence_penalty \"between 0 and 2\" for frameworks that take it; these weights quantize that model"
+
+[[substrate.cpu-beellama-qwen3-1p7b-q4km.recommended]]
+mode = "thinking"
+temperature = "0.6"
+top_p = "0.95"
+top_k = "20"
+min_p = "0"
+presence_penalty = ["0", "2"]
+
+[[substrate.cpu-beellama-qwen3-1p7b-q4km.recommended]]
+mode = "instruct"
+temperature = "0.7"
+top_p = "0.8"
+top_k = "20"
+min_p = "0"
+presence_penalty = ["0", "2"]
 
 [substrate.cpu-beellama-qwen3-1p7b-q4km.engine_libraries]
 "libggml-base.so.0.14.0" = "8afbf3aad3719a82b0bba029720cef5845e6a2c75afe00cc878804940c9f2851"
@@ -953,6 +998,25 @@ serving_flags = "config.yml: backend exllamav3, max_seq_len 524288, cache_size 5
 admission = "no admission word: parity is not a bar on the 3.8 line (the maintainer, #393 6000878147; the redesign is #491); the r2 window's parity word was inconclusive as measured, and its fire ran clean (substrates/measurements/2026-10-05-accel24-tabbyapi-exl3-27b-r2/); the ratified config's window was void, the engine OOM in seat A (substrates/admission/accel24-tabbyapi-exl3-qwen38-27b-3p00/6a96d5696231/parity-void-2026-10-05/)"
 preflight = "the box preflight re-reads every live component of engine_components and compares, refusing on any difference and naming the component that drifted, as llama.cpp's binary hash refuses (#337, 5975255706); the re-read is the inference seat's, on the host"
 hazards = "a different client surface from the llama.cpp line: reasoning_effort 'high' is a 400 (the template knows low, medium and xhigh) and content may open with a blank line after the reasoning (substrates/measurements/2026-10-03-ada48-tabbyapi/apicheck-results.jsonl); no slot erase and a different /props shape (the inference seat, as relayed on #143 5971023545, not in the committed checks). Quantization: mean KLD against the Q8_0 reference 0.086 (code) and 0.230 (prose), about half of the Q2_0 build's (substrates/measurements/2026-10-03-ada48-tabbyapi/kld-results.txt; the Q2_0 figures, substrates/measurements/2026-10-03-characterization/). Concurrency: the four-passage check stayed in its own passages after the switch (substrates/measurements/2026-10-03-ada48-tabbyapi/switch.txt). Nothing may be gated on token identity"
+recommended_is = "the base model's card, Qwen/Qwen3.8-Flash-Next at revision de4b8e4d43b917e7706784d8bb445c9af86a3540 (https://huggingface.co/Qwen/Qwen3.8-Flash-Next/blob/de4b8e4d43b917e7706784d8bb445c9af86a3540/README.md, \"We recommend using the following sets of sampling parameters\", read 2026-10-14): thinking and instruct; these weights quantize that model"
+
+[[substrate.ada48-tabbyapi-exl3-qwen38flashnext-2p05.recommended]]
+mode = "thinking"
+temperature = "1.0"
+top_p = "0.95"
+top_k = "20"
+min_p = "0.0"
+presence_penalty = "0.0"
+repetition_penalty = "1.0"
+
+[[substrate.ada48-tabbyapi-exl3-qwen38flashnext-2p05.recommended]]
+mode = "instruct"
+temperature = "0.7"
+top_p = "0.80"
+top_k = "20"
+min_p = "0.0"
+presence_penalty = "1.5"
+repetition_penalty = "1.0"
 
 [substrate.ada48-tabbyapi-exl3-qwen38flashnext-2p05.engine_components]
 serving_commit = "be74bf0a00bcb3a518e6feb7606f150c189be637"
@@ -1089,6 +1153,25 @@ serving_flags = "config-floor.yml (r3 since 2026-10-13: retune r2 plus recurrent
 admission = "unadmitted: no admission cell has run on this line; admission is the three results on #143 (the behavioural fingerprint, the canary from its own baseline draw, the parity fire), unchanged by the component identity (#337, 5975255706); the window's rulings are #393 5986337117"
 preflight = "the box preflight re-reads every live component of engine_components and compares, refusing on any difference and naming the component that drifted (#337, 5975255706); the re-read is the inference seat's, on the host"
 hazards = "the fastest engine, and its knowledge is built here (the maintainer, #393 5986337117): reasoning_effort 'high' is a 400; TabbyAPI at be74bf0a serves /props in llama-server's shape (total_slots, model_path, chat_template, default_generation_settings, modalities) but with no build_info, so the engine check cannot read a build from it, and serves no /slots, so there is no checkpoint-restore report (that word is n/a on this engine) (endpoints/core/router.py:138, endpoints/core/types/model.py:183); a response's timings carry draft_n and draft_n_accepted when the draft model produced draft tokens and leave both keys out otherwise (endpoints/OAI/utils/common_.py:77-81), and the live tool-call turn on config r2 carried both (#526); the parity window's routing check was instance identity plus the /v1/model id at every request (#393 5986337117); output invariance is n/a under this line (ruled #393 5986337117); the chat template's digest and its rendered effort levels come from the model directory, a capability fact"
+recommended_is = "the base model's card, Qwen/Qwen3.8-27B at revision 1d4bf0f2ff6012fd82039f2fa52739d0dd7c60c0 (https://huggingface.co/Qwen/Qwen3.8-27B/blob/1d4bf0f2ff6012fd82039f2fa52739d0dd7c60c0/README.md, \"We recommend using the following sets of sampling parameters\", read 2026-10-14): thinking and instruct; these weights quantize that model"
+
+[[substrate.accel24-tabbyapi-exl3-qwen38-27b-3p00.recommended]]
+mode = "thinking"
+temperature = "1.0"
+top_p = "0.95"
+top_k = "20"
+min_p = "0.0"
+presence_penalty = "0.0"
+repetition_penalty = "1.0"
+
+[[substrate.accel24-tabbyapi-exl3-qwen38-27b-3p00.recommended]]
+mode = "instruct"
+temperature = "0.7"
+top_p = "0.80"
+top_k = "20"
+min_p = "0.0"
+presence_penalty = "1.5"
+repetition_penalty = "1.0"
 
 [substrate.accel24-tabbyapi-exl3-qwen38-27b-3p00.engine_components]
 serving_commit = "be74bf0a00bcb3a518e6feb7606f150c189be637"
@@ -1169,6 +1252,7 @@ reproducible_because = "replay the acts and the same bytes play again; exact mat
 engine_single_digest_suffices = "the digest is of the acts, not of an executable: the server is this repository's own code, and the acts are the whole of what it plays"
 engine_build_info = "canned-8947e69543df56300d85ed571a6799d66b25a51c18c6d456193918864d7f5e9d"
 engine_build_info_is = "derived, not read from a server: canned::build_info(), \"canned-\" + the entry's acts digest (weights_acts_sha256, equal to engine_identity); its acts as first registered; no server in the crate plays them now, so a serve under a regimen naming this substrate is refused (track three discloses it)"
+recommended_absent = "canned acts replayed on loopback: every reply is committed, nothing is sampled"
 
 [substrate.canned-cache-n]
 equipment = "canned-loopback-cache-n"
@@ -1184,6 +1268,7 @@ reproducible_because = "as for `canned`: replay the acts and the same bytes play
 engine_single_digest_suffices = "the digest is of the acts, not of an executable: the server is this repository's own code, and the acts are the whole of what it plays"
 engine_build_info = "canned-188c4004c8e620086962a29773f89bce58a3cdd2df502032291cb90736979b90"
 engine_build_info_is = "derived, not read from a server: canned::build_info(), \"canned-\" + the entry's acts digest (weights_acts_sha256, equal to engine_identity); the acts the crate plays now, so the canned server reports this literal at GET /props"
+recommended_absent = "canned acts replayed on loopback: every reply is committed, nothing is sampled"
 
 [substrate.canned-replay]
 equipment = "canned-loopback-replay"
@@ -1199,6 +1284,7 @@ reproducible_because = "replay the capture and the same bytes play again; exact 
 engine_single_digest_suffices = "the digest is of the acts, not of an executable: the server is this repository's own code, and the capture is the whole of what it plays"
 engine_build_info = "canned-2087aa015ae2a2a05b36adedc25902d605ac2b2c461ef9139747a25ca1e566f8"
 engine_build_info_is = "derived, not read from a server: canned::replay_build_info(), \"canned-\" + the acts digest; what `diet-drive replay` reports at GET /props"
+recommended_absent = "canned acts replayed on loopback: every reply is committed, nothing is sampled"
 
 [substrate.canned-replay-tools]
 equipment = "canned-loopback-replay-tools"
@@ -1214,6 +1300,7 @@ reproducible_because = "replay the captures and the same bytes play again; exact
 engine_single_digest_suffices = "the digest is of the acts, not of an executable: the server is this repository's own code, and the captures are the whole of what it plays"
 engine_build_info = "canned-7336cc7fed1f2e64c6095c49f73317c9b30be3ba8d22d7cf3bf8fc2bc62c6966"
 engine_build_info_is = "derived, not read from a server: canned::replay_tools_build_info(), \"canned-\" + the acts digest; what `diet-drive replay` reports at GET /props"
+recommended_absent = "canned acts replayed on loopback: every reply is committed, nothing is sampled"
 
 [substrate.canned-scenario]
 equipment = "canned-loopback-scenario"
@@ -1231,6 +1318,7 @@ reproducible_because = "run the same scenario file and the same replies play aga
 engine_single_digest_suffices = "the server is this repository's own code, and the scenario's replies, digested per run, are the whole of what it plays"
 engine_build_info = "canned-e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
 engine_build_info_is = "derived, not read from a server: canned::scenario_build_info(), \"canned-\" + the digest of no acts; what `diet-drive scenario` reports at GET /props"
+recommended_absent = "a scenario's own replies, routed on loopback: every answer is one the scenario wrote, nothing is sampled"
 
 
 [substrate.canned-scenario-windowed]
@@ -1253,6 +1341,7 @@ reproducible_because = "run the same scenario file and the same replies play aga
 engine_single_digest_suffices = "the server is this repository's own code, and the scenario's replies, digested per run, are the whole of what it plays"
 engine_build_info = "canned-e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
 engine_build_info_is = "derived, not read from a server: canned::scenario_build_info(), \"canned-\" + the digest of no acts; what `diet-drive scenario` reports at GET /props"
+recommended_absent = "a scenario's own replies, routed on loopback: every answer is one the scenario wrote, nothing is sampled"
 [substrate.stub-hosted-api]
 equipment = "stub-hosted-api"
 description = "the hosted-API rehearsal substrate (#555): this crate's loopback stub playing constructed Anthropic Messages events, never a provider's model; a rehearsal substrate for a hosted session's wiring when no live call is allowed, and never a claim substrate: every answer is a constructed one"
@@ -1268,6 +1357,7 @@ weights_kind = "hosted"
 weights_provider = "diet-drive stub"
 weights_model_id = "a-hosted-model"
 weights_version_or_date_observed = "constructed"
+recommended_absent = "this crate's stub playing constructed events, never a provider's model: nothing is sampled"
 
 [substrate.anthropic-claude-haiku-5-5]
 equipment = "anthropic-api"
@@ -1370,6 +1460,7 @@ sampler_card = "none: counting only, each fragment tokenized alone without speci
 # served paths of one converted artifact, one daemon run each, and the fp32 PyTorch
 # forward the parity is measured against. A substrate here is a classification
 # run: no sampler, one forward per request.
+recommended_absent = "a tokenizer counting text: nothing is generated"
 [substrate.apple32-sidekick-laya-typed-ane]
 equipment = "macbook-pro-2021"
 pinned = true
@@ -1393,6 +1484,7 @@ current = false
 current_note = "served on demand for #165's pass A only; the daemon was started and stopped by the Sidekick program"
 served = "2026-10-04T00:10:51Z/2026-10-04T00:17:27Z"
 served_is = "the daemon log's `sidekickd starting` line and the run record's stop (SIGTERM), from the Sidekick program's files (results/2026-10-03-laya-calibration-bound/sidekick/pass-a.daemon.log, pass-a.record.txt); the run record's start, 00:10:54Z, is when it was written down"
+recommended_absent = "a classifier: one forward per request, its softmax read whole, nothing sampled"
 
 [substrate.apple32-sidekick-laya-typed-gpu]
 equipment = "macbook-pro-2021"
@@ -1416,6 +1508,7 @@ current = false
 current_note = "served on demand for #165's pass B only; the daemon was started and stopped by the Sidekick program"
 served = "2026-10-04T00:17:27Z/2026-10-04T00:19:55Z"
 served_is = "the daemon log's `sidekickd starting` line and the run record's stop (SIGTERM), from the Sidekick program's files (results/2026-10-03-laya-calibration-bound/sidekick/pass-b.daemon.log, pass-b.record.txt); the run record's start, 00:17:30Z, is when it was written down"
+recommended_absent = "a classifier: one forward per request, its softmax read whole, nothing sampled"
 
 [substrate.apple32-torch-laya-typed-fp32]
 equipment = "macbook-pro-2021"
@@ -1440,6 +1533,7 @@ sampler_card = "none: fp32 logits per request, with sidekick's ideal-fp16 oracle
 # the caches were committed to the research archive from it on 2026-09-04.
 # Each cell is pinned the way its cache meta pins it: hub revision, the digest
 # of the weights file that was loaded, pooling, prefixes, and the library.
+recommended_absent = "a classifier: fp32 logits per request, nothing sampled"
 [substrate.all-MiniLM-L6-v2]
 equipment = "mac-pro-2019"
 description = "sentence-transformers/all-MiniLM-L6-v2, the bakeoff's declared floor, run on the host's CPU by sentence-transformers 3.0.1"
@@ -1456,6 +1550,7 @@ prefix_rows = ""
 prefix_senses = ""
 batch_size = 32
 role = "the declared floor: a symmetric-pair objective, the wrong one for asymmetric description-to-instance matching, kept as the control every reader knows"
+recommended_absent = "an embedder: one forward per input, nothing sampled"
 
 [substrate."bge-small-en-v1.5"]
 equipment = "mac-pro-2019"
@@ -1472,6 +1567,7 @@ pooling = "the CLS token, then L2-normalise (the model's shipped modules)"
 prefix_rows = ""
 prefix_senses = ""
 batch_size = 32
+recommended_absent = "an embedder: one forward per input, nothing sampled"
 
 [substrate.embeddinggemma-300m]
 equipment = "mac-pro-2019"
@@ -1490,6 +1586,7 @@ pooling = "the graph's own sentence_embedding output, then L2-normalise"
 prefix_rows = "title: none | text: "
 prefix_senses = "task: search result | query: "
 batch_size = 1
+recommended_absent = "an embedder: one forward per input, nothing sampled"
 
 [substrate."Qwen3-Embedding-0.6B"]
 equipment = "mac-pro-2019"
@@ -1507,6 +1604,7 @@ prefix_rows = ""
 prefix_senses = "Instruct: Given a description of a kind of statement made in a coding session, retrieve statements of that kind\nQuery: "
 prefix_senses_note = "the ruling's byte form of 2026-09-04, with a space after `Query:`; the model card's form has none, and changing the byte would be a new cell under a new ruling"
 batch_size = 1
+recommended_absent = "an embedder: one forward per input, nothing sampled"
 
 [substrate.apple32-omlx-gemma12b]
 equipment = "macbook-pro-2021"

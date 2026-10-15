@@ -1,0 +1,3 @@
+arm = "fixture"
+substrates = ["fixture-unsampled"]
+dogma_version = 0
