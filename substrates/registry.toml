@@ -738,6 +738,25 @@ engine_libraries_read = "disk"
 engine_libraries_is = "read from disk, not from a process, on 2026-10-01T05:12Z: nothing serves this substrate between windows. Tied to the instance by its own read: the exe and the 8 libraries the 2026-09-29 engine manifest hashed (engine_identity_is) are equal on disk (measurements/2026-10-01-engine-libraries/tie.py); the other 7 are the build's tool libraries, which the server does not load and the manifest did not hash; measurements/2026-10-01-engine-libraries/accel24-llamacpp-candidate-disk.json"
 engine_fingerprint = "2c2bbdfd05dd5d3224b4ec8546c3fbe942de769e01527f08bb891e4b99bcaf99"
 engine_fingerprint_is = "sha256 of the exe digest and every library digest, canonically serialised (check-fingerprints.py, engine_fingerprint)"
+recommended_is = "the base model's card, Qwen/Qwen3.8-27B at revision 1d4bf0f2ff6012fd82039f2fa52739d0dd7c60c0 (https://huggingface.co/Qwen/Qwen3.8-27B/blob/1d4bf0f2ff6012fd82039f2fa52739d0dd7c60c0/README.md, \"We recommend using the following sets of sampling parameters\", read 2026-10-14): thinking and instruct. These GSQ-RCO weights plainly quantize that model: their own card, ISTA-DASLab/Qwen3.8-27B-GSQ-RCO-GGUF at revision d562806dbafae37109975e970aae91b43e73b440 (read 2026-10-14), declares base_model Qwen/Qwen3.8-27B with base_model_relation quantized, describes GSQ as post-training scalar quantization of each tensor and RCO as a per-tensor type allocation under a size budget (no fine-tuning or pruning; the -mtp build adds the base model's own MTP head), and says the weights inherit the base model's license; it states no sampling of its own"
+
+[[substrate.accel24-llamacpp-qwen38-27b-iq3s.recommended]]
+mode = "thinking"
+temperature = "1.0"
+top_p = "0.95"
+top_k = "20"
+min_p = "0.0"
+presence_penalty = "0.0"
+repetition_penalty = "1.0"
+
+[[substrate.accel24-llamacpp-qwen38-27b-iq3s.recommended]]
+mode = "instruct"
+temperature = "0.7"
+top_p = "0.80"
+top_k = "20"
+min_p = "0.0"
+presence_penalty = "1.5"
+repetition_penalty = "1.0"
 
 [substrate.accel24-llamacpp-qwen38-27b-iq3s.engine_libraries]
 "libggml-base.so.0.24.0" = "76fccaca96c6b39ef6a70b77923929501a5f54966c007f73cf253f80ddb68dcd"
@@ -887,6 +906,25 @@ engine_libraries_read = "process"
 engine_libraries_is = "read from the reverted production process, 2026-10-03, by the inference seat with check-fingerprints.py from main (--read-engine-pid): the process maps exactly the eight shared objects in its directory (substrates/measurements/2026-10-03-ada48-concurrency/revert-process-read.json, sha256 09b72e684c75e7997dad70c759ac8ec7702f0d382156e1a78ae97d2ce1fffc1a)"
 engine_fingerprint = "a08e5511390e70f9b92401284a5587a20163a9528a14982ecf8589d88290dea4"
 engine_fingerprint_is = "sha256 of the exe digest and every library digest, canonically serialised (check-fingerprints.py, engine_fingerprint)"
+recommended_is = "the base model's card, Qwen/Qwen3.8-Flash-Next at revision de4b8e4d43b917e7706784d8bb445c9af86a3540 (https://huggingface.co/Qwen/Qwen3.8-Flash-Next/blob/de4b8e4d43b917e7706784d8bb445c9af86a3540/README.md, \"We recommend using the following sets of sampling parameters\", read 2026-10-14): thinking and instruct. These GSQ-RCO weights plainly quantize that model: their own card, ISTA-DASLab/Qwen3.8-Flash-Next-GSQ-RCO-GGUF at revision ed59f92082b1e93c0e96d60a8b11aab089b52f09 (read 2026-10-14), declares base_model Qwen/Qwen3.8-Flash-Next with base_model_relation quantized, describes GSQ as post-training scalar quantization of each tensor and RCO as a per-tensor type allocation under a size budget, keeps all 512 routed experts (the expert-pruned Coder variant is a separate repository, not these weights), and says the weights inherit the base model's license; it states no sampling of its own"
+
+[[substrate.ada48-llamacpp-qwen38flashnext-q20.recommended]]
+mode = "thinking"
+temperature = "1.0"
+top_p = "0.95"
+top_k = "20"
+min_p = "0.0"
+presence_penalty = "0.0"
+repetition_penalty = "1.0"
+
+[[substrate.ada48-llamacpp-qwen38flashnext-q20.recommended]]
+mode = "instruct"
+temperature = "0.7"
+top_p = "0.80"
+top_k = "20"
+min_p = "0.0"
+presence_penalty = "1.5"
+repetition_penalty = "1.0"
 
 [substrate.ada48-llamacpp-qwen38flashnext-q20.engine_libraries]
 "libggml-base.so.0.24.0" = "2002376d7915eb8dc201babcbfc6f9c44687080fd19483da8a538cc6126e421c"
@@ -1374,6 +1412,7 @@ weights_kind = "hosted"
 weights_provider = "Anthropic"
 weights_model_id = "claude-haiku-5-5"
 weights_version_or_date_observed = "2026-10-10"
+recommended_absent = "the provider publishes no recommended sampling for Claude Haiku 5.5, and its API fixes the sampler: \"If a request includes temperature, it must be 1. If it includes top_p, it must be 0.99, its default. Any other temperature or top_p value returns a 400 error, including a top_p of 1. So does any top_k value\" (https://platform.claude.com/docs/en/models/haiku-5-5/migration-guide#remove-sampling-parameters, read 2026-10-14). A run on it samples at the provider's defaults whatever a regimen intends, so a sampler range cannot be read against a card; a regimen that sets a non-default value is refused by the API (HTTP 400) rather than run. Read a result on it as sampled at the provider's fixed defaults, never as a characterisation; whether this key, written for substrates that sample nothing, is the right home for a provider-fixed sampler is flagged to Dispatch for a ruling"
 
 [substrate.anthropic-claude-sonnet-5-5]
 equipment = "anthropic-api"
@@ -1390,6 +1429,7 @@ weights_kind = "hosted"
 weights_provider = "Anthropic"
 weights_model_id = "claude-sonnet-5-5"
 weights_version_or_date_observed = "2026-10-10"
+recommended_absent = "the provider publishes no recommended sampling for Claude Sonnet 5.5, and its API fixes the sampler: \"On Claude Sonnet 5.5, a non-default value returns a 400 error\" for temperature, top_p and top_k (https://platform.claude.com/docs/en/models/sonnet-5-5/migration-guide, read 2026-10-14). A run on it samples at the provider's defaults whatever a regimen intends, so a sampler range cannot be read against a card; a regimen that sets a non-default value is refused by the API (HTTP 400) rather than run. Read a result on it as sampled at the provider's fixed defaults, never as a characterisation; whether this key, written for substrates that sample nothing, is the right home for a provider-fixed sampler is flagged to Dispatch for a ruling"
 
 # The drive endpoint's engine commit and weights on this host's CPU, served for #29's I0
 # captures (a streamed tool call and its turn 2); not a claim substrate.
@@ -1419,6 +1459,25 @@ engine_libraries_read = "disk"
 engine_libraries_is = "read from disk after the build by check-fingerprints.py --read-engine with the .dylib recipe added in the same change (substrates/measurements/2026-10-02-i0-tool-call-captures/engine-read.json); the captures ran from this build, unmodified"
 engine_fingerprint = "30053225c3ffeeaa9a95b9f0df78b5e8755093d83e9f74c7339a4679b1d037d7"
 engine_fingerprint_is = "sha256 of the exe digest and every library digest, canonically serialised (check-fingerprints.py, engine_fingerprint)"
+recommended_is = "the base model's card, Qwen/Qwen3.8-Flash-Next at revision de4b8e4d43b917e7706784d8bb445c9af86a3540 (https://huggingface.co/Qwen/Qwen3.8-Flash-Next/blob/de4b8e4d43b917e7706784d8bb445c9af86a3540/README.md, \"We recommend using the following sets of sampling parameters\", read 2026-10-14): thinking and instruct. These GSQ-RCO weights plainly quantize that model: their own card, ISTA-DASLab/Qwen3.8-Flash-Next-GSQ-RCO-GGUF at revision ed59f92082b1e93c0e96d60a8b11aab089b52f09 (read 2026-10-14), declares base_model Qwen/Qwen3.8-Flash-Next with base_model_relation quantized, describes GSQ as post-training scalar quantization of each tensor and RCO as a per-tensor type allocation under a size budget, keeps all 512 routed experts (the expert-pruned Coder variant is a separate repository, not these weights), and says the weights inherit the base model's license; it states no sampling of its own"
+
+[[substrate.macpro-llamacpp-qwen38flashnext-q20-cpu.recommended]]
+mode = "thinking"
+temperature = "1.0"
+top_p = "0.95"
+top_k = "20"
+min_p = "0.0"
+presence_penalty = "0.0"
+repetition_penalty = "1.0"
+
+[[substrate.macpro-llamacpp-qwen38flashnext-q20-cpu.recommended]]
+mode = "instruct"
+temperature = "0.7"
+top_p = "0.80"
+top_k = "20"
+min_p = "0.0"
+presence_penalty = "1.5"
+repetition_penalty = "1.0"
 
 [substrate.macpro-llamacpp-qwen38flashnext-q20-cpu.engine_libraries]
 "libggml-base.0.24.0.dylib" = "6361a3f3e2a41e7682aeb2b7cf3ad735ab5b98075d3865346641ab2528cface6"
@@ -1641,3 +1700,17 @@ An earlier version of this entry said "nothing about it has been measured... a \
 name with a machine behind it and nothing else". That was false in three of its \
 four particulars, and the manifest it should have been read against was \
 committed before the fixtures that reference this substrate were written."""
+recommended_is = "the card of the checkpoint these weights quantize, google/gemma-4-12B-it-qat-q4_0-unquantized at revision b6ed86275a6a5735884e208bfed95b445a684ca2 (https://huggingface.co/google/gemma-4-12B-it-qat-q4_0-unquantized/blob/b6ed86275a6a5735884e208bfed95b445a684ca2/README.md, \"1. Sampling Parameters\": \"Use the following standardized sampling configuration across all use cases\", temperature=1.0, top_p=0.95, top_k=64, read 2026-10-14), the same set as the instruction-tuned base google/gemma-4-12B-it at revision 707f0a3b8a3c7ad586ed01e27eafbad8a27dd0f7. One set for all use cases, so it stands for both modes; the card names no min_p or penalties, so none is recorded. The served weights, gemma-4-12B-it-qat-OptiQ-4bit, are an mlx-optiq mixed 4/8-bit quant whose card (mlx-community/gemma-4-12B-it-qat-OptiQ-4bit at revision 625223a54b2ecae941d727df319b91dbcc4ba603; an identical card at npario/gemma-4-12B-it-qat-OptiQ-4bit) names that checkpoint as its base and ships a generation_config.json with the same three values. Which mirror the manifest pulled is unrecorded (this substrate is unpinned), and both name the same base"
+
+[[substrate.apple32-omlx-gemma12b.recommended]]
+mode = "thinking"
+temperature = "1.0"
+top_p = "0.95"
+top_k = "64"
+
+[[substrate.apple32-omlx-gemma12b.recommended]]
+mode = "instruct"
+temperature = "1.0"
+top_p = "0.95"
+top_k = "64"
+
