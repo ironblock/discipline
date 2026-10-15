@@ -327,6 +327,20 @@ export const ServedForks: Story = {
   },
 };
 
+/** `?drive`, log v5 (#453): the ask the operator marked `scoping: true` carries the scope-answer mark; the next, unmarked, does not. */
+export const ServedScopeAnswerMark: Story = {
+  name: '?drive: the scope answer is marked on its ask, and only there (v5)',
+  args: { drive: true, web: serving(forks) },
+  play: async ({ canvasElement }) => {
+    await waitFor(async () => expect(canvasElement.querySelectorAll('.ex-trunk [data-tone="user"]')).toHaveLength(2));
+    const asks = [...canvasElement.querySelectorAll<HTMLElement>('.ex-trunk [data-tone="user"]')];
+    await expect(asks.map((ask) => [ask.textContent?.includes('what are we building'), ask.querySelector('.ex-scope-answer')?.textContent ?? null])).toEqual([
+      [true, 'scope answer'],
+      [false, null],
+    ]);
+  },
+};
+
 /**
  * The operator's screenshot (#372), attached in the composer: picked, shown as a chip, sent ahead of the ask by
  * the transport's upload, named on the ask by digest -- and drawn on the operator's message, read back by that digest.
