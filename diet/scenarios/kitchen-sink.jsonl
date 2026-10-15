@@ -50,10 +50,12 @@
 {"reply":{"text":"."}}
 {"reply":{"text":"."}}
 {"reply":{"text":"."}}
-{"reply":{"when":"Output 15 lines and nothing else","text":"1. KEEP\n2. KEEP\n3. KEEP\n4. KEEP\n5. KEEP\n6. KEEP\n7. KEEP\n8. KEEP\n9. KEEP\n10. KEEP\n11. KEEP\n12. KEEP\n13. KEEP\n14. KEEP\n15. KEEP\n"}}
-{"reply":{"when":"Output 15 lines and nothing else","text":"1. KEEP\n2. KEEP\n3. KEEP\n4. KEEP\n5. KEEP\n6. KEEP\n7. KEEP\n8. KEEP\n9. KEEP\n10. KEEP\n11. KEEP\n12. KEEP\n13. KEEP\n14. KEEP\n15. KEEP\n"}}
-{"reply":{"when":"Output 16 lines and nothing else","text":"1. KEEP\n2. KEEP\n3. KEEP\n4. KEEP\n5. KEEP\n6. KEEP\n7. KEEP\n8. KEEP\n9. KEEP\n10. KEEP\n11. KEEP\n12. KEEP\n13. KEEP\n14. KEEP\n15. KEEP\n16. KEEP\n"}}
-{"reply":{"when":"Output 16 lines and nothing else","text":"1. KEEP\n2. KEEP\n3. KEEP\n4. KEEP\n5. KEEP\n6. KEEP\n7. KEEP\n8. KEEP\n9. KEEP\n10. KEEP\n11. KEEP\n12. KEEP\n13. KEEP\n14. KEEP\n15. KEEP\n16. KEEP\n"}}
+{"reply":{"when":"Output 8 lines and nothing else","text":"1. KEEP\n2. KEEP\n3. KEEP\n4. KEEP\n5. KEEP\n6. KEEP\n7. KEEP\n8. KEEP\n"}}
+{"reply":{"when":"Output 8 lines and nothing else","text":"1. KEEP\n2. KEEP\n3. KEEP\n4. KEEP\n5. KEEP\n6. KEEP\n7. KEEP\n8. KEEP\n"}}
+{"reply":{"when":"Output 8 lines and nothing else","text":"1. KEEP\n2. KEEP\n3. KEEP\n4. KEEP\n5. KEEP\n6. KEEP\n7. KEEP\n8. KEEP\n"}}
+{"reply":{"when":"Output 8 lines and nothing else","text":"1. KEEP\n2. KEEP\n3. KEEP\n4. KEEP\n5. KEEP\n6. KEEP\n7. KEEP\n8. KEEP\n"}}
+{"reply":{"when":"Output 8 lines and nothing else","text":"1. KEEP\n2. KEEP\n3. KEEP\n4. KEEP\n5. KEEP\n6. KEEP\n7. KEEP\n8. KEEP\n"}}
+{"reply":{"when":"Output 7 lines and nothing else","text":"1. KEEP\n2. KEEP\n3. KEEP\n4. KEEP\n5. KEEP\n6. KEEP\n7. KEEP\n"}}
 {"reply":{"when":"Output 1 lines and nothing else","text":"1. KEEP\n"}}
 {"reply":{"when":"The turn has ended","text":"DECISION: notes.md holds one line per decision\nPLAN: write it, then read it back\nSUPERSEDE: NONE"}}
 {"reply":{"when":"The turn has ended","text":"DECISION: NONE\nPLAN: NONE\nSUPERSEDE: interview-t1-0 decision: notes.md holds the decisions as a Markdown list"}}
@@ -61,8 +63,6 @@
 {"reply":{"when":"You just read a document","text":"LEARNED: notes.md reads back as written\nEVIDENCE: decision: one line per decision\nSTUCK: NONE"}}
 {"reply":{"when":"You just ingested a large piece","text":"EXCERPT: xxxxxxxxxx\nPOINTER: the long line is 9000 x's (the output of call-b2)"}}
 {"reply":{"when":"did anything behave differently","text":"GOTCHA: missing.txt does not exist — IMPLICATION: create it before showing it"}}
-{"reply":{"when":"Did you make, confirm, or change any decision","text":"NONE"}}
-{"reply":{"when":"learn of or commit to any constraint","text":"NONE"}}
 {"reply":{"when":"Two questions about where you are right now","text":"OPEN: whether the build in the background finished\nNEXT: read its output"}}
 {"reply":{"when":"What did this turn establish","text":"LEARNED: NONE\nEVIDENCE: NONE\nSTUCK: NONE"}}
 {"reply":{"when":"What did this turn establish","text":"LEARNED: NONE\nEVIDENCE: NONE\nSTUCK: NONE"}}
@@ -76,18 +76,13 @@
 {"reply":{"when":"You just changed something","text":"LEARNED: NONE\nEVIDENCE: NONE\nSTUCK: NONE"}}
 {"reply":{"when":"You just read a document","text":"LEARNED: NONE\nEVIDENCE: NONE\nSTUCK: NONE"}}
 {"reply":{"when":"You just read source","text":"API_SURFACE: NONE\nLEARNED: NONE\nSTUCK: NONE"}}
-{"reply":{"when":"Two questions about where you are right now","text":"OPEN: NONE\nNEXT: NONE"}}
-{"reply":{"when":"Two questions about where you are right now","text":"OPEN: NONE\nNEXT: NONE"}}
-{"reply":{"when":"Two questions about where you are right now","text":"OPEN: NONE\nNEXT: NONE"}}
-{"reply":{"when":"did anything behave differently","text":"NONE"}}
-{"reply":{"when":"did anything behave differently","text":"NONE"}}
-{"reply":{"when":"did anything behave differently","text":"NONE"}}
-{"reply":{"when":"Did you make, confirm, or change any decision","text":"NONE"}}
-{"reply":{"when":"Did you make, confirm, or change any decision","text":"NONE"}}
 {"reply":{"when":"Did you make, confirm, or change any decision","text":"NONE"}}
 {"reply":{"when":"learn of or commit to any constraint","text":"NONE"}}
-{"reply":{"when":"learn of or commit to any constraint","text":"NONE"}}
-{"reply":{"when":"learn of or commit to any constraint","text":"NONE"}}
+{"classify":{"when":"No such file","hypothesis":"went wrong","score":"0.93"}}
+{"classify":{"when":"No such file","hypothesis":"decision","score":"0.71"}}
+{"classify":{"when":"No such file","hypothesis":"constraint","score":"0.64"}}
+{"classify":{"when":"echo built","hypothesis":"left open","score":"0.88"}}
+{"classify":{"when":"","hypothesis":"","score":"0.04"}}
 {"step":"start-phase","phase":"orient"}
 {"step":"ask","text":"Scope: a notes file, notes.md, holding one line per decision; read it back after each write.","scoping":true}
 {"step":"ask","text":"Write notes.md with the first decision, tighten it, then read it back."}
@@ -187,3 +182,11 @@
 {"expect":"tool_call","where":{"name":"tidy_everything","outcome":"refused","reason":"unknown_tool"}}
 {"expect":"turn.settled","where":{"reason":"failed"}}
 {"expect":"ask","where":{"files~":"image/png"}}
+{"expect":"session.start","where":{"levers.warrant_gate":"classifier:canned-scenario-classifier@0000000000000000000000000000000000000000","levers.meditation_audit_concurrency":"2:effective:2","levers.meditation_audit_chunk":"notes:8"}}
+{"expect":"warrant.gated","where":{"outcome":"decided","probe":"gotcha","class":"gotcha","score":"0.930000","threshold":"0.5","fired":"true","model":"canned-scenario-classifier@0000000000000000000000000000000000000000","compute_units":"none"},"name":"gated"}
+{"expect":"fork","where":{"why":"trouble","ask":"gotchas"},"after":"gated"}
+{"expect":"warrant.gated","where":{"outcome":"decided","probe":"open","fired":"true","score":"0.880000"},"name":"gated-open"}
+{"expect":"fork","where":{"why":"open"},"after":"gated-open"}
+{"expect":"warrant.gated","where":{"outcome":"decided","fired":"false","score":"0.040000"},"at_least":100}
+{"expect":"fork","where":{"lane":"audit","why":"meditation","chunk":"1"},"at_least":3}
+{"expect":"fork","where":{"lane":"audit","why":"meditation","chunk":"2"},"at_least":3}

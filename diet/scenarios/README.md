@@ -4,7 +4,7 @@ A scenario (#760) is a drive written down as steps and expectations. `diet-drive
 
 `split-turn.jsonl` (#813) runs on the same windowed substrate: a turn whose own steps outgrow the window, split by the window meditation inside it.
 
-`kitchen-sink.jsonl` (#798) is one session showing every lever that writes a line to the log, each with an `expect`; its log is the page's `kitchen-sink` example. It runs on `canned-scenario-windowed`, the scenario substrate with a declared 24000-token window, so its budget meditation fires at a turn's end and its window meditation inside a later turn. `meditation_at_working_set_bytes` is not shown: serve refuses it (`NotServed`), and only the scripted drive takes it. Its replies are routed by `when` and provisioned one per request, so a request nobody wrote a reply for fails the run rather than taking another's.
+`kitchen-sink.jsonl` (#798) is one session showing every lever that writes a line to the log, each with an `expect`; its log is the page's `kitchen-sink` example. It runs on `canned-scenario-windowed`, the scenario substrate with a declared 24000-token window, so its budget meditation fires at a turn's end and its window meditation inside a later turn. `meditation_at_working_set_bytes` is not shown: serve refuses it (`NotServed`), and only the scripted drive takes it. Its replies are routed by `when` and provisioned one per request, so a request nobody wrote a reply for fails the run rather than taking another's. It gates its step warrants by a classifier (`warrant_gate = "classifier"`, #850), scored by its own `classify` lines, so every step logs `warrant.gated` decisions, fired and not. Its audits ask in chunks of eight notes, two in flight at once (`meditation_audit_concurrency = 2`, #854), each fork carrying its `chunk`.
 
 A run on the canned substrate shows its model the same bytes on any machine. Its recording and worktree are shown as `/scenario/recording` and `/scenario/worktree` wherever their paths would appear: in tool results, background notices, a capped output's "saved to" and the meditation's "saved at". The whole of a capped output is rewritten before it is kept, so the copies under `files/` and their digests are path-free too. Background job ids are taken from their count, and the model is shown pid 0. Commands still run in the real directories, and a job is stopped by its real pid. The log's metadata (`tool_call.cwd`) stays real, and `session.start` declares `shown_roots` and `scenario_fixed`. Only a canned substrate takes `--shown-root`, so a re-fire on an endpoint is shown where it really ran. One limit: a spilled output, one too large to hold, is copied as it streams, so its kept whole keeps real paths.
 
@@ -41,6 +41,19 @@ The format has no grammar of its own, so it has no directory under `diet/formats
 - `prompt_tokens` (optional) is the prompt the reply's usage reports, in tokens; absent, the canned server's 600. A trunk that large is what a budget meditation measures.
 - `delay_ms` (optional) holds the reply back that long, its events trickled after the delay (#782). The stub answers each request on its own thread, so a held reply orders a trunk's answer after a fork beside it.
 - A re-fire on an endpoint ignores every reply.
+
+## `classify`: what the canned classifier scores
+
+`{"classify": {"when": TEXT, "hypothesis": TEXT, "score": TEXT}}`
+
+- A scenario whose regimen gates by a classifier (`warrant_gate = "classifier"`) is scored on the canned substrate by these rules: `diet-drive scenario` serves `POST /v1/classify` on the substrate's own port and passes serve `--classifier-endpoint`, which only a canned substrate takes. The regimen's `endpoint` is never called.
+- A window holding `when` scores a hypothesis holding `hypothesis` at `score`: a decimal from 0 to 1, written as text, since the format has no floats.
+- The first rule naming both decides. A pair no rule names scores 0, and an empty `when` and `hypothesis` name every pair.
+- Rules are used on every call, never spent.
+- The canned classifier reports the model, revision and compute units the regimen declares.
+- The rules are part of the replies' digest, after the replies.
+- A scenario with `classify` lines whose regimen gates no step by a classifier is refused.
+- A re-fire on an endpoint ignores every rule.
 
 ## `step`: what the runner drives
 

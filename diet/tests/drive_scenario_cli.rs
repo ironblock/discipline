@@ -283,21 +283,61 @@ fn an_assembled_run_keeps_the_files_its_asks_attached() {
 }
 
 /// A run's log with what may differ between two runs of one scenario
-/// taken out -- when each line was written (`t`, `opened`), its place
-/// (`seq`: a background job's end lands where its timing puts it), where
-/// a command really ran (`cwd`), and the real roots `shown_roots` declares
-/// -- as a sorted list of lines, and its kept outputs by name and bytes.
+/// taken out -- when each line was written (`t`, `opened`, and a warrant
+/// gate's `latency_ms`), its place (`seq`: a background job's end lands
+/// where its timing puts it, and a gate's call or an audit's chunks beside
+/// each other interleave as they finish, #862), so each reference to a line
+/// by its `seq` is read as that line's kind, where a command really ran
+/// (`cwd`), and the real roots `shown_roots` declares -- as a sorted list of
+/// lines, and its kept outputs by name and bytes.
 /// Everything else -- every message, result, notice, size and digest the
 /// model's requests were made of -- stays.
 fn run_of(out: &Path) -> (Vec<String>, std::collections::BTreeMap<String, Vec<u8>>) {
+    // The fields that name another line by its `seq`, as the exercise's
+    // lane check reads them (`exercise/src/drive/scenario-log.ts`).
+    const REFERENCES: [&str; 8] = [
+        "request",
+        "to_request",
+        "fork",
+        "at",
+        "cut",
+        "after",
+        "last_seq",
+        "opened_by",
+    ];
     let log = std::fs::read_to_string(out.join("session.log")).expect("the log");
-    let mut lines: Vec<String> = log
+    let events: Vec<serde_json::Value> = log
         .lines()
-        .map(|line| {
-            let mut event: serde_json::Value = serde_json::from_str(line).expect("a log line");
+        .map(|line| serde_json::from_str(line).expect("a log line"))
+        .collect();
+    let kinds: std::collections::BTreeMap<u64, String> = events
+        .iter()
+        .filter_map(|event| Some((event["seq"].as_u64()?, event["kind"].as_str()?.to_owned())))
+        .collect();
+    let kind_of = |seq: u64| format!("<{}>", kinds.get(&seq).map_or("?", String::as_str));
+    let mut lines: Vec<String> = events
+        .into_iter()
+        .map(|mut event| {
             let object = event.as_object_mut().expect("an object");
-            for key in ["t", "seq", "opened", "cwd"] {
+            for key in ["t", "seq", "opened", "cwd", "latency_ms"] {
                 object.remove(key);
+            }
+            for key in REFERENCES {
+                if let Some(seq) = object.get(key).and_then(serde_json::Value::as_u64) {
+                    object.insert(key.to_owned(), serde_json::Value::from(kind_of(seq)));
+                }
+            }
+            // A fork's trigger names its line after its word: `open:102`.
+            if let Some((word, seq)) = object
+                .get("trigger")
+                .and_then(serde_json::Value::as_str)
+                .and_then(|trigger| trigger.split_once(':'))
+                .and_then(|(word, seq)| Some((word.to_owned(), seq.parse::<u64>().ok()?)))
+            {
+                object.insert(
+                    "trigger".to_owned(),
+                    serde_json::Value::from(format!("{word}:{}", kind_of(seq))),
+                );
             }
             if let Some(roots) = object
                 .get_mut("shown_roots")

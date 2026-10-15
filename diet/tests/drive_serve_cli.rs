@@ -5026,3 +5026,40 @@ fn a_drive_server_takes_shown_roots_only_on_a_canned_substrate() {
     );
     assert_eq!(served.substrate.as_deref(), Some("canned-cache-n"));
 }
+
+/// #862: `--classifier-endpoint` points the warrant gate's classifier at a
+/// scenario's canned one. Only a canned substrate takes it, as
+/// `--shown-root`: a real model's gate is scored where its regimen says.
+/// And only a regimen that gates by a classifier: there is nothing else to
+/// point.
+#[test]
+fn a_drive_server_takes_a_classifier_endpoint_only_on_a_canned_substrate_that_gates_by_one() {
+    let stub = Stub::serving(Vec::new()).expect("loopback");
+    let regimen = regimen_registered("accel24-llamacpp-qwen38-27b-iq3s");
+    let path = regimen.0.to_string_lossy().into_owned();
+    let (code, said) = run_briefly(
+        &stub.url(),
+        &[
+            "--regimen",
+            &path,
+            "--classifier-endpoint",
+            "http://127.0.0.1:9",
+        ],
+    );
+    assert_eq!(code, Some(2), "{said}");
+    assert!(said.contains("only a canned substrate takes it"), "{said}");
+    let stub =
+        Stub::serving_with_props(Vec::new(), &diet::drive::canned::build_info()).expect("loopback");
+    let dev_loop = format!("{}/drive/dev-loop.toml", env!("CARGO_MANIFEST_DIR"));
+    let (code, said) = run_briefly(
+        &stub.url(),
+        &[
+            "--regimen",
+            &dev_loop,
+            "--classifier-endpoint",
+            "http://127.0.0.1:9",
+        ],
+    );
+    assert_eq!(code, Some(2), "{said}");
+    assert!(said.contains("gates no step by a classifier"), "{said}");
+}

@@ -93,10 +93,84 @@ impl Route {
     }
 }
 
-/// A routed stub's replies not yet spent, and the requests none answered.
+/// A routed stub's canned classifier (#862): what it answers `POST
+/// /v1/classify` with, as Sidekick answers it, so a scenario's warrant gate
+/// decides on scores the scenario wrote.
+#[derive(Debug, Clone, PartialEq)]
+pub struct Classifying {
+    /// The model it reports serving (`sidekick-model`): the regimen's id and
+    /// revision, `id@revision`.
+    pub model: String,
+    /// The compute units it reports (`sidekick-compute-units`).
+    pub compute_units: String,
+    /// Its rules, in order.
+    pub rules: Vec<ClassifyRule>,
+}
+
+/// One canned classifier rule: a window holding `when` scores a label
+/// holding `hypothesis` at `score`. A pair no rule names scores 0.
+#[derive(Debug, Clone, PartialEq)]
+pub struct ClassifyRule {
+    /// Text the window holds.
+    pub when: String,
+    /// Text the candidate label holds.
+    pub hypothesis: String,
+    /// P(entailment).
+    pub score: f64,
+}
+
+impl Classifying {
+    /// The answer to a classify request's `body`: each input's score for
+    /// each candidate label, by the first rule that names both, in the
+    /// labels' order, with the label at its highest score.
+    fn answer(&self, body: &str) -> String {
+        let value: serde_json::Value = serde_json::from_str(body).unwrap_or_default();
+        let texts = |key: &str| -> Vec<String> {
+            value[key]
+                .as_array()
+                .map(|all| {
+                    all.iter()
+                        .filter_map(|text| text.as_str().map(str::to_owned))
+                        .collect()
+                })
+                .unwrap_or_default()
+        };
+        let (inputs, labels) = (texts("input"), texts("candidate_labels"));
+        let data: Vec<serde_json::Value> = inputs
+            .iter()
+            .enumerate()
+            .map(|(index, input)| {
+                let probs: Vec<f64> = labels
+                    .iter()
+                    .map(|label| {
+                        self.rules
+                            .iter()
+                            .find(|rule| {
+                                input.contains(&rule.when) && label.contains(&rule.hypothesis)
+                            })
+                            .map_or(0.0, |rule| rule.score)
+                    })
+                    .collect();
+                let top = probs
+                    .iter()
+                    .enumerate()
+                    .fold(None::<(usize, f64)>, |best, (at, p)| match best {
+                        Some((_, high)) if high >= *p => best,
+                        _ => Some((at, *p)),
+                    })
+                    .map_or("", |(at, _)| labels[at].as_str());
+                serde_json::json!({"index": index, "label": top, "probs": probs})
+            })
+            .collect();
+        serde_json::json!({ "data": data }).to_string()
+    }
+}
+
+/// A routed stub's replies not yet spent, and its canned classifier.
 #[derive(Debug, Default)]
 struct Routes {
     left: Vec<Route>,
+    classifying: Option<Classifying>,
 }
 
 impl Routes {
@@ -200,7 +274,34 @@ impl Stub {
             Vec::new(),
             Some(format!("{{\"build_info\":\"{build_info}\"}}")),
             (Replay::Routed, port),
-            routes,
+            Routes {
+                left: routes,
+                classifying: None,
+            },
+        )
+    }
+
+    /// [`Stub::routing`], answering `POST /v1/classify` too, by
+    /// `classifying`'s rules (#862), every time and without spending a
+    /// reply. A routed stub without one refuses a classify call `404`.
+    ///
+    /// # Errors
+    ///
+    /// Returns the I/O error if loopback cannot be bound.
+    pub fn routing_classifying(
+        routes: Vec<Route>,
+        build_info: &str,
+        port: u16,
+        classifying: Classifying,
+    ) -> io::Result<Self> {
+        Self::start_routed(
+            Vec::new(),
+            Some(format!("{{\"build_info\":\"{build_info}\"}}")),
+            (Replay::Routed, port),
+            Routes {
+                left: routes,
+                classifying: Some(classifying),
+            },
         )
     }
 
@@ -282,14 +383,14 @@ impl Stub {
     }
 
     fn start(acts: Vec<Act>, props: Option<String>, replay: Replay, port: u16) -> io::Result<Self> {
-        Self::start_routed(acts, props, (replay, port), Vec::new())
+        Self::start_routed(acts, props, (replay, port), Routes::default())
     }
 
     fn start_routed(
         acts: Vec<Act>,
         props: Option<String>,
         (replay, port): (Replay, u16),
-        routes: Vec<Route>,
+        routes: Routes,
     ) -> io::Result<Self> {
         let listener = TcpListener::bind(("127.0.0.1", port))?;
         listener.set_nonblocking(true)?;
@@ -311,7 +412,7 @@ impl Stub {
         let worker = thread::spawn(move || {
             serve(
                 &listener,
-                (acts, Routes { left: routes }),
+                (acts, routes),
                 props.as_deref(),
                 replay,
                 &flag,
@@ -494,6 +595,37 @@ fn unanswered(
     );
 }
 
+/// A routed stub's classify call (#862): answered by its canned
+/// classifier, under Sidekick's provenance headers, or refused `404` when it
+/// has none. Never a reply spent, never among what was asked.
+fn classified(
+    stream: &mut TcpStream,
+    classifying: Option<&Classifying>,
+    (head, body): (&str, &str),
+    heads: &Mutex<Vec<String>>,
+) {
+    heads
+        .lock()
+        .unwrap_or_else(PoisonError::into_inner)
+        .push(head.to_owned());
+    let Some(classifying) = classifying else {
+        write_reply(stream, 404, "no canned classifier", Closing::Yes);
+        return;
+    };
+    let answer = classifying.answer(body);
+    let _ = stream.write_all(
+        format!(
+            "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nsidekick-model: {}\r\n\
+             sidekick-compute-units: {}\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{answer}",
+            classifying.model,
+            classifying.compute_units,
+            answer.len()
+        )
+        .as_bytes(),
+    );
+    let _ = stream.flush();
+}
+
 /// Serve every act, and collect what was asked.
 fn serve(
     listener: &TcpListener,
@@ -533,6 +665,18 @@ fn serve(
                 .unwrap_or_else(PoisonError::into_inner)
                 .push(head.clone());
             write_reply(&mut stream, 200, props, Closing::Yes);
+            continue;
+        }
+        if by_content
+            && let Ok((head, body)) = &read
+            && head.starts_with("POST /v1/classify ")
+        {
+            classified(
+                &mut stream,
+                routes.classifying.as_ref(),
+                (head, body),
+                heads,
+            );
             continue;
         }
         let picked = if by_content {
@@ -953,5 +1097,90 @@ mod tests {
             stub.unmatched(),
             ["the fork's ask, a second time".to_owned()]
         );
+    }
+    /// #862: a routed stub given a canned classifier answers `POST
+    /// /v1/classify` as Sidekick does -- each window's score for each label,
+    /// in the labels' order, under the provenance headers -- from its rules
+    /// alone, every time, and spends no reply on it. The gate's own client
+    /// reads the answer.
+    #[test]
+    fn a_routed_stub_answers_a_classify_call_by_its_rules_and_spends_no_reply() {
+        use crate::drive::warrant_gate::{Classifier, classify};
+        let stub = Stub::routing_classifying(
+            vec![Route::ordered(Act::Answer("the trunk's".to_owned()))],
+            "build",
+            0,
+            Classifying {
+                model: "canned-nli@0000000000000000000000000000000000000000".to_owned(),
+                compute_units: "none".to_owned(),
+                rules: vec![
+                    ClassifyRule {
+                        when: "No such file".to_owned(),
+                        hypothesis: "went wrong".to_owned(),
+                        score: 0.93,
+                    },
+                    ClassifyRule {
+                        when: "still open".to_owned(),
+                        hypothesis: "left open".to_owned(),
+                        score: 0.81,
+                    },
+                ],
+            },
+        )
+        .expect("loopback");
+        let classifier = Classifier {
+            endpoint: format!("http://{}", stub.address()),
+            model: "canned-nli".to_owned(),
+            revision: "0000000000000000000000000000000000000000".to_owned(),
+            compute_units: "none".to_owned(),
+            truncation_side: "left".to_owned(),
+            timeout: Duration::from_secs(5),
+            prose_window_sentences: 3,
+            prose_window_chars: 400,
+            output_tail_chars: 400,
+            batch: 8,
+            probes: Vec::new(),
+        };
+        let labels = ["Something went wrong.", "A question is left open."];
+        for _ in 0..2 {
+            let answer = classify(
+                &classifier,
+                &[
+                    "cat: No such file or directory",
+                    "all fine",
+                    "one is still open",
+                ],
+                &labels,
+                Duration::from_secs(5),
+            )
+            .expect("an answer");
+            assert_eq!(
+                answer.probs,
+                [vec![0.93, 0.0], vec![0.0, 0.0], vec![0.0, 0.81]]
+            );
+            assert_eq!(
+                answer.model,
+                "canned-nli@0000000000000000000000000000000000000000"
+            );
+            assert_eq!(answer.compute_units, "none");
+        }
+        assert_eq!(ask(&stub, "hello"), (200, "the trunk's".to_owned()));
+        assert!(stub.unmatched().is_empty());
+        // Without a canned classifier, a classify call is refused, naming
+        // it, and still spends no reply.
+        let plain = Stub::routing(
+            vec![Route::ordered(Act::Answer("the trunk's".to_owned()))],
+            "build",
+            0,
+        )
+        .expect("loopback");
+        let unclassified = Classifier {
+            endpoint: format!("http://{}", plain.address()),
+            ..classifier
+        };
+        let refused = classify(&unclassified, &["x"], &labels, Duration::from_secs(5))
+            .expect_err("no classifier");
+        assert!(refused.contains("HTTP 404"), "{refused}");
+        assert_eq!(ask(&plain, "hello"), (200, "the trunk's".to_owned()));
     }
 }

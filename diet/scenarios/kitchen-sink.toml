@@ -41,6 +41,58 @@ meditation_tool_outputs = "reference"
 render_budget_tokens = 120
 archive_recall = "literal"
 reconcile_gate = "refuse"
+# Two audit chunks in flight at once (#854): a meditation's audit over more
+# than eight notes asks in chunks of eight, each line carrying its `chunk`.
+meditation_audit_chunk_notes = 8
+meditation_audit_concurrency = 2
+
+# The step warrants' gate by a classifier (#850): every step's probes are
+# scored and logged as `warrant.gated`. On the canned substrate the scenario's
+# own classifier answers on the substrate's port (`diet-drive scenario`
+# passes serve `--classifier-endpoint`), scoring by the scenario's `classify`
+# lines; the endpoint below is never called. The model is no model: its id,
+# revision and compute units are what the canned classifier reports back.
+warrant_gate = "classifier"
+
+[warrant_classifier]
+endpoint = "http://127.0.0.1:9"
+model = "canned-scenario-classifier"
+revision = "0000000000000000000000000000000000000000"
+compute_units = "none"
+truncation_side = "left"
+timeout_ms = 5000
+prose_window_sentences = 3
+prose_window_chars = 400
+output_tail_chars = 400
+batch = 8
+
+[warrant_classifier.gotcha]
+class = "gotcha"
+input = "both"
+hypotheses = ["Something went wrong or behaved unexpectedly."]
+aggregate = "max"
+threshold = 0.5
+
+[warrant_classifier.decision]
+class = "decision"
+input = "both"
+hypotheses = ["A decision was made or changed."]
+aggregate = "max"
+threshold = 0.5
+
+[warrant_classifier.constraint]
+class = "constraint"
+input = "both"
+hypotheses = ["A constraint was learned."]
+aggregate = "max"
+threshold = 0.5
+
+[warrant_classifier.open]
+class = "open"
+input = "both"
+hypotheses = ["Something is left open to do next."]
+aggregate = "max"
+threshold = 0.5
 
 [tool_output]
 max_lines = 20

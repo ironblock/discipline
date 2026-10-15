@@ -792,7 +792,7 @@ export const ServedPhaseEvidence: Story = {
   args: { drive: true, web: posting(lines(MODEL_PROPOSED)) },
   play: async ({ canvasElement }) => {
     const ruling = await within(canvasElement).findByRole('region', { name: 'the model proposes orient → plan' });
-    await expect(within(ruling).getByRole('definition', { name: 'phase length' })).toHaveTextContent('35 steps · 4.9k tokens');
+    await expect(within(ruling).getByRole('definition', { name: 'phase length' })).toHaveTextContent('35 steps · 5.0k tokens');
     await expect(within(ruling).getByRole('definition', { name: 'since the last meditation' })).toHaveTextContent('0 tokens');
     posted.length = 0;
     await userEvent.click(within(ruling).getByRole('button', { name: 'Stay in orient' }));

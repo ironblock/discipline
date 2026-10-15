@@ -60,6 +60,8 @@ const REFERENCES = new Set(['request', 'to_request', 'fork', 'at', 'cut', 'after
 const TRIGGER_AT = /^([a-z_]+):(\d+)$/;
 /** Fields that name the build that ran, not what it wrote. */
 const BUILD = new Set(['build_commit', 'build_dirty']);
+/** Fields that are wall time on the machine that ran, as `t` is: a gate's call latency (#862). */
+const CLOCK = new Set(['latency_ms']);
 
 type Line = Readonly<Record<string, unknown>> & { readonly seq: number; readonly kind: string };
 
@@ -92,7 +94,7 @@ export function lanesOf(lines: readonly LogLine[]): Map<number, string> {
   return laneOf;
 }
 
-/** Each lane's lines, in order, as compared: `seq`, `t`, `opened` and the build left out, and each reference read as
+/** Each lane's lines, in order, as compared: `seq`, `t`, `opened`, a gate's latency and the build left out, and each reference read as
  * its target's lane and place in it. Everything else is compared, sizes and digests among it: a scenario shows its
  * model the same bytes on any machine (#859), so they are the same every run. */
 export function byLane(lines: readonly LogLine[]): Record<string, readonly unknown[]> {
@@ -109,7 +111,7 @@ export function byLane(lines: readonly LogLine[]): Record<string, readonly unkno
   for (const line of all) {
     const compared: Record<string, unknown> = {};
     for (const [key, value] of Object.entries(line)) {
-      if (key === 'seq' || key === 't' || key === 'opened' || BUILD.has(key)) continue;
+      if (key === 'seq' || key === 't' || key === 'opened' || BUILD.has(key) || CLOCK.has(key)) continue;
       const named = key === 'trigger' && typeof value === 'string' ? TRIGGER_AT.exec(value) : null;
       const target = named ? Number(named[2]) : undefined;
       compared[key] =
