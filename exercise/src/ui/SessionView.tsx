@@ -300,8 +300,8 @@ export function SessionView({ session, link = 'live', linkWhy, surface, onSurfac
     sides.sort((x, y) => (order.get(x.at) ?? 0) - (order.get(y.at) ?? 0));
     const spots = place(sides, trunk, session.now, gap);
     const next = new Map<string, Placement>();
-    // Where each branch was placed, for the meditations below it.
-    const spans: { readonly top: number; readonly bottom: number }[] = [];
+    // When each branch settled and where it was placed, for the meditations after it.
+    const spans: { readonly settled: number; readonly bottom: number }[] = [];
     let bottom = 0;
     for (const side of sides) {
       const spot = spots.get(side.id);
@@ -312,22 +312,27 @@ export function SessionView({ session, link = 'live', linkWhy, surface, onSurfac
       const opened = inlines.current.get(side.id);
       const leave = opened ? opened.getBoundingClientRect().top - base + ENTER : spot.leave;
       next.set(side.id, { ...spot, leave, reach: cellEl.getBoundingClientRect().left - anchorEl.getBoundingClientRect().right });
-      spans.push({ top: spot.top, bottom: spot.top + side.height });
+      if (side.endedAt !== undefined) spans.push({ settled: side.endedAt, bottom: spot.top + side.height });
       bottom = Math.max(bottom, spot.top + side.height + gap);
     }
     // A meditation is a barrier: the refill happens after every side call before it
     // has finished, so it is drawn below all of them, and only it moves the trunk.
-    // Before it is drawn above it, not anchored in an earlier era: a side call
-    // placed by time below a meditation it preceded, counted, pushed the
-    // meditation down, which moved the side call down with the trunk, which
-    // pushed again on every layout (#862). What is above the meditation does not
-    // move with its pad, so the pad settles.
+    // Before it is settled before its line -- its audit's chunks, stacked in
+    // their slot below one another, among them (#854). One still running when it
+    // refilled (a window meditation does not wait for the forks in flight,
+    // diet/src/formats/log.rs:2603) runs across it, and is not counted. `place`
+    // puts a side call by when it started, or settled if it never did: for one
+    // settled before the meditation, above everything that came after it, so it
+    // does not move with the pad, and the pad settles. One placed at `now` would
+    // move down with the trunk the pad pushed, and be padded below again on every
+    // layout (#862).
     const pads = new Map<number, number>();
     for (const [era, el] of meditations.current) {
       // The wrapper's own top does not move with its padding: the pad is inside it.
       const natural = el.getBoundingClientRect().top - base;
+      const at = session.eras[era]?.meditation?.t ?? Number.NEGATIVE_INFINITY;
       let before = 0;
-      for (const span of spans) if (span.top < natural) before = Math.max(before, span.bottom);
+      for (const span of spans) if (span.settled < at) before = Math.max(before, span.bottom);
       const pad = Math.max(0, Math.ceil(before + gap - natural));
       if (pad > 0) pads.set(era, pad);
     }
