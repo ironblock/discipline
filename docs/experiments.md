@@ -14,7 +14,10 @@
 - a results directory's contract is `results/_template/`, and `results/AGENTS.md` governs what goes in it;
 - a rule's bars are checked against what its instrument can attain before a verdict (ruled on #17; operative from 2026-10-13): each clause declares its bar beside the best value a perfect scorer reaches and the values trivial scorers reach on the same pooling, its floor's stance on the predicted outcome, how finely its statistic moves and the chance a trivial scorer reaches the bar anyway, its margin read as an interval, a cell veto's reach, the share of constructed rows (a clause they carry says so), which scorers chose the rows and what the scorer sees, and how well each labelled class's labellers agree; `scripts/check-results.py` holds them to seven checks, and holds a doc line that calls a linked record dead, closed, disproven, ruled out or refuted to that record's word (`results/AGENTS.md`).
 
-`[unsettled]` Planning proposed three more claim rules: parameters outside the recommended range make a row a characterisation; controls seen red before the run; one fire per row, the first. None of them is written in an operative file.
+Planning's three further claim rules are operative from 2026-10-14 (accepted then; `scripts/check-results.py --claims`, `results/AGENTS.md`):
+- **Out-of-range parameters downgrade the row.** A run whose sampling is outside its substrate's recommended sets (the registry's, each cited to its model card) is a characterisation. That is derived, never written, as post-hoc is, and a characterisation carries no verdict.
+- **Controls are seen red before the run.** Every control points, by digest, at committed evidence that it failed on an input it should fail on, dated before the window opens. The draft's reason, that a control bounds noise and cannot find a confound that scales with the treatment, is not checked: a dose-scaled or positive control is a design matter, not an artifact.
+- **One fire per row, the first.** A row is a claim under one ratified rule digest. Its first fire carries the word, and a later fire names the first and never supersedes it.
 
 ## With a result
 

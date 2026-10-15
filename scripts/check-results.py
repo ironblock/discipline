@@ -995,6 +995,293 @@ def ledger_words(doc: pathlib.Path, records: pathlib.Path) -> list[str]:
     return failures
 
 
+# THE CLAIM RULES, OPERATIVE (accepted 2026-10-14: Planning's three draft
+# rules, adapted in docs/experiments.md, left [unsettled] until then). Three
+# checks over a results root, each mechanical over what a record declares and
+# what its siblings and the substrate registry say:
+#
+#   1. a run outside its substrate's recommended sampling is a
+#      CHARACTERISATION -- derived, never chosen, like post_hoc -- and carries
+#      no verdict: its word is inconclusive or unadjudicated, and its README
+#      lists exactly the parameters that made it one. The range is the
+#      registry's (`[[substrate.<id>.recommended]]`, cited by
+#      `recommended_is`), never the rule's, so no author narrows it after the
+#      data; a sampled substrate with neither a card nor `recommended_absent`
+#      cannot be read, and fails;
+#   2. every control is SEEN RED before the window opens: a `seen_red` row
+#      per `controls_run` name points at committed evidence, by digest, that
+#      the control failed on an input it should fail on, dated before
+#      `window_start` (before `rule_ratified.at` where there is no window). A
+#      run with no control says why (`controls_run_absent`). The draft's
+#      reason -- a control bounds noise and cannot find a confound that
+#      scales with the treatment -- is a design matter, not an artifact, and
+#      is not checked;
+#   3. ONE FIRE PER ROW, THE FIRST: a row is (claim_issue, the ratified rule's
+#      digest); a fire is a directory that derives from no sibling (an
+#      adjudication belongs to the fire whose product it derives from); the
+#      first fire, by directory date and then window_start, carries the
+#      row's word. A later fire names it (`repeats` = its product_sha256) and
+#      never supersedes it.
+#
+# Checks 1 and 2 need declarations that history never made, so they bind only
+# directories dated after CLAIM_RULES_LANDED. Check 3 reads what every record
+# already declares, so it runs over history too, and a failure there is
+# reported, not failed, when GRANDFATHERED_CLAIMS lists it.
+CLAIM_RULES_LANDED = "2026-10-14"
+GRANDFATHERED_CLAIMS: dict[str, tuple[tuple[str, str], ...]] = {
+    "2026-09-20-entry-to-turn-nomination-v2": (
+        ("results.repeat-fire", "#17's second draw under rule 73137c..., beside v1, which stands as ratified; "
+                                "both adjudications read refuted (experiments.md: \"twice on one dataset\")"),
+    ),
+}
+DEFAULT_REGISTRY = pathlib.Path("substrates/registry.toml")
+# The regimen's sampler fields a card can name, and the reasoning state that
+# picks the card's set: `substrate_reasoning = "off"` is the instruct set,
+# any other the thinking set.
+SAMPLER_FIELDS = ("temperature", "top_p", "top_k", "min_p", "presence_penalty", "repetition_penalty")
+VERDICTS = ("supported", "refuted")
+CLAIMS_REPORTED: list[str] = []
+REGISTRY_SUBSTRATES: dict = {}
+
+
+def registry_substrates(path: pathlib.Path) -> dict:
+    try:
+        return tomllib.loads(read_text(path)).get("substrate", {})
+    except (OSError, tomllib.TOMLDecodeError):
+        return {}
+
+
+def regimen_of(directory: pathlib.Path) -> dict:
+    try:
+        return tomllib.loads(read_text(directory / "regimen.toml"))
+    except (OSError, tomllib.TOMLDecodeError):
+        return {}
+
+
+def in_range(used: decimal.Decimal, recommended: object) -> bool | None:
+    """Whether `used` is the card's point or inside its stated [lo, hi];
+    None when the card's value is not one of those."""
+    if isinstance(recommended, list) and len(recommended) == 2:
+        lo, hi = exact(recommended[0]), exact(recommended[1])
+        return None if lo is None or hi is None else lo <= used <= hi
+    point = exact(recommended)
+    return None if point is None else used == point
+
+
+def spelled(recommended: object) -> str:
+    return f"{recommended[0]}..{recommended[1]}" if isinstance(recommended, list) else str(recommended)
+
+
+def characterisation(directory: pathlib.Path, registry: dict) -> tuple[list[dict] | None, list[str]]:
+    """What made the run a characterisation, as rows of substrate,
+    parameter, used and recommended (empty: in range), and why it cannot be
+    read, if it cannot."""
+    regimen = regimen_of(directory)
+    substrates = regimen.get("substrates") or ([regimen["substrate"]] if isinstance(regimen.get("substrate"), str) else [])
+    sampler = regimen.get("sampler") if isinstance(regimen.get("sampler"), dict) else {}
+    mode = "instruct" if regimen.get("substrate_reasoning") == "off" else "thinking"
+    derived: list[dict] = []
+    unreadable: list[str] = []
+    for substrate in substrates:
+        entry = registry.get(substrate)
+        if not isinstance(entry, dict):
+            unreadable.append(f"`{substrate}` is not in the registry")
+            continue
+        if has_text(entry.get("recommended_absent")):
+            continue
+        sets = [row for row in entry.get("recommended", []) if isinstance(row, dict) and row.get("mode") == mode]
+        if not sets or not has_text(entry.get("recommended_is")):
+            unreadable.append(
+                f"`{substrate}` samples and its registry entry gives no cited {mode} set "
+                f"(`[[substrate.{substrate}.recommended]]` with `recommended_is`) nor `recommended_absent`"
+            )
+            continue
+        stated = {key: sampler[key] for key in SAMPLER_FIELDS if is_number(sampler.get(key))}
+        if not stated or "substrate_reasoning" not in regimen:
+            unreadable.append(f"the regimen states no `substrate_reasoning` and `[sampler]` for `{substrate}`, so its range cannot be read")
+            continue
+        best = None
+        for row in sets:
+            off = []
+            for key, value in sorted(stated.items()):
+                if key not in row:
+                    continue
+                fits = in_range(decimal.Decimal(str(value)), row[key])
+                if fits is None:
+                    unreadable.append(f"`{substrate}`'s recommended {key} is {row[key]!r}, neither a point nor [lo, hi]")
+                elif not fits:
+                    off.append({"substrate": substrate, "parameter": key, "used": str(value), "recommended": spelled(row[key])})
+            if best is None or len(off) < len(best):
+                best = off
+        derived += best or []
+    return (None if unreadable else derived), unreadable
+
+
+def off_card(row: dict) -> str:
+    return f"{row['parameter']} {row['used']} against {row['recommended']}"
+
+
+def evidence_red(directory: pathlib.Path, row: dict, before: str | None) -> str | None:
+    """Why `row` does not show its control seen red before `before`, or None."""
+    path = row.get("evidence")
+    if not has_text(path) or pathlib.PurePosixPath(path).is_absolute() or ".." in pathlib.PurePosixPath(path).parts:
+        return f"names no evidence inside the directory ({path!r})"
+    file = directory / path
+    if file.is_symlink() or not file.is_file():
+        return f"`{path}` is not a committed file here"
+    if digest_of(file) != row.get("sha256"):
+        return f"`{path}` is not the file its sha256 names"
+    try:
+        evidence = json.loads(read_text(file))
+    except (OSError, ValueError) as err:
+        return f"`{path}` does not read as JSON: {err}"
+    if not isinstance(evidence, dict) or evidence.get("control") != row.get("control") or not has_text(evidence.get("input")):
+        return f"`{path}` is not evidence about `{row.get('control')}` on a named input"
+    if evidence.get("outcome") != "red":
+        return f"`{path}` shows the control {evidence.get('outcome')!r} on its planted input, not red"
+    at = evidence.get("at")
+    if not is_utc(at) or at != row.get("at"):
+        return f"`{path}`'s time {at!r} is not the row's {row.get('at')!r}"
+    if before is None:
+        return "there is neither a window_start nor a rule_ratified.at for it to precede"
+    if not at < before:
+        return f"it was seen red at {at}, not before {before}"
+    return None
+
+
+def claim_rules(directory: pathlib.Path, registry: dict) -> list[tuple[str, str]]:
+    """The claim rules' failures for `directory`, as (class, message)."""
+    failures: list[tuple[str, str]] = []
+    match = DIR_NAME.fullmatch(directory.name)
+    operative = bool(match) and match.group(1) > CLAIM_RULES_LANDED
+    front = front_of(directory)
+    if operative:
+        # Rule 1.
+        derived, unreadable = characterisation(directory, registry)
+        for why in unreadable:
+            failures.append(("results.characterisation-undeclared", why))
+        if derived is not None:
+            written = front.get("characterisation", [])
+            key = lambda rows: sorted(json.dumps(row, sort_keys=True) for row in rows if isinstance(row, dict))
+            if not isinstance(written, list) or key(written) != key(derived) or len(written) != len(derived):
+                failures.append((
+                    "results.characterisation-mismatch",
+                    f"`characterisation` lists {written!r}; the regimen against the registry's card makes it "
+                    f"{derived!r}",
+                ))
+            if derived and front.get("result") in VERDICTS:
+                failures.append((
+                    "results.characterisation-carries-verdict",
+                    f"a characterisation ({', '.join(off_card(r) for r in derived)}) "
+                    f"reads {front.get('result')!r}; it carries inconclusive or unadjudicated",
+                ))
+        # Rule 2.
+        controls = front.get("controls_run", [])
+        rows = front.get("seen_red", [])
+        if not isinstance(rows, list):
+            rows = []
+        if controls == []:
+            if not has_text(front.get("controls_run_absent")):
+                failures.append(("results.controls-undeclared", "`controls_run` is empty and `controls_run_absent` gives no reason"))
+        else:
+            ratified = front.get("rule_ratified")
+            before = front.get("window_start") if is_utc(front.get("window_start")) else (
+                ratified.get("at") if isinstance(ratified, dict) and is_utc(ratified.get("at")) else None)
+            for control in controls if isinstance(controls, list) else []:
+                found = [row for row in rows if isinstance(row, dict) and row.get("control") == control]
+                if len(found) != 1:
+                    failures.append(("results.control-not-seen-red", f"`{control}` has {len(found)} `seen_red` row(s); it has one"))
+                    continue
+                why = evidence_red(directory, found[0], before)
+                if why:
+                    failures.append(("results.control-not-seen-red", f"`{control}` is not seen red before the run: {why}"))
+    # Rule 3, over history too.
+    failures += repeat_fire(directory, front)
+    return failures
+
+
+def fires(root: pathlib.Path) -> dict[str, dict]:
+    """Every sibling's front matter, by directory name."""
+    return {d.name: front_of(d) for d in sorted(root.iterdir()) if d.is_dir() and DIR_NAME.fullmatch(d.name)}
+
+
+def row_of(front: dict) -> tuple[str, str] | None:
+    ratified = front.get("rule_ratified")
+    digest = ratified.get("digest") if isinstance(ratified, dict) else None
+    issue = front.get("claim_issue")
+    return (issue, digest) if isinstance(issue, str) and isinstance(digest, str) else None
+
+
+def derives_from_a_sibling(front: dict, siblings: dict[str, dict]) -> bool:
+    derivation = front.get("derivation")
+    source = derivation.get("derived_from") if isinstance(derivation, dict) else None
+    return any(other.get("product_sha256") == source for other in siblings.values()) if source else False
+
+
+def repeat_fire(directory: pathlib.Path, front: dict) -> list[tuple[str, str]]:
+    siblings = fires(directory.parent)
+    row = row_of(front)
+    if row is None or derives_from_a_sibling(front, siblings):
+        if "repeats" in front:
+            return [("results.repeat-fire", "`repeats` on a directory that is no fire of a ratified row")]
+        return []
+    same = sorted(
+        (name for name, other in siblings.items() if row_of(other) == row and not derives_from_a_sibling(other, siblings)),
+        key=lambda name: (name[:10], str(siblings[name].get("window_start", "")), name),
+    )
+    first = same[0] if same else directory.name
+    if first == directory.name:
+        if "repeats" in front:
+            return [("results.repeat-fire", f"`repeats` on the first fire of row (#{row[0]}, {row[1][:12]}...)")]
+        return []
+    product = siblings[first].get("product_sha256")
+    failures = []
+    if front.get("repeats") != product:
+        failures.append((
+            "results.repeat-fire",
+            f"a later fire of row (#{row[0]}, rule {row[1][:12]}...) after `{first}`, and `repeats` "
+            f"does not name its product ({product})",
+        ))
+    if front.get("supersedes") == product:
+        failures.append((
+            "results.repeat-fire",
+            f"supersedes `{first}`, the first fire of its row: a repeat never replaces the first's word",
+        ))
+    return failures
+
+
+def judged_claims(directory: pathlib.Path, registry: dict) -> list[str]:
+    """The claim rules' failures as `check_run` messages, a grandfathered
+    directory's listed ones moved to CLAIMS_REPORTED instead."""
+    found = claim_rules(directory, registry)
+    listed = dict(GRANDFATHERED_CLAIMS.get(directory.name, ()))
+    match = DIR_NAME.fullmatch(directory.name)
+    out = []
+    for failure_class, message in found:
+        if failure_class in listed and match and match.group(1) <= CLAIM_RULES_LANDED:
+            CLAIMS_REPORTED.append(
+                f"{directory}: reported, not failed (predates the claim rules: {listed[failure_class]}): "
+                f"{message}  [{failure_class}]"
+            )
+        else:
+            out.append(f"{directory}: {message}  [{failure_class}]")
+    return out
+
+
+def claim_flags(directory: pathlib.Path, registry: dict) -> dict:
+    """The ledger's derived claim-rule fields: whether the run is a
+    characterisation (None where it cannot be read), and whether it is a
+    repeat fire, or an adjudication of one."""
+    derived, _ = characterisation(directory, registry)
+    front = front_of(directory)
+    siblings = fires(directory.parent)
+    fire = front
+    if derives_from_a_sibling(front, siblings):
+        source = front["derivation"]["derived_from"]
+        fire = next((other for other in siblings.values() if other.get("product_sha256") == source), front)
+    return {"characterisation": None if derived is None else bool(derived), "repeat": "repeats" in fire}
+
+
 def check_run(directory: pathlib.Path) -> list[str]:
     """Lint one run directory. Returns a list of failure messages."""
     failures: list[str] = []
@@ -1438,6 +1725,10 @@ def check_run(directory: pathlib.Path) -> list[str]:
     if name != TEMPLATE_DIR:
         failures += judged_attainability(directory)
 
+    # --- the claim rules (accepted 2026-10-14) ----------------------------------
+    if name != TEMPLATE_DIR:
+        failures += judged_claims(directory, REGISTRY_SUBSTRATES)
+
     if LEDGER is not None and not failures and name != TEMPLATE_DIR:
         row = ledger_row(directory, front, claims)
         row["figures"] = figures
@@ -1449,6 +1740,9 @@ def check_run(directory: pathlib.Path) -> list[str]:
             # Derived, never written: a rule ratified after its window opened
             # is a post-hoc rule, whatever a note says about it.
             "post_hoc": post_hoc,
+            # Derived, never written, as post_hoc is: a run outside its
+            # substrate's card, and a later fire of its row.
+            **claim_flags(directory, REGISTRY_SUBSTRATES),
         }
         LEDGER.append(row)
     return failures
@@ -2137,6 +2431,18 @@ def main(argv: list[str]) -> int:
         help="hold only the attainability rule's checks over the directories' rules; needs no diet",
     )
     parser.add_argument(
+        "--claims",
+        action="store_true",
+        help="hold only the claim rules (characterisation, controls seen red, one fire per row) over --root; needs no diet",
+    )
+    parser.add_argument(
+        "--registry",
+        type=pathlib.Path,
+        default=DEFAULT_REGISTRY,
+        metavar="PATH",
+        help="the substrate registry whose recommended sampling the claim rules read (default: %(default)s)",
+    )
+    parser.add_argument(
         "--docs",
         type=pathlib.Path,
         action="append",
@@ -2157,6 +2463,20 @@ def main(argv: list[str]) -> int:
         if args.root or args.directories or args.ledger is not None:
             parser.error("--render takes one directory and nothing else")
         args.directories = [args.render]
+    global REGISTRY_SUBSTRATES
+    REGISTRY_SUBSTRATES = registry_substrates(args.registry)
+    if args.claims:
+        if args.attainability or args.docs or args.ledger is not None or args.render is not None:
+            parser.error("--claims takes --root, directories and --registry, and nothing else")
+        targets = [d for root in args.root for d in run_directories(root)] + list(args.directories)
+        failures = [message for directory in targets for message in judged_claims(directory, REGISTRY_SUBSTRATES)]
+        for line in CLAIMS_REPORTED:
+            print(line)
+        for message in failures:
+            print(message, file=sys.stderr)
+        print(f"check-results: claim rules over {len(targets)} directory(ies): {len(failures)} failure(s), "
+              f"{len(CLAIMS_REPORTED)} reported, not failed")
+        return 1 if failures else 0
     if args.docs:
         if args.attainability or args.ledger is not None or args.render is not None or args.directories or len(args.root) != 1:
             parser.error("--docs takes one --root, the records its docs link, and nothing else")
@@ -2242,7 +2562,7 @@ def main(argv: list[str]) -> int:
         print(message, file=sys.stderr)
     # What history carries under the attainability rule, named beside its
     # audit row on every sweep, to stderr under --render.
-    for line in REPORTED:
+    for line in [*REPORTED, *CLAIMS_REPORTED]:
         print(line, file=sys.stderr if args.render is not None else sys.stdout)
 
     checked = len(targets)
