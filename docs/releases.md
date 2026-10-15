@@ -7,7 +7,7 @@
 The maintainer, 2026-10-09: "Working prototype _with every theorized lever present_ → controls and reproducible tests → rigor, test matrix, data collection → publish." Each is an initiative, run in that order, and holds as many milestones as it needs; nothing in a later initiative is an obstacle to an earlier one.
 
 1. **The prototype:** every theorized lever (`program.md`, The levers) present and working. v0.1.0 is its first milestone, v0.2.0 the remainder of the levers, v0.3.0 sessions an agent can drive end to end, v0.4.0 phased operation (both the maintainer, 2026-10-11), and v0.5.0 the hosted API (approved by the maintainer, 2026-10-10).
-2. **Controls and reproducible tests:** v0.8.0, runs re-fire, and v0.9.0, every lever has its control (drafted by Dispatch; awaits the maintainer).
+2. **Controls and reproducible tests:** v0.8.0, runs re-fire, and v0.9.0, every lever has its control (drafted by Dispatch; approved by the maintainer, 2026-10-14).
 3. **Rigor:** the test matrix and data collection.
 4. **Publish.**
 
@@ -119,7 +119,7 @@ The pieces used in whatever order the work needs to reach a goal, in one session
 
 Attempting the NetHack 5 WebAssembly port, with a record that says truthfully which arm, regime and model ran it. The comparison is the archived Claude desktop app session of the same work, read by the Claude Code adapter (#500, #501).
 
-## v0.8.0 — runs re-fire (draft)
+## v0.8.0 — runs re-fire
 
 The second initiative's first milestone. Every run committed so far is a historical observation. Its asks were typed in answer to what a temperature-1.0 model did, so the inputs of a re-firing don't exist. A run re-fires when its inputs are a file. v0.3.0's scenarios (#760) are that file and its runner. This milestone derives scenarios from the runs already committed, repeats them, and names a re-fired run reproducible.
 
@@ -132,7 +132,7 @@ The second initiative's first milestone. Every run committed so far is a histori
 
 An ask a person types in answer to what the model did can't be scripted faithfully. A scripted run says which asks are fixed, and a driven run stays a driven run.
 
-## v0.9.0 — every lever has its control (draft)
+## v0.9.0 — every lever has its control
 
 For each lever row of v0.2.0, the same script run with the lever at its shown state and at its control: off, the default, or a sham where one is named (`program.md` §2). It runs *N* times each, on the floor. This milestone shows that the pairs run and the receipts compare. Whether a difference is real is the third initiative's.
 
