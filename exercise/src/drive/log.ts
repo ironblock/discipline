@@ -250,6 +250,8 @@ export interface Fork extends At {
   readonly trigger?: string;
   /** A hazard it was sent knowing (log v7, #637): `may-displace-trunk-cache` when its slot may evict the trunk's cache. */
   readonly hazard?: string;
+  /** Which chunk of a meditation's audit it is (#854), when the audit runs in several at once; absent when it is whole. */
+  readonly chunk?: number;
 }
 
 /** How a fork ended. */
