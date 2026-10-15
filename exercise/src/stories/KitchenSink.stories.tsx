@@ -63,6 +63,16 @@ export const Whole: Story = {
     await expect(pads()).toEqual(settled);
     const stacked = [...canvasElement.querySelectorAll<HTMLElement>('.ex-branchcell')].reduce((sum, cell) => sum + cell.offsetHeight, 0);
     await expect(settled.filter((pad) => pad > stacked)).toEqual([]);
+    // And it is a barrier: every side call settled before a meditation is drawn above it -- its audit's chunks among them,
+    // stacked in their slot below one another (#854). One still running when a window meditation refilled runs across it.
+    const settledAt = new Map(log.flatMap((line) => (line.kind === 'fork.settled' ? [[String(line.fork), line.seq] as const] : [])));
+    const meditations = [...canvasElement.querySelectorAll<HTMLElement>('.ex-era__meditation .ex-meditation')];
+    const over = meditations.flatMap((meditation) =>
+      [...canvasElement.querySelectorAll<HTMLElement>('.ex-branchcell')]
+        .filter((cell) => (settledAt.get(cell.dataset['branch'] ?? '') ?? Infinity) < Number(meditation.dataset['id']) && cell.getBoundingClientRect().bottom > meditation.getBoundingClientRect().top)
+        .map((cell) => `${cell.dataset['branch']} over ${meditation.dataset['id']}`),
+    );
+    await expect(over).toEqual([]);
   },
 };
 

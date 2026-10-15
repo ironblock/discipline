@@ -272,6 +272,8 @@ export interface MeditationNode extends Provenance {
   readonly kind: 'meditation';
   readonly id: string;
   readonly atTurn: number;
+  /** Session time of its line: what ran before it, ran before the refill. */
+  readonly t: number;
   readonly reason: MeditationReason;
   readonly phase?: { readonly from: string; readonly to: string };
   readonly hashBefore: string;
@@ -1203,6 +1205,7 @@ export function fold(written: readonly LogLine[]): Session {
           kind: 'meditation',
           id: id(meditationLine.seq),
           atTurn: meditationLine.at_turn,
+          t: meditationLine.t,
           reason: meditationLine.reason,
           ...(meditationLine.phase ? { phase: meditationLine.phase } : {}),
           hashBefore: meditationLine.prefix_hash_before,
