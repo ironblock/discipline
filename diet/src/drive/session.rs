@@ -617,6 +617,9 @@ pub enum Event {
         /// declared again with no turn since the last, as the operator does
         /// to reconcile changes made after that refill.
         after_meditation: Option<u64>,
+        /// Which of the audit's chunks it asks over, from 1; `None` for the
+        /// gate's re-ask over the notes left (#150).
+        chunk: Option<u64>,
     },
     /// How the fork ended: once per fork, after its call's last event.
     ForkSettled {
@@ -1286,6 +1289,10 @@ pub struct Interview {
     /// `served_chunk_size`, else [`POOL_CHUNK_DEFAULT`]. Every job on it is
     /// counted rounded up to whole chunks, and two more ([`footprint`]).
     pub pool_chunk: u64,
+    /// The requests the trunk's server batches at once: its entry's
+    /// `served_max_batch_size`, when declared. An audit's chunks overlap no
+    /// further ([`crate::meditation::policy::Served::audit_concurrency`]).
+    pub served_batch: Option<usize>,
     /// The warrants that look at what a step produced, and their numbers
     /// (#783).
     pub step: crate::drive::warrants::StepWarrants,
@@ -5089,6 +5096,7 @@ pub fn line_of(logged: &Logged) -> log::Line {
             // audit's is (#783).
             ask: Some(pinned.map_or_else(|| ask.tag().to_owned(), |t| t.name().to_lowercase())),
             hazard: displaces.then(|| DISPLACES_TRUNK_CACHE.to_owned()),
+            chunk: None,
         },
         Event::Audited {
             of_turn,
@@ -5096,7 +5104,9 @@ pub fn line_of(logged: &Logged) -> log::Line {
             template,
             question,
             after_meditation,
+            chunk,
         } => log::Event::Fork {
+            chunk: *chunk,
             after_meditation: *after_meditation,
             lane: log::Lane::Audit,
             of_turn: *of_turn,
@@ -8306,25 +8316,176 @@ fn audit_and_gate<'a, S: Streaming>(
     state.audit_unreached = None;
     // In chunks, each its own fork, so each one's reasoning and answer fit
     // its cap: the operator's changed notes first, then the newest. One at a
-    // time, under the session's one flight.
-    for chunk in audit_chunks_of(&state) {
-        if let Some(fired) = audit_fired(&shared.template, &mut state, reason, Some(&chunk)) {
-            drop(state);
-            shared.changed.notify_all();
-            audited(shared, fired);
-            state = shared.lock();
+    // time, under the session's one flight, unless the regimen runs them
+    // beside each other.
+    let chunks = audit_chunks_of(&state);
+    let beside = audit_concurrency_of(&state);
+    if beside > 1 && chunks.len() > 1 {
+        state = audits_beside(shared, state, reason, (&chunks, beside));
+    } else {
+        for (at, chunk) in (1..).zip(&chunks) {
+            if let Some(fired) = audit_fired(
+                &shared.template,
+                &mut state,
+                reason,
+                (Some(chunk), Some(at)),
+            ) {
+                drop(state);
+                shared.changed.notify_all();
+                audited(shared, fired);
+                state = shared.lock();
+            }
         }
     }
     let Some(left) = left_unaddressed(&state).filter(|_| refusing(&state)) else {
         return state;
     };
-    if let Some(fired) = audit_fired(&shared.template, &mut state, reason, Some(&left)) {
+    if let Some(fired) = audit_fired(&shared.template, &mut state, reason, (Some(&left), None)) {
         drop(state);
         shared.changed.notify_all();
         audited(shared, fired);
         state = shared.lock();
     }
     state
+}
+
+/// The audit chunks a meditation may have in flight at once
+/// ([`crate::meditation::policy::Served::audit_concurrency`]).
+fn audit_concurrency_of(state: &State) -> usize {
+    state.interview.as_ref().map_or(1, |interview| {
+        interview
+            .meditations
+            .audit_concurrency(
+                interview.served_batch,
+                interview.capture == crate::dogma::asks::Modality::Tools,
+            )
+            .0
+    })
+}
+
+/// An audit's `chunks`, up to `beside` of them in flight at once, each sent
+/// only when the trunk's pool holds it beside the ones in flight -- the
+/// first always -- each counted as the engine holds it ([`footprint`]). Their
+/// calls' lines are logged as they come; each chunk is folded, settled and
+/// its patches logged in chunk order, once every chunk before it is, so
+/// working memory is what one after another leaves. One stop reaches every
+/// chunk in flight, and the next goes once they have all ended.
+///
+/// Only the audit's own chunks are counted against the window: nothing else
+/// is in flight while a meditation audits. Only an operator, phase or cadence
+/// meditation audits ([`crate::meditation::pinned_ask`]). A cadence one is
+/// made due by [`turn_over`], which waits while [`State::pool_busy`]
+/// (`Deferred::TurnOver`). An operator's declared while forks run waits for
+/// them (`declare_meditation`'s `pool_only`, run by [`pool_settled`] once
+/// none is busy). A phase move is admitted only while the session awaits,
+/// which [`State::move_to`] holds off while the pool is busy. A gap's fork is
+/// `forking`, which [`pool_settled`] also waits out. During the meditation
+/// the session is in `capture`, where no ask, and so no turn and no fork cut
+/// during one, is admitted.
+fn audits_beside<'a, S: Streaming>(
+    shared: &'a Shared<S>,
+    state: std::sync::MutexGuard<'a, State>,
+    reason: crate::meditation::Reason,
+    (chunks, beside): (&[Vec<String>], usize),
+) -> std::sync::MutexGuard<'a, State> {
+    let window = shared.template.limits.context_window;
+    std::thread::scope(|scope| {
+        let mut state = state;
+        let (sender, ended) = std::sync::mpsc::channel::<(u64, Option<Aside>)>();
+        let mut next = (1..).zip(chunks);
+        let mut waiting: Option<AuditAsked> = None;
+        let mut flying: BTreeMap<u64, (AuditFired, u64)> = BTreeMap::new();
+        let mut settled: BTreeMap<u64, (AuditFired, AuditEnded)> = BTreeMap::new();
+        let mut order: std::collections::VecDeque<u64> = std::collections::VecDeque::new();
+        let mut cancel = Cancel::new();
+        loop {
+            while flying.len() < beside {
+                if cancel.is_asked() {
+                    if !flying.is_empty() {
+                        break;
+                    }
+                    cancel = Cancel::new();
+                }
+                if waiting.is_none() {
+                    waiting = next.by_ref().find_map(|(at, chunk)| {
+                        audit_asked(
+                            &shared.template,
+                            &mut state,
+                            reason,
+                            (Some(chunk), Some(at)),
+                        )
+                    });
+                }
+                let Some(asked) = waiting.take() else {
+                    break;
+                };
+                let holds = footprint(audit_holding(&state, &asked.shape), pool_chunk(&state));
+                let held: u64 = flying.values().map(|(_, holds)| holds).sum();
+                if !flying.is_empty() && window.is_some_and(|window| held + holds > window) {
+                    waiting = Some(asked);
+                    break;
+                }
+                let fired = audit_sent(&shared.template, &mut state, asked, &cancel);
+                let chunk = fired.chunk.unwrap_or_default();
+                let (request, tools) = (fired.request, fired.tools);
+                let (shape, stop, sender) = (fired.shape.clone(), cancel.clone(), sender.clone());
+                scope.spawn(move || {
+                    let streamed = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                        aside(shared, &shape, &stop, (request, tools))
+                    }));
+                    let _ = sender.send((chunk, streamed.ok()));
+                });
+                order.push_back(chunk);
+                flying.insert(chunk, (fired, holds));
+            }
+            if flying.is_empty() {
+                break;
+            }
+            drop(state);
+            shared.changed.notify_all();
+            let came = ended.recv();
+            state = shared.lock();
+            let Ok((chunk, streamed)) = came else {
+                break;
+            };
+            let Some((fired, _)) = flying.remove(&chunk) else {
+                continue;
+            };
+            if flying.is_empty() {
+                state.flight = None;
+            }
+            let streamed = streamed.unwrap_or_else(|| Aside {
+                result: Err(TransportFailure::Connect(
+                    "the audit chunk's thread panicked".to_owned(),
+                )),
+                partial: String::new(),
+                reasoning: String::new(),
+                called: false,
+                calls: Vec::new(),
+                hosted: Hosted::default(),
+            });
+            let ending = audit_ended(&mut state, &fired, streamed);
+            settled.insert(chunk, (fired, ending));
+            while let Some((fired, ending)) = order.front().and_then(|first| settled.remove(first))
+            {
+                order.pop_front();
+                audit_settled(&mut state, fired, ending);
+            }
+        }
+        state
+    })
+}
+
+/// The tokens an audit's request holds of the pool: its prompt and the
+/// output cap the window leaves it.
+fn audit_holding(state: &State, shape: &RequestShape) -> u64 {
+    let prompt = state.prompt_of(shape);
+    let cap = clamped(
+        shape.limits.max_output_tokens,
+        shape.limits.context_window,
+        prompt,
+    );
+    prompt + u64::from(cap)
 }
 
 /// The live notes an audit asks over, in chunks of the regimen's
@@ -8394,8 +8555,39 @@ fn audit_fired(
     template: &RequestShape,
     state: &mut State,
     reason: crate::meditation::Reason,
-    only: Option<&[String]>,
+    (only, chunk): (Option<&[String]>, Option<u64>),
 ) -> Option<AuditFired> {
+    let asked = audit_asked(template, state, reason, (only, chunk))?;
+    Some(audit_sent(template, state, asked, &Cancel::new()))
+}
+
+/// A meditation's audit, asked and not yet sent ([`audit_asked`]).
+struct AuditAsked {
+    /// The turn it audits after, and that turn's answered trunk request.
+    turn: u32,
+    at: u64,
+    /// The pinned ask it puts, and its text.
+    template: crate::dogma::Template,
+    question: String,
+    shape: RequestShape,
+    /// The notes the ask numbered, in its order.
+    items: Vec<crate::object::EntryId>,
+    /// The notes among them with an operator's pending change (#150, #748).
+    marked: Vec<String>,
+    /// Whether it is answered through the record tools (#610), not in lines.
+    tools: bool,
+    /// Which of the audit's chunks it asks over, from 1.
+    chunk: Option<u64>,
+}
+
+/// [`audit_fired`]'s ask, over `only` when given, built and fitted to the
+/// window, nothing logged but its cut ([`State::audit_cut`]).
+fn audit_asked(
+    template: &RequestShape,
+    state: &mut State,
+    reason: crate::meditation::Reason,
+    (only, chunk): (Option<&[String]>, Option<u64>),
+) -> Option<AuditAsked> {
     let interview = state
         .interview
         .as_ref()
@@ -8456,6 +8648,38 @@ fn audit_fired(
     shape
         .messages
         .push(Message::new(Role::User, ask.text.clone()));
+    Some(AuditAsked {
+        turn,
+        at,
+        template: ask.template,
+        question: ask.text,
+        shape,
+        items: ask.items,
+        marked,
+        tools,
+        chunk,
+    })
+}
+
+/// An audit `asked`, sent: its fork line and its request, sized to the
+/// window, logged; the session's flight its call, stopped by `cancel`.
+fn audit_sent(
+    template: &RequestShape,
+    state: &mut State,
+    asked: AuditAsked,
+    cancel: &Cancel,
+) -> AuditFired {
+    let AuditAsked {
+        turn,
+        at,
+        template: pinned,
+        question,
+        mut shape,
+        items,
+        marked,
+        tools,
+        chunk,
+    } = asked;
     // A meditation since that request (#698's run): the audit is cut from its
     // refill, the trunk the session holds now, and says so.
     let after_meditation = state
@@ -8467,9 +8691,10 @@ fn audit_fired(
     let fork = state.push(Event::Audited {
         of_turn: turn,
         at,
-        template: ask.template,
-        question: ask.text.clone(),
+        template: pinned,
+        question,
         after_meditation,
+        chunk,
     });
     let max_tokens = state.sized(&mut shape, template.limits.max_output_tokens);
     let request = state.push(Event::Requested {
@@ -8480,22 +8705,23 @@ fn audit_fired(
         max_tokens,
         beside: None,
     });
-    let cancel = Cancel::new();
     state.flight = Some(Flight {
         turn,
         request,
         cancel: cancel.clone(),
     });
-    Some(AuditFired {
+    AuditFired {
         turn,
         fork,
         request,
         shape,
-        cancel,
-        items: ask.items,
+        cancel: cancel.clone(),
+        items,
         marked,
         tools,
-    })
+        chunk,
+        sized: (state.last_sized, state.sent_estimate),
+    }
 }
 
 /// A side call's stream (#504): its text, reasoning and progress logged
@@ -8593,16 +8819,39 @@ struct Aside {
 /// everything, `unparseable` when the answer is not the ask's audit (or the
 /// call made a tool call); a cut, stopped or failed call folds nothing.
 fn audited<S: Streaming>(shared: &Shared<S>, fired: AuditFired) {
-    let AuditFired {
-        turn,
-        fork,
-        request,
-        shape,
-        cancel,
-        items,
-        marked,
-        tools,
-    } = fired;
+    let streamed = aside(
+        shared,
+        &fired.shape,
+        &fired.cancel,
+        (fired.request, fired.tools),
+    );
+    let mut state = shared.lock();
+    state.flight = None;
+    let ended = audit_ended(&mut state, &fired, streamed);
+    audit_settled(&mut state, fired, ended);
+    drop(state);
+    shared.changed.notify_all();
+}
+
+/// How an audit's call ended ([`audit_ended`]): answered, with what its
+/// fold needs; or over, folding nothing.
+enum AuditEnded {
+    Answered {
+        text: String,
+        /// Cut off by its cap.
+        cut: bool,
+        /// A stop reached it.
+        cancelled: bool,
+        /// It called a tool, on the lines route.
+        called: bool,
+        calls: Vec<Call>,
+    },
+    Over(log::ForkOutcome),
+}
+
+/// An audit's call, `streamed`, ended: its answer, stop, refusal or failure
+/// logged, against its own request's sizing.
+fn audit_ended(state: &mut State, fired: &AuditFired, streamed: Aside) -> AuditEnded {
     let Aside {
         result,
         partial,
@@ -8610,12 +8859,11 @@ fn audited<S: Streaming>(shared: &Shared<S>, fired: AuditFired) {
         called,
         calls,
         hosted,
-    } = aside(shared, &shape, &cancel, (request, tools));
-    let mut state = shared.lock();
-    state.flight = None;
+    } = streamed;
+    let request = fired.request;
+    (state.last_sized, state.sent_estimate) = fired.sized;
     let reasoning = Some(reasoning).filter(|thought| !thought.is_empty());
-    let mut lines = Vec::new();
-    let outcome = match result {
+    match result {
         Ok(StreamEnded::Finished {
             finish_reason,
             timings,
@@ -8630,40 +8878,17 @@ fn audited<S: Streaming>(shared: &Shared<S>, fired: AuditFired) {
                 timings,
                 hosted,
             });
-            if cancel.is_asked() {
-                log::ForkOutcome::Cancelled
-            } else if cut {
-                // Cut off by its cap, it folds nothing: every note it asked
-                // over stands as it was, and the meditation line says so.
-                state.audit_unreached =
-                    Some(state.audit_unreached.unwrap_or(0) + items.len() as u64);
-                log::ForkOutcome::Truncated
-            } else if tools {
-                // #610: each record-tool call run as a fork's is, its
-                // patches the audit's (lane `audit`).
-                let (outcome, patched) =
-                    captured_in(&mut state, &calls, (turn, request), (fork, Lane::Audit));
-                if outcome != log::ForkOutcome::Unparseable {
-                    acted_on(&mut state, &marked, &patched);
-                }
-                lines = patched;
-                outcome
-            } else if called {
-                log::ForkOutcome::Unparseable
-            } else {
-                let (outcome, patched) = audit_folded(&mut state, &text, &items, fork);
-                // Parsed: every marked note had its line (#150), and the
-                // answer's patches say which it acted on (#748).
-                if outcome != log::ForkOutcome::Unparseable {
-                    acted_on(&mut state, &marked, &patched);
-                }
-                lines = patched;
-                outcome
+            AuditEnded::Answered {
+                text,
+                cut,
+                cancelled: fired.cancel.is_asked(),
+                called,
+                calls,
             }
         }
         Ok(StreamEnded::Cancelled) => {
             state.push(Event::Cancelled { request, partial });
-            log::ForkOutcome::Cancelled
+            AuditEnded::Over(log::ForkOutcome::Cancelled)
         }
         Ok(StreamEnded::Rejected {
             status,
@@ -8679,7 +8904,7 @@ fn audited<S: Streaming>(shared: &Shared<S>, fired: AuditFired) {
                 class,
                 partial,
             });
-            log::ForkOutcome::Failed
+            AuditEnded::Over(log::ForkOutcome::Failed)
         }
         Err(failure) => {
             let overflow = state.failed_overflow(&failure);
@@ -8689,15 +8914,63 @@ fn audited<S: Streaming>(shared: &Shared<S>, fired: AuditFired) {
                 failure,
                 partial,
             });
-            log::ForkOutcome::Failed
+            AuditEnded::Over(log::ForkOutcome::Failed)
+        }
+    }
+}
+
+/// An audit's call, `ended`, folded and settled: its answer's patches
+/// applied and the notes it acted on marked, its `fork.settled`, then its
+/// patches' lines.
+fn audit_settled(state: &mut State, fired: AuditFired, ended: AuditEnded) {
+    let AuditFired {
+        turn,
+        fork,
+        request,
+        items,
+        marked,
+        tools,
+        ..
+    } = fired;
+    let mut lines = Vec::new();
+    let outcome = match ended {
+        AuditEnded::Over(outcome) => outcome,
+        AuditEnded::Answered {
+            cancelled: true, ..
+        } => log::ForkOutcome::Cancelled,
+        AuditEnded::Answered { cut: true, .. } => {
+            // Cut off by its cap, it folds nothing: every note it asked
+            // over stands as it was, and the meditation line says so.
+            state.audit_unreached = Some(state.audit_unreached.unwrap_or(0) + items.len() as u64);
+            log::ForkOutcome::Truncated
+        }
+        AuditEnded::Answered { calls, .. } if tools => {
+            // #610: each record-tool call run as a fork's is, its
+            // patches the audit's (lane `audit`).
+            let (outcome, patched) =
+                captured_in(state, &calls, (turn, request), (fork, Lane::Audit));
+            if outcome != log::ForkOutcome::Unparseable {
+                acted_on(state, &marked, &patched);
+            }
+            lines = patched;
+            outcome
+        }
+        AuditEnded::Answered { called: true, .. } => log::ForkOutcome::Unparseable,
+        AuditEnded::Answered { text, .. } => {
+            let (outcome, patched) = audit_folded(state, &text, &items, fork);
+            // Parsed: every marked note had its line (#150), and the
+            // answer's patches say which it acted on (#748).
+            if outcome != log::ForkOutcome::Unparseable {
+                acted_on(state, &marked, &patched);
+            }
+            lines = patched;
+            outcome
         }
     };
     state.push(Event::settled(fork, outcome));
     for line in lines {
         state.push(line);
     }
-    drop(state);
-    shared.changed.notify_all();
 }
 
 /// The marked entries an audit acted on (#748, log v8), added to the ones
@@ -9504,7 +9777,16 @@ struct AuditFired {
     marked: Vec<String>,
     /// Whether it is answered through the record tools (#610), not in lines.
     tools: bool,
+    /// Which of the audit's chunks it asks over, from 1.
+    chunk: Option<u64>,
+    /// How its request was sized ([`State::sized`]): what a refusal's
+    /// overflow and its answer's measured prompt are read against, its own
+    /// whatever chunks were sent beside it.
+    sized: Sizing,
 }
+
+/// A request's sizing: [`State`]'s `last_sized` and `sent_estimate` for it.
+type Sizing = (Option<(u64, u32, Option<u64>)>, Option<u64>);
 
 vocabulary! {
     /// What the operator ruled on the model's phase proposal (#124).
@@ -14637,6 +14919,7 @@ pub(in crate::drive) mod tests {
                 at: 3,
                 template: crate::dogma::Template::AuditQHuman,
                 question: "audit the notes".to_owned(),
+                chunk: Some(1),
             },
             Event::Flagged {
                 turn: 2,
@@ -15043,6 +15326,7 @@ pub(in crate::drive) mod tests {
                 view_overridden: None,
                 prefix_shared: None,
                 reserved: None,
+                chunk: None,
             },
             log::Event::Request {
                 turn: 1,
@@ -15204,6 +15488,7 @@ pub(in crate::drive) mod tests {
                 view_overridden: None,
                 prefix_shared: None,
                 reserved: None,
+                chunk: Some(1),
             },
             log::Event::Flag {
                 turn: 2,
@@ -18187,6 +18472,7 @@ pub(in crate::drive) mod tests {
             timing: Timing::Gap,
             step: crate::drive::warrants::StepWarrants::DEFAULTS,
             operator_unilateral: true,
+            served_batch: None,
         }
     }
 
@@ -18366,7 +18652,7 @@ pub(in crate::drive) mod tests {
 
     /// `count` notes added to working memory, `bulk-00` the oldest, each
     /// `size` repeats of a phrase long.
-    fn add_notes(session: &Session<Canned>, count: u32, size: usize) {
+    fn add_notes<S: Streaming>(session: &Session<S>, count: u32, size: usize) {
         let mut state = session.shared.lock();
         let object = &mut state.interview.as_mut().expect("memory").object;
         for n in 0..count {
@@ -18556,6 +18842,428 @@ pub(in crate::drive) mod tests {
             })
             .expect("an audit");
         assert!(first.contains("[flagged: still true?]"), "{first}");
+    }
+
+    /// A transport whose audits answer by what they ask -- the first note of
+    /// each chunk updated, the rest kept, whichever chunk is sent first --
+    /// each one asking over one of `held`'s texts held at its gate; the scoping turn
+    /// and its fork, the first two calls, from `canned`. Every audit waits
+    /// until `together`'s count are in flight at once, then none does. It
+    /// counts the audits in flight, now and at most.
+    struct ByAsk {
+        canned: Canned,
+        held: (Vec<String>, crate::client::stream::Gate),
+        together: (usize, crate::client::stream::Gate),
+        calls: Mutex<usize>,
+        flying: Mutex<(usize, usize)>,
+    }
+
+    impl Streaming for ByAsk {
+        fn stream(
+            &self,
+            shape: &RequestShape,
+            deadline: Instant,
+            cancel: &Cancel,
+            on_delta: &mut dyn FnMut(Piece<'_>),
+        ) -> Result<StreamEnded, TransportFailure> {
+            let call = {
+                let mut calls = self.calls.lock().expect("calls");
+                *calls += 1;
+                *calls
+            };
+            if call <= 2 {
+                return self.canned.stream(shape, deadline, cancel, on_delta);
+            }
+            let ask = shape
+                .messages
+                .last()
+                .map_or("", |message| message.content.as_str());
+            let notes: Vec<&str> = ask
+                .lines()
+                .filter_map(|line| {
+                    let (number, note) = line.split_once(". ")?;
+                    number.trim().parse::<usize>().ok().map(|_| note)
+                })
+                .collect();
+            let answer: String = std::iter::once(format!(
+                "1. UPDATE: revised {}\n",
+                notes.first().unwrap_or(&"")
+            ))
+            .chain((2..=notes.len()).map(|number| format!("{number}. KEEP\n")))
+            .collect();
+            let mut steps = vec![Step::Hold(self.together.1.clone())];
+            if self.held.0.iter().any(|held| ask.contains(held.as_str())) {
+                steps.push(Step::Hold(self.held.1.clone()));
+            }
+            steps.push(Step::Delta(answer));
+            {
+                let mut flying = self.flying.lock().expect("flying");
+                flying.0 += 1;
+                flying.1 = flying.1.max(flying.0);
+                if flying.0 >= self.together.0 {
+                    self.together.1.open();
+                }
+            }
+            let ended = Canned::new([steps]).stream(shape, deadline, cancel, on_delta);
+            self.flying.lock().expect("flying").0 -= 1;
+            ended
+        }
+
+        fn describes(&self) -> String {
+            "audits answered by what they ask".to_owned()
+        }
+    }
+
+    /// Eighteen notes and the scoping fork's audited in chunks of three,
+    /// `beside` at once, over the record tools when `tools`; the chunk asking
+    /// over the newest note held, when more than one may run, until every
+    /// other has answered: the meditation's log and its live notes, and the
+    /// most audits in flight.
+    fn audited_beside(beside: usize, tools: bool) -> (Vec<Logged>, Vec<(String, String)>, usize) {
+        let together = if tools { 1 } else { beside };
+        audited_within(
+            beside,
+            tools,
+            (None, None),
+            (together, &["fact  17"], false),
+        )
+    }
+
+    /// [`audited_beside`], the trunk's server batching `served_batch` and
+    /// its window `window`, when given, with an output cap of 1,024; every
+    /// audit waiting until `together` are in flight, and those over a note
+    /// `held` names held until every other has answered -- then let go, or,
+    /// when `stop`, the turn stopped.
+    fn audited_within(
+        beside: usize,
+        tools: bool,
+        (served_batch, window): (Option<usize>, Option<u64>),
+        (together, held, stop): (usize, &[&str], bool),
+    ) -> (Vec<Logged>, Vec<(String, String)>, usize) {
+        let gate = crate::client::stream::Gate::new();
+        if together == 1 {
+            gate.open();
+        }
+        let transport = ByAsk {
+            canned: Canned::new([deltas(&[SCOPED]), deltas(&[DECIDED])]),
+            held: (
+                held.iter().map(|held| (*held).to_owned()).collect(),
+                gate.clone(),
+            ),
+            together: (together, crate::client::stream::Gate::new()),
+            calls: Mutex::new(0),
+            flying: Mutex::new((0, 0)),
+        };
+        let mut interview = interviewing(&[log::Warrant::Scoping]);
+        interview.meditations.audit = true;
+        interview.meditations.audit_chunk_notes = Some(3);
+        interview.meditations.audit_concurrency = Some(beside);
+        if tools {
+            interview.capture = crate::dogma::asks::Modality::Tools;
+        }
+        interview.served_batch = served_batch;
+        let mut shape = template();
+        if window.is_some() {
+            shape.limits.context_window = window;
+            shape.limits.max_output_tokens = 1_024;
+        }
+        let session = Session::open_with(transport, shape, None, None, None, Some(interview));
+        session
+            .ask_marked("what are we building?", None, true)
+            .expect("accepted");
+        wait_until(&session, "the fork to settle", |log| {
+            settled(log) && !fork_outcomes(log).is_empty()
+        });
+        add_notes(&session, 18, 1);
+        let chunks = live_entries(&session).len().div_ceil(3);
+        session.declare_meditation(None).expect("admitted");
+        if together > 1 {
+            wait_until(&session, "every other chunk answered", |log| {
+                log.iter()
+                    .filter(|logged| matches!(logged.event, Event::Answered { .. }))
+                    .count()
+                    >= 2 + chunks - held.len()
+            });
+            if stop {
+                session.cancel(1, None).expect("stopped");
+            } else {
+                gate.open();
+            }
+        }
+        let log = wait_until(&session, "the meditation", meditated);
+        let memory = live_entries(&session);
+        let most = session.shared.transport.flying.lock().expect("flying").1;
+        (log, memory, most)
+    }
+
+    /// The meditation's lines from its first audit on, each chunk's apart
+    /// and in its order, without their seqs and times, every fork and
+    /// request seq they cite -- in a field, an audit's id, in a text or not,
+    /// or a provenance -- named by its chunk instead, and without the refill's
+    /// prefix digest, which is of a render that names those ids; and
+    /// `memory`'s ids so named.
+    fn chunk_lines(log: &[Logged], memory: &[(String, String)]) -> ChunkLines {
+        use serde_json::Value as Json;
+        fn walk(value: &mut Json, rename: &dyn Fn(&str) -> String) {
+            match value {
+                Json::String(text) => *text = rename(text),
+                Json::Array(items) => items.iter_mut().for_each(|item| walk(item, rename)),
+                Json::Object(fields) => fields.values_mut().for_each(|field| walk(field, rename)),
+                _ => {}
+            }
+        }
+        let mut forks: BTreeMap<u64, u64> = BTreeMap::new();
+        let mut requests: BTreeMap<u64, u64> = BTreeMap::new();
+        for logged in log {
+            match &logged.event {
+                Event::Audited {
+                    chunk: Some(chunk), ..
+                } => {
+                    forks.insert(logged.seq, *chunk);
+                }
+                Event::Requested {
+                    fork: Some(fork), ..
+                } => {
+                    if let Some(chunk) = forks.get(fork) {
+                        requests.insert(logged.seq, *chunk);
+                    }
+                }
+                _ => {}
+            }
+        }
+        let rename = |text: &str| -> String {
+            let mut text = text.to_owned();
+            for (fork, chunk) in &forks {
+                if text == format!("f/{fork}") {
+                    return format!("f/c{chunk}");
+                }
+                text = text.replace(&format!("audit-{fork}-"), &format!("audit-c{chunk}-"));
+            }
+            text
+        };
+        let first = forks.keys().next().copied().unwrap_or(u64::MAX);
+        let mut chunks: BTreeMap<u64, Vec<String>> = BTreeMap::new();
+        let mut rest = Vec::new();
+        let mut patches = Vec::new();
+        for logged in log.iter().filter(|logged| logged.seq >= first) {
+            let mut line: Json =
+                serde_json::from_str(&log::render(&line_of(logged))).expect("a line");
+            let fields = line.as_object_mut().expect("an object");
+            let cited: Vec<(&str, Option<u64>)> = ["fork", "request", "to_request"]
+                .into_iter()
+                .map(|key| {
+                    let of = if key == "fork" { &forks } else { &requests };
+                    let chunk = fields
+                        .get(key)
+                        .and_then(Json::as_u64)
+                        .and_then(|seq| of.get(&seq).copied());
+                    (key, chunk)
+                })
+                .collect();
+            let owner = forks
+                .get(&logged.seq)
+                .copied()
+                .or_else(|| cited.iter().find_map(|(_, chunk)| *chunk));
+            for key in ["seq", "t", "prefix_hash_after"] {
+                fields.remove(key);
+            }
+            for (key, chunk) in cited {
+                if let Some(chunk) = chunk {
+                    fields.insert(key.to_owned(), Json::String(format!("c{chunk}")));
+                }
+            }
+            walk(&mut line, &rename);
+            if matches!(logged.event, Event::Patched { .. }) {
+                patches.push(line.to_string());
+            }
+            match owner {
+                Some(chunk) => chunks.entry(chunk).or_default().push(line.to_string()),
+                None => rest.push(line.to_string()),
+            }
+        }
+        let memory = memory
+            .iter()
+            .map(|(id, content)| (rename(id), content.clone()))
+            .collect();
+        ChunkLines {
+            chunks,
+            rest,
+            patches,
+            memory,
+        }
+    }
+
+    /// [`chunk_lines`]: each chunk's lines, the meditation's own, every
+    /// patch in the order it was applied, and the live notes.
+    #[derive(Debug, PartialEq, Eq)]
+    struct ChunkLines {
+        chunks: BTreeMap<u64, Vec<String>>,
+        rest: Vec<String>,
+        patches: Vec<String>,
+        memory: Vec<(String, String)>,
+    }
+
+    /// Four chunks in flight at once, an early one answering last, leave the
+    /// working memory one after another leaves -- in content, order and
+    /// structure, its ids citing the run's own fork seqs -- and each
+    /// chunk's lines, its seqs renamed, are one after another's; every
+    /// audit fork names its chunk.
+    #[test]
+    fn audit_chunks_beside_each_other_leave_the_memory_one_after_another_leaves() {
+        let (one_log, one_memory, one_most) = audited_beside(1, false);
+        let (four_log, four_memory, four_most) = audited_beside(4, false);
+        assert_eq!(one_most, 1);
+        assert_eq!(four_most, 4, "four chunks in flight at once");
+        let settled_chunks = |log: &[Logged]| -> Vec<u64> {
+            let forks: BTreeMap<u64, u64> = log
+                .iter()
+                .filter_map(|logged| match &logged.event {
+                    Event::Audited { chunk, .. } => Some((logged.seq, chunk.expect("a chunk"))),
+                    _ => None,
+                })
+                .collect();
+            log.iter()
+                .filter_map(|logged| match &logged.event {
+                    Event::Answered { request, .. } => {
+                        log.iter().find_map(|other| match &other.event {
+                            Event::Requested {
+                                fork: Some(fork), ..
+                            } if other.seq == *request => forks.get(fork).copied(),
+                            _ => None,
+                        })
+                    }
+                    _ => None,
+                })
+                .collect()
+        };
+        let chunks = settled_chunks(&one_log);
+        assert!(chunks.len() > 4, "more chunks than run at once: {chunks:?}");
+        assert!(
+            chunks.iter().copied().eq(1..=chunks.len() as u64),
+            "{chunks:?}"
+        );
+        // The held chunk answered last, though chunks come after it.
+        let held = four_log
+            .iter()
+            .find_map(|logged| match &logged.event {
+                Event::Audited {
+                    question, chunk, ..
+                } if question.contains("fact  17") => *chunk,
+                _ => None,
+            })
+            .expect("the held chunk");
+        assert_eq!(settled_chunks(&four_log).last(), Some(&held));
+        assert!(
+            held < chunks.len() as u64,
+            "chunk {held} of {}",
+            chunks.len()
+        );
+        // Interleaved, the log still reads back.
+        let text: String = four_log
+            .iter()
+            .flat_map(|logged| [log::render(&line_of(logged)), "\n".to_owned()])
+            .collect();
+        log::parse(&text).expect("the log reads back");
+        let one = chunk_lines(&one_log, &one_memory);
+        let four = chunk_lines(&four_log, &four_memory);
+        assert_eq!(one.chunks.len(), chunks.len());
+        assert_eq!(four.memory, one.memory, "the same working memory");
+        assert_eq!(
+            four.patches, one.patches,
+            "the patches, applied in chunk order"
+        );
+        assert_eq!(four.chunks, one.chunks, "each chunk's lines");
+        assert_eq!(four.rest, one.rest, "the meditation's own lines");
+    }
+
+    /// No more chunks overlap than the trunk's server batches, whatever the
+    /// regimen declares.
+    #[test]
+    fn audit_chunks_overlap_no_further_than_the_server_batches() {
+        let (_, _, most) = audited_within(4, false, (Some(2), None), (2, &["fact  17"], false));
+        assert_eq!(most, 2);
+    }
+
+    /// No more chunks overlap than the trunk's pool holds, each counted as
+    /// the engine holds it -- each prompt estimated with [`ESTIMATE_PAD`] -- two of
+    /// them, in a window of 70,000.
+    #[test]
+    fn audit_chunks_overlap_no_further_than_the_pool_holds_them() {
+        let (log, _, most) =
+            audited_within(4, false, (None, Some(70_000)), (2, &["fact  17"], false));
+        let holds = log
+            .iter()
+            .filter_map(|logged| match &logged.event {
+                Event::Requested {
+                    lane: Lane::Audit,
+                    max_tokens,
+                    ..
+                } => Some(*max_tokens),
+                _ => None,
+            })
+            .collect::<Vec<_>>();
+        assert!(holds.iter().all(|cap| *cap == 1_024), "{holds:?}");
+        assert_eq!(most, 2, "two fit 70,000; three would not");
+    }
+
+    /// One stop reaches every chunk in flight: the two held settle
+    /// `cancelled`, every other folds as it answered, and the meditation
+    /// ends.
+    #[test]
+    fn one_stop_reaches_every_audit_chunk_in_flight() {
+        let (log, _, most) =
+            audited_within(4, false, (None, None), (4, &["fact  17", "fact  3"], true));
+        assert_eq!(most, 4);
+        let outcomes: Vec<log::ForkOutcome> = log
+            .iter()
+            .filter_map(|logged| match &logged.event {
+                Event::ForkSettled { fork, outcome, .. }
+                    if log.iter().any(|other| {
+                        other.seq == *fork && matches!(other.event, Event::Audited { .. })
+                    }) =>
+                {
+                    Some(*outcome)
+                }
+                _ => None,
+            })
+            .collect();
+        let cancelled = outcomes
+            .iter()
+            .filter(|outcome| **outcome == log::ForkOutcome::Cancelled)
+            .count();
+        assert_eq!(cancelled, 2, "{outcomes:?}");
+        assert!(
+            outcomes.iter().all(|outcome| matches!(
+                outcome,
+                log::ForkOutcome::Cancelled | log::ForkOutcome::Value
+            )),
+            "{outcomes:?}"
+        );
+        assert!(
+            log.iter()
+                .any(|logged| matches!(logged.event, Event::StopAsked { .. }))
+        );
+    }
+
+    /// Through the record tools a chunk's patches may supersede another
+    /// chunk's note, so there the chunks run one at a time, whatever the
+    /// regimen declares.
+    #[test]
+    fn on_the_record_tools_route_audit_chunks_run_one_at_a_time() {
+        let (log, _, most) = audited_beside(4, true);
+        assert_eq!(most, 1, "one audit in flight at a time");
+        let chunks: Vec<u64> = log
+            .iter()
+            .filter_map(|logged| match &logged.event {
+                Event::Audited { chunk, .. } => *chunk,
+                _ => None,
+            })
+            .collect();
+        assert!(chunks.len() > 4, "{chunks:?}");
+        assert!(
+            chunks.iter().copied().eq(1..=chunks.len() as u64),
+            "{chunks:?}"
+        );
     }
 
     /// A chunk cut off by its cap folds nothing and its notes are named
@@ -19257,7 +19965,7 @@ pub(in crate::drive) mod tests {
         tidy(&[&tree]);
     }
 
-    fn live_entries(session: &Session<Canned>) -> Vec<(String, String)> {
+    fn live_entries<S: Streaming>(session: &Session<S>) -> Vec<(String, String)> {
         session
             .shared
             .lock()
@@ -25838,6 +26546,7 @@ pub(in crate::drive) mod tests {
                     warm: false,
                     audit: false,
                     audit_chunk_notes: None,
+                    audit_concurrency: None,
                 },
                 ..interviewing(&[log::Warrant::Read])
             }),
@@ -26179,6 +26888,7 @@ pub(in crate::drive) mod tests {
                 warm: false,
                 audit: false,
                 audit_chunk_notes: None,
+                audit_concurrency: None,
             })),
         );
         session
@@ -26250,6 +26960,7 @@ pub(in crate::drive) mod tests {
                     warm: false,
                     audit: false,
                     audit_chunk_notes: None,
+                    audit_concurrency: None,
                 })),
             )
         };
@@ -26353,6 +27064,7 @@ pub(in crate::drive) mod tests {
                 warm: false,
                 audit: false,
                 audit_chunk_notes: None,
+                audit_concurrency: None,
             })),
         );
         session
@@ -26392,6 +27104,7 @@ pub(in crate::drive) mod tests {
                 warm: false,
                 audit: false,
                 audit_chunk_notes: None,
+                audit_concurrency: None,
             })),
         );
         session
@@ -26443,6 +27156,7 @@ pub(in crate::drive) mod tests {
                 warm: false,
                 audit: false,
                 audit_chunk_notes: None,
+                audit_concurrency: None,
             })),
         );
         session
@@ -26496,6 +27210,7 @@ pub(in crate::drive) mod tests {
                 warm: false,
                 audit: false,
                 audit_chunk_notes: None,
+                audit_concurrency: None,
             })),
         );
         session.ask("hi", None).expect("accepted");
@@ -26538,6 +27253,7 @@ pub(in crate::drive) mod tests {
                 warm: false,
                 audit: false,
                 audit_chunk_notes: None,
+                audit_concurrency: None,
             })),
         );
         session

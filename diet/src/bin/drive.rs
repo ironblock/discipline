@@ -1237,6 +1237,9 @@ fn serving_interview(
             .and_then(|identity| identity.served.get("chunk_size")?.parse::<u64>().ok())
             .filter(|chunk| *chunk > 0)
             .unwrap_or(session::POOL_CHUNK_DEFAULT);
+    // The requests it batches at once, which an audit's chunks overlap no
+    // further than.
+    let served_batch = served_batch(&regime.substrates[0].id);
     // The step warrants' gate: the patterns, or a classifier the regimen
     // names in full.
     let warrant_gate =
@@ -1336,6 +1339,7 @@ fn serving_interview(
             prefix_pages,
             warrant_gate,
             pool_chunk,
+            served_batch,
             step,
             operator_unilateral,
         }),
@@ -2166,11 +2170,21 @@ fn registered_regime(
     diet::drive::regimen::regime_registered(&regimen, diet::drive::registry::REGISTRY)
         .map(|regime| {
             let output_cap = diet::drive::regimen::output_cap(flag, Some(&regimen));
+            let mut levers = diet::drive::regimen::serve_levers(&regimen, output_cap);
+            // The audit's chunks in flight at once, against what the trunk's
+            // server batches.
+            levers.insert(
+                "meditation_audit_concurrency".to_owned(),
+                diet::drive::regimen::meditation_audit_concurrency_lever(
+                    &regimen,
+                    served_batch(&regime.substrates[0].id),
+                ),
+            );
             (
                 regime,
                 ReadAtStart {
                     regimen_sha256: diet::digest::sha256_hex(text.as_bytes()),
-                    levers: diet::drive::regimen::serve_levers(&regimen, output_cap),
+                    levers,
                     output_cap,
                     stream_idle,
                 },
@@ -2753,6 +2767,15 @@ fn subcommand(args: &[String]) -> Option<ExitCode> {
         return Some(check(&args[1..]));
     }
     None
+}
+
+/// The requests substrate `id`'s server batches at once: its registry
+/// entry's `served_max_batch_size`, when declared.
+fn served_batch(id: &str) -> Option<usize> {
+    diet::drive::registry::identity(diet::drive::registry::REGISTRY, id)
+        .ok()
+        .and_then(|identity| identity.served.get("max_batch_size")?.parse::<usize>().ok())
+        .filter(|batch| *batch > 0)
 }
 
 fn main() -> ExitCode {

@@ -1458,6 +1458,11 @@ pub enum Event {
         /// `served_prefix_shared`, and the fork sends from the trunk's own
         /// server.
         prefix_shared: Option<bool>,
+        /// Which chunk of its meditation's audit it asks over, from 1 (v8):
+        /// a meditation's audit only, written at every
+        /// `meditation_audit_concurrency`. Chunks of one audit may run beside
+        /// each other; the gate's re-ask over the notes left carries none.
+        chunk: Option<u64>,
     },
     /// How a fork ended (v5, #374).
     ForkSettled {
@@ -2635,6 +2640,9 @@ struct Forks {
     /// The forks cut during the turn (v8, #782): each runs beside the trunk
     /// and the others, never one after another.
     cut: BTreeSet<u64>,
+    /// The chunks of a meditation's audit (v8): each may run beside the
+    /// others.
+    chunked: BTreeSet<u64>,
 }
 
 impl Forks {
@@ -2653,10 +2661,19 @@ impl Forks {
         &mut self,
         seq: u64,
         (lane, of_turn, at, triggered): (Lane, u32, u64, bool),
-        (after_meditation, cut): (Option<u64>, Option<u64>),
+        (after_meditation, cut, chunk): (Option<u64>, Option<u64>, Option<u64>),
         turns: u32,
         trunk: &BTreeMap<u32, u64>,
     ) -> Result<(), String> {
+        if let Some(chunk) = chunk
+            && lane != Lane::Audit
+        {
+            return Err(format!(
+                "a fork on the `{}` lane naming chunk {chunk}: only a meditation's audit is \
+                 asked in chunks",
+                lane.tag()
+            ));
+        }
         if let Some(cut) = cut {
             if lane != Lane::Interview || !triggered || after_meditation.is_some() {
                 return Err(format!(
@@ -2730,6 +2747,18 @@ impl Forks {
                  trunk the fork would be cut from"
             ));
         }
+        self.in_its_gap(seq, (of_turn, triggered), chunk)
+    }
+
+    /// A gap's fork after the gap's others: one alone, or each named by its
+    /// `trigger`, each after the one before settled -- but a meditation's
+    /// audit's chunk, which runs beside its audit's other chunks.
+    fn in_its_gap(
+        &mut self,
+        seq: u64,
+        (of_turn, triggered): (u32, bool),
+        chunk: Option<u64>,
+    ) -> Result<(), String> {
         let earlier: Vec<u64> = self
             .of_turn
             .iter()
@@ -2742,11 +2771,22 @@ impl Forks {
                  unless each names the `trigger` the interview cadence fired it on"
             ));
         }
-        if let Some(open) = earlier.iter().find(|fork| !self.settled.contains_key(fork)) {
-            return Err(format!(
-                "a fork in the gap after turn {of_turn} while fork {open} is unsettled: a \
-                 gap's forks run one after another"
-            ));
+        if let Some(open) = earlier.iter().find(|fork| {
+            !(self.settled.contains_key(fork) || chunk.is_some() && self.chunked.contains(fork))
+        }) {
+            return Err(match chunk {
+                Some(chunk) => format!(
+                    "chunk {chunk} of an audit while fork {open}, no audit's chunk, is \
+                     unsettled: a chunk runs beside only its audit's other chunks"
+                ),
+                None => format!(
+                    "a fork in the gap after turn {of_turn} while fork {open} is unsettled: a \
+                     gap's forks run one after another, but for an audit's chunks"
+                ),
+            });
+        }
+        if chunk.is_some() {
+            self.chunked.insert(seq);
         }
         self.of_turn.insert(seq, of_turn);
         Ok(())
@@ -3163,12 +3203,13 @@ fn check(lines: &[Line]) -> Result<(), LogError> {
                 trigger,
                 after_meditation,
                 cut,
+                chunk,
                 ..
             } => forks
                 .fork(
                     line.seq,
                     (*lane, *of_turn, *forked_at, trigger.is_some()),
-                    (*after_meditation, *cut),
+                    (*after_meditation, *cut, *chunk),
                     turns,
                     &trunk,
                 )
@@ -3614,6 +3655,7 @@ fn from_object(object: &BTreeMap<String, Value>) -> Result<Line, String> {
             view_overridden: fields.optional_string("view_overridden")?,
             reserved: fields.optional_count("reserved")?,
             prefix_shared: fields.optional_flag("prefix_shared")?,
+            chunk: fields.optional_count("chunk")?,
         },
         Kind::ForkSettled => Event::ForkSettled {
             fork: fields.count("fork")?,
@@ -5403,6 +5445,7 @@ pub fn schema(kind: Kind) -> &'static [Field] {
                 may_v8("view_overridden", Text),
                 may_v8("reserved", Count),
                 may_v8("prefix_shared", Holds::Flag),
+                may_v8("chunk", Count),
             ];
             F
         }
@@ -6455,6 +6498,7 @@ fn to_value(line: &Line) -> Value {
             view_overridden,
             reserved,
             prefix_shared,
+            chunk,
         } => {
             put("lane", text(lane.tag()));
             put("of_turn", count(u64::from(*of_turn)));
@@ -6497,6 +6541,9 @@ fn to_value(line: &Line) -> Value {
             }
             if let Some(shared) = prefix_shared {
                 put("prefix_shared", Value::Boolean(*shared));
+            }
+            if let Some(chunk) = chunk {
+                put("chunk", count(*chunk));
             }
             Kind::Fork
         }
@@ -8480,6 +8527,7 @@ mod tests {
                 view_overridden: None,
                 prefix_shared: Some(true),
                 reserved: Some(212),
+                chunk: None,
             },
             Event::Request {
                 turn: 5,
