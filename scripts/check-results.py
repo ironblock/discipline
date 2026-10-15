@@ -1039,6 +1039,8 @@ DEFAULT_REGISTRY = pathlib.Path("substrates/registry.toml")
 # picks the card's set: `substrate_reasoning = "off"` is the instruct set,
 # any other the thinking set.
 SAMPLER_FIELDS = ("temperature", "top_p", "top_k", "min_p", "presence_penalty", "repetition_penalty")
+# A regimen field by diet's wire name, read as the card's name for it.
+WIRE_NAMES = {"repeat_penalty": "repetition_penalty"}
 VERDICTS = ("supported", "refuted")
 CLAIMS_REPORTED: list[str] = []
 REGISTRY_SUBSTRATES: dict = {}
@@ -1072,16 +1074,19 @@ def spelled(recommended: object) -> str:
     return f"{recommended[0]}..{recommended[1]}" if isinstance(recommended, list) else str(recommended)
 
 
-def characterisation(directory: pathlib.Path, registry: dict) -> tuple[list[dict] | None, list[str]]:
+def characterisation(directory: pathlib.Path, registry: dict) -> tuple[list[dict] | None, list[str], list[dict] | None]:
     """What made the run a characterisation, as rows of substrate,
-    parameter, used and recommended (empty: in range), and why it cannot be
-    read, if it cannot."""
+    parameter, used and recommended (empty: in range); why it cannot be
+    read, if it cannot; and the carded fields the regimen left to the
+    server's default, which are not checked against the card and may be off
+    it (rows of substrate, parameter and recommended)."""
     regimen = regimen_of(directory)
     substrates = regimen.get("substrates") or ([regimen["substrate"]] if isinstance(regimen.get("substrate"), str) else [])
     sampler = regimen.get("sampler") if isinstance(regimen.get("sampler"), dict) else {}
     mode = "instruct" if regimen.get("substrate_reasoning") == "off" else "thinking"
     derived: list[dict] = []
     unreadable: list[str] = []
+    unstated: list[dict] = []
     for substrate in substrates:
         entry = registry.get(substrate)
         if not isinstance(entry, dict):
@@ -1096,11 +1101,12 @@ def characterisation(directory: pathlib.Path, registry: dict) -> tuple[list[dict
                 f"(`[[substrate.{substrate}.recommended]]` with `recommended_is`) nor `recommended_absent`"
             )
             continue
-        stated = {key: sampler[key] for key in SAMPLER_FIELDS if is_number(sampler.get(key))}
+        named = {WIRE_NAMES.get(key, key): value for key, value in sampler.items()}
+        stated = {key: named[key] for key in SAMPLER_FIELDS if is_number(named.get(key))}
         if not stated or "substrate_reasoning" not in regimen:
             unreadable.append(f"the regimen states no `substrate_reasoning` and `[sampler]` for `{substrate}`, so its range cannot be read")
             continue
-        best = None
+        best, best_row = None, None
         for row in sets:
             off = []
             for key, value in sorted(stated.items()):
@@ -1112,9 +1118,13 @@ def characterisation(directory: pathlib.Path, registry: dict) -> tuple[list[dict
                 elif not fits:
                     off.append({"substrate": substrate, "parameter": key, "used": str(value), "recommended": spelled(row[key])})
             if best is None or len(off) < len(best):
-                best = off
+                best, best_row = off, row
         derived += best or []
-    return (None if unreadable else derived), unreadable
+        unstated += [
+            {"substrate": substrate, "parameter": key, "recommended": spelled(best_row[key])}
+            for key in sorted(best_row or {}) if key in SAMPLER_FIELDS and key not in stated
+        ]
+    return (None if unreadable else derived), unreadable, (None if unreadable else unstated)
 
 
 def off_card(row: dict) -> str:
@@ -1157,7 +1167,7 @@ def claim_rules(directory: pathlib.Path, registry: dict) -> list[tuple[str, str]
     front = front_of(directory)
     if operative:
         # Rule 1.
-        derived, unreadable = characterisation(directory, registry)
+        derived, unreadable, _ = characterisation(directory, registry)
         for why in unreadable:
             failures.append(("results.characterisation-undeclared", why))
         if derived is not None:
@@ -1278,7 +1288,7 @@ def claim_flags(directory: pathlib.Path, registry: dict) -> dict:
     """The ledger's derived claim-rule fields: whether the run is a
     characterisation (None where it cannot be read), and whether it is a
     repeat fire, or an adjudication of one."""
-    derived, _ = characterisation(directory, registry)
+    derived, _, unstated = characterisation(directory, registry)
     front = front_of(directory)
     siblings = fires(directory.parent)
     fire = directory.name
@@ -1289,7 +1299,12 @@ def claim_flags(directory: pathlib.Path, registry: dict) -> dict:
     # (#17's second draw declares none).
     row = row_of(siblings.get(fire, front))
     first = first_fire(row, siblings) if row else None
-    return {"characterisation": None if derived is None else bool(derived), "repeat": first is not None and first != fire}
+    return {
+        "characterisation": None if derived is None else bool(derived),
+        # Carded fields left to the server: not checked, so named.
+        "unstated": unstated,
+        "repeat": first is not None and first != fire,
+    }
 
 
 def check_run(directory: pathlib.Path) -> list[str]:
@@ -2446,6 +2461,11 @@ def main(argv: list[str]) -> int:
         help="hold only the claim rules (characterisation, controls seen red, one fire per row) over --root; needs no diet",
     )
     parser.add_argument(
+        "--flags",
+        action="store_true",
+        help="with --claims: print each directory's derived ledger fields (characterisation, unstated, repeat) as a JSON line",
+    )
+    parser.add_argument(
         "--registry",
         type=pathlib.Path,
         default=DEFAULT_REGISTRY,
@@ -2480,6 +2500,9 @@ def main(argv: list[str]) -> int:
             parser.error("--claims takes --root, directories and --registry, and nothing else")
         targets = [d for root in args.root for d in run_directories(root)] + list(args.directories)
         failures = [message for directory in targets for message in judged_claims(directory, REGISTRY_SUBSTRATES)]
+        if args.flags:
+            for directory in targets:
+                print(json.dumps({"directory": directory.name, **claim_flags(directory, REGISTRY_SUBSTRATES)}))
         for line in CLAIMS_REPORTED:
             print(line)
         for message in failures:
