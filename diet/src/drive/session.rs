@@ -2509,10 +2509,21 @@ impl State {
     /// flight beside the trunk is sized, and answers, without moving the
     /// measurement the trunk's next request is sized from.
     fn aside_sizing<T>(&mut self, f: impl FnOnce(&mut Self) -> T) -> T {
-        let kept = (self.sent_estimate, self.last_sized, self.measured_prompt);
+        let kept = self.sizing();
         let out = f(self);
-        (self.sent_estimate, self.last_sized, self.measured_prompt) = kept;
+        self.set_sizing(kept);
         out
+    }
+
+    /// What the next request is sized from: the latest request's estimate
+    /// and sizing, and the latest measured prompt.
+    fn sizing(&self) -> Measured {
+        (self.sent_estimate, self.last_sized, self.measured_prompt)
+    }
+
+    /// [`State::sizing`], set.
+    fn set_sizing(&mut self, sizing: Measured) {
+        (self.sent_estimate, self.last_sized, self.measured_prompt) = sizing;
     }
 
     /// A session's state as it opens: awaiting, on `trunk`, in `phase`.
@@ -8444,8 +8455,12 @@ fn audit_concurrency_of(state: &State) -> usize {
 /// first always -- each counted as the engine holds it ([`footprint`]). Their
 /// calls' lines are logged as they come; each chunk is folded, settled and
 /// its patches logged in chunk order, once every chunk before it is, so
-/// working memory is what one after another leaves. One stop reaches every
-/// chunk in flight, and the next goes once they have all ended.
+/// working memory is what one after another leaves. Every chunk is sized from
+/// the measurement the audit started from, and each answer's measurement is
+/// set aside as it comes; the audit leaves the last chunk's, in chunk order.
+/// So no chunk's cap, and nothing sized after the audit (the gate's re-ask,
+/// the refill), turns on which call happened to finish first. One stop
+/// reaches every chunk in flight, and the next goes once they have all ended.
 ///
 /// Only the audit's own chunks are counted against the window: nothing else
 /// is in flight while a meditation audits. Only an operator, phase or cadence
@@ -8473,6 +8488,10 @@ fn audits_beside<'a, S: Streaming>(
         let mut flying: BTreeMap<u64, (AuditFired, u64)> = BTreeMap::new();
         let mut settled: BTreeMap<u64, (AuditFired, AuditEnded)> = BTreeMap::new();
         let mut order: std::collections::VecDeque<u64> = std::collections::VecDeque::new();
+        // The sizing every chunk is sent from, and each chunk's as its answer
+        // left it, by chunk.
+        let before = state.sizing();
+        let mut measured: BTreeMap<u64, Measured> = BTreeMap::new();
         let mut cancel = Cancel::new();
         loop {
             while flying.len() < beside {
@@ -8541,12 +8560,17 @@ fn audits_beside<'a, S: Streaming>(
                 hosted: Hosted::default(),
             });
             let ending = audit_ended(&mut state, &fired, streamed);
+            measured.insert(chunk, state.sizing());
+            state.set_sizing(before);
             settled.insert(chunk, (fired, ending));
             while let Some((fired, ending)) = order.front().and_then(|first| settled.remove(first))
             {
                 order.pop_front();
                 audit_settled(&mut state, fired, ending);
             }
+        }
+        if let Some((_, last)) = measured.pop_last() {
+            state.set_sizing(last);
         }
         state
     })
@@ -9863,6 +9887,14 @@ struct AuditFired {
 
 /// A request's sizing: [`State`]'s `last_sized` and `sent_estimate` for it.
 type Sizing = (Option<(u64, u32, Option<u64>)>, Option<u64>);
+
+/// What a request is sized from ([`State::sizing`]): `sent_estimate`,
+/// `last_sized` and `measured_prompt`.
+type Measured = (
+    Option<u64>,
+    Option<(u64, u32, Option<u64>)>,
+    Option<(u64, u64)>,
+);
 
 vocabulary! {
     /// What the operator ruled on the model's phase proposal (#124).
@@ -19093,13 +19125,15 @@ pub(in crate::drive) mod tests {
     /// each one asking over one of `held`'s texts held at its gate; the scoping turn
     /// and its fork, the first two calls, from `canned`. Every audit waits
     /// until `together`'s count are in flight at once, then none does. It
-    /// counts the audits in flight, now and at most.
+    /// counts the audits in flight, now and at most. With `measured`, each
+    /// audit reports that prompt, as a server's timings do.
     struct ByAsk {
         canned: Canned,
         held: (Vec<String>, crate::client::stream::Gate),
         together: (usize, crate::client::stream::Gate),
         calls: Mutex<usize>,
         flying: Mutex<(usize, usize)>,
+        measured: Option<u64>,
     }
 
     impl Streaming for ByAsk {
@@ -19140,6 +19174,12 @@ pub(in crate::drive) mod tests {
                 steps.push(Step::Hold(self.held.1.clone()));
             }
             steps.push(Step::Delta(answer));
+            if let Some(prompt_n) = self.measured {
+                steps.push(Step::Timings(crate::client::stream::Timings {
+                    prompt_n: Some(prompt_n),
+                    ..crate::client::stream::Timings::default()
+                }));
+            }
             {
                 let mut flying = self.flying.lock().expect("flying");
                 flying.0 += 1;
@@ -19184,6 +19224,27 @@ pub(in crate::drive) mod tests {
         (served_batch, window): (Option<usize>, Option<u64>),
         (together, held, stop): (usize, &[&str], bool),
     ) -> (Vec<Logged>, Vec<(String, String)>, usize) {
+        let (log, memory, most, _) = audited_measuring(
+            beside,
+            tools,
+            (served_batch, window, None),
+            (together, held, stop),
+        );
+        (log, memory, most)
+    }
+
+    /// The latest measured prompt and the estimate it measured.
+    type Measurement = Option<(u64, u64)>;
+
+    /// [`audited_within`], each audit reporting `measured` as its prompt
+    /// when given; with the measurement the session's next request is sized
+    /// from, after: the latest measured prompt and the estimate it measured.
+    fn audited_measuring(
+        beside: usize,
+        tools: bool,
+        (served_batch, window, measured): (Option<usize>, Option<u64>, Option<u64>),
+        (together, held, stop): (usize, &[&str], bool),
+    ) -> (Vec<Logged>, Vec<(String, String)>, usize, Measurement) {
         let gate = crate::client::stream::Gate::new();
         if together == 1 {
             gate.open();
@@ -19197,6 +19258,7 @@ pub(in crate::drive) mod tests {
             together: (together, crate::client::stream::Gate::new()),
             calls: Mutex::new(0),
             flying: Mutex::new((0, 0)),
+            measured,
         };
         let mut interview = interviewing(&[log::Warrant::Scoping]);
         interview.meditations.audit = true;
@@ -19237,7 +19299,8 @@ pub(in crate::drive) mod tests {
         let log = wait_until(&session, "the meditation", meditated);
         let memory = live_entries(&session);
         let most = session.shared.transport.flying.lock().expect("flying").1;
-        (log, memory, most)
+        let sizing = session.shared.lock().measured_prompt;
+        (log, memory, most, sizing)
     }
 
     /// The meditation's lines from its first audit on, each chunk's apart
@@ -19418,6 +19481,40 @@ pub(in crate::drive) mod tests {
         );
         assert_eq!(four.chunks, one.chunks, "each chunk's lines");
         assert_eq!(four.rest, one.rest, "the meditation's own lines");
+    }
+
+    /// Chunks beside each other are sized, and leave the session's sizing,
+    /// whichever answers last: each chunk is sized from the measurement the
+    /// audit started from, never from a chunk that happened to answer before
+    /// it, and the audit leaves the last chunk's measurement, in chunk order,
+    /// as one after another does. Before, each answer moved the measurement
+    /// as it came, so the next chunk's cap and the gate's re-ask, sized from
+    /// it, turned on which call finished first: the kitchen sink's re-ask was
+    /// fitted to the window in one run and not in another.
+    #[test]
+    fn audit_chunks_beside_each_other_are_sized_whichever_answers_last() {
+        let measuring = |beside: usize, held: &[&str]| {
+            let (log, memory, _, sizing) = audited_measuring(
+                beside,
+                false,
+                (None, None, Some(600)),
+                (beside, held, false),
+            );
+            (chunk_lines(&log, &memory), sizing)
+        };
+        // The first chunk answers last, then the second.
+        let (first_last, first_sizing) = measuring(2, &["fact  17"]);
+        let (second_last, second_sizing) = measuring(2, &["fact  14"]);
+        assert!(first_sizing.is_some(), "the audits were measured");
+        assert_eq!(first_sizing, second_sizing, "the measurement left behind");
+        assert_eq!(first_last.chunks, second_last.chunks, "each chunk's lines");
+        assert_eq!(
+            first_last.rest, second_last.rest,
+            "the meditation's own lines"
+        );
+        // And the measurement is the one one after another leaves.
+        let (_, one_sizing) = measuring(1, &[]);
+        assert_eq!(first_sizing, one_sizing);
     }
 
     /// No more chunks overlap than the trunk's server batches, whatever the
