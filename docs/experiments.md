@@ -19,6 +19,8 @@ Planning's three further claim rules are operative from 2026-10-14 (accepted the
 - **Controls are seen red before the run.** Every control points, by digest, at committed evidence that it failed on an input it should fail on, dated before the window opens. The draft's reason, that a control bounds noise and cannot find a confound that scales with the treatment, is not checked: a dose-scaled or positive control is a design matter, not an artifact.
 - **One fire per row, the first.** A row is a claim under one ratified rule digest. Its first fire carries the word, and a later fire names the first and never supersedes it.
 
+From 2026-10-15 (taken by the maintainer then; `scripts/check-results.py --claims`, `results/AGENTS.md`), an instrument run through an agent harness, such as a judge, labeller, reader or coder in a subagent or `claude -p`, declares its ambient context as probed: its instruction files, system line, tools and memory. It is declared the way a measurement declares its sampler state.
+
 ## With a result
 
 | row | lever | word | where |

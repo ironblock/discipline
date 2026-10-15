@@ -1023,6 +1023,14 @@ def ledger_words(doc: pathlib.Path, records: pathlib.Path) -> list[str]:
 #      row's word. A later fire names it (`repeats` = its product_sha256) and
 #      never supersedes it.
 #
+# And, taken by the maintainer 2026-10-15, the AMBIENT CONTEXT: an instrument
+# run through an agent harness (a judge, labeller, reader or coder in a
+# subagent, `claude -p` and the like) declares what the harness loaded into
+# it -- instruction files by path and sha256, system line, tools, memory -- as
+# a committed probe saw it, in `[[ambient]]` rows; a directory with no such
+# instrument says `ambient = "not applicable: <why>"`, which a rule declaring
+# `[[labels]]` cannot. It binds directories dated after AMBIENT_LANDED.
+#
 # Checks 1 and 2 need declarations that history never made, so they bind only
 # directories dated after CLAIM_RULES_LANDED. Check 3 reads what every record
 # already declares, so it runs over history too, and a failure there is
@@ -1044,6 +1052,93 @@ WIRE_NAMES = {"repeat_penalty": "repetition_penalty"}
 VERDICTS = ("supported", "refuted")
 CLAIMS_REPORTED: list[str] = []
 REGISTRY_SUBSTRATES: dict = {}
+# The ambient-context rule (taken by the maintainer 2026-10-15): an instrument
+# run through an agent harness -- a judge, labeller, reader or coder -- declares
+# what the harness loaded into it, as probed, the way a measurement declares its
+# sampler state. A directory dated after this date declares it.
+AMBIENT_LANDED = "2026-10-15"
+# What a row declares the instrument carried, each as its probe saw it.
+AMBIENT_CARRIED = ("instruction_files", "system_line", "tools", "memory")
+SHA256 = re.compile(r"[0-9a-f]{64}")
+
+
+def ambient_row(directory: pathlib.Path, at: int, row: object) -> tuple[str, str] | None:
+    """Why `[[ambient]]` row `at` is not a probed declaration, as (class,
+    message), or None."""
+    where = f"ambient[{at}]"
+    files = row.get("instruction_files") if isinstance(row, dict) else None
+    tools = row.get("tools") if isinstance(row, dict) else None
+    probe = row.get("probe") if isinstance(row, dict) else None
+    if not isinstance(row, dict) or not has_text(row.get("instrument")) or not has_text(row.get("harness")) \
+            or not isinstance(files, list) or not all(
+                isinstance(f, dict) and has_text(f.get("path")) and isinstance(f.get("sha256"), str)
+                and SHA256.fullmatch(f["sha256"]) for f in files) \
+            or not isinstance(row.get("system_line"), str) \
+            or not isinstance(tools, list) or not all(has_text(t) for t in tools) \
+            or not has_text(row.get("memory")) or not isinstance(probe, dict):
+        return (
+            "results.ambient-undeclared",
+            f"{where} is not a declaration: `instrument`, `harness`, `instruction_files` (each `{{ path, sha256 }}`; "
+            f"may be empty), `system_line` (the text; may be empty), `tools` (may be empty), `memory`, and "
+            f"`probe = {{ evidence, sha256 }}`",
+        )
+    path = probe.get("evidence")
+    name = f"{where} (`{row['instrument']}`)"
+    if not has_text(path) or pathlib.PurePosixPath(path).is_absolute() or ".." in pathlib.PurePosixPath(path).parts \
+            or not named_exactly(directory, path):
+        return ("results.ambient-unprobed", f"{name}: its probe names no committed file here ({path!r})")
+    file = directory / path
+    if digest_of(file) != probe.get("sha256"):
+        return ("results.ambient-unprobed", f"{name}: `{path}` is not the file its sha256 names")
+    try:
+        seen = json.loads(read_text(file))
+    except (OSError, ValueError) as err:
+        return ("results.ambient-unprobed", f"{name}: `{path}` does not read as JSON: {err}")
+    if not isinstance(seen, dict) or seen.get("instrument") != row["instrument"] or not is_utc(seen.get("at")):
+        return ("results.ambient-unprobed", f"{name}: `{path}` is not a probe of `{row['instrument']}` at a UTC time")
+    differ = [key for key in AMBIENT_CARRIED if seen.get(key) != row.get(key)]
+    if differ:
+        return (
+            "results.ambient-unprobed",
+            f"{name}: declares {', '.join(f'`{k}`' for k in differ)} other than its probe saw it carry "
+            f"(`{path}`): the declaration is what the instrument carried, not what was intended",
+        )
+    return None
+
+
+def labelled(directory: pathlib.Path) -> bool:
+    """Whether a rule here declares `[[labels]]` rows: labellers ran."""
+    for path in rule_files(directory):
+        try:
+            labels = tomllib.loads(read_text(path)).get("labels")
+        except (OSError, ValueError, Unreadable):
+            continue
+        if isinstance(labels, list) and labels:
+            return True
+    return False
+
+
+def ambient_rule(directory: pathlib.Path, front: dict) -> list[tuple[str, str]]:
+    """The ambient-context rule's failures for `directory`, as (class,
+    message): every `[[ambient]]` row probed, or `ambient = "not applicable:
+    <why>"` where no instrument ran -- never under a rule that declares
+    `[[labels]]`."""
+    ambient = front.get("ambient")
+    if isinstance(ambient, str) and NOT_APPLICABLE.fullmatch(ambient):
+        if labelled(directory):
+            return [(
+                "results.ambient-undeclared",
+                "`ambient` says not applicable, and a rule here declares `[[labels]]`: its labellers are "
+                "instruments, and each declares what it carried",
+            )]
+        return []
+    if not isinstance(ambient, list) or not ambient:
+        return [(
+            "results.ambient-undeclared",
+            "declares no `[[ambient]]` rows (each instrument run through an agent harness: what it carried, as "
+            "probed) and no `ambient = \"not applicable: <why>\"`",
+        )]
+    return [found for at, row in enumerate(ambient) if (found := ambient_row(directory, at, row))]
 
 
 def registry_substrates(path: pathlib.Path) -> dict:
@@ -1207,6 +1302,9 @@ def claim_rules(directory: pathlib.Path, registry: dict) -> list[tuple[str, str]
                     failures.append(("results.control-not-seen-red", f"`{control}` is not seen red before the run: {why}"))
     # Rule 3, over history too.
     failures += repeat_fire(directory, front)
+    # The ambient-context rule (2026-10-15).
+    if match and match.group(1) > AMBIENT_LANDED:
+        failures += ambient_rule(directory, front)
     return failures
 
 
@@ -2458,7 +2556,7 @@ def main(argv: list[str]) -> int:
     parser.add_argument(
         "--claims",
         action="store_true",
-        help="hold only the claim rules (characterisation, controls seen red, one fire per row) over --root; needs no diet",
+        help="hold only the claim rules (characterisation, controls seen red, one fire per row, ambient context) over --root; needs no diet",
     )
     parser.add_argument(
         "--flags",

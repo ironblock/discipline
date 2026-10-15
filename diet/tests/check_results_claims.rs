@@ -7,18 +7,22 @@
 //! fixture root under `tests/fixtures/results-claims/bad/` fails exactly its
 //! own check, named on its `.reason`'s first line; each passing one passes;
 //! and the committed results are reported against `GRANDFATHERED_CLAIMS`,
-//! not failed.
+//! not failed. The ambient-context rule (2026-10-15) rides with them: an
+//! instrument run through an agent harness declares what it carried, as
+//! probed.
 
 use std::path::{Path, PathBuf};
 use std::process::{Command, Output};
 
-const CLASSES: [&str; 6] = [
+const CLASSES: [&str; 8] = [
     "results.characterisation-undeclared",
     "results.characterisation-mismatch",
     "results.characterisation-carries-verdict",
     "results.control-not-seen-red",
     "results.controls-undeclared",
     "results.repeat-fire",
+    "results.ambient-undeclared",
+    "results.ambient-unprobed",
 ];
 
 fn root() -> PathBuf {

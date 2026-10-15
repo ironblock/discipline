@@ -1,0 +1,2 @@
+results.ambient-undeclared
+Its rule declares `[[labels]]`, so labellers ran: "not applicable" does not answer for them.

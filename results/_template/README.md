@@ -6,6 +6,7 @@ figures = "referenced"
 product_sha256 = "b491f615ad737993319517a59c5d450c320ea7d20358e4787e41526baae05182"
 controls_run = ["null-regimen"]
 known_defects = []
+ambient = "not applicable: the template runs no judge, labeller, reader or coder"
 turns = 2
 prefill_tokens_total = 2048
 
@@ -64,6 +65,28 @@ A copy dated after the claim rules landed is held to them as well
   shows it red before the window, or `controls_run_absent` says why there is
   none;
 - a later fire of the same claim under the same rule declares `repeats`.
+
+A copy dated after the ambient-context rule landed declares its instruments'
+ambient context (`results/AGENTS.md`). Each judge, labeller, reader or coder
+run through an agent harness gets one row:
+
+```toml
+[[ambient]]
+instrument = "segment-reader"
+harness = "a subagent of the coding agent"
+instruction_files = [{ path = "AGENTS.md", sha256 = "<the file's sha256>" }]
+system_line = "<the system line it ran under, as it saw it>"
+tools = ["Read"]
+memory = "none"
+probe = { evidence = "ambient/segment-reader.probe.json", sha256 = "<its sha256>" }
+```
+
+The probe is a committed JSON file. It holds `instrument`, the four carried
+fields as the instrument actually carried them, and `at`, a UTC time. It is
+recorded by asking the instrument or by reading its harness's own record,
+never from what was meant to load. With no such instrument, the copy says
+`ambient = "not applicable: <why>"`, as this template does. A rule that
+declares `[[labels]]` has labellers, so that answer is not open to it.
 
 ## Observation
 
