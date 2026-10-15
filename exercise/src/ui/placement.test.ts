@@ -34,6 +34,11 @@ describe('where a side call is drawn', () => {
     expect(place(pending, trunk, 45, GAP).get('p')?.pending).toBe(true);
   });
 
+  it('is placed where it settled when it never started -- refused, the slots had no room for it -- and is not pending', () => {
+    const refused = [side('r', 'n0', { endedAt: 25 })];
+    expect(place(refused, trunk, 45, GAP).get('r')).toEqual({ top: 220 + GAP, leave: 100 - LEAVE, pending: false });
+  });
+
   it('pins once its request starts, and stays pinned as the trunk grows', () => {
     const started = [side('a', 'n0', { startedAt: 15 })];
     expect(place(started, trunk, 15, GAP).get('a')?.top).toBe(place(started, trunk, 45, GAP).get('a')?.top);

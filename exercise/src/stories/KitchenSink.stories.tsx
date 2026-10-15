@@ -49,6 +49,11 @@ export const Whole: Story = {
     const ids = [...canvasElement.querySelectorAll('.ex-branchcell')].map((c) => c.getAttribute('data-branch') ?? '');
     await expect(ids).toHaveLength(forks.length);
     await waitFor(async () => expect(ids.filter((id) => cableOf(canvasElement, id) === undefined)).toEqual([]));
+    // A meditation drawn below the side calls before it is pushed down at most by all of them stacked: one that started
+    // after it (fork 132, at a request before a mid-turn meditation) must not push it, or each layout pushes again.
+    const stacked = [...canvasElement.querySelectorAll<HTMLElement>('.ex-branchcell')].reduce((sum, cell) => sum + cell.offsetHeight, 0);
+    const pads = [...canvasElement.querySelectorAll<HTMLElement>('.ex-era__meditation')].map((m) => parseFloat(m.style.paddingTop) || 0);
+    await expect(pads.filter((pad) => pad > stacked)).toEqual([]);
   },
 };
 

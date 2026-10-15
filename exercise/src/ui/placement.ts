@@ -33,7 +33,7 @@ export interface Side {
   readonly at: string;
   readonly slot: number;
   readonly height: number;
-  /** Session time its request started; absent while it waits for its slot. */
+  /** Session time its request started; absent while it waits for its slot, or if it never got one. */
   readonly startedAt?: number;
   readonly endedAt?: number;
 }
@@ -47,20 +47,23 @@ export interface Placed {
 
 export function place(sides: readonly Side[], trunk: readonly Span[], now: number, gap: number): Map<string, Placed> {
   const anchors = new Map(trunk.map((s) => [s.id, s] as const));
-  // In the order they started; the ones still waiting last, in trunk order.
-  const order = sides.map((s, i) => ({ s, i })).sort((a, b) => (a.s.startedAt ?? Infinity) - (b.s.startedAt ?? Infinity) || a.i - b.i);
+  // When each was in time: when it started, or when it settled if it never did (refused: the slots had no room for it,
+  // #637); one still waiting is now, and follows the work down.
+  const when = (s: Side) => s.startedAt ?? s.endedAt;
+  // In that order; the ones still waiting last, in trunk order.
+  const order = sides.map((s, i) => ({ s, i })).sort((a, b) => (when(a.s) ?? Infinity) - (when(b.s) ?? Infinity) || a.i - b.i);
   const floors = new Map<number, number>();
   const done: { readonly bottom: number; readonly endedAt: number }[] = trunk.flatMap((s) => (s.endedAt !== undefined ? [{ bottom: s.bottom, endedAt: s.endedAt }] : []));
   const placed = new Map<string, Placed>();
   for (const { s } of order) {
     const anchor = anchors.get(s.at);
     if (!anchor) continue;
-    const start = s.startedAt ?? now;
+    const start = when(s) ?? now;
     let below = Number.NEGATIVE_INFINITY;
     for (const d of done) if (d.endedAt <= start) below = Math.max(below, d.bottom + gap);
     const top = Math.max(anchor.top, floors.get(s.slot) ?? 0, below);
     const leave = Math.max(anchor.top + ENTER, Math.min(top + ENTER, anchor.bottom - LEAVE));
-    placed.set(s.id, { top, leave, pending: s.startedAt === undefined });
+    placed.set(s.id, { top, leave, pending: when(s) === undefined });
     floors.set(s.slot, top + s.height + gap);
     if (s.endedAt !== undefined) done.push({ bottom: top + s.height, endedAt: s.endedAt });
   }

@@ -300,8 +300,8 @@ export function SessionView({ session, link = 'live', linkWhy, surface, onSurfac
     sides.sort((x, y) => (order.get(x.at) ?? 0) - (order.get(y.at) ?? 0));
     const spots = place(sides, trunk, session.now, gap);
     const next = new Map<string, Placement>();
-    // The lowest branch bottom per era, for the meditation that closes it.
-    const eraBottom = new Map<number, number>();
+    // Where each branch was placed, for the meditations below it.
+    const spans: { readonly top: number; readonly bottom: number }[] = [];
     let bottom = 0;
     for (const side of sides) {
       const spot = spots.get(side.id);
@@ -312,18 +312,22 @@ export function SessionView({ session, link = 'live', linkWhy, surface, onSurfac
       const opened = inlines.current.get(side.id);
       const leave = opened ? opened.getBoundingClientRect().top - base + ENTER : spot.leave;
       next.set(side.id, { ...spot, leave, reach: cellEl.getBoundingClientRect().left - anchorEl.getBoundingClientRect().right });
-      const era = eraOf.get(side.at) ?? 0;
-      eraBottom.set(era, Math.max(eraBottom.get(era) ?? 0, spot.top + side.height));
+      spans.push({ top: spot.top, bottom: spot.top + side.height });
       bottom = Math.max(bottom, spot.top + side.height + gap);
     }
     // A meditation is a barrier: the refill happens after every side call before it
     // has finished, so it is drawn below all of them, and only it moves the trunk.
+    // Before it is drawn above it, not anchored in an earlier era: a side call
+    // placed by time below a meditation it preceded, counted, pushed the
+    // meditation down, which moved the side call down with the trunk, which
+    // pushed again on every layout (#862). What is above the meditation does not
+    // move with its pad, so the pad settles.
     const pads = new Map<number, number>();
     for (const [era, el] of meditations.current) {
       // The wrapper's own top does not move with its padding: the pad is inside it.
       const natural = el.getBoundingClientRect().top - base;
       let before = 0;
-      for (const [e, b] of eraBottom) if (e < era) before = Math.max(before, b);
+      for (const span of spans) if (span.top < natural) before = Math.max(before, span.bottom);
       const pad = Math.max(0, Math.ceil(before + gap - natural));
       if (pad > 0) pads.set(era, pad);
     }
