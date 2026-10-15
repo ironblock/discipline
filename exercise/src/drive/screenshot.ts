@@ -10,6 +10,7 @@
  * `cwd` and `files`, and `projections.ts` hands it to `diet check-log`.
  */
 
+import { T1_CWD } from './approval.ts';
 import { png } from './png.ts';
 import type { ScriptedFile, Timings } from './script.ts';
 import type { Beat } from './specimen.ts';
@@ -66,7 +67,7 @@ export const SCREENSHOT: readonly Beat[] = [
         stop: 'tool',
         timings: timings(680, 0, 400, 36, 880),
       },
-      { kind: 'tool.begin', t: 1320, id: 't/1', turn: 1, after: 'q/1#response', tool: 'bash', args: { command: 'node shot.mjs --out shots/scene.png' }, cwd: '~/git/experiments/t1' },
+      { kind: 'tool.begin', t: 1320, id: 't/1', turn: 1, after: 'q/1#response', tool: 'bash', args: { command: 'node shot.mjs --out shots/scene.png' }, cwd: T1_CWD },
       { kind: 'tool.end', t: 4100, id: 't/1', exit: 0, output: 'wrote shots/scene.png (160x96)\n', files: [SCENE] },
       { kind: 'request', t: 4120, id: 'q/2', lane: 'trunk', slot: 0, turn: 1 },
       {

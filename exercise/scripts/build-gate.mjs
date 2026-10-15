@@ -76,7 +76,10 @@ if (/\b__wbg_init\b/.test(text)) fail('the glue still names __wbg_init, which it
 if (/\b(fetch|XMLHttpRequest|WebSocket|EventSource|importScripts)\s*\(/.test(text)) fail('the glue still makes a network call');
 writeFileSync(glue, text);
 const typings = path.join(out, 'diet_wasm.d.ts');
-writeFileSync(typings, readFileSync(typings, 'utf8').replace(/^export default function __wbg_init\b.*\n/m, ''));
+// `__wbg_init`'s signature goes with its JSDoc block, which would otherwise document nothing (#437).
+const declared = readFileSync(typings, 'utf8').replace(/^\/\*\*\n(?:\*.*\n)*?\*\/\nexport default function __wbg_init\b.*\n/m, '');
+if (/\*\/\s*$/.test(declared)) fail('the typings end on a JSDoc block that documents nothing');
+writeFileSync(typings, declared);
 
 const bound = path.join(out, 'diet_wasm_bg.wasm');
 writeFileSync(path.join(out, 'bytes.js'), `export default ${JSON.stringify(readFileSync(bound).toString('base64'))};\n`);
