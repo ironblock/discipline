@@ -10,15 +10,15 @@ import { fold } from '../session/fold.ts';
 import { CannedTransport, snapshot } from './canned.ts';
 import { assetAnswer, assetModule, importedFiles, read } from './files.ts';
 import type { FileSource } from './files.ts';
-import type { FileRef, LogLine } from './log.ts';
-import { SCENE, SCENE_PNG, SCENE_SHA256, SCREENSHOT } from './screenshot.ts';
+import type { LogLine } from './log.ts';
+import { SCENE, SCENE_PNG, SCENE_REF, SCENE_SHA256, SCREENSHOT } from './screenshot.ts';
 
 /**
  * A tool call's file (#372): read by digest from a source and refused unless
  * its bytes hash to the digest -- one reader for `serve`'s `GET /files` and a
  * recording's published assets (ruled 5983588781, 5983595066).
  */
-const ref: FileRef = { path: 'shots/scene.png', sha256: SCENE_SHA256, media_type: 'image/png', bytes: SCENE_PNG.length };
+const ref = SCENE_REF;
 const answering = (bytes: Uint8Array): FileSource => () => Promise.resolve({ kind: 'bytes', bytes });
 const moduleUrl = (text: string) => `data:text/javascript;base64,${Buffer.from(text).toString('base64')}`;
 

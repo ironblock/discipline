@@ -6,7 +6,7 @@ import { PHASES } from '../App.tsx';
 import { CannedTransport, snapshot } from '../drive/canned.ts';
 import { assetModule, importedFiles } from '../drive/files.ts';
 import type { FileSource } from '../drive/files.ts';
-import { SCENE_PNG, SCENE_SHA256, SCREENSHOT } from '../drive/screenshot.ts';
+import { SCENE_PNG, SCENE_REF, SCENE_SHA256, SCREENSHOT } from '../drive/screenshot.ts';
 import { fold } from '../session/fold.ts';
 import { useSession } from '../session/useSession.ts';
 import { SessionView } from '../ui/SessionView.tsx';
@@ -27,7 +27,11 @@ export default meta;
 
 const surface = { curtain: true, gaps: false } as const;
 const settled = fold(snapshot(SCREENSHOT, { beat: SCREENSHOT.length }));
-const shot = (root: HTMLElement) => root.querySelector<HTMLElement>('.ex-trunk [data-tone="tool"] .ex-file');
+/** The file in the trunk's block of TONE: the tool call's result, or the operator's ask. */
+const fileIn = (root: HTMLElement, tone: 'tool' | 'user') => root.querySelector<HTMLElement>(`.ex-trunk [data-tone="${tone}"] .ex-file`);
+const shot = (root: HTMLElement) => fileIn(root, 'tool');
+/** What each block calls its files. */
+const LISTED = { tool: 'the files it wrote', user: 'what the operator attached' } as const;
 
 /** The session as its log has it, read through SOURCE. */
 function Logged({ source }: { readonly source?: FileSource }) {
@@ -42,17 +46,18 @@ function Driven() {
   return <SessionView session={session} surface={surface} follow files={transport.file} composer={{ phases: PHASES, dispatch: (command) => transport.dispatch(command) }} />;
 }
 
-/** The image, drawn: loaded, at its own size, from a blob of the checked bytes -- never from its path. */
-async function drawn(root: HTMLElement) {
+/** The image in the block of TONE, drawn: loaded, at its own size, from a blob of the checked bytes -- never from its path. */
+async function drawn(root: HTMLElement, tone: 'tool' | 'user' = 'tool') {
   const image = await waitFor(async () => {
-    const found = shot(root)?.querySelector<HTMLImageElement>('img.ex-file__image');
+    const found = fileIn(root, tone)?.querySelector<HTMLImageElement>('img.ex-file__image');
     await expect(found).not.toBeNull();
     await expect(found!.complete && found!.naturalWidth).toBe(160);
     return found!;
   });
   await expect(image.src.startsWith('blob:')).toBe(true);
   await expect(image.dataset['sha256']).toBe(SCENE_SHA256);
-  await expect(shot(root)?.querySelector('.ex-file__ref')?.textContent).toBe(`shots/scene.png · image/png · ${(SCENE_PNG.length / 1024).toFixed(1)} KB · ${SCENE_SHA256.slice(0, 12)}`);
+  await expect(fileIn(root, tone)?.querySelector('.ex-file__ref')?.textContent).toBe(`shots/scene.png · image/png · ${(SCENE_PNG.length / 1024).toFixed(1)} KB · ${SCENE_SHA256.slice(0, 12)}`);
+  await expect(root.querySelector(`.ex-trunk [data-tone="${tone}"] .ex-files`)?.getAttribute('aria-label')).toBe(LISTED[tone]);
 }
 
 /** What is said in place of an image that is not drawn. */
@@ -101,27 +106,13 @@ export const Withheld: StoryObj = {
 };
 
 /** The operator's screenshot on the ask (#372, log v5's `ask.files`, #458): the same session, the scene attached to its ask. */
-const ref = { path: 'shots/scene.png', sha256: SCENE_SHA256, media_type: 'image/png', bytes: SCENE_PNG.length };
-const attached = fold(snapshot(SCREENSHOT, { beat: SCREENSHOT.length }).map((line) => (line.kind === 'ask' ? { ...line, files: [ref] } : line)));
-const asked = (root: HTMLElement) => root.querySelector<HTMLElement>('.ex-trunk [data-tone="user"] .ex-file');
-
-/** The operator's attachment on their ask, drawn from its checked bytes: as `serve`'s GET /files answers, or a replay's asset. */
-async function drawnOnTheAsk(root: HTMLElement) {
-  const image = await waitFor(async () => {
-    const found = asked(root)?.querySelector<HTMLImageElement>('img.ex-file__image');
-    await expect(found).not.toBeNull();
-    await expect(found!.complete && found!.naturalWidth).toBe(160);
-    return found!;
-  });
-  await expect(image.src.startsWith('blob:')).toBe(true);
-  await expect(image.dataset['sha256']).toBe(SCENE_SHA256);
-  await expect(root.querySelector('.ex-trunk [data-tone="user"] .ex-files')?.getAttribute('aria-label')).toBe('what the operator attached');
-}
+const attached = fold(snapshot(SCREENSHOT, { beat: SCREENSHOT.length }).map((line) => (line.kind === 'ask' ? { ...line, files: [SCENE_REF] } : line)));
+const asked = (root: HTMLElement) => fileIn(root, 'user');
 
 export const AskAttachedLive: StoryObj = {
   name: 'the operator’s screenshot on their ask, live: read by digest and drawn',
   render: () => <SessionView session={attached} surface={surface} composer={{ phases: PHASES }} files={() => Promise.resolve({ kind: 'bytes', bytes: SCENE_PNG })} />,
-  play: async ({ canvasElement }) => drawnOnTheAsk(canvasElement),
+  play: async ({ canvasElement }) => drawn(canvasElement, 'user'),
 };
 
 export const AskAttachedReplayed: StoryObj = {
@@ -134,7 +125,7 @@ export const AskAttachedReplayed: StoryObj = {
       files={importedFiles((sha256) => (sha256 === SCENE_SHA256 ? `data:text/javascript;base64,${btoa(assetModule(SCENE_PNG))}` : 'data:text/javascript,'))}
     />
   ),
-  play: async ({ canvasElement }) => drawnOnTheAsk(canvasElement),
+  play: async ({ canvasElement }) => drawn(canvasElement, 'user'),
 };
 
 export const AskAttachedNotTheBytes: StoryObj = {

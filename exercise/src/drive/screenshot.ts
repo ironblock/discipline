@@ -11,6 +11,7 @@
  */
 
 import { T1_CWD } from './approval.ts';
+import type { FileRef } from './log.ts';
 import { png } from './png.ts';
 import type { ScriptedFile, Timings } from './script.ts';
 import type { Beat } from './specimen.ts';
@@ -34,6 +35,9 @@ export const SCENE_PNG = png(160, 96, (x, y) => {
 export const SCENE_SHA256 = '181894c2119af02298cc86a30ed1f490cf95c79c8567022e1f102511d010bf77';
 
 export const SCENE: ScriptedFile = { path: 'shots/scene.png', media_type: 'image/png', sha256: SCENE_SHA256, bytes: SCENE_PNG };
+
+/** The scene as the log names it (#479): by reference, its bytes counted -- one source for tests and stories. */
+export const SCENE_REF: FileRef = { path: SCENE.path, sha256: SCENE.sha256, media_type: SCENE.media_type, bytes: SCENE_PNG.length };
 
 export const SCREENSHOT: readonly Beat[] = [
   {
