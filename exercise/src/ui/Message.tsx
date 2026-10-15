@@ -122,16 +122,6 @@ function HarnessNote({ note, label, text }: { readonly note: string; readonly la
 }
 
 /**
- * The model on the trunk: what it read, apart from what it wrote. The
- * reading is its header, along its top edge -- right under the ask or tool
- * output it mostly is; the writing is its body, reasoning in italic then the
- * answer streamed from line 1, and its footer. Both count up while they run.
- * The tool calls it ended in (`calls`) are the nodes after it (ToolBlock):
- * then its footer is its text's share, where the drive said where the calls
- * began, and nothing where it did not -- the whole closes the first call.
- * Having written no text, it is one row: what it read.
- */
-/**
  * The warrant gate on a step (#850): the probes that fired, strongest first, or that none did and the highest score; a
  * gate that did not decide says what it did instead. Its title has every probe, the threshold, and who scored them.
  */
@@ -156,6 +146,16 @@ const gateStat = (gate: Gate) => {
   };
 };
 
+/**
+ * The model on the trunk: what it read, apart from what it wrote. The
+ * reading is its header, along its top edge -- right under the ask or tool
+ * output it mostly is; the writing is its body, reasoning in italic then the
+ * answer streamed from line 1, and its footer. Both count up while they run.
+ * The tool calls it ended in (`calls`) are the nodes after it (ToolBlock):
+ * then its footer is its text's share, where the drive said where the calls
+ * began, and nothing where it did not -- the whole closes the first call.
+ * Having written no text, it is one row: what it read.
+ */
 export function AssistantMessage({ node, calls = [] }: { readonly node: Folded<AssistantNode>; readonly calls?: readonly Folded<ToolNode>[] }) {
   const { curtain } = useSurface();
   const [thinking, setThinking] = useState(false);

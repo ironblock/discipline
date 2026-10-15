@@ -562,7 +562,6 @@ interface GenerationBuilder {
   failed?: LineOf<'request.failed'>;
 }
 
-/** G, drawn; a request that names no slot (v0's never do) is on UNNAMED: the trunk's, or its fork's side slot. */
 /** A step's gate lines, one per probe (#850), as the step's gate: the scores are the classifier's decimal strings. */
 function gateOf(lines: readonly LineOf<'warrant.gated'>[]): Gate {
   const first = lines[0]!;
@@ -579,6 +578,7 @@ function gateOf(lines: readonly LineOf<'warrant.gated'>[]): Gate {
   };
 }
 
+/** G, drawn; a request that names no slot (v0's never do) is on UNNAMED: the trunk's, or its fork's side slot. */
 function generation(g: GenerationBuilder, unnamed: number): Generation {
   const { request, response, cancelled, failed } = g;
   const streamed = (piece: 'text' | 'reasoning') => g.deltas.map((d) => d[piece] ?? '').join('');
