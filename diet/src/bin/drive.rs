@@ -115,6 +115,8 @@ fn serve_usage() -> String {
     out.push_str("--shown-root REAL=SHOWN (a canned substrate's only, as `scenario` passes\n");
     out.push_str("it) shows the model SHOWN wherever REAL would appear, fixes background job\n");
     out.push_str("ids and the pid it is shown, and declares both on session.start.\n");
+    out.push_str("--classifier-endpoint URL (a canned substrate's only, as `scenario` passes\n");
+    out.push_str("it) scores the warrant gate's steps on the scenario's canned classifier.\n");
     out.push_str("--key-file names a file holding the endpoint's key, sent as a bearer\n");
     out.push_str("credential; it is never taken as an argument.\n");
     out.push_str("--auth-file names a file holding user:password; every request must then\n");
@@ -190,6 +192,24 @@ struct ServeArgs {
     /// `--shown-root REAL=SHOWN`, each: what a scenario on a canned
     /// substrate shows its model in place of where it ran.
     shown_roots: Vec<String>,
+    /// `--classifier-endpoint`: a scenario's canned classifier (#862).
+    classifier_endpoint: Option<String>,
+}
+
+/// Whether `regime`'s substrate has canned weights: every answer written in
+/// advance.
+fn canned_substrate(regime: Option<&diet::formats::record::Regime>) -> bool {
+    regime
+        .and_then(|regime| regime.substrates.first())
+        .and_then(|substrate| {
+            diet::drive::registry::identity(diet::drive::registry::REGISTRY, &substrate.id).ok()
+        })
+        .is_some_and(|identity| {
+            matches!(
+                identity.weights,
+                diet::formats::record::Weights::Canned { .. }
+            )
+        })
 }
 
 /// `--shown-root`'s roots, refused unless the substrate is canned: a path
@@ -203,18 +223,7 @@ fn shown_roots_for(
     if given.is_empty() {
         return Ok(roots);
     }
-    let canned = regime
-        .and_then(|regime| regime.substrates.first())
-        .and_then(|substrate| {
-            diet::drive::registry::identity(diet::drive::registry::REGISTRY, &substrate.id).ok()
-        })
-        .is_some_and(|identity| {
-            matches!(
-                identity.weights,
-                diet::formats::record::Weights::Canned { .. }
-            )
-        });
-    if !canned {
+    if !canned_substrate(regime) {
         return Err(
             "--shown-root is a scenario's, and only a canned substrate takes it: a real model \
              is shown where it really ran"
@@ -225,6 +234,36 @@ fn shown_roots_for(
         roots.add(root)?;
     }
     Ok(roots)
+}
+
+/// `--classifier-endpoint` taken by the warrant gate (#862): refused unless
+/// the substrate is canned -- a real model's steps are scored where its
+/// regimen says -- and unless the regimen gates by a classifier.
+fn classifier_endpoint_for(
+    given: Option<&str>,
+    regime: Option<&diet::formats::record::Regime>,
+    interview: Option<&mut Interview>,
+) -> Result<(), String> {
+    let Some(endpoint) = given else {
+        return Ok(());
+    };
+    if !canned_substrate(regime) {
+        return Err(
+            "--classifier-endpoint is a scenario's, and only a canned substrate takes it: a real \
+             model's steps are scored where its regimen says"
+                .to_owned(),
+        );
+    }
+    match interview.map(|interview| &mut interview.warrant_gate) {
+        Some(diet::drive::warrant_gate::WarrantGate::Classifier(classifier)) => {
+            classifier.served_at(endpoint)
+        }
+        _ => Err(
+            "--classifier-endpoint names a classifier, and the regimen gates no step by a \
+             classifier"
+                .to_owned(),
+        ),
+    }
 }
 
 /// Where an offboard extraction seat is reached, as `serve`'s flags say.
@@ -267,6 +306,7 @@ fn serve_args(args: &[String]) -> Option<ServeArgs> {
     let mut seat = SeatArgs::default();
     let mut ui = None;
     let mut shown_roots = Vec::new();
+    let mut classifier_endpoint = None;
     let mut given = args.iter();
     while let Some(flag) = given.next() {
         let value = given.next()?;
@@ -311,6 +351,9 @@ fn serve_args(args: &[String]) -> Option<ServeArgs> {
         } else if flag == "--shown-root" {
             shown_roots.push(value.clone());
             true
+        } else if flag == "--classifier-endpoint" {
+            classifier_endpoint = Some(value.clone());
+            true
         } else if flag == "--allow-origin" {
             let origin = is_an_origin(value);
             if origin {
@@ -353,6 +396,7 @@ fn serve_args(args: &[String]) -> Option<ServeArgs> {
         seat,
         ui,
         shown_roots,
+        classifier_endpoint,
     })
 }
 
@@ -382,6 +426,7 @@ fn serve(args: &[String]) -> ExitCode {
         seat,
         ui,
         shown_roots,
+        classifier_endpoint,
     }) = serve_args(args)
     else {
         eprint!("{}", serve_usage());
@@ -515,10 +560,17 @@ fn serve(args: &[String]) -> ExitCode {
     }
     // What the capture gap forks under (#374), when the regimen warrants
     // forks: its rules, and a working object under its regime.
-    let interview = match serving_interview(regimen_file.as_deref(), regime.as_ref()) {
+    let mut interview = match serving_interview(regimen_file.as_deref(), regime.as_ref()) {
         Ok(interview) => interview,
         Err(why) => return fail(EXIT_INPUT, &why),
     };
+    if let Err(why) = classifier_endpoint_for(
+        classifier_endpoint.as_deref(),
+        regime.as_ref(),
+        interview.as_mut(),
+    ) {
+        return fail(EXIT_USAGE, &why);
+    }
     // What the model's calls run under, opened now: a confinement that
     // cannot open refuses before any request is made or anything binds
     // (#298 point 8).

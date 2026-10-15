@@ -4,8 +4,9 @@
 //! The file is JSON Lines in the record's value space, read with the
 //! record's own reader (`diet/scenarios/README.md` is its note). Its
 //! first line names the scenario, its two regimens and its head; every other
-//! line is one `reply` the canned substrate answers with, one `step` the
-//! runner drives, or one `expect` the log must meet.
+//! line is one `reply` the canned substrate answers with, one `classify`
+//! rule its canned classifier scores by, one `step` the runner drives, or one
+//! `expect` the log must meet.
 
 use std::collections::BTreeMap;
 use std::fmt::{self, Write as _};
@@ -32,6 +33,8 @@ pub struct Scenario {
     pub seed: BTreeMap<String, String>,
     /// The canned substrate's replies, in the file's order.
     pub replies: Vec<Reply>,
+    /// Its canned classifier's rules, in the file's order (#862).
+    pub classified: Vec<Classify>,
     /// What the runner drives, in order.
     pub steps: Vec<Step>,
     /// What the log must show.
@@ -54,6 +57,19 @@ pub struct Reply {
     /// The prompt its usage reports, in tokens (#798); absent, the canned
     /// server's own count.
     pub prompt_tokens: Option<u64>,
+}
+
+/// One rule of the canned classifier (#862): a window holding `when` scores
+/// a hypothesis holding `hypothesis` at `score`, a decimal from 0 to 1 as
+/// written. A pair no rule names scores 0.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Classify {
+    /// Text the window holds.
+    pub when: String,
+    /// Text the hypothesis holds.
+    pub hypothesis: String,
+    /// The score, as written.
+    pub score: String,
 }
 
 /// One call a reply makes.
@@ -257,9 +273,33 @@ impl Scenario {
             .collect()
     }
 
+    /// The canned classifier (#862): this scenario's `classify` rules, under
+    /// the model, revision and compute units `classifier` declares.
+    #[must_use]
+    pub fn classifying(
+        &self,
+        classifier: &crate::drive::warrant_gate::Classifier,
+    ) -> crate::client::stub::Classifying {
+        crate::client::stub::Classifying {
+            model: format!("{}@{}", classifier.model, classifier.revision),
+            compute_units: classifier.compute_units.clone(),
+            rules: self
+                .classified
+                .iter()
+                .map(|rule| crate::client::stub::ClassifyRule {
+                    when: rule.when.clone(),
+                    hypothesis: rule.hypothesis.clone(),
+                    // Read when the line was: a decimal from 0 to 1.
+                    score: rule.score.parse().unwrap_or(0.0),
+                })
+                .collect(),
+        }
+    }
+
     /// The canned substrate's identity (#760): the sha256 of its replies,
     /// each rendered as the record renders a value, one per line, in the
-    /// file's order. What `canned-scenario`'s `engine_identity_is` names,
+    /// file's order, then its classifier's rules as `{"classify": ...}`
+    /// (#862). What `canned-scenario`'s `engine_identity_is` names,
     /// and what a run says it played.
     #[must_use]
     pub fn replies_digest(&self) -> String {
@@ -297,6 +337,18 @@ impl Scenario {
                 );
             }
             json::render(&Value::Object(members), &mut out);
+            out.push('\n');
+        }
+        // The canned classifier's rules, after the replies: a scenario with
+        // none digests as it always has.
+        for rule in &self.classified {
+            let members = BTreeMap::from([
+                ("when".to_owned(), text(&rule.when)),
+                ("hypothesis".to_owned(), text(&rule.hypothesis)),
+                ("score".to_owned(), text(&rule.score)),
+            ]);
+            let line = BTreeMap::from([("classify".to_owned(), Value::Object(members))]);
+            json::render(&Value::Object(line), &mut out);
             out.push('\n');
         }
         crate::digest::sha256_hex(out.as_bytes())
@@ -347,6 +399,10 @@ pub fn parse(text: &str) -> Result<Scenario, ScenarioError> {
             let reply = fields.object("reply")?;
             fields.done()?;
             scenario.replies.push(reply_of(Fields::of(reply, at))?);
+        } else if fields.has("classify") {
+            let rule = fields.object("classify")?;
+            fields.done()?;
+            scenario.classified.push(classify_of(Fields::of(rule, at))?);
         } else if fields.has("step") {
             scenario.steps.push(step_of(fields)?);
         } else if fields.has("expect") {
@@ -356,7 +412,7 @@ pub fn parse(text: &str) -> Result<Scenario, ScenarioError> {
             }
             scenario.expects.push(expect);
         } else {
-            return Err(fields.wrong("a `reply`, `step` or `expect` line"));
+            return Err(fields.wrong("a `reply`, `classify`, `step` or `expect` line"));
         }
     }
     Ok(scenario)
@@ -399,6 +455,7 @@ fn header(mut fields: Fields) -> Result<Scenario, ScenarioError> {
         approvals,
         seed,
         replies: Vec::new(),
+        classified: Vec::new(),
         steps: Vec::new(),
         expects: Vec::new(),
     })
@@ -411,6 +468,33 @@ fn is_relative(path: &str) -> bool {
         && path
             .components()
             .all(|part| matches!(part, std::path::Component::Normal(_)))
+}
+
+fn classify_of(mut fields: Fields) -> Result<Classify, ScenarioError> {
+    let when = fields.text("when")?;
+    let hypothesis = fields.text("hypothesis")?;
+    let score = fields.text("score")?;
+    let decimal = score.split_once('.').is_some_and(|(whole, part)| {
+        !whole.is_empty()
+            && !part.is_empty()
+            && whole
+                .bytes()
+                .chain(part.bytes())
+                .all(|b| b.is_ascii_digit())
+    });
+    if !decimal
+        || !score
+            .parse::<f64>()
+            .is_ok_and(|value| (0.0..=1.0).contains(&value))
+    {
+        return Err(fields.wrong("`score` a decimal from 0 to 1, written as text"));
+    }
+    fields.done()?;
+    Ok(Classify {
+        when,
+        hypothesis,
+        score,
+    })
 }
 
 fn reply_of(mut fields: Fields) -> Result<Reply, ScenarioError> {
@@ -1205,18 +1289,39 @@ fn running(
     let runs_commands = crate::drive::tool_loop::declared(&read)
         .map_err(|why| Failure(format!("{}: {why}", regimen.display())))?
         .is_some();
+    // The warrant gate's classifier, when the regimen gates by one: on the
+    // canned substrate, the scenario's own (#862), reporting the model and
+    // compute units the regimen declares.
+    let classifier = match crate::drive::warrant_gate::read(&read)
+        .map_err(|why| Failure(format!("{}: {why}", regimen.display())))?
+    {
+        crate::drive::warrant_gate::WarrantGate::Classifier(classifier) => Some(classifier),
+        crate::drive::warrant_gate::WarrantGate::Regex => None,
+    };
+    if classifier.is_none() && !scenario.classified.is_empty() {
+        return Err(Failure(format!(
+            "the scenario scores `classify` lines and {} gates no step by a classifier",
+            regimen.display()
+        )));
+    }
     // The canned substrate: the scenario's own replies, routed.
     let stub = if live {
         None
     } else {
         said["replies_sha256"] = serde_json::Value::String(scenario.replies_digest());
-        Some(
-            crate::client::stub::Stub::routing(
+        let build_info = crate::drive::canned::scenario_build_info();
+        let listening = match &classifier {
+            None => crate::client::stub::Stub::routing(scenario.routes(), &build_info, 0),
+            Some(classifier) => crate::client::stub::Stub::routing_classifying(
                 scenario.routes(),
-                &crate::drive::canned::scenario_build_info(),
+                &build_info,
                 0,
-            )
-            .map_err(|why| Failure(format!("the canned substrate cannot listen: {why}")))?,
+                scenario.classifying(classifier),
+            ),
+        };
+        Some(
+            listening
+                .map_err(|why| Failure(format!("the canned substrate cannot listen: {why}")))?,
         )
     };
     let endpoint = match (&options.endpoint, &stub) {
@@ -1299,6 +1404,12 @@ fn running(
                 .arg("--shown-root")
                 .arg(format!("{}={SHOWN_WORKTREE}", dir.display()));
         }
+    }
+    // The canned classifier answers on the canned substrate's own port.
+    if let (Some(stub), Some(_)) = (&stub, &classifier) {
+        serve
+            .arg("--classifier-endpoint")
+            .arg(format!("http://{}", stub.address()));
     }
     let mut child = serve
         .spawn()
@@ -1451,6 +1562,14 @@ mod tests {
             ]
         );
         assert_eq!(
+            read.classified,
+            [Classify {
+                when: "No such file".to_owned(),
+                hypothesis: "went wrong".to_owned(),
+                score: "0.93".to_owned(),
+            }]
+        );
+        assert_eq!(
             read.steps,
             [
                 Step::StartPhase {
@@ -1568,6 +1687,10 @@ mod tests {
         let mut other = read.clone();
         other.replies[2].text.push('!');
         assert_ne!(other.replies_digest(), digest);
+        // The canned classifier's rules are what it plays too (#862).
+        let mut rescored = read.clone();
+        rescored.classified[0].score = "0.5".to_owned();
+        assert_ne!(rescored.replies_digest(), digest);
         assert_eq!(read.routes().len(), 3);
     }
 
@@ -1586,6 +1709,19 @@ mod tests {
             (r#"{"expect":"fork","at_least":0}"#, 2),
             (r#"{"step":"end","reply":{"text":"x"}}"#, 2),
             (r#"{"step":"wait"}"#, 2),
+            (r#"{"classify":{"when":"x","hypothesis":"y"}}"#, 2),
+            (
+                r#"{"classify":{"when":"x","hypothesis":"y","score":"1.5"}}"#,
+                2,
+            ),
+            (
+                r#"{"classify":{"when":"x","hypothesis":"y","score":"high"}}"#,
+                2,
+            ),
+            (
+                r#"{"classify":{"when":"x","hypothesis":"y","score":"0.5","loud":true}}"#,
+                2,
+            ),
         ] {
             let text = format!("{header}\n{body}\n");
             assert!(

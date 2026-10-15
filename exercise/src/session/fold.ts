@@ -905,6 +905,9 @@ export function fold(written: readonly LogLine[]): Session {
       // A fork screened out of its gap (#611): no branch to draw; folded into no node yet.
       case 'fork.skipped':
         break;
+      // A step's warrant-gate decision (#850): folded into no node yet; the kitchen sink writes them (#862).
+      case 'warrant.gated':
+        break;
       // A meditation held for the operator (#150's gate): it waits on them until the next meditation line, the refill.
       case 'meditation.held':
         held = { atTurn: e.at_turn, reason: e.reason, unaddressed: e.unaddressed };

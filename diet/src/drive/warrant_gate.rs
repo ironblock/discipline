@@ -110,6 +110,25 @@ pub enum Aggregate {
     Mean,
 }
 
+impl Classifier {
+    /// The classifier served at `endpoint` instead of the regimen's: a
+    /// scenario's canned one (#862), on the canned substrate's port.
+    ///
+    /// # Errors
+    ///
+    /// An endpoint that is not loopback, as the regimen's must be.
+    pub fn served_at(&mut self, endpoint: &str) -> Result<(), String> {
+        if !loopback(endpoint) {
+            return Err(format!(
+                "{endpoint} is not a loopback address: the step's reasoning and tool output go \
+                 to it over plain HTTP"
+            ));
+        }
+        endpoint.clone_into(&mut self.endpoint);
+        Ok(())
+    }
+}
+
 /// One probe: a class, the windows it reads, its hypotheses and how they
 /// combine, and the threshold its aggregate must reach.
 #[derive(Debug, Clone, PartialEq)]

@@ -59,6 +59,13 @@ describe('the kitchen sink, compared lane by lane', () => {
     expect(laneDiff(INTERLEAVED, moved)).not.toEqual([]);
   });
 
+  it('leaves a gate’s latency out, a clock like t, and compares its decision (#862)', () => {
+    const gated = (lines: LogLine[], request: number, latency: number, score: string) =>
+      [...lines, { seq: 90, t: 90, kind: 'warrant.gated', request, outcome: 'decided', probe: 'gotcha', score, fired: true, latency_ms: latency }] as unknown as LogLine[];
+    expect(laneDiff(gated(TRUNK_ASK, 2, 2, '0.930000'), gated(INTERLEAVED, 11, 41, '0.930000'))).toEqual([]);
+    expect(laneDiff(gated(TRUNK_ASK, 2, 2, '0.930000'), gated(INTERLEAVED, 11, 2, '0.040000')).join('\n')).toMatch(/trunk.*warrant\.gated.*score/);
+  });
+
   it('reads a trigger that names a line by its seq as that line’s lane and place', () => {
     const triggered = (log: readonly LogLine[], at: number) => log.map((line) => (line.kind === 'fork' ? { ...line, trigger: `open:${at}` } : line)) as LogLine[];
     expect(laneDiff(triggered(TRUNK_ASK, 2), triggered(INTERLEAVED, 11))).toEqual([]);
