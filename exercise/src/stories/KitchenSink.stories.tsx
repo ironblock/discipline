@@ -49,11 +49,20 @@ export const Whole: Story = {
     const ids = [...canvasElement.querySelectorAll('.ex-branchcell')].map((c) => c.getAttribute('data-branch') ?? '');
     await expect(ids).toHaveLength(forks.length);
     await waitFor(async () => expect(ids.filter((id) => cableOf(canvasElement, id) === undefined)).toEqual([]));
-    // A meditation drawn below the side calls before it is pushed down at most by all of them stacked: one that started
-    // after it (fork 132, at a request before a mid-turn meditation) must not push it, or each layout pushes again.
+    // The layout is a fixed point (#862): a meditation's pad resizes the page, which lays it out again, so pads that a
+    // pass changes are padded again on the next -- the trunk ran off the page that way. Once settled, another pass gives
+    // the same pads; and none is more than every side call stacked, which a pass pinned at the browser's limit is.
+    const pads = () => [...canvasElement.querySelectorAll<HTMLElement>('.ex-era__meditation')].map((m) => parseFloat(m.style.paddingTop) || 0);
+    const settled = await waitFor(async () => {
+      const first = pads();
+      await new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+      await expect(pads()).toEqual(first);
+      return first;
+    });
+    await new Promise((resolve) => setTimeout(resolve, 250));
+    await expect(pads()).toEqual(settled);
     const stacked = [...canvasElement.querySelectorAll<HTMLElement>('.ex-branchcell')].reduce((sum, cell) => sum + cell.offsetHeight, 0);
-    const pads = [...canvasElement.querySelectorAll<HTMLElement>('.ex-era__meditation')].map((m) => parseFloat(m.style.paddingTop) || 0);
-    await expect(pads.filter((pad) => pad > stacked)).toEqual([]);
+    await expect(settled.filter((pad) => pad > stacked)).toEqual([]);
   },
 };
 
