@@ -1218,6 +1218,16 @@ def derives_from_a_sibling(front: dict, siblings: dict[str, dict]) -> bool:
     return any(other.get("product_sha256") == source for other in siblings.values()) if source else False
 
 
+def first_fire(row: tuple[str, str], siblings: dict[str, dict]) -> str | None:
+    """The first fire of `row` among `siblings`: by directory date, then
+    window_start."""
+    same = sorted(
+        (name for name, other in siblings.items() if row_of(other) == row and not derives_from_a_sibling(other, siblings)),
+        key=lambda name: (name[:10], str(siblings[name].get("window_start", "")), name),
+    )
+    return same[0] if same else None
+
+
 def repeat_fire(directory: pathlib.Path, front: dict) -> list[tuple[str, str]]:
     siblings = fires(directory.parent)
     row = row_of(front)
@@ -1225,11 +1235,7 @@ def repeat_fire(directory: pathlib.Path, front: dict) -> list[tuple[str, str]]:
         if "repeats" in front:
             return [("results.repeat-fire", "`repeats` on a directory that is no fire of a ratified row")]
         return []
-    same = sorted(
-        (name for name, other in siblings.items() if row_of(other) == row and not derives_from_a_sibling(other, siblings)),
-        key=lambda name: (name[:10], str(siblings[name].get("window_start", "")), name),
-    )
-    first = same[0] if same else directory.name
+    first = first_fire(row, siblings) or directory.name
     if first == directory.name:
         if "repeats" in front:
             return [("results.repeat-fire", f"`repeats` on the first fire of row (#{row[0]}, {row[1][:12]}...)")]
@@ -1275,11 +1281,15 @@ def claim_flags(directory: pathlib.Path, registry: dict) -> dict:
     derived, _ = characterisation(directory, registry)
     front = front_of(directory)
     siblings = fires(directory.parent)
-    fire = front
+    fire = directory.name
     if derives_from_a_sibling(front, siblings):
         source = front["derivation"]["derived_from"]
-        fire = next((other for other in siblings.values() if other.get("product_sha256") == source), front)
-    return {"characterisation": None if derived is None else bool(derived), "repeat": "repeats" in fire}
+        fire = next((name for name, other in siblings.items() if other.get("product_sha256") == source), fire)
+    # Derived from the row's order, not from a `repeats` a record may lack
+    # (#17's second draw declares none).
+    row = row_of(siblings.get(fire, front))
+    first = first_fire(row, siblings) if row else None
+    return {"characterisation": None if derived is None else bool(derived), "repeat": first is not None and first != fire}
 
 
 def check_run(directory: pathlib.Path) -> list[str]:
