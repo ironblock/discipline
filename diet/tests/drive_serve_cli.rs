@@ -439,6 +439,24 @@ fn a_drive_server_off_loopback_without_a_credential_refuses_to_start() {
     assert!(said.contains("cannot listen on 192.0.2.1"), "{said}");
 }
 
+/// A typo in the audit's concurrency refuses the start, naming the key,
+/// rather than running one chunk at a time unannounced.
+#[test]
+fn a_drive_server_refuses_an_audit_concurrency_that_is_no_count() {
+    let stub = Stub::serving(Vec::new()).expect("loopback");
+    let regimen = regimen_registered_with(
+        "accel24-tabbyapi-exl3-qwen38-27b-3p00",
+        "meditation_audit = \"on\"\nmeditation_audit_concurrency = \"4\"\n",
+    );
+    let path = regimen.0.to_string_lossy().into_owned();
+    let (code, said) = run_briefly(&stub.url(), &["--regimen", &path]);
+    assert!(code.is_some_and(|code| code != 0), "{code:?}: {said}");
+    assert!(
+        said.contains("`meditation_audit_concurrency` is a whole number above 0"),
+        "{said}"
+    );
+}
+
 #[test]
 fn a_drive_server_refuses_a_wildcard_listen_even_with_a_credential() {
     let stub = Stub::serving(Vec::new()).expect("loopback");
@@ -607,6 +625,11 @@ fn a_drive_server_announces_the_registered_substrate_its_regimen_names() {
 /// A regimen naming registered substrate `id`, with its equipment's own
 /// hardware fingerprint, as a file.
 fn regimen_registered(id: &str) -> HeadFile {
+    regimen_registered_with(id, "")
+}
+
+/// [`regimen_registered`], declaring `more` besides.
+fn regimen_registered_with(id: &str, more: &str) -> HeadFile {
     let hardware = diet::drive::registry::identity(diet::drive::registry::REGISTRY, id)
         .expect("registered")
         .hardware_fingerprint;
@@ -614,7 +637,7 @@ fn regimen_registered(id: &str) -> HeadFile {
         "regimen",
         &format!(
             "arm = \"a\"\ndogma_version = 0\nsubstrate = \"{id}\"\n\
-             substrate_reasoning = \"off\"\nsubstrate_hardware = \"{hardware}\"\n\
+             substrate_reasoning = \"off\"\nsubstrate_hardware = \"{hardware}\"\n{more}\
              [sampler]\nseed = 7\n"
         ),
     )
@@ -1012,7 +1035,11 @@ fn a_drive_server_confirms_a_declared_engines_model_settings_and_draft() {
         .expect("registered")
         .engine_commit
         .expect("an engine_commit");
-    let regimen = regimen_registered(id);
+    // Four audit chunks at once, against a server that batches two.
+    let regimen = regimen_registered_with(
+        id,
+        "meditation_audit = \"on\"\nmeditation_audit_concurrency = 4\n",
+    );
     let path = regimen.0.to_string_lossy().into_owned();
     let stub = Stub::serving(vec![tabby_model_card(163_840), warm()]).expect("loopback");
     let log_file = file_holding("log", "");
@@ -1040,6 +1067,10 @@ fn a_drive_server_confirms_a_declared_engines_model_settings_and_draft() {
         "{heads:?}"
     );
     let start_line = first_logged_line(&log_file.0);
+    assert_eq!(
+        start_line["levers"]["meditation_audit_concurrency"], "4:effective:2:served_max_batch_size",
+        "{start_line}"
+    );
     let corroborated = |field: &str, value: &str| {
         serde_json::json!({
             "field": field, "value": value, "provenance": "corroborated", "reported": value,

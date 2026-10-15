@@ -1053,6 +1053,37 @@ fn meditation_audit_chunk_lever(regimen: &Regimen) -> String {
     }
 }
 
+/// The audit concurrency lever's word: `off` with the audit; otherwise the
+/// regimen's count (`:default` when it declares none), then `effective:` and
+/// the chunks in flight at most -- and what lowered it, when anything did:
+/// the trunk's server's `served_batch` (`served_max_batch_size`), or the
+/// record tools' route (`tools_route`). The pool's room lowers it further as
+/// the chunks go, which the fork lines' times show.
+#[must_use]
+pub fn meditation_audit_concurrency_lever(
+    regimen: &Regimen,
+    served_batch: Option<usize>,
+) -> String {
+    use crate::meditation::policy::{Served, audit_concurrency_declared};
+    if meditation_work_lever(regimen, crate::meditation::policy::MEDITATION_AUDIT) == "off" {
+        return "off".to_owned();
+    }
+    // Refused at start, by the served policy, when it is no count.
+    let declared = audit_concurrency_declared(regimen).ok().flatten();
+    let tools = crate::drive::session::capture_modality(regimen)
+        .is_ok_and(|modality| modality == crate::dogma::asks::Modality::Tools);
+    let served = Served {
+        audit_concurrency: declared,
+        ..Served::default()
+    };
+    let (effective, lowered) = served.audit_concurrency(served_batch, tools);
+    let declared = declared.map_or_else(|| "1:default".to_owned(), |n| n.to_string());
+    match lowered {
+        Some(why) => format!("{declared}:effective:{effective}:{why}"),
+        None => format!("{declared}:effective:{effective}"),
+    }
+}
+
 /// A meditation's audit or pre-warm lever's word (#504): `on` or `off`.
 fn meditation_work_lever(regimen: &Regimen, key: &str) -> String {
     let on = match regimen.get(key) {
@@ -1147,7 +1178,7 @@ fn command_levers(regimen: &Regimen, (cap, cap_from): (u32, &str)) -> [String; 4
 
 #[cfg(test)]
 mod tests {
-    use super::{UNDECLARED, regime_of, serve_levers};
+    use super::{UNDECLARED, meditation_audit_concurrency_lever, regime_of, serve_levers};
 
     /// #150's gate on the start row: `carry`, `refuse`, or undeclared for
     /// a value serve refuses.
@@ -1466,6 +1497,26 @@ mod tests {
         assert_eq!(
             lever("meditation_audit = \"on\"\nmeditation_audit_chunk_notes = 40\n"),
             "notes:40"
+        );
+    }
+
+    /// The audit concurrency lever: off with the audit; the declared count
+    /// or the default, and the effective one, with what lowered it.
+    #[test]
+    fn the_audit_concurrency_lever_names_the_count_and_the_effective_one() {
+        let lever = |text: &str, served: Option<usize>| {
+            meditation_audit_concurrency_lever(&regimen::parse(text).expect("a regimen"), served)
+        };
+        let on = "meditation_audit = \"on\"\n";
+        assert_eq!(lever("", Some(4)), "off");
+        assert_eq!(lever(on, Some(4)), "1:default:effective:1");
+        let four = format!("{on}meditation_audit_concurrency = 4\n");
+        assert_eq!(lever(&four, None), "4:effective:4");
+        assert_eq!(lever(&four, Some(4)), "4:effective:4");
+        assert_eq!(lever(&four, Some(2)), "4:effective:2:served_max_batch_size");
+        assert_eq!(
+            lever(&format!("{four}capture_modality = \"tools\"\n"), Some(4)),
+            "4:effective:1:tools_route"
         );
     }
 

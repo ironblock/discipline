@@ -3331,6 +3331,7 @@ mod tests {
             view_overridden: None,
             prefix_shared: None,
             reserved: None,
+            chunk: None,
         };
         let call = |turn: u32, fork: u64| {
             [

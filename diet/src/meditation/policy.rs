@@ -82,6 +82,14 @@ pub const MEDITATION_AUDIT_CHUNK_NOTES: &str = "meditation_audit_chunk_notes";
 /// 7-8 a note, inside the cap; at 231 to 517 notes, reasoning alone took the
 /// whole cap and four answers never began.
 pub const AUDIT_CHUNK_NOTES_DEFAULT: usize = 100;
+/// How many of an audit's chunks may be in flight at once: a whole number
+/// above 0, 1 -- one after another -- unless declared. The chunks overlap
+/// no further than the trunk's server batches (its entry's
+/// `served_max_batch_size`) and its pool holds them, and only on the lines
+/// route: through the record tools (#610) a chunk's patches may supersede
+/// another chunk's note, so there they run one at a time
+/// ([`Served::audit_concurrency`]).
+pub const MEDITATION_AUDIT_CONCURRENCY: &str = "meditation_audit_concurrency";
 /// A meditation's pre-warm (#504): `"on"` (or `true`) sends the refilled trunk
 /// once, with an output cap of one, so the next ask finds it cached; off by
 /// default, and never after a `window` meditation, whose request warms it.
@@ -136,6 +144,10 @@ pub struct Policy {
 pub enum PolicyError {
     /// A key that must hold a whole number holds something else.
     NotAnInteger(&'static str),
+    /// A key that must hold a whole number above 0 holds something else:
+    /// a count of what runs at once, which a typo must not turn into the
+    /// default.
+    NotACount(&'static str),
     /// A count that must be positive is zero or negative. Zero is not "no
     /// cadence": a cadence of zero would fire on every turn or on none
     /// depending on how it is read, and the way to declare no cadence is to
@@ -190,6 +202,7 @@ impl fmt::Display for PolicyError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::NotAnInteger(key) => write!(f, "`{key}` is not a whole number"),
+            Self::NotACount(key) => write!(f, "`{key}` is a whole number above 0"),
             Self::NotPositive(key) => write!(
                 f,
                 "`{key}` must be positive; leave the key out to declare none"
@@ -373,6 +386,9 @@ pub struct Served {
     /// The notes one audit fork asks over
     /// ([`MEDITATION_AUDIT_CHUNK_NOTES`]), when declared.
     pub audit_chunk_notes: Option<usize>,
+    /// The audit chunks in flight at once ([`MEDITATION_AUDIT_CONCURRENCY`]),
+    /// when declared.
+    pub audit_concurrency: Option<usize>,
 }
 
 impl Served {
@@ -383,6 +399,43 @@ impl Served {
         self.audit_chunk_notes
             .unwrap_or(AUDIT_CHUNK_NOTES_DEFAULT)
             .max(1)
+    }
+
+    /// The audit chunks in flight at once, and what lowered it from the
+    /// regimen's: the regimen's (1 unless declared), no more than the
+    /// trunk's server batches (`served_batch`, its entry's
+    /// `served_max_batch_size`, when declared), and 1 on the record tools'
+    /// route (`tools`). The pool's room lowers it further as the chunks go.
+    #[must_use]
+    pub fn audit_concurrency(
+        &self,
+        served_batch: Option<usize>,
+        tools: bool,
+    ) -> (usize, Option<&'static str>) {
+        let declared = self.audit_concurrency.unwrap_or(1).max(1);
+        if tools && declared > 1 {
+            return (1, Some("tools_route"));
+        }
+        match served_batch.filter(|batch| *batch < declared) {
+            Some(batch) => (batch.max(1), Some("served_max_batch_size")),
+            None => (declared, None),
+        }
+    }
+}
+
+/// The audit chunks `regimen` declares in flight at once
+/// ([`MEDITATION_AUDIT_CONCURRENCY`]), `None` when it declares none.
+///
+/// # Errors
+///
+/// [`PolicyError::NotACount`] for anything but a whole number above 0.
+pub fn audit_concurrency_declared(regimen: &Regimen) -> Result<Option<usize>, PolicyError> {
+    match regimen.get(MEDITATION_AUDIT_CONCURRENCY) {
+        None => Ok(None),
+        Some(Value::Integer(n)) if *n > 0 => usize::try_from(*n)
+            .map(Some)
+            .map_err(|_| PolicyError::NotACount(MEDITATION_AUDIT_CONCURRENCY)),
+        Some(_) => Err(PolicyError::NotACount(MEDITATION_AUDIT_CONCURRENCY)),
     }
 }
 
@@ -480,6 +533,7 @@ impl Served {
                 Some(Value::Integer(n)) if *n > 0 => usize::try_from(*n).ok(),
                 _ => None,
             },
+            audit_concurrency: audit_concurrency_declared(regimen)?,
             warm: on(regimen, MEDITATION_WARM),
             window_off: matches!(regimen.get(MEDITATION_WINDOW), Some(Value::String(word)) if word == "off")
                 || matches!(regimen.get(MEDITATION_WINDOW), Some(Value::Boolean(false))),
@@ -574,6 +628,26 @@ mod tests {
         );
     }
 
+    /// The audit chunks in flight at once: 1 unless declared, a whole number
+    /// above 0 as written, and anything else refused at start, naming the key
+    /// -- never read as the default.
+    #[test]
+    fn the_audit_concurrency_is_a_whole_number_above_0_or_refused() {
+        let beside = |text: &str| served(text, None).map(|read| read.audit_concurrency);
+        assert_eq!(beside(""), Ok(None));
+        assert_eq!(beside("meditation_audit_concurrency = 4\n"), Ok(Some(4)));
+        for wrong in ["0", "-1", "\"4\"", "4.0"] {
+            let refused = beside(&format!("meditation_audit_concurrency = {wrong}\n"))
+                .expect_err(wrong)
+                .to_string();
+            assert!(
+                refused.contains("`meditation_audit_concurrency`")
+                    && refused.contains("a whole number above 0"),
+                "{wrong}: {refused}"
+            );
+        }
+    }
+
     /// The compaction depth (#552): absent is 0, the total refill; a
     /// whole number of tokens otherwise, 0 included; anything else refused.
     #[test]
@@ -610,6 +684,7 @@ mod tests {
                 warm: false,
                 audit: false,
                 audit_chunk_notes: None,
+                audit_concurrency: None,
             })
         );
         assert_eq!(
@@ -625,6 +700,7 @@ mod tests {
                 warm: false,
                 audit: false,
                 audit_chunk_notes: None,
+                audit_concurrency: None,
             })
         );
         for bad in ["0.0", "1.5", "-0.2", "\"half\""] {
@@ -666,6 +742,7 @@ mod tests {
             warm: false,
             audit: false,
             audit_chunk_notes: None,
+            audit_concurrency: None,
         };
         assert_eq!(policy.due(2, Some(999)), None);
         assert_eq!(policy.due(2, None), None);

@@ -584,6 +584,7 @@ export type ForkLine = {
   view_overridden?: string;
   reserved?: number;
   prefix_shared?: boolean;
+  chunk?: number;
 } & ({ substrate: string; model: string } | { substrate?: never; model?: never });
 
 export type ForkSettledLine = {
