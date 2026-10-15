@@ -59,6 +59,7 @@
         "meditation_trigger": "operator-declared+cadence+budget+window+model-proposed",
         "meditation_warm": "on",
         "model_pruning": "off",
+        "note_dedupe": "off",
         "operator_unilateral": "on",
         "phase_graph": "library:starter;start:plan;phases:plan,build,orient,quick,test;transitions:plan>build,plan>orient,build>plan,build>test,orient>plan,test>build",
         "reasoning_state": "off",

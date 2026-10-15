@@ -831,6 +831,9 @@ pub enum Event {
         /// Why the entry it voided or retired went (#812), when the fork
         /// said so: a `SUPERSEDE: <id> — <reason>` pair's reason.
         reason: Option<String>,
+        /// The live entry an `add` was merged into for its likeness, and
+        /// their cosine (the note dedupe lever).
+        merged: Option<log::Merged>,
     },
     /// A self-capture call and what it came to (#609).
     /// The operator's ruling on the model's pending phase proposal (#124).
@@ -5217,6 +5220,7 @@ pub fn line_of(logged: &Logged) -> log::Line {
             supersedes,
             tangent,
             reason,
+            merged,
         } => log::Event::Patch {
             fork: *fork,
             lane: lane.clone(),
@@ -5225,6 +5229,7 @@ pub fn line_of(logged: &Logged) -> log::Line {
             supersedes: supersedes.clone(),
             tangent: tangent.clone(),
             reason: reason.clone(),
+            merged: merged.clone(),
         },
         Event::PhaseRuled {
             call,
@@ -12519,6 +12524,15 @@ fn patched(fork: Option<u64>, patch: &Patch, object: &WorkingObject) -> Event {
         supersedes,
         tangent: patch.provenance().tangent.clone(),
         reason: None,
+        // An `add` the object merged into a live entry for its likeness:
+        // what absorbed it, so a reviewer can see it.
+        merged: match patch {
+            Patch::Add { id, .. } => object.merged(id).map(|(into, cosine)| log::Merged {
+                into: into.as_str().to_owned(),
+                cosine: cosine.to_owned(),
+            }),
+            _ => None,
+        },
     }
 }
 
@@ -13601,6 +13615,77 @@ pub(in crate::drive) mod tests {
                 "{arrow}: {patches:?}"
             );
         }
+    }
+
+    /// The note dedupe lever: a fork's gotcha restating a live one is merged
+    /// into it, and its `patch` line names the entry that absorbed it and
+    /// their cosine.
+    #[test]
+    fn a_note_merged_for_its_likeness_is_logged_with_what_absorbed_it() {
+        let mut interview = interviewing(&[log::Warrant::Scoping]);
+        interview.object = WorkingObject::open(regime()).merging_similar("0.40");
+        let session = Session::open_with(
+            Canned::new(Vec::<Vec<Step>>::new()),
+            template(),
+            None,
+            None,
+            None,
+            Some(interview),
+        );
+        let mut state = session.shared.lock();
+        let logged = |lines: Vec<Event>| -> Vec<log::Event> {
+            lines
+                .into_iter()
+                .map(|event| {
+                    line_of(&Logged {
+                        seq: 0,
+                        t: 0,
+                        event,
+                    })
+                    .event
+                })
+                .collect()
+        };
+        let (_, first) = folded(
+            &mut state,
+            "GOTCHA: the pnpm lockfile is stale: run pnpm install before tests in packages/core\n",
+            1,
+            7,
+        );
+        let [
+            log::Event::Patch {
+                entry: held,
+                merged: None,
+                ..
+            },
+        ] = &logged(first)[..]
+        else {
+            panic!("the first gotcha is its own entry");
+        };
+        let (outcome, second) = folded(
+            &mut state,
+            "GOTCHA: stale pnpm lockfile in packages/core -- run pnpm install first\n",
+            2,
+            18,
+        );
+        assert_eq!(outcome, log::ForkOutcome::Value);
+        let second = logged(second);
+        assert!(
+            matches!(
+                &second[..],
+                [log::Event::Patch {
+                    op: log::PatchOp::Add,
+                    merged: Some(log::Merged { into, cosine }),
+                    entry,
+                    ..
+                }] if *into == held.id
+                    && cosine == "0.6576"
+                    && entry.text.starts_with("gotcha: stale pnpm lockfile")
+            ),
+            "{second:#?}"
+        );
+        let object = &state.interview.as_ref().expect("an interview").object;
+        assert_eq!(object.live().count(), 1, "one note, not two");
     }
 
     /// #812: a fork's `<id> — <reason>` reaches the log as the reason on
@@ -14879,6 +14964,7 @@ pub(in crate::drive) mod tests {
                 supersedes: None,
                 tangent: Some("t/1".to_owned()),
                 reason: None,
+                merged: None,
             },
             Event::Meditated {
                 phase_document: None,
@@ -15432,6 +15518,7 @@ pub(in crate::drive) mod tests {
                 supersedes: None,
                 tangent: Some("t/1".to_owned()),
                 reason: None,
+                merged: None,
             },
             log::Event::Meditation {
                 phase_document: None,
@@ -20317,6 +20404,7 @@ pub(in crate::drive) mod tests {
             supersedes: None,
             tangent: None,
             reason: None,
+            merged: None,
         };
         for op in [
             log::PatchOp::Park,

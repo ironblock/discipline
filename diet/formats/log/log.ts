@@ -611,7 +611,7 @@ export type PatchLine = {
   supersedes?: string;
   tangent?: string;
   reason?: string;
-} & ({ fork: number; lane?: never } | { lane: string; fork?: never });
+} & ({ fork: number; lane?: never } | { lane: string; fork?: never }) & ({ merged: string; cosine: string } | { merged?: never; cosine?: never });
 
 export type MeditationLine = {
   seq: number;

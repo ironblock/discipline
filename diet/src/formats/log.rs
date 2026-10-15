@@ -1521,6 +1521,9 @@ pub enum Event {
         /// `SUPERSEDE: <id> — <reason>`. Only on a `supersede` or a
         /// `retire`.
         reason: Option<String>,
+        /// The live entry an `add` was merged into for its likeness (v8, the
+        /// note dedupe lever), and the cosine that merged it.
+        merged: Option<Merged>,
     },
     /// Forks' patches delivered to the trunk (v7, the fork delivery lever):
     /// one note at the tail of turn `turn`'s first request, after its ask,
@@ -2020,6 +2023,16 @@ pub struct PatchEntry {
     pub text: String,
     /// Its category, when named.
     pub category: Option<String>,
+}
+
+/// An `add` merged into a live entry of its kind for its likeness (v8, the
+/// note dedupe lever): the entry it went into, and their TF-IDF cosine.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Merged {
+    /// The id of the entry it went into.
+    pub into: String,
+    /// Their cosine, four decimals.
+    pub cosine: String,
 }
 
 /// A call's token counts as the server reported them in its `usage`
@@ -3744,6 +3757,31 @@ fn from_object(object: &BTreeMap<String, Value>) -> Result<Line, String> {
                     op.tag()
                 ));
             }
+            // Both or neither, by [`all_or_none`].
+            let merged = match (
+                fields.optional_string("merged")?,
+                fields.optional_string("cosine")?,
+            ) {
+                (Some(_), Some(_)) if op != PatchOp::Add => {
+                    return Err(format!(
+                        "a patch whose `op` is `{}` was merged for its likeness: only an `add` \
+                         is merged into a live entry",
+                        op.tag()
+                    ));
+                }
+                (Some(into), Some(cosine)) => {
+                    if !cosine
+                        .parse::<f64>()
+                        .is_ok_and(|value| (0.0..=1.0).contains(&value))
+                    {
+                        return Err(format!(
+                            "a merge's `cosine` is `{cosine}`, not a number from 0 to 1"
+                        ));
+                    }
+                    Some(Merged { into, cosine })
+                }
+                _ => None,
+            };
             Event::Patch {
                 fork,
                 lane,
@@ -3752,6 +3790,7 @@ fn from_object(object: &BTreeMap<String, Value>) -> Result<Line, String> {
                 supersedes,
                 tangent: fields.optional_string("tangent")?,
                 reason,
+                merged,
             }
         }
         Kind::Capture => Event::Capture {
@@ -5489,6 +5528,8 @@ pub fn schema(kind: Kind) -> &'static [Field] {
                 may_v5("supersedes", Text),
                 may_v7("tangent", Text),
                 may_v8("reason", Text),
+                may_v8("merged", Text),
+                may_v8("cosine", Text),
             ];
             F
         }
@@ -5774,6 +5815,9 @@ pub fn all_or_none(kind: Kind) -> &'static [&'static str] {
         Kind::Meditation => &["turn_steps_kept", "turn_steps_compacted"],
         // What a fork refused for the pool did not fit beside (v8, #782).
         Kind::ForkSettled => &["window", "trunk_tokens", "beside_tokens", "fork_tokens"],
+        // The entry a note was merged into for its likeness, and their
+        // cosine (v8, the note dedupe lever).
+        Kind::Patch => &["merged", "cosine"],
         _ => &[],
     }
 }
@@ -6622,9 +6666,14 @@ fn to_value(line: &Line) -> Value {
             supersedes,
             tangent,
             reason,
+            merged,
         } => {
             if let Some(reason) = reason {
                 put("reason", text(reason));
+            }
+            if let Some(Merged { into, cosine }) = merged {
+                put("merged", text(into));
+                put("cosine", text(cosine));
             }
             if let Some(fork) = fork {
                 put("fork", count(*fork));
@@ -8616,6 +8665,26 @@ mod tests {
                 supersedes: None,
                 tangent: Some("t/1".to_owned()),
                 reason: None,
+                merged: None,
+            },
+            // Merged into a live entry for its likeness (the note dedupe
+            // lever).
+            Event::Patch {
+                fork: Some(fork),
+                lane: None,
+                op: PatchOp::Add,
+                entry: PatchEntry {
+                    id: "d3".to_owned(),
+                    text: "gotcha: a tracker, one per team".to_owned(),
+                    category: None,
+                },
+                supersedes: None,
+                tangent: None,
+                reason: None,
+                merged: Some(Merged {
+                    into: "d1".to_owned(),
+                    cosine: "0.6576".to_owned(),
+                }),
             },
             // The trunk's own (#609): named by its lane, not a fork.
             Event::Patch {
@@ -8630,6 +8699,7 @@ mod tests {
                 supersedes: Some("d1".to_owned()),
                 tangent: None,
                 reason: Some("the scope narrowed to one team".to_owned()),
+                merged: None,
             },
             Event::TangentOpen {
                 id: "t/1".to_owned(),
@@ -9351,7 +9421,9 @@ mod tests {
                                 || why.contains("carries `policy` under no profile")
                                 || why.contains("carries no `policy`")))
                         || (tags == Tags::ToolRefusal && why.contains("a `bash` call refused"))
-                        || (tags == Tags::PatchOp && why.contains("`supersedes`"))
+                        || (tags == Tags::PatchOp
+                            && (why.contains("`supersedes`")
+                                || why.contains("merged for its likeness")))
                         || (tags == Tags::ForkOutcome
                             && why.contains("exactly when it settled `refused`"))
                         || (tags == Tags::MeditationReason

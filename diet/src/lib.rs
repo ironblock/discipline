@@ -10,6 +10,7 @@ pub mod adapters;
 pub mod build;
 pub mod capture;
 pub mod client;
+pub mod dedupe;
 pub mod digest;
 pub mod dogma;
 pub mod drive;
