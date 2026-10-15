@@ -281,3 +281,109 @@ fn an_assembled_run_keeps_the_files_its_asks_attached() {
     );
     let _ = std::fs::remove_dir_all(&dir);
 }
+
+/// A run's log with what may differ between two runs of one scenario
+/// taken out -- when each line was written (`t`, `opened`), its place
+/// (`seq`: a background job's end lands where its timing puts it), where
+/// a command really ran (`cwd`), and the real roots `shown_roots` declares
+/// -- as a sorted list of lines, and its kept outputs by name and bytes.
+/// Everything else -- every message, result, notice, size and digest the
+/// model's requests were made of -- stays.
+fn run_of(out: &Path) -> (Vec<String>, std::collections::BTreeMap<String, Vec<u8>>) {
+    let log = std::fs::read_to_string(out.join("session.log")).expect("the log");
+    let mut lines: Vec<String> = log
+        .lines()
+        .map(|line| {
+            let mut event: serde_json::Value = serde_json::from_str(line).expect("a log line");
+            let object = event.as_object_mut().expect("an object");
+            for key in ["t", "seq", "opened", "cwd"] {
+                object.remove(key);
+            }
+            if let Some(roots) = object
+                .get_mut("shown_roots")
+                .and_then(serde_json::Value::as_object_mut)
+            {
+                for real in roots.values_mut() {
+                    *real = serde_json::Value::from("<real>");
+                }
+            }
+            event.to_string()
+        })
+        .collect();
+    lines.sort();
+    let kept = std::fs::read_dir(out.join("files"))
+        .map(|entries| {
+            entries
+                .filter_map(Result::ok)
+                .map(|entry| {
+                    (
+                        entry.file_name().to_string_lossy().into_owned(),
+                        std::fs::read(entry.path()).expect("a kept output"),
+                    )
+                })
+                .collect()
+        })
+        .unwrap_or_default();
+    (lines, kept)
+}
+
+/// A scenario shows its model the same bytes wherever it runs (path-free
+/// scenario outputs): its worktree and recording are shown as fixed
+/// placeholders, its background jobs are named from their count and shown
+/// pid 0, so two runs at once under roots of different lengths and parents
+/// -- /var/folders here, /tmp on CI -- write the same log but for when and
+/// where, and keep the same outputs, byte for byte, under the same digests.
+#[test]
+fn a_scenario_shows_its_model_the_same_bytes_under_any_roots() {
+    let dir = scratch("path-free");
+    // The two runs at once: each is a minute of the kitchen sink's waits.
+    let children: Vec<(PathBuf, std::process::Child)> =
+        ["a", "a-much-longer-parent-directory/nested"]
+            .iter()
+            .map(|parent| {
+                let out = dir.join(parent).join("out");
+                let child = Command::new(DRIVE)
+                    .current_dir(root())
+                    .arg("scenario")
+                    .arg(root().join("diet/scenarios/kitchen-sink.jsonl"))
+                    .arg("--out")
+                    .arg(&out)
+                    .arg("--worktree")
+                    .arg(dir.join(parent).join("wt"))
+                    .arg("--no-assemble")
+                    .stdout(std::process::Stdio::piped())
+                    .stderr(std::process::Stdio::piped())
+                    .spawn()
+                    .expect("diet-drive runs");
+                (out, child)
+            })
+            .collect();
+    let mut runs = Vec::new();
+    for (out, child) in children {
+        let ran = child.wait_with_output().expect("diet-drive ends");
+        assert_eq!(
+            ran.status.code(),
+            Some(0),
+            "{}{}",
+            String::from_utf8_lossy(&ran.stdout),
+            String::from_utf8_lossy(&ran.stderr)
+        );
+        runs.push(run_of(&out));
+    }
+    let (first, second) = (&runs[0], &runs[1]);
+    assert!(
+        first.0.iter().any(|line| line.contains("\"shown_roots\"")),
+        "the start declares its roots"
+    );
+    for (a, b) in first.0.iter().zip(&second.0) {
+        assert_eq!(a, b, "the two runs' logs differ");
+    }
+    assert_eq!(first.0.len(), second.0.len());
+    assert_eq!(
+        first.1.keys().collect::<Vec<_>>(),
+        second.1.keys().collect::<Vec<_>>(),
+        "the kept outputs' digests differ"
+    );
+    assert_eq!(first.1, second.1, "the kept outputs' bytes differ");
+    let _ = std::fs::remove_dir_all(&dir);
+}

@@ -2356,6 +2356,9 @@ pub struct Tools {
     pub background: bool,
     /// A call's default timeout, in milliseconds (#613); `None`, none.
     pub timeout_ms: Option<u64>,
+    /// The roots the model is shown in place of where it ran: a scenario's
+    /// on a canned substrate (`--shown-root`); none, otherwise.
+    pub shown_roots: super::shown::ShownRoots,
 }
 
 vocabulary! {

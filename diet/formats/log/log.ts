@@ -412,6 +412,8 @@ export type SessionStartLine = {
   tool_output_max_lines?: number;
   tool_output_max_bytes?: number;
   bash_timeout_ms?: number;
+  shown_roots?: Record<string, string>;
+  scenario_fixed?: string[];
 } & ({ substrate: string; registry_sha256: string } | { substrate?: never; registry_sha256?: never });
 
 export type AskLine = {

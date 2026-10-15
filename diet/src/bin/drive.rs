@@ -112,6 +112,9 @@ fn serve_usage() -> String {
     out.push_str("at /?drive driving the session with no proxy; unnamed, a ui directory\n");
     out.push_str("beside this binary is served when there is one. The first line names it\n");
     out.push_str("as `page`.\n");
+    out.push_str("--shown-root REAL=SHOWN (a canned substrate's only, as `scenario` passes\n");
+    out.push_str("it) shows the model SHOWN wherever REAL would appear, fixes background job\n");
+    out.push_str("ids and the pid it is shown, and declares both on session.start.\n");
     out.push_str("--key-file names a file holding the endpoint's key, sent as a bearer\n");
     out.push_str("credential; it is never taken as an argument.\n");
     out.push_str("--auth-file names a file holding user:password; every request must then\n");
@@ -184,6 +187,44 @@ struct ServeArgs {
     seat: SeatArgs,
     /// `--ui`, the surface's built bundle to serve (#716).
     ui: Option<String>,
+    /// `--shown-root REAL=SHOWN`, each: what a scenario on a canned
+    /// substrate shows its model in place of where it ran.
+    shown_roots: Vec<String>,
+}
+
+/// `--shown-root`'s roots, refused unless the substrate is canned: a path
+/// rewritten in what a real model is shown would make its record lie about
+/// what it saw.
+fn shown_roots_for(
+    given: &[String],
+    regime: Option<&diet::formats::record::Regime>,
+) -> Result<diet::drive::shown::ShownRoots, String> {
+    let mut roots = diet::drive::shown::ShownRoots::none();
+    if given.is_empty() {
+        return Ok(roots);
+    }
+    let canned = regime
+        .and_then(|regime| regime.substrates.first())
+        .and_then(|substrate| {
+            diet::drive::registry::identity(diet::drive::registry::REGISTRY, &substrate.id).ok()
+        })
+        .is_some_and(|identity| {
+            matches!(
+                identity.weights,
+                diet::formats::record::Weights::Canned { .. }
+            )
+        });
+    if !canned {
+        return Err(
+            "--shown-root is a scenario's, and only a canned substrate takes it: a real model \
+             is shown where it really ran"
+                .to_owned(),
+        );
+    }
+    for root in given {
+        roots.add(root)?;
+    }
+    Ok(roots)
 }
 
 /// Where an offboard extraction seat is reached, as `serve`'s flags say.
@@ -208,6 +249,7 @@ fn asks_for_help(args: &[String]) -> bool {
 }
 
 /// `serve`'s flags, or nothing when they are not a usage it takes.
+#[allow(clippy::too_many_lines)]
 fn serve_args(args: &[String]) -> Option<ServeArgs> {
     let mut endpoint = None;
     let mut model = None;
@@ -224,6 +266,7 @@ fn serve_args(args: &[String]) -> Option<ServeArgs> {
     let mut worktree = None;
     let mut seat = SeatArgs::default();
     let mut ui = None;
+    let mut shown_roots = Vec::new();
     let mut given = args.iter();
     while let Some(flag) = given.next() {
         let value = given.next()?;
@@ -264,6 +307,9 @@ fn serve_args(args: &[String]) -> Option<ServeArgs> {
             value.parse().map(|given| listen = given).is_ok()
         } else if flag == "--ui" {
             ui = Some(value.clone());
+            true
+        } else if flag == "--shown-root" {
+            shown_roots.push(value.clone());
             true
         } else if flag == "--allow-origin" {
             let origin = is_an_origin(value);
@@ -306,6 +352,7 @@ fn serve_args(args: &[String]) -> Option<ServeArgs> {
         worktree,
         seat,
         ui,
+        shown_roots,
     })
 }
 
@@ -334,6 +381,7 @@ fn serve(args: &[String]) -> ExitCode {
         worktree,
         seat,
         ui,
+        shown_roots,
     }) = serve_args(args)
     else {
         eprint!("{}", serve_usage());
@@ -532,6 +580,16 @@ fn serve(args: &[String]) -> ExitCode {
                 ),
             );
         }
+    }
+    // What a scenario shows its model in place of where it ran: only on a
+    // canned substrate, whose every reply was written in advance, so no
+    // real run ever has a path rewritten.
+    let shown = match shown_roots_for(&shown_roots, regime.as_ref()) {
+        Ok(shown) => shown,
+        Err(why) => return fail(EXIT_USAGE, &why),
+    };
+    if let Some(tools) = tools.as_mut() {
+        tools.shown_roots = shown.clone();
     }
     let credential = match auth_file.as_deref().map(credential_from).transpose() {
         Ok(credential) => credential,
@@ -1521,6 +1579,8 @@ fn serving_tools(
         background: declared.background,
         // #613: the regimen's default timeout, 120000 ms unless it says.
         timeout_ms: declared.timeout_ms,
+        // Set once the substrate is known to be canned (`--shown-root`).
+        shown_roots: diet::drive::shown::ShownRoots::none(),
     }))
 }
 
