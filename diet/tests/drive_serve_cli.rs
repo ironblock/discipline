@@ -458,6 +458,22 @@ fn a_drive_server_refuses_an_audit_concurrency_that_is_no_count() {
 }
 
 #[test]
+fn a_drive_server_refuses_a_note_dedupe_threshold_out_of_range() {
+    let stub = Stub::serving(Vec::new()).expect("loopback");
+    let regimen = regimen_registered_with(
+        "accel24-tabbyapi-exl3-qwen38-27b-3p00",
+        "note_dedupe = true\nnote_dedupe_threshold = 1.5\n",
+    );
+    let path = regimen.0.to_string_lossy().into_owned();
+    let (code, said) = run_briefly(&stub.url(), &["--regimen", &path]);
+    assert!(code.is_some_and(|code| code != 0), "{code:?}: {said}");
+    assert!(
+        said.contains("`note_dedupe_threshold` is a number above 0 and at most 1"),
+        "{said}"
+    );
+}
+
+#[test]
 fn a_drive_server_refuses_a_wildcard_listen_even_with_a_credential() {
     let stub = Stub::serving(Vec::new()).expect("loopback");
     let auth = file_holding("auth", "author:s3cret\n");
@@ -1035,10 +1051,12 @@ fn a_drive_server_confirms_a_declared_engines_model_settings_and_draft() {
         .expect("registered")
         .engine_commit
         .expect("an engine_commit");
-    // Four audit chunks at once, against a server that batches two.
+    // Four audit chunks at once, against a server that batches two; and
+    // similar notes merged at a cosine of 0.55.
     let regimen = regimen_registered_with(
         id,
-        "meditation_audit = \"on\"\nmeditation_audit_concurrency = 4\n",
+        "meditation_audit = \"on\"\nmeditation_audit_concurrency = 4\n\
+         note_dedupe = true\nnote_dedupe_threshold = 0.55\n",
     );
     let path = regimen.0.to_string_lossy().into_owned();
     let stub = Stub::serving(vec![tabby_model_card(163_840), warm()]).expect("loopback");
@@ -1069,6 +1087,10 @@ fn a_drive_server_confirms_a_declared_engines_model_settings_and_draft() {
     let start_line = first_logged_line(&log_file.0);
     assert_eq!(
         start_line["levers"]["meditation_audit_concurrency"], "4:effective:2:served_max_batch_size",
+        "{start_line}"
+    );
+    assert_eq!(
+        start_line["levers"]["note_dedupe"], "tfidf:0.55",
         "{start_line}"
     );
     let corroborated = |field: &str, value: &str| {

@@ -466,6 +466,12 @@ pub struct WorkingObject {
     /// can go on saying `e2`, and identity is not collapsed because content
     /// was.
     aliases: BTreeMap<EntryId, EntryId>,
+    /// The TF-IDF cosine at or above which a new entry merges into a live
+    /// one of its kind ([`crate::dedupe`]), as written; `None`, off.
+    similar: Option<String>,
+    /// Each id merged for its likeness: the entry it went into, the cosine
+    /// as the log writes it, and its own content, normalised.
+    merges: BTreeMap<EntryId, (EntryId, String, String)>,
     version: u32,
 }
 
@@ -478,8 +484,29 @@ impl WorkingObject {
             entries: BTreeMap::new(),
             by_content: BTreeMap::new(),
             aliases: BTreeMap::new(),
+            similar: None,
+            merges: BTreeMap::new(),
             version: 0,
         }
+    }
+
+    /// This object, merging a new entry into a live one of its kind whose
+    /// text is at TF-IDF cosine `threshold` or above ([`crate::dedupe`]).
+    #[must_use]
+    pub fn merging_similar(self, threshold: &str) -> Self {
+        Self {
+            similar: Some(threshold.to_owned()),
+            ..self
+        }
+    }
+
+    /// The entry `id` was merged into for its likeness, and the cosine as
+    /// the log writes it.
+    #[must_use]
+    pub fn merged(&self, id: &EntryId) -> Option<(&EntryId, &str)> {
+        self.merges
+            .get(id)
+            .map(|(into, cosine, _)| (into, cosine.as_str()))
     }
 
     /// The regime every patch in this object was applied under.
@@ -650,6 +677,17 @@ impl WorkingObject {
         provenance: &Provenance,
     ) -> Result<Applied, ObjectError> {
         let key = normalise(content);
+        // An id merged for its likeness, saying again what it said: the
+        // entry it went into already holds it.
+        if let Some((into, _, said)) = self.merges.get(id).cloned()
+            && said == key
+        {
+            return Ok(if self.record_provenance(&into, provenance) {
+                Applied::Deduped(into)
+            } else {
+                Applied::Unchanged(into)
+            });
+        }
         self.check_admissible(id, &key)?;
         // Two forks in one turn say the same thing. One entry, both
         // provenances: which of them said it is what a later reviewer needs to
@@ -699,7 +737,36 @@ impl WorkingObject {
                 Applied::Unchanged(held)
             });
         }
+        // Not the same text, but perhaps the same note: merged as an
+        // identical one is, into a live entry of its kind only.
+        if let Some((held, cosine)) = self.similar_to(content)
+            && self.canonical(id).is_none()
+        {
+            self.record_alias(id, &held);
+            self.record_provenance(&held, provenance);
+            self.merges.insert(
+                id.clone(),
+                (held.clone(), crate::dedupe::written(cosine), key),
+            );
+            return Ok(Applied::Deduped(held));
+        }
         Ok(Applied::Created(self.create(id, content, key, provenance)))
+    }
+
+    /// The live entry of `content`'s kind nearest it at the object's
+    /// threshold or above, and the cosine; `None` when the object merges no
+    /// likeness, `content` has no kind, or nothing reaches it.
+    fn similar_to(&self, content: &str) -> Option<(EntryId, f64)> {
+        let threshold: f64 = self.similar.as_ref()?.parse().ok()?;
+        let (kind, text) = crate::dedupe::kind_of(content)?;
+        let held: Vec<(&EntryId, &str)> = self
+            .live()
+            .filter_map(|entry| {
+                let (theirs, said) = crate::dedupe::kind_of(&entry.content)?;
+                (theirs == kind).then_some((&entry.id, said))
+            })
+            .collect();
+        crate::dedupe::nearest(&held, text, threshold).map(|(id, cosine)| ((*id).clone(), cosine))
     }
 
     /// Whether an entry under `id` carrying content that normalises to `key`
@@ -1194,6 +1261,120 @@ mod tests {
             object.entry(&id("e2")).map(|e| &e.id),
             Some(&id("e1")),
             "e2 resolves through its alias"
+        );
+    }
+
+    /// Two gotchas restating one another, at TF-IDF cosine 0.70 (measured
+    /// against scikit-learn in `dedupe`'s tests), and one far from both.
+    const STALE: &str =
+        "gotcha: The pnpm lockfile is stale: run `pnpm install` before tests in packages/core.";
+    const RESTATED: &str =
+        "gotcha: Stale pnpm lockfile in packages/core -- run pnpm install first.";
+    const PORT: &str = "gotcha: Port 8080 is taken by another dev server.";
+
+    /// An object merging similar entries at `threshold`.
+    fn merging(threshold: &str) -> WorkingObject {
+        object().merging_similar(threshold)
+    }
+
+    #[test]
+    fn a_restatement_at_the_threshold_merges_into_the_live_entry() {
+        let mut object = merging("0.40");
+        let first = from(3, "interview", Some("f1"));
+        let second = from(5, "interview", Some("f2"));
+        object
+            .apply(&add("e1", STALE, first.clone()))
+            .expect("the first");
+        object
+            .apply(&add("e2", PORT, first.clone()))
+            .expect("a far one");
+        assert_eq!(
+            object.apply(&add("e3", RESTATED, second.clone())),
+            Ok(Applied::Deduped(id("e1")))
+        );
+        assert_eq!(object.entries().count(), 2, "no third entry");
+        assert_eq!(object.canonical(&id("e3")), Some(id("e1")));
+        assert_eq!(
+            object.entry(&id("e1")).expect("held").provenances,
+            vec![first, second.clone()]
+        );
+        let (into, cosine) = object.merged(&id("e3")).expect("a merge on record");
+        assert_eq!((into, cosine), (&id("e1"), "0.7021"));
+        // The same patch again changes nothing, rather than reading as an id
+        // reused for other content.
+        assert_eq!(
+            object.apply(&add("e3", RESTATED, second)),
+            Ok(Applied::Unchanged(id("e1")))
+        );
+    }
+
+    #[test]
+    fn a_restatement_below_the_threshold_is_its_own_entry() {
+        let mut object = merging("0.75");
+        let at = from(3, "interview", None);
+        object
+            .apply(&add("e1", STALE, at.clone()))
+            .expect("the first");
+        assert_eq!(
+            object.apply(&add("e2", RESTATED, at)),
+            Ok(Applied::Created(id("e2")))
+        );
+        assert!(object.merged(&id("e2")).is_none());
+    }
+
+    #[test]
+    fn an_entry_of_another_kind_is_never_merged_into() {
+        let mut object = merging("0.40");
+        let at = from(3, "interview", None);
+        let decision = STALE.replacen("gotcha: ", "decision: ", 1);
+        object
+            .apply(&add("e1", &decision, at.clone()))
+            .expect("a decision");
+        assert_eq!(
+            object.apply(&add("e2", RESTATED, at.clone())),
+            Ok(Applied::Created(id("e2")))
+        );
+        // Nor one with no kind at all, though its text is the same.
+        let untagged = RESTATED.replacen("gotcha: ", "", 1);
+        let mut plain = merging("0.40");
+        plain
+            .apply(&add("e1", &untagged, at.clone()))
+            .expect("untagged");
+        assert_eq!(
+            plain.apply(&add("e2", &untagged.replace("first", "first!"), at)),
+            Ok(Applied::Created(id("e2")))
+        );
+    }
+
+    #[test]
+    fn an_entry_no_longer_live_is_never_merged_into() {
+        let mut object = merging("0.40");
+        let at = from(3, "interview", None);
+        object
+            .apply(&add("e1", STALE, at.clone()))
+            .expect("the first");
+        object
+            .apply(&Patch::Resolve {
+                target: id("e1"),
+                provenance: from(4, "interview", None),
+            })
+            .expect("resolved");
+        assert_eq!(
+            object.apply(&add("e2", RESTATED, from(5, "interview", None))),
+            Ok(Applied::Created(id("e2")))
+        );
+    }
+
+    #[test]
+    fn similar_entries_are_their_own_unless_the_object_merges_them() {
+        let mut object = object();
+        let at = from(3, "interview", None);
+        object
+            .apply(&add("e1", STALE, at.clone()))
+            .expect("the first");
+        assert_eq!(
+            object.apply(&add("e2", RESTATED, at)),
+            Ok(Applied::Created(id("e2")))
         );
     }
 

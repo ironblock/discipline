@@ -731,6 +731,8 @@ pub fn serve_levers(regimen: &Regimen, output_cap: (u32, &str)) -> BTreeMap<Stri
         ("warrant_gate".to_owned(), warrant_gate_lever(regimen)),
         // #784: each settled tool call's touches into working memory.
         ("mechanical_capture".to_owned(), mechanical_lever(regimen)),
+        // Write-time dedupe of similar notes: `off`, or `tfidf:<threshold>`.
+        ("note_dedupe".to_owned(), crate::dedupe::lever(regimen)),
         ("fork_delivery".to_owned(), delivery),
         ("tool_output_disposition".to_owned(), disposition),
         (

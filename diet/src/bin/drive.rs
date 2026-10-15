@@ -1410,10 +1410,18 @@ fn serving_interview(
         asks,
         capture,
     )?;
+    // Write-time dedupe of similar notes: off unless declared, and refused
+    // at start when malformed.
+    let dedupe = diet::dedupe::declared(&read).map_err(|why| format!("{path}: {why}"))?;
+    let object = diet::object::WorkingObject::open(regime.clone());
+    let object = match &dedupe {
+        Some(threshold) => object.merging_similar(threshold),
+        None => object,
+    };
     Ok(
         (!rules.is_empty() || self_capture.is_some() || mechanical).then(|| Interview {
             rules,
-            object: diet::object::WorkingObject::open(regime.clone()),
+            object,
             meditations,
             delivery,
             phases,
