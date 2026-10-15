@@ -4991,3 +4991,38 @@ fn a_drive_mcp_move_phase_moves_alone_unless_the_regimen_forbids_it() {
         "{refused}"
     );
 }
+
+/// `--shown-root` is a scenario's, and only a canned substrate takes it: a
+/// real model is shown where it really ran, so a path rewritten in what it
+/// saw would make its record lie (path-free scenario outputs). On a canned
+/// substrate the server starts with it.
+#[test]
+fn a_drive_server_takes_shown_roots_only_on_a_canned_substrate() {
+    let stub = Stub::serving(Vec::new()).expect("loopback");
+    let regimen = regimen_registered("accel24-llamacpp-qwen38-27b-iq3s");
+    let path = regimen.0.to_string_lossy().into_owned();
+    let (code, said) = run_briefly(
+        &stub.url(),
+        &[
+            "--regimen",
+            &path,
+            "--shown-root",
+            "/tmp/a-scenario-recording=/scenario/recording",
+        ],
+    );
+    assert_eq!(code, Some(2), "{said}");
+    assert!(said.contains("only a canned substrate takes it"), "{said}");
+    let stub =
+        Stub::serving_with_props(Vec::new(), &diet::drive::canned::build_info()).expect("loopback");
+    let dev_loop = format!("{}/drive/dev-loop.toml", env!("CARGO_MANIFEST_DIR"));
+    let served = start(
+        &stub.url(),
+        &[
+            "--regimen",
+            &dev_loop,
+            "--shown-root",
+            "/tmp/a-scenario-recording=/scenario/recording",
+        ],
+    );
+    assert_eq!(served.substrate.as_deref(), Some("canned-cache-n"));
+}

@@ -2215,6 +2215,8 @@ mod tests {
         Line::SessionStart {
             phase_document: None,
             bash_timeout_ms: None,
+            shown_roots: None,
+            scenario_fixed: None,
             version: VERSION,
             opened: 1_790_000_000_000,
             model: "a-model".to_owned(),

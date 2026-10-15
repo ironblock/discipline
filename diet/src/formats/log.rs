@@ -1174,6 +1174,15 @@ pub enum Event {
         /// #613), when the session runs commands; 0 is none. Absent, a
         /// session before #613: no call timed out.
         bash_timeout_ms: Option<u64>,
+        /// The roots a scenario's model was shown in place of where it ran
+        /// (v8, path-free scenario outputs): each placeholder, with the real
+        /// root it stood for. Absent, the model was shown the real paths.
+        shown_roots: Option<BTreeMap<String, String>>,
+        /// What else a scenario fixed in what its model was shown (v8):
+        /// `job_ids`, each background job's id derived from its count, and
+        /// `pids`, each background shell's pid shown as 0. The real pid
+        /// stays the one the job is stopped by. Absent, both were real.
+        scenario_fixed: Option<Vec<String>>,
     },
     /// An ask was admitted.
     Ask {
@@ -3407,6 +3416,8 @@ fn from_object(object: &BTreeMap<String, Value>) -> Result<Line, String> {
                 instruction_files: fields.instruction_files("instruction_files")?,
                 tool_output: tool_output(&fields)?,
                 bash_timeout_ms: fields.optional_count("bash_timeout_ms")?,
+                shown_roots: fields.optional_words("shown_roots")?,
+                scenario_fixed: fields.optional_strings("scenario_fixed")?,
                 phases: fields.optional_strings("phases")?,
                 phase_transitions: match object.get("phase_transitions") {
                     None => None,
@@ -5287,6 +5298,8 @@ pub fn schema(kind: Kind) -> &'static [Field] {
                 may_v7("tool_output_max_lines", Holds::Count),
                 may_v7("tool_output_max_bytes", Holds::Count),
                 may_v7("bash_timeout_ms", Holds::Count),
+                may_v8("shown_roots", Holds::Words),
+                may_v8("scenario_fixed", Holds::Strings),
             ];
             F
         }
@@ -6030,6 +6043,8 @@ fn to_value(line: &Line) -> Value {
             reasoning_effort_default,
             tool_output,
             bash_timeout_ms,
+            shown_roots,
+            scenario_fixed,
             phases,
             phase_transitions,
             opening_phase,
@@ -6105,6 +6120,23 @@ fn to_value(line: &Line) -> Value {
             }
             if let Some(ms) = bash_timeout_ms {
                 put("bash_timeout_ms", count(*ms));
+            }
+            if let Some(fixed) = scenario_fixed {
+                put(
+                    "scenario_fixed",
+                    Value::Array(fixed.iter().map(|word| text(word)).collect()),
+                );
+            }
+            if let Some(roots) = shown_roots {
+                put(
+                    "shown_roots",
+                    Value::Object(
+                        roots
+                            .iter()
+                            .map(|(shown, real)| (shown.clone(), text(real)))
+                            .collect(),
+                    ),
+                );
             }
             if let Some(cap) = tool_output {
                 put("tool_output", text(cap.state.tag()));
@@ -8188,6 +8220,11 @@ mod tests {
             t: 0,
             event: Event::SessionStart {
                 bash_timeout_ms: None,
+                shown_roots: Some(BTreeMap::from([(
+                    "/scenario/worktree".to_owned(),
+                    "/tmp/a-run/wt".to_owned(),
+                )])),
+                scenario_fixed: Some(vec!["job_ids".to_owned(), "pids".to_owned()]),
                 version: VERSION,
                 opened: 1_790_000_000_000,
                 model: "a-model".to_owned(),
@@ -9518,6 +9555,8 @@ mod tests {
             notes_in_the_ask,
             build_commit,
             build_dirty,
+            shown_roots,
+            scenario_fixed,
             ..
         } = &mut lines[0].event
         else {
@@ -9532,6 +9571,8 @@ mod tests {
         *notes_in_the_ask = None;
         *build_commit = None;
         *build_dirty = None;
+        *shown_roots = None;
+        *scenario_fixed = None;
         // Written as a v0 log spells it (#583).
         let document: String = lines
             .iter()

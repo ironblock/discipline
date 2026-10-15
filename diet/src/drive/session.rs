@@ -339,6 +339,9 @@ pub enum Event {
         /// A `bash` call's default timeout, in milliseconds, 0 for none
         /// (#613), when the session runs commands.
         bash_timeout_ms: Option<u64>,
+        /// The roots a scenario's model is shown in place of where it ran,
+        /// each placeholder with its real root (`--shown-root`).
+        shown_roots: Option<BTreeMap<String, String>>,
         /// The phase graph it runs under, as the log names it (#563): its
         /// phases and allowed moves, and the phase it opens in; `None` when
         /// the regimen declares none.
@@ -2393,6 +2396,11 @@ struct State {
     /// The recording directory, when the session keeps one: where a meditation's
     /// `reference` saves an output's whole (#553).
     recording: Option<std::path::PathBuf>,
+    /// The roots a scenario's model is shown in place of where it ran
+    /// (`--shown-root`); none, otherwise.
+    shown_roots: super::shown::ShownRoots,
+    /// How many background job ids the session has made (#614).
+    jobs_made: u64,
     /// The session's background jobs (#614), by id.
     jobs: BTreeMap<String, super::background::Job>,
     /// Ended jobs' notifications, waiting for the next ask (#614).
@@ -2572,6 +2580,8 @@ impl State {
             forking: None,
             queued: std::collections::VecDeque::new(),
             recording: tools.and_then(|t| t.recording.clone()),
+            shown_roots: tools.map(|t| t.shown_roots.clone()).unwrap_or_default(),
+            jobs_made: 0,
             pruned: Vec::new(),
             operator_pending: Vec::new(),
             operator_addressed: Vec::new(),
@@ -2965,6 +2975,23 @@ impl State {
     /// the session's end kills is logged `cancelled` before it, with the
     /// output it wrote so far. Its reaper then logs nothing more. An
     /// admitted `end`'s gap stays immediately before its outcome.
+    /// A fresh background job id: a canned scenario's from its count, so
+    /// every run names its jobs alike; else from the moment.
+    fn job_id(&mut self) -> String {
+        let n = self.jobs_made;
+        self.jobs_made += 1;
+        if self.shown_roots.is_empty() {
+            super::background::new_id()
+        } else {
+            super::background::scenario_id(n)
+        }
+    }
+
+    /// The pid a canned scenario's model is shown for a background job: 0.
+    fn pid_shown(&self) -> Option<u32> {
+        (!self.shown_roots.is_empty()).then_some(0)
+    }
+
     fn stop_jobs(&mut self) {
         use super::background::Status;
         let gap = self.pending_gap.take();
@@ -2977,7 +3004,9 @@ impl State {
             job.status = Status::Cancelled;
             super::background::stop_group(job.pid);
             job.write_status();
-            let output = std::fs::read(&job.output).unwrap_or_default();
+            let output = self
+                .shown_roots
+                .bytes(&std::fs::read(&job.output).unwrap_or_default());
             let files: Vec<log::RecordedFile> = self
                 .recording
                 .as_deref()
@@ -3230,6 +3259,9 @@ impl<S: Streaming + 'static> Session<S> {
             notes_in_the_ask: true,
             tool_output: tools.as_ref().map(|tools| tools.output_cap),
             bash_timeout_ms: bash_timeout_of(tools.as_ref(), &template),
+            shown_roots: tools
+                .as_ref()
+                .and_then(|tools| tools.shown_roots.declared()),
             phases,
             phase_document,
         });
@@ -4424,7 +4456,7 @@ impl<S: Streaming + 'static> Session<S> {
             if job.is_some() {
                 return Err(Refusal::NothingRunning);
             }
-            let id = super::background::new_id();
+            let id = state.job_id();
             let (output, status_file) =
                 super::background::files_of(&background_dir(&self.shared, &state), &id);
             *job = Some(super::background::Job {
@@ -4438,6 +4470,7 @@ impl<S: Streaming + 'static> Session<S> {
                 exit: None,
                 stopping: false,
                 listed: None,
+                pid_shown: state.pid_shown(),
             });
             Ok(id)
         });
@@ -4749,6 +4782,7 @@ pub fn line_of(logged: &Logged) -> log::Line {
             reasoning_effort_default,
             tool_output,
             bash_timeout_ms,
+            shown_roots,
             phases,
             phase_document,
             instruction_files,
@@ -4760,6 +4794,14 @@ pub fn line_of(logged: &Logged) -> log::Line {
             build_commit: build.as_ref().map(|(commit, _)| commit.clone()),
             build_dirty: build.as_ref().map(|(_, dirty)| *dirty),
             bash_timeout_ms: *bash_timeout_ms,
+            shown_roots: shown_roots.clone(),
+            // What a scenario shown its placeholders also fixes.
+            scenario_fixed: shown_roots.as_ref().map(|_| {
+                super::shown::FIXED
+                    .iter()
+                    .map(|word| (*word).to_owned())
+                    .collect()
+            }),
             levers: levers.clone(),
             notes_in_the_ask: notes_in_the_ask.then_some(true),
             // #563: the graph, and the phase it opens in; nothing when none.
@@ -6039,6 +6081,12 @@ fn run_calls<S: Streaming + 'static>(
         } else {
             shown
         };
+        // A scenario's roots, shown as their placeholders (every tool's
+        // result, a background shell's start and listing among them).
+        let shown = match (shown, shared.tools.as_ref()) {
+            (Some(shown), Some(tools)) => Some(tools.shown_roots.text(&shown)),
+            (shown, _) => shown,
+        };
         // The one string the result message carries, logged as given.
         line.shown.clone_from(&shown);
         unknown |= line.reason == Some(log::ToolRefusal::UnknownTool);
@@ -6298,13 +6346,20 @@ fn tool_output_of(cap: super::output::OutputCap) -> log::ToolOutput {
 /// and tail, the whole kept in the recording by digest and named on `line`.
 fn shown_capped(tools: &Tools, whole: &str, line: &mut ToolLine) -> String {
     use super::output::{self, Kept};
+    // A scenario's roots, rewritten before the whole is kept, so the copy
+    // and its digest are path-free too.
+    let whole = tools.shown_roots.text(whole);
+    let whole = whole.as_str();
     if !output::over(whole, tools.output_cap) {
         return whole.to_owned();
     }
     let saved = tools.recording.as_ref().and_then(|dir| {
         super::attach::kept_whole(dir, whole.as_bytes(), "text/plain")
             .ok()
-            .map(|file| (dir.join(&file.path).to_string_lossy().into_owned(), file))
+            .map(|file| {
+                let path = dir.join(&file.path).to_string_lossy().into_owned();
+                (tools.shown_roots.text(&path), file)
+            })
     });
     let kept = saved.as_ref().map_or(Kept::Nowhere, |(path, _)| Kept::At {
         path,
@@ -6352,10 +6407,15 @@ fn shown_ran(
     if let Some(nl) = newline(ran.stderr.as_bytes()) {
         parts.push(Part::Bytes(nl));
     }
+    // A spilled whole is copied as it streams, never held, so its bytes
+    // keep their roots; its path and what the model is shown do not.
     let saved = tools.recording.as_ref().and_then(|dir| {
         super::attach::kept_whole_from(dir, &parts, "text/plain")
             .ok()
-            .map(|file| (dir.join(&file.path).to_string_lossy().into_owned(), file))
+            .map(|file| {
+                let path = dir.join(&file.path).to_string_lossy().into_owned();
+                (tools.shown_roots.text(&path), file)
+            })
     });
     let kept = saved.as_ref().map_or(Kept::Nowhere, |(path, _)| Kept::At {
         path,
@@ -6365,7 +6425,7 @@ fn shown_ran(
         OutputCap::Keep => OutputCap::DEFAULT,
         capped @ OutputCap::Capped { .. } => capped,
     };
-    let shown = output::capped(&seen, cap, kept);
+    let shown = output::capped(&tools.shown_roots.text(&seen), cap, kept);
     if let Some((_, file)) = saved {
         line.files.push(file);
     }
@@ -6836,11 +6896,12 @@ fn prune_call<S>(
     if !on_trunk {
         return (line, Some(super::prune::ALREADY_COMPACTED.to_owned()));
     }
-    let saved = saved_whole(
+    let mut saved = saved_whole(
         &shown,
         target.files.first().cloned(),
         state.recording.as_deref(),
     );
+    saved.path = saved.path.map(|path| state.shown_roots.text(&path));
     let text = crate::meditation::outputs::reference_line(&crate::meditation::outputs::Output {
         turn: target.turn,
         name: target.name.clone(),
@@ -7274,8 +7335,10 @@ fn background_call<S>(
     mut line: ToolLine,
     (run, command): (&[String], &str),
 ) -> (ToolLine, Option<String>) {
-    let dir = background_dir(shared, &shared.lock());
-    let id = super::background::new_id();
+    let (dir, id) = {
+        let mut state = shared.lock();
+        (background_dir(shared, &state), state.job_id())
+    };
     let (output, status_file) = super::background::files_of(&dir, &id);
     // Made new (#735): a name planted there is refused, not followed.
     let spawned = std::fs::OpenOptions::new()
@@ -7306,6 +7369,7 @@ fn background_call<S>(
                 exit: None,
                 stopping: false,
                 listed: None,
+                pid_shown: (!tools.shown_roots.is_empty()).then_some(0),
             };
             let shown = super::background::started(&job);
             line.confined = Some(ran.confined.clone());
@@ -7545,6 +7609,11 @@ fn ended<S>(shared: &Shared<S>, id: &str, code: Option<i32>) {
         .tools
         .as_ref()
         .and_then(|tools| tools.recording.clone());
+    let roots = shared
+        .tools
+        .as_ref()
+        .map(|tools| tools.shown_roots.clone())
+        .unwrap_or_default();
     let mut state = shared.lock();
     let Some(job) = state.jobs.get_mut(id) else {
         return;
@@ -7558,8 +7627,8 @@ fn ended<S>(shared: &Shared<S>, id: &str, code: Option<i32>) {
         Status::Failed
     };
     job.write_status();
-    let output = std::fs::read(&job.output).unwrap_or_default();
-    let note = super::background::notification(job, &output);
+    let output = roots.bytes(&std::fs::read(&job.output).unwrap_or_default());
+    let note = roots.text(&super::background::notification(job, &output));
     let status = match job.status {
         Status::Completed => log::BackgroundStatus::Completed,
         Status::Failed => log::BackgroundStatus::Failed,
@@ -7687,11 +7756,13 @@ fn refilled(
             tool_outputs,
             (state.recording.as_deref(), &state.pruned),
         ),
-    );
+    )
+    .map(|(text, n)| (state.shown_roots.text(&text), n));
     // Each background command still running (#614), after the summary in
     // the refill's message, as Qwen Code places its list: the refill
     // compacts away the call that started it.
-    let background = super::background::running_at_meditation(state.jobs.values_mut());
+    let background = super::background::running_at_meditation(state.jobs.values_mut())
+        .map(|list| state.shown_roots.text(&list));
     let (head, phase_document) = state.phase_head(&template.messages);
     // The refill fits the window (#814): sized past its line, the render is
     // elided, oldest first, to the room the rest leaves -- whatever the
@@ -14562,6 +14633,7 @@ pub(in crate::drive) mod tests {
             Event::Started {
                 phase_document: None,
                 bash_timeout_ms: None,
+                shown_roots: None,
                 opened: 1_790_000_000_000,
                 model: "a-model".to_owned(),
                 head: vec![Message::new(Role::System, HEAD)],
@@ -15081,6 +15153,8 @@ pub(in crate::drive) mod tests {
             log::Event::SessionStart {
                 phase_document: None,
                 bash_timeout_ms: None,
+                shown_roots: None,
+                scenario_fixed: None,
                 version: log::VERSION,
                 opened: 1_790_000_000_000,
                 model: "a-model".to_owned(),
@@ -16129,6 +16203,7 @@ pub(in crate::drive) mod tests {
             surface: tool_loop::ToolSurface::Bash,
             background: false,
             timeout_ms: None,
+            shown_roots: crate::drive::shown::ShownRoots::none(),
         }
     }
 
@@ -16497,6 +16572,88 @@ pub(in crate::drive) mod tests {
         reads_whole(&session);
         every_head_rebuilds(&log);
         tidy(&[&tree]);
+    }
+
+    /// Under a canned scenario's roots (path-free scenario outputs) a job is
+    /// named from its count and its model shown pid 0, and the placeholders
+    /// stand for the recording in what it is told; but it is still run,
+    /// written to its status file and stopped by its real pid, inside the
+    /// real recording, so `task_stop` stops it.
+    #[test]
+    fn under_a_scenarios_roots_a_job_is_shown_fixed_and_stopped_by_its_real_pid() {
+        let tree = scratch("bg-shown");
+        let recording = std::fs::canonicalize(scratch("bg-shown-recording")).expect("canonical");
+        let mut tools = tools(
+            Confinement::Unconfined,
+            &tree,
+            &["sleep"],
+            None,
+            Decider::Decline,
+        );
+        tools.background = true;
+        tools.approvals_off = true;
+        tools.recording = Some(recording.clone());
+        tools
+            .shown_roots
+            .add(&format!("{}=/scenario/recording", recording.display()))
+            .expect("a root");
+        let mut shape = looping();
+        shape.tools = tool_loop::ToolSurface::Bash.tools_with(true);
+        let session = Session::open_looping(
+            Canned::new(vec![
+                vec![in_the_background("call-1", "sleep 30")],
+                deltas(&["started"]),
+            ]),
+            shape,
+            None,
+            tools,
+        );
+        session.ask("start it", None).expect("accepted");
+        let log = wait_until(&session, "the turn", |log| turns_settled(log) == 1);
+        let id = lines(&log)[0].background.clone().expect("a job");
+        assert_eq!(id, super::super::background::scenario_id(0));
+        let started = lines(&log)[0].shown.clone().expect("shown");
+        assert!(started.contains("\npid: 0\n"), "{started}");
+        assert!(
+            started.contains(&format!(
+                "output file: /scenario/recording/background/shell-{id}.output"
+            )),
+            "{started}"
+        );
+        let (pid, status_file) = {
+            let state = session.shared.lock();
+            let job = &state.jobs[&id];
+            (job.pid, job.status_file.clone())
+        };
+        assert_ne!(pid, 0, "the job runs under its real pid");
+        assert!(
+            status_file.starts_with(&recording),
+            "{}",
+            status_file.display()
+        );
+        let status = std::fs::read_to_string(&status_file).expect("the status file");
+        assert!(status.contains(&format!("\"pid\":{pid},")), "{status}");
+        session.shared.transport.append(vec![Step::call(
+            0,
+            "call-2",
+            super::super::background::TASK_STOP,
+            &serde_json::json!({ "task_id": id }).to_string(),
+        )]);
+        session.shared.transport.append(deltas(&["stopped"]));
+        session.ask("stop it", None).expect("accepted");
+        let log = wait_until(&session, "the job's end", |log| ended_jobs(log).len() == 1);
+        assert_eq!(ended_jobs(&log)[0].1, log::BackgroundStatus::Cancelled);
+        let gone = std::time::Instant::now() + std::time::Duration::from_secs(10);
+        while std::process::Command::new("kill")
+            .args(["-0", &pid.to_string()])
+            .stderr(std::process::Stdio::null())
+            .status()
+            .is_ok_and(|alive| alive.success())
+        {
+            assert!(std::time::Instant::now() < gone, "pid {pid} still runs");
+            std::thread::sleep(std::time::Duration::from_millis(50));
+        }
+        tidy(&[&tree, &recording]);
     }
 
     /// A job still running when the session ends (#614) is stopped, and its
@@ -19493,6 +19650,7 @@ pub(in crate::drive) mod tests {
             exit: None,
             stopping: false,
             listed: None,
+            pid_shown: None,
         };
         {
             let mut state = session.shared.lock();

@@ -93,9 +93,19 @@ pub struct Job {
     pub stopping: bool,
     /// Its output's bytes when a meditation last listed it running (#614).
     pub listed: Option<u64>,
+    /// The pid the model is shown, when it is not [`Self::pid`]: a canned
+    /// scenario's 0, so a run shows the same bytes wherever it runs. The
+    /// job is stopped, and its status file written, by the real one.
+    pub pid_shown: Option<u32>,
 }
 
 impl Job {
+    /// The pid the model is shown.
+    #[must_use]
+    pub fn shown_pid(&self) -> u32 {
+        self.pid_shown.unwrap_or(self.pid)
+    }
+
     /// The status file's text: a JSON object, as Qwen Code's sidecar is.
     #[must_use]
     pub fn status_text(&self) -> String {
@@ -114,6 +124,18 @@ impl Job {
     pub fn write_status(&self) {
         let _ = std::fs::write(&self.status_file, self.status_text());
     }
+}
+
+/// A canned scenario's `n`th job id, from 0: `bg_` and eight hex digits of
+/// a digest of its count alone, so every run of the scenario names its
+/// jobs alike. Each run's jobs keep their files in its own recording, so
+/// two runs at once never share one.
+#[must_use]
+pub fn scenario_id(n: u64) -> String {
+    format!(
+        "bg_{}",
+        &crate::digest::sha256_hex(format!("scenario:{n}").as_bytes())[..8]
+    )
 }
 
 /// A fresh job id: `bg_` and eight hex digits of a digest of the moment
@@ -175,7 +197,7 @@ pub fn started(job: &Job) -> String {
         "Background shell started.\nid: {}\npid: {}\noutput file: {}\n{}\nRead the output file \
          directly to view the captured output.",
         job.id,
-        job.pid,
+        job.shown_pid(),
         job.output.display(),
         status_guidance(&job.status_file)
     )
@@ -192,7 +214,7 @@ pub fn promoted(job: &Job) -> String {
          }})`.",
         job.command,
         job.id,
-        job.pid,
+        job.shown_pid(),
         job.output.display(),
         status_guidance(&job.status_file),
         job.id
@@ -253,7 +275,7 @@ pub fn notification(job: &Job, output: &[u8]) -> String {
         ),
         format!("<command>{}</command>", escaped(&job.command)),
         format!("<cwd>{}</cwd>", escaped(&job.cwd)),
-        format!("<pid>{}</pid>", job.pid),
+        format!("<pid>{}</pid>", job.shown_pid()),
     ];
     if let Some(code) = job.exit {
         parts.push(format!("<exit-code>{code}</exit-code>"));
@@ -378,6 +400,7 @@ mod tests {
             exit: None,
             stopping: false,
             listed: None,
+            pid_shown: None,
         };
         let list = running_at_meditation(std::iter::once(&mut job)).expect("a list");
         let cut = format!("echo &lt;{}\u{2026}", "x".repeat(194));
@@ -403,6 +426,7 @@ mod tests {
             exit: Some(0),
             stopping: false,
             listed: None,
+            pid_shown: None,
         };
         let note = notification(&job, b"hi\n");
         assert!(note.starts_with("<task-notification>\n<task-id>bg_0123abcd</task-id>"));

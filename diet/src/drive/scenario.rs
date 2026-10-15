@@ -1115,6 +1115,12 @@ fn seeded(
     Ok(())
 }
 
+/// What a canned scenario's model is shown for its recording's directory,
+/// wherever that really is.
+pub const SHOWN_RECORDING: &str = "/scenario/recording";
+/// ... and for its worktree.
+pub const SHOWN_WORKTREE: &str = "/scenario/worktree";
+
 /// A directory no other run uses, under the system's temporary one.
 fn fresh(what: &str) -> Result<std::path::PathBuf, Failure> {
     let stamp = std::time::SystemTime::now()
@@ -1276,6 +1282,23 @@ fn running(
         return Err(Failure(
             "the scenario seeds a worktree and its regimen runs no commands".to_owned(),
         ));
+    }
+    // Path-free outputs: on the canned substrate the model is shown fixed
+    // placeholders for the recording and the worktree, so a run shows the
+    // same bytes on any machine. A re-fire on an endpoint is shown where it
+    // ran, and serve refuses the roots off a canned substrate anyway.
+    if !live {
+        serve.arg("--shown-root").arg(format!(
+            "{}={SHOWN_RECORDING}",
+            std::path::absolute(&work)
+                .unwrap_or_else(|_| work.clone())
+                .display()
+        ));
+        if let Some(dir) = &worktree {
+            serve
+                .arg("--shown-root")
+                .arg(format!("{}={SHOWN_WORKTREE}", dir.display()));
+        }
     }
     let mut child = serve
         .spawn()
