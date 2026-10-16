@@ -210,7 +210,7 @@ claude mcp add diet-drive -- /abs/path/to/target/debug/diet-drive mcp --url http
 
 In the Claude app, add the same command under `mcpServers` in its MCP configuration, as `command` and `args`.
 
-**From nothing, in one call.** Started with no `--url`, the server's `start` tool takes a profile's name. It launches `diet-drive serve --profile NAME`, attaches to the address `serve` prints, and uses the profile's auth file. `stop` ends the session and the `serve` it started; nothing is left running, and closing the MCP server stops it too. So the Claude Code line can be:
+**From nothing, in one call.** Started with no `--url`, the server's `start` tool takes a profile's name. It launches `diet-drive serve --profile NAME`, attaches to the address `serve` prints, and uses the profile's auth file. `stop` ends the session and the `serve` it started; nothing is left running, and closing the MCP server stops it too. Once `serve` has logged `ended` it is writing its record, which on a long session takes minutes, and `stop` waits for it to exit however long that takes (#879); a `serve` that has neither exited nor logged `ended` within 30 seconds is killed. So the Claude Code line can be:
 
 ```
 claude mcp add diet-drive -- /abs/path/to/target/debug/diet-drive mcp
