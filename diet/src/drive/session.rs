@@ -10634,7 +10634,9 @@ fn fire<S>(
         });
         return None;
     }
-    let max_tokens = state.sized_at(&mut shape, ceiling, prompt);
+    // Sized aside (#889): a gap fork moves no measurement the trunk's next
+    // request is sized from, as a fork cut beside the trunk moves none.
+    let max_tokens = state.aside_sizing(|state| state.sized_at(&mut shape, ceiling, prompt));
     let request = state.push(Event::Requested {
         turn,
         lane: Lane::Interview,
@@ -11744,7 +11746,8 @@ fn one_fork<S: Streaming>(shared: &Shared<S>, forked: &Fired) -> Option<Fired> {
     let mut state = shared.lock();
     state.flight = None;
     state.forking = None;
-    let outcome = settle_fork(shared, &mut state, forked, run);
+    // Its answer measured aside too (#889).
+    let outcome = state.aside_sizing(|state| settle_fork(shared, state, forked, run));
     // The gap's next fork (#564), unless a stop or an `end` came meanwhile.
     if outcome == log::ForkOutcome::Cancelled || state.ending {
         state.queued.clear();
@@ -13016,6 +13019,52 @@ pub(in crate::drive) mod tests {
         assert_eq!(clamped(64_000, Some(32_768), 30_000), 2_768);
         assert_eq!(clamped(64_000, Some(32_768), 20_000), 4_000);
         assert_eq!(clamped(64_000, Some(32_768), 40_000), 1);
+    }
+
+    /// #889: a fork in a turn's gap -- answered after the turn's last trunk
+    /// request -- is sized, and answers, without moving what the next ask is
+    /// sized from: its estimate, its sizing and its measured prompt are the
+    /// trunk's alone, exactly as with no fork.
+    #[test]
+    fn a_gap_fork_leaves_the_next_asks_sizing_the_trunks() {
+        let timed = |prompt: u64| {
+            Step::Timings(Timings {
+                prompt_n: Some(prompt),
+                cache_n: Some(0),
+                predicted_n: Some(2),
+                ..Timings::default()
+            })
+        };
+        let sized = |warrants: &[log::Warrant]| {
+            let session = Session::open_with(
+                Canned::new([
+                    vec![Step::Delta("A tracker.".to_owned()), timed(1_000)],
+                    vec![
+                        Step::Delta("DECISION: a tracker\nPLAN: NONE\n".to_owned()),
+                        timed(9_000),
+                    ],
+                ]),
+                template(),
+                None,
+                None,
+                None,
+                Some(interviewing(warrants)),
+            );
+            session
+                .ask_marked("what are we building?", None, true)
+                .expect("accepted");
+            wait_until(&session, "the turn and its gap", |log| {
+                settled(log) && (warrants.is_empty() || !fork_outcomes(log).is_empty())
+            });
+            session.shared.lock().sizing()
+        };
+        let alone = sized(&[]);
+        assert_eq!(alone.2.map(|(prompt, _)| prompt), Some(1_000), "{alone:?}");
+        assert_eq!(
+            sized(&[log::Warrant::Scoping]),
+            alone,
+            "the gap fork moved what the next ask is sized from"
+        );
     }
 
     #[test]
