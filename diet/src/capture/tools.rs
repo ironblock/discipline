@@ -1099,6 +1099,7 @@ fn update_record(
                 content,
                 voids: EntryId::new(voids).map_err(ToolError::BadEntry)?,
                 provenance,
+                refuted: None,
             },
             None => Patch::Add {
                 id,
@@ -1599,7 +1600,7 @@ mod tests {
             .parameter("field")
             .expect("`update_record` takes a field");
         assert_eq!(field.kind, ParamType::Choice);
-        for kind in FieldKind::ALL {
+        for kind in FieldKind::ALL.iter().filter(|kind| kind.is_recorded()) {
             assert!(
                 field.choices.iter().any(|of| of == kind.canonical_tag()),
                 "the contract does not admit `{}`, so the model cannot record \
@@ -1611,7 +1612,7 @@ mod tests {
             assert!(
                 FieldKind::ALL
                     .iter()
-                    .any(|kind| kind.canonical_tag() == choice),
+                    .any(|kind| kind.is_recorded() && kind.canonical_tag() == choice),
                 "the contract admits `{choice}`, which is not an interview field"
             );
         }
@@ -1862,6 +1863,7 @@ mod tests {
                 content,
                 voids,
                 provenance,
+                ..
             },
         ] = effect.patches.as_slice()
         else {

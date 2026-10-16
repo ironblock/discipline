@@ -152,6 +152,9 @@ pub enum Patch {
         voids: EntryId,
         /// Where it came from.
         provenance: Provenance,
+        /// What showed the voided entry wrong, when a refutation voided it
+        /// (#878): it stays rendered as what was believed.
+        refuted: Option<Refutation>,
     },
     /// Mark an entry settled.
     Resolve {
@@ -259,6 +262,52 @@ pub struct Entry {
     /// which of them said it is exactly what a later reviewer needs to
     /// attribute a wrong outcome to the model or to the reconciler.
     pub provenances: Vec<Provenance>,
+    /// What showed it wrong, when a refutation voided it (#878).
+    pub refuted: Option<Refutation>,
+}
+
+/// How firmly a refuted claim was held (#878): the model's own word for it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+pub enum Held {
+    /// A guess.
+    Guess,
+    /// A belief.
+    Belief,
+    /// A conclusion.
+    Conclusion,
+}
+
+impl Held {
+    /// Every word, in order of firmness.
+    pub const ALL: [Self; 3] = [Self::Guess, Self::Belief, Self::Conclusion];
+
+    /// The word.
+    #[must_use]
+    pub fn word(self) -> &'static str {
+        match self {
+            Self::Guess => "guess",
+            Self::Belief => "belief",
+            Self::Conclusion => "conclusion",
+        }
+    }
+
+    /// The firmness `word` names.
+    #[must_use]
+    pub fn of(word: &str) -> Option<Self> {
+        Self::ALL.into_iter().find(|held| held.word() == word)
+    }
+}
+
+/// What refuted a claim (#878): how firmly it was held, why it is wrong, and
+/// where that was shown -- a durable pointer, never "earlier".
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Refutation {
+    /// How firmly it was held.
+    pub held: Held,
+    /// What shows it is wrong.
+    pub because: String,
+    /// Where: the failed call, or the operator's ask, by its log position.
+    pub pointer: String,
 }
 
 /// Why a patch could not be applied.
@@ -619,6 +668,20 @@ impl WorkingObject {
         self.entries.values().filter(|entry| entry.state.is_live())
     }
 
+    /// The live entries an audit may prune (#878): every one but a
+    /// correction -- the entry that voided a refuted claim, which the
+    /// refutation keeps beside it -- since an audit that retired it as a
+    /// duplicate of the claim would drop the correction and keep the error.
+    pub fn auditable(&self) -> impl Iterator<Item = &Entry> {
+        self.live().filter(|entry| {
+            entry
+                .supersedes
+                .as_ref()
+                .and_then(|voided| self.entries.get(voided))
+                .is_none_or(|voided| voided.refuted.is_none())
+        })
+    }
+
     /// Apply one patch.
     ///
     /// Deterministic: the same object and the same patch give the same result
@@ -641,7 +704,8 @@ impl WorkingObject {
                 content,
                 voids,
                 provenance,
-            } => self.supersede(id, content, voids, provenance)?,
+                refuted,
+            } => self.supersede(id, content, voids, (provenance, refuted.as_ref()))?,
             Patch::Resolve { target, provenance } => {
                 self.set_state(target, EntryState::Resolved, provenance)?
             }
@@ -811,6 +875,7 @@ impl WorkingObject {
                 state: EntryState::Live,
                 supersedes: None,
                 provenances: vec![provenance.clone()],
+                refuted: None,
             },
         );
         self.by_content.insert(key, id.clone());
@@ -823,7 +888,7 @@ impl WorkingObject {
         id: &EntryId,
         content: &str,
         voids: &EntryId,
-        provenance: &Provenance,
+        (provenance, refuted): (&Provenance, Option<&Refutation>),
     ) -> Result<Applied, ObjectError> {
         if id == voids {
             return Err(ObjectError::SelfSupersede(id.clone()));
@@ -882,6 +947,8 @@ impl WorkingObject {
         }
         if let Some(old) = self.entries.get_mut(voids) {
             old.state = EntryState::Voided { by: added.clone() };
+            // What showed it wrong (#878), on the claim it showed wrong.
+            old.refuted = refuted.cloned();
         }
         Ok(Applied::Superseded {
             added,
@@ -1066,6 +1133,21 @@ fn entry_value(entry: &Entry, aliases: &[&EntryId]) -> Value {
     if let Some(superseded) = &entry.supersedes {
         members.insert("supersedes".to_owned(), Value::String(superseded.0.clone()));
     }
+    if let Some(Refutation {
+        held,
+        because,
+        pointer,
+    }) = &entry.refuted
+    {
+        members.insert(
+            "refuted".to_owned(),
+            Value::Object(BTreeMap::from([
+                ("held".to_owned(), Value::String(held.word().to_owned())),
+                ("because".to_owned(), Value::String(because.clone())),
+                ("pointer".to_owned(), Value::String(pointer.clone())),
+            ])),
+        );
+    }
     if !aliases.is_empty() {
         members.insert(
             "aliases".to_owned(),
@@ -1187,6 +1269,7 @@ mod tests {
                 content: "the rate is 0.31 after the regrade".to_owned(),
                 voids: id("e1"),
                 provenance: from(2, "interview", None),
+                refuted: None,
             })
             .expect("a correction");
 
@@ -1365,6 +1448,106 @@ mod tests {
         );
     }
 
+    /// #878: a refutation's supersede leaves on the voided entry how firmly
+    /// it was held, what showed it wrong and where, and the dump says so.
+    #[test]
+    fn a_refuted_entry_keeps_what_showed_it_wrong() {
+        let mut object = object();
+        object
+            .apply(&add(
+                "e1",
+                "decision: the loader reads ./config.toml",
+                from(1, "interview", None),
+            ))
+            .expect("the claim");
+        let refuted = super::Refutation {
+            held: super::Held::Conclusion,
+            because: "cat config.toml failed".to_owned(),
+            pointer: "call call-c".to_owned(),
+        };
+        assert_eq!(
+            object.apply(&Patch::Supersede {
+                id: id("e2"),
+                content: "decision: the settings path is not known yet".to_owned(),
+                voids: id("e1"),
+                provenance: from(2, "interview", Some("f/7")),
+                refuted: Some(refuted.clone()),
+            }),
+            Ok(Applied::Superseded {
+                added: id("e2"),
+                voided: id("e1"),
+            })
+        );
+        let old = object.entry(&id("e1")).expect("kept");
+        assert_eq!(old.refuted.as_ref(), Some(&refuted));
+        assert!(
+            object
+                .entry(&id("e2"))
+                .expect("the correction")
+                .refuted
+                .is_none()
+        );
+        assert!(
+            object.dump().contains(
+                r#""refuted":{"because":"cat config.toml failed","held":"conclusion","pointer":"call call-c"}"#
+            ),
+            "{}",
+            object.dump()
+        );
+    }
+
+    /// #878: a correction is never put to the audit, which could retire it
+    /// as a duplicate of the claim it corrects; every other live entry is.
+    #[test]
+    fn a_correction_is_not_auditable() {
+        let mut object = object();
+        object
+            .apply(&add(
+                "e1",
+                "decision: the loader reads ./config.toml",
+                from(1, "interview", None),
+            ))
+            .expect("the claim");
+        object
+            .apply(&add(
+                "e2",
+                "learned: the build is green",
+                from(1, "interview", None),
+            ))
+            .expect("another");
+        object
+            .apply(&add(
+                "e3",
+                "decision: tests run in CI",
+                from(1, "interview", None),
+            ))
+            .expect("a third");
+        object
+            .apply(&Patch::Supersede {
+                id: id("e4"),
+                content: "decision: the settings path is not known yet".to_owned(),
+                voids: id("e1"),
+                provenance: from(2, "interview", None),
+                refuted: Some(super::Refutation {
+                    held: super::Held::Belief,
+                    because: "cat config.toml failed".to_owned(),
+                    pointer: "call call-c".to_owned(),
+                }),
+            })
+            .expect("a refutation");
+        object
+            .apply(&Patch::Supersede {
+                id: id("e5"),
+                content: "decision: tests run locally".to_owned(),
+                voids: id("e3"),
+                provenance: from(2, "interview", None),
+                refuted: None,
+            })
+            .expect("a plain supersede");
+        let ids: Vec<&str> = object.auditable().map(|entry| entry.id.as_str()).collect();
+        assert_eq!(ids, ["e2", "e5"]);
+    }
+
     #[test]
     fn similar_entries_are_their_own_unless_the_object_merges_them() {
         let mut object = object();
@@ -1413,6 +1596,7 @@ mod tests {
                 content: "the rate is 0.31 after the regrade".to_owned(),
                 voids: id("e2"),
                 provenance: from(3, "interview", None),
+                refuted: None,
             },
             Patch::Resolve {
                 target: id("e1"),
@@ -1630,6 +1814,7 @@ mod tests {
                 content: "x".to_owned(),
                 voids: id("nope"),
                 provenance: from(1, "a", None),
+                refuted: None,
             },
         ] {
             assert_eq!(
@@ -1670,6 +1855,7 @@ mod tests {
                 content: "a fact".to_owned(),
                 voids: id("e1"),
                 provenance: from(2, "a", None),
+                refuted: None,
             }),
             Err(ObjectError::SelfSupersede(id("e1")))
         );
@@ -1679,6 +1865,7 @@ mod tests {
                 content: "a correction".to_owned(),
                 voids: id("e1"),
                 provenance: from(2, "a", None),
+                refuted: None,
             })
             .expect("the first correction");
         assert!(matches!(
@@ -1687,6 +1874,7 @@ mod tests {
                 content: "another correction".to_owned(),
                 voids: id("e1"),
                 provenance: from(3, "a", None),
+                refuted: None,
             }),
             Err(ObjectError::AlreadyVoided { .. })
         ));
@@ -1748,6 +1936,7 @@ mod tests {
             content: "the  parser   rejects\nempty input".to_owned(),
             voids: id("e1"),
             provenance: from(2, "interview", None),
+            refuted: None,
         });
         assert_eq!(
             refused,
@@ -1776,6 +1965,7 @@ mod tests {
                 content: "the rate is 0.31 after the regrade".to_owned(),
                 voids: id("e0"),
                 provenance: from(2, "interview", None),
+                refuted: None,
             })
             .expect("a correction");
         // Correcting e1 with content that restates e3 would have to reuse e3
@@ -1785,6 +1975,7 @@ mod tests {
             content: "the rate is 0.31 after the regrade".to_owned(),
             voids: id("e1"),
             provenance: from(3, "interview", None),
+            refuted: None,
         });
         assert_eq!(
             refused,
@@ -1864,6 +2055,7 @@ mod tests {
                 content: "the rate is 0.31".to_owned(),
                 voids: id("e1"),
                 provenance: from(2, "interview", None),
+                refuted: None,
             })
             .expect("a correction");
         // A later lane, not having seen the correction, asserts the old fact
@@ -1938,6 +2130,7 @@ mod tests {
                 content: "the resolver refuses a stale binary".to_owned(),
                 voids: id("a"),
                 provenance: from(2, "interview", None),
+                refuted: None,
             })
             .expect_err("a correction that restates a held fact is refused");
         object
@@ -1946,6 +2139,7 @@ mod tests {
                 content: "the rate is 0.42".to_owned(),
                 voids: id("b"),
                 provenance: from(3, "interview", None),
+                refuted: None,
             })
             .expect_err("and so is its mirror image");
         assert_eq!(
@@ -2018,6 +2212,7 @@ mod tests {
                 content: "the rate is 0.31".to_owned(),
                 voids: id("e1"),
                 provenance: from(2, "interview", None),
+                refuted: None,
             })
             .expect("a correction");
         for patch in [
@@ -2087,6 +2282,7 @@ mod tests {
                     content: "the rate is 0.31".to_owned(),
                     voids: id("e1"),
                     provenance: from(3, "interview", None),
+                    refuted: None,
                 }),
                 Err(ObjectError::TargetNotLive {
                     id: id("e1"),
@@ -2141,6 +2337,7 @@ mod tests {
                 content: "a corrected fact".to_owned(),
                 voids: id("e1"),
                 provenance: from(2, "interview", None),
+                refuted: None,
             },
             Patch::Resolve {
                 target: id("e2"),
@@ -2239,6 +2436,7 @@ mod tests {
                 content: "the sampler is greedy with a seed".to_owned(),
                 voids: id("b1"),
                 provenance: at(7, "structuring", None, 0),
+                refuted: None,
             },
             Patch::Resolve {
                 target: id("a2"),
@@ -2388,6 +2586,7 @@ mod tests {
                 content: "the rate is 0.31".to_owned(),
                 voids: id("e1"),
                 provenance: from(2, "interview", None),
+                refuted: None,
             }),
             Err(ObjectError::SelfSupersede(id("e1"))),
             "a correction of an entry by its own alias was not named as one"
@@ -2399,6 +2598,7 @@ mod tests {
                 content: "the rate is 0.31".to_owned(),
                 voids: id("e2"),
                 provenance: from(2, "interview", None),
+                refuted: None,
             }),
             Err(ObjectError::SelfSupersede(id("e1")))
         );

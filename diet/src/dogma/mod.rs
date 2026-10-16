@@ -121,7 +121,13 @@ pub mod vocabulary;
 ///   ends its turn; and `PHASE_OPERATOR_PROPOSAL`, the note that puts the
 ///   operator's proposal to it. `propose_phase_transition` left the `c1`
 ///   and `c2` contracts, so both sets' contract pins moved.
-pub const VERSION: u32 = 11;
+/// * 12, 2026-10-16: `REFUTE_Q` joined (#878): the refutation interview's
+///   ask, put after a failed command or the operator's message -- what it
+///   shows was wrong of what the model believed, by note id or quoted claim,
+///   how firmly it was held, why and what is believed now. Track 3's draft,
+///   for the maintainer's approval of the wording before it ships. No
+///   template already pinned changed.
+pub const VERSION: u32 = 12;
 
 /// The digest of `diet/dogma/MANIFEST.tsv` that [`VERSION`] was declared
 /// against.
@@ -131,7 +137,7 @@ pub const VERSION: u32 = 11;
 /// that recomputes it fails until both lines are edited together. Without it
 /// the manifest could be regenerated after an edit and the version left at
 /// what it was, which is a bump that never happened.
-pub const MANIFEST_DIGEST: &str = "74bfe97e1444a9c5";
+pub const MANIFEST_DIGEST: &str = "5168035a2bd4d9d7";
 
 /// The per-model operating points, as TOML text, exactly as pinned.
 ///
@@ -238,7 +244,8 @@ pub enum Hole {
     Category,
     /// How many lines the audited list has, and so how many the answer must.
     LineCount,
-    /// The numbered list of working notes to audit.
+    /// The list of working notes an ask is about: numbered, to audit; by
+    /// id, for a refutation (#878).
     Items,
     /// The material the ask is about: its name in one template, its full
     /// text in another. Which is which is the template's business.
@@ -349,6 +356,9 @@ pub enum Template {
     /// [`Self::AuditQHuman`], with operator changes to address (#150).
     AuditQHumanReconcile,
     /// Audit rider: the goal must state the current mission.
+    /// After a failed command or the operator's message: what it shows
+    /// was wrong of what the model believed (#878).
+    RefuteQ,
     AuditGoalNote,
     /// Audit rider: an answered question is updated, not dropped.
     AuditOpenNote,
@@ -391,6 +401,7 @@ impl Template {
         Self::AuditQReconcile,
         Self::AuditQCadenceReconcile,
         Self::AuditQHumanReconcile,
+        Self::RefuteQ,
         Self::AuditGoalNote,
         Self::AuditOpenNote,
         Self::AddQ,
@@ -426,6 +437,7 @@ impl Template {
             Self::AuditQReconcile => "AUDIT_Q_RECONCILE",
             Self::AuditQCadenceReconcile => "AUDIT_Q_CADENCE_RECONCILE",
             Self::AuditQHumanReconcile => "AUDIT_Q_HUMAN_RECONCILE",
+            Self::RefuteQ => "REFUTE_Q",
             Self::AuditGoalNote => "AUDIT_GOAL_NOTE",
             Self::AuditOpenNote => "AUDIT_OPEN_NOTE",
             Self::AddQ => "ADD_Q",
@@ -474,6 +486,7 @@ impl Template {
             Self::AuditQHumanReconcile => {
                 include_str!("../../dogma/templates/AUDIT_Q_HUMAN_RECONCILE.txt")
             }
+            Self::RefuteQ => include_str!("../../dogma/templates/REFUTE_Q.txt"),
             Self::AuditGoalNote => include_str!("../../dogma/templates/AUDIT_GOAL_NOTE.txt"),
             Self::AuditOpenNote => include_str!("../../dogma/templates/AUDIT_OPEN_NOTE.txt"),
             Self::AddQ => include_str!("../../dogma/templates/ADD_Q.txt"),
@@ -507,6 +520,7 @@ impl Template {
             | Self::DocRead
             | Self::TurnBoundary
             | Self::Evidence
+            | Self::RefuteQ
             | Self::Extract
             | Self::ExtractMinimal
             | Self::Gotchas
@@ -539,6 +553,7 @@ impl Template {
             Self::ApiSurface => &[Hole::Path, Hole::Depth, Hole::Intent],
             Self::Doctrine | Self::DocRead => &[Hole::Path],
             Self::Evidence => &[Hole::Source, Hole::Size],
+            Self::RefuteQ => &[Hole::Source, Hole::Items],
             Self::ExtractMinimal => &[Hole::Source],
             Self::Supersede => &[Hole::OldEntry, Hole::NewQuote],
             Self::ForkNoteAdvisory | Self::ForkNoteImperative => &[Hole::Entry],

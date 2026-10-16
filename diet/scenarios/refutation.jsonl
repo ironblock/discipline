@@ -1,0 +1,14 @@
+{"scenario":"refutation","regimen":"refutation.toml","head":"../drive/heads/floor.md"}
+{"reply":{"when":"Set up the config loader","text":"The loader reads ./config.toml."}}
+{"reply":{"when":"The turn has ended","text":"DECISION: the loader reads its settings from ./config.toml\nPLAN: NONE\nSUPERSEDE: NONE"}}
+{"reply":{"when":"show that something you believed was wrong","text":"REFUTED: NONE"}}
+{"reply":{"when":"Run the loader","text":"Checking the file.","calls":[{"id":"call-c","name":"bash","arguments":"{\"command\": \"cat config.toml\"}"}]}}
+{"reply":{"text":"There is no config.toml here."}}
+{"reply":{"when":"show that something you believed was wrong","text":"REFUTED: interview-t1-0 — held: conclusion — because: cat config.toml failed, the file does not exist — now: the loader's settings path is not known yet"}}
+{"step":"ask","text":"Set up the config loader.","scoping":true}
+{"step":"ask","text":"Run the loader."}
+{"step":"declare-meditation"}
+{"step":"end"}
+{"expect":"fork","name":"refuted","where":{"why":"refutation","ask":"refute_q","trigger":"refutation:call-c","question~":"cat config.toml"}}
+{"expect":"patch","name":"corrected","where":{"op":"supersede","entry.text":"decision: the loader's settings path is not known yet","refuted.held":"conclusion","refuted.because":"cat config.toml failed, the file does not exist","refuted.pointer":"call call-c"},"after":"refuted"}
+{"expect":"meditation","where":{"render~":"was: decision: the loader reads its settings from ./config.toml (held as a conclusion), wrong because cat config.toml failed, the file does not exist [call call-c]"},"after":"corrected"}

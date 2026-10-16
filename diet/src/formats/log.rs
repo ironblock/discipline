@@ -169,10 +169,10 @@ use super::record::vocabulary;
 struct LogParser;
 
 /// The version this module writes, as `session.start` states it.
-pub const VERSION: i64 = 8;
+pub const VERSION: i64 = 9;
 
 /// Every version this module reads.
-pub const READS: &[i64] = &[0, 1, 2, 3, 4, 5, 6, 7, 8];
+pub const READS: &[i64] = &[0, 1, 2, 3, 4, 5, 6, 7, 8, 9];
 
 /// How recent an input event must be, at the moment a turn settles, for the
 /// person to count as already present: `notice` is then zero (Q4 (a), ruled
@@ -598,6 +598,9 @@ vocabulary! {
         Trouble => "trouble",
         /// Every so many steps (v8, #783): the `OPEN_NEXT` ask.
         Open => "open",
+        /// A failed command, or the operator's message (v9, #878): the
+        /// `REFUTE_Q` ask, what it shows was wrong of what the model believed.
+        Refutation => "refutation",
     }
 }
 
@@ -1529,6 +1532,8 @@ pub enum Event {
         /// The live entry an `add` was merged into for its likeness (v8, the
         /// note dedupe lever), and the cosine that merged it.
         merged: Option<Merged>,
+        /// What showed the entry a `supersede` voids wrong (v9, #878).
+        refuted: Option<Refuted>,
     },
     /// Forks' patches delivered to the trunk (v7, the fork delivery lever):
     /// one note at the tail of turn `turn`'s first request, after its ask,
@@ -2016,6 +2021,18 @@ pub struct RenderBudget {
     pub fits: Option<bool>,
     /// The window's line, when it set the budget (v8, #814).
     pub window_line: Option<u64>,
+}
+
+/// What showed the entry a `supersede` voids wrong (v9, #878): how firmly it
+/// was held, why it is wrong, and where that was shown.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Refuted {
+    /// How firmly it was held: `guess`, `belief` or `conclusion`.
+    pub held: String,
+    /// What shows it wrong.
+    pub because: String,
+    /// Where that was shown: `call <id>`, or `log seq <n>`.
+    pub pointer: String,
 }
 
 /// A patch's entry (v5, #374): its id, its text, and its category when the
@@ -3788,6 +3805,17 @@ fn from_object(object: &BTreeMap<String, Value>) -> Result<Line, String> {
                 }
                 _ => None,
             };
+            let refuted = match fields.0.get("refuted") {
+                None => None,
+                Some(_) => Some(fields.refuted("refuted")?),
+            };
+            if refuted.is_some() && op != PatchOp::Supersede {
+                return Err(format!(
+                    "a patch whose `op` is `{}` carries `refuted`: only a `supersede` voids \
+                     the claim it refutes",
+                    op.tag()
+                ));
+            }
             Event::Patch {
                 fork,
                 lane,
@@ -3797,6 +3825,7 @@ fn from_object(object: &BTreeMap<String, Value>) -> Result<Line, String> {
                 tangent: fields.optional_string("tangent")?,
                 reason,
                 merged,
+                refuted,
             }
         }
         Kind::Capture => Event::Capture {
@@ -4774,6 +4803,9 @@ pub enum Holds {
     /// A `patch`'s [`PatchEntry`]: an object of the keys [`PATCH_ENTRY`]
     /// declares (v5).
     Entry,
+    /// A `patch`'s [`Refuted`]: an object of the keys [`REFUTED`] declares
+    /// (v9, #878).
+    Refuted,
 }
 
 /// One key a kind carries.
@@ -4958,6 +4990,15 @@ pub const SERVED_FIELD: &[Field] = &[
 
 /// The keys of a `patch`'s entry: its id and text always, its category when
 /// the fold names one. Arrived in v5.
+/// The keys of a supersede's refutation (v9, #878): how firmly the claim it
+/// voids was held (`guess`, `belief` or `conclusion`), what shows it wrong,
+/// and where that was shown.
+pub const REFUTED: &[Field] = &[
+    must_v9("held", Holds::Text),
+    must_v9("because", Holds::Text),
+    must_v9("pointer", Holds::Text),
+];
+
 pub const PATCH_ENTRY: &[Field] = &[
     must_v5("id", Holds::Text),
     must_v5("text", Holds::Text),
@@ -4991,6 +5032,25 @@ const fn may_v8(key: &'static str, holds: Holds) -> Field {
         holds,
         required: false,
         since: 8,
+    }
+}
+
+/// A key that arrived in v9 and is required wherever its object is written.
+const fn must_v9(key: &'static str, holds: Holds) -> Field {
+    Field {
+        key,
+        holds,
+        required: true,
+        since: 9,
+    }
+}
+
+const fn may_v9(key: &'static str, holds: Holds) -> Field {
+    Field {
+        key,
+        holds,
+        required: false,
+        since: 9,
     }
 }
 
@@ -5119,6 +5179,7 @@ pub fn object_fields(holds: Holds) -> Option<&'static [Field]> {
         Holds::Files => Some(RECORDED_FILE),
         Holds::Served => Some(SERVED_FIELD),
         Holds::Entry => Some(PATCH_ENTRY),
+        Holds::Refuted => Some(REFUTED),
         _ => None,
     }
 }
@@ -5180,6 +5241,9 @@ fn two_keys(tags: Tags, tag: &str) -> bool {
 #[must_use]
 #[allow(clippy::too_many_lines)] // one table of arrivals, written out
 pub fn tag_introduced(tags: Tags, tag: &str) -> i64 {
+    if tags == Tags::Warrant && Warrant::from_tag(tag) == Some(Warrant::Refutation) {
+        return 9;
+    }
     if tags == Tags::Refusal
         && matches!(
             Refusal::from_tag(tag),
@@ -5537,6 +5601,7 @@ pub fn schema(kind: Kind) -> &'static [Field] {
                 may_v8("reason", Text),
                 may_v8("merged", Text),
                 may_v8("cosine", Text),
+                may_v9("refuted", Holds::Refuted),
             ];
             F
         }
@@ -5881,6 +5946,7 @@ fn ts_holds(holds: Holds) -> String {
         Holds::ToolCallPiece => "ToolCallPiece".to_owned(),
         Holds::Approval => "Approval".to_owned(),
         Holds::Entry => "PatchEntry".to_owned(),
+        Holds::Refuted => "Refuted".to_owned(),
         Holds::Files => "RecordedFile[]".to_owned(),
         Holds::Served => "ServedField[]".to_owned(),
         Holds::Head => "HeadMessage[]".to_owned(),
@@ -5987,6 +6053,7 @@ pub fn typescript() -> String {
         ("RecordedFile", RECORDED_FILE),
         ("ServedField", SERVED_FIELD),
         ("PatchEntry", PATCH_ENTRY),
+        ("Refuted", REFUTED),
     ] {
         let _ = writeln!(out, "export interface {name} {{");
         for field in fields {
@@ -6678,6 +6745,7 @@ fn to_value(line: &Line) -> Value {
             tangent,
             reason,
             merged,
+            refuted,
         } => {
             if let Some(reason) = reason {
                 put("reason", text(reason));
@@ -6685,6 +6753,21 @@ fn to_value(line: &Line) -> Value {
             if let Some(Merged { into, cosine }) = merged {
                 put("merged", text(into));
                 put("cosine", text(cosine));
+            }
+            if let Some(Refuted {
+                held,
+                because,
+                pointer,
+            }) = refuted
+            {
+                put(
+                    "refuted",
+                    Value::Object(BTreeMap::from([
+                        ("held".to_owned(), text(held)),
+                        ("because".to_owned(), text(because)),
+                        ("pointer".to_owned(), text(pointer)),
+                    ])),
+                );
             }
             if let Some(fork) = fork {
                 put("fork", count(*fork));
@@ -7828,6 +7911,24 @@ impl Fields<'_> {
     }
 
     /// A `patch`'s `entry`: an object of [`PATCH_ENTRY`]'s keys (v5).
+    /// A `patch`'s `refuted`: an object of [`REFUTED`]'s keys (v9), its
+    /// `held` one of the three words.
+    fn refuted(&self, key: &str) -> Result<Refuted, String> {
+        let inner = Fields(self.object(key, REFUTED)?);
+        let within = |why: String| format!("`{key}`: {why}");
+        let held = inner.string("held").map_err(within)?;
+        if !["guess", "belief", "conclusion"].contains(&held.as_str()) {
+            return Err(format!(
+                "`{key}`: `held` is `{held}`, not `guess`, `belief` or `conclusion`"
+            ));
+        }
+        Ok(Refuted {
+            held,
+            because: inner.string("because").map_err(within)?,
+            pointer: inner.string("pointer").map_err(within)?,
+        })
+    }
+
     fn entry(&self, key: &str) -> Result<PatchEntry, String> {
         let inner = Fields(self.object(key, PATCH_ENTRY)?);
         let within = |why: String| format!("`{key}`: {why}");
@@ -8267,11 +8368,11 @@ mod tests {
         assert!(refused.why.contains("v8"), "{refused}");
     }
 
-    /// #583: this module writes v8.
+    /// #583, #878: this module writes v9.
     #[test]
-    fn this_module_writes_v8_and_reads_every_version_before_it() {
-        assert_eq!(super::VERSION, 8);
-        assert_eq!(super::READS, &[0, 1, 2, 3, 4, 5, 6, 7, 8]);
+    fn this_module_writes_v9_and_reads_every_version_before_it() {
+        assert_eq!(super::VERSION, 9);
+        assert_eq!(super::READS, &[0, 1, 2, 3, 4, 5, 6, 7, 8, 9]);
     }
 
     fn start() -> Line {
@@ -8678,6 +8779,7 @@ mod tests {
                 tangent: Some("t/1".to_owned()),
                 reason: None,
                 merged: None,
+                refuted: None,
             },
             // Merged into a live entry for its likeness (the note dedupe
             // lever).
@@ -8697,6 +8799,7 @@ mod tests {
                     into: "d1".to_owned(),
                     cosine: "0.6576".to_owned(),
                 }),
+                refuted: None,
             },
             // The trunk's own (#609): named by its lane, not a fork.
             Event::Patch {
@@ -8712,6 +8815,12 @@ mod tests {
                 tangent: None,
                 reason: Some("the scope narrowed to one team".to_owned()),
                 merged: None,
+                // What showed the claim it voids wrong (v9, #878).
+                refuted: Some(Refuted {
+                    held: "belief".to_owned(),
+                    because: "the operator said the tracker is the team's".to_owned(),
+                    pointer: "log seq 1".to_owned(),
+                }),
             },
             Event::TangentOpen {
                 id: "t/1".to_owned(),
@@ -8923,7 +9032,8 @@ mod tests {
                 | Holds::PhaseDocument
                 | Holds::ToolCallPiece
                 | Holds::Approval
-                | Holds::Entry,
+                | Holds::Entry
+                | Holds::Refuted,
                 Value::Object(object),
             ) => {
                 let declared = object_fields(holds).expect("an object holder");
@@ -10259,7 +10369,7 @@ mod tests {
         );
         assert_eq!(
             tags(Warrant::ALL.iter().map(|it| it.tag()).collect()),
-            "read scoping meditation evidence trouble open"
+            "read scoping meditation evidence trouble open refutation"
         );
         assert_eq!(
             tags(ForkOutcome::ALL.iter().map(|it| it.tag()).collect()),

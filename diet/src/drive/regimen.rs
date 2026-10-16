@@ -677,6 +677,7 @@ fn warrant_lever(regimen: &Regimen) -> String {
 /// failed turn's commands stay on the trunk -- and are written as the build
 /// has them.
 #[must_use]
+#[allow(clippy::too_many_lines)] // one table of levers, written out
 pub fn serve_levers(regimen: &Regimen, output_cap: (u32, &str)) -> BTreeMap<String, String> {
     use crate::meditation::policy::MEDITATION_TAIL_TOKENS;
     let word = |key: &str| match regimen.get(key) {
@@ -733,6 +734,11 @@ pub fn serve_levers(regimen: &Regimen, output_cap: (u32, &str)) -> BTreeMap<Stri
         ("mechanical_capture".to_owned(), mechanical_lever(regimen)),
         // Write-time dedupe of similar notes: `off`, or `tfidf:<threshold>`.
         ("note_dedupe".to_owned(), crate::dedupe::lever(regimen)),
+        // The refutation interview (#878): `off`, or its cooldown.
+        (
+            "refutation_interview".to_owned(),
+            crate::drive::session::refutation_lever(regimen),
+        ),
         ("fork_delivery".to_owned(), delivery),
         ("tool_output_disposition".to_owned(), disposition),
         (

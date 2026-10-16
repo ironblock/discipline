@@ -1,0 +1,12 @@
+{"scenario":"refutation-nothing","regimen":"refutation-nothing.toml","head":"../drive/heads/floor.md"}
+{"reply":{"when":"Run the loader","text":"Checking the file.","calls":[{"id":"call-c","name":"bash","arguments":"{\"command\": \"cat config.toml\"}"}]}}
+{"reply":{"text":"There is no config.toml here, as expected."}}
+{"reply":{"when":"show that something you believed was wrong","text":"REFUTED: NONE"}}
+{"reply":{"when":"Run it again","text":"Once more.","calls":[{"id":"call-d","name":"bash","arguments":"{\"command\": \"cat config.toml\"}"}]}}
+{"reply":{"text":"Still no config.toml, as expected."}}
+{"step":"ask","text":"Run the loader."}
+{"step":"ask","text":"Run it again."}
+{"step":"end"}
+{"expect":"fork","name":"asked","where":{"why":"refutation","ask":"refute_q","trigger":"refutation:call-c"}}
+{"expect":"fork.settled","where":{"outcome":"decline"},"after":"asked"}
+{"expect":"turn.settled","where":{"turn":"2","reason":"final"}}

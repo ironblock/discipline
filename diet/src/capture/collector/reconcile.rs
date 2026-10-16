@@ -76,6 +76,7 @@ pub fn reconcile(
             content: replacement.content.to_owned(),
             voids: nomination.entry.clone(),
             provenance: replacement.provenance,
+            refuted: None,
         }),
         Verdict::Done => Outcome::Resolved(Patch::Resolve {
             target: nomination.entry.clone(),

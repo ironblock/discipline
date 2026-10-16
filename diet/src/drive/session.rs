@@ -834,6 +834,8 @@ pub enum Event {
         /// The live entry an `add` was merged into for its likeness, and
         /// their cosine (the note dedupe lever).
         merged: Option<log::Merged>,
+        /// What showed the entry a `supersede` voids wrong (#878).
+        refuted: Option<log::Refuted>,
     },
     /// A self-capture call and what it came to (#609).
     /// The operator's ruling on the model's pending phase proposal (#124).
@@ -1299,6 +1301,10 @@ pub struct Interview {
     /// `served_max_batch_size`, when declared. An audit's chunks overlap no
     /// further ([`crate::meditation::policy::Served::audit_concurrency`]).
     pub served_batch: Option<usize>,
+    /// The refutation interview (#878), when the regimen turns it on: the
+    /// steps each source waits between its forks -- failed commands', then
+    /// the operator's messages'.
+    pub refutation: Option<(u64, u64)>,
     /// The warrants that look at what a step produced, and their numbers
     /// (#783).
     pub step: crate::drive::warrants::StepWarrants,
@@ -2437,6 +2443,11 @@ struct State {
     /// (#783): every step's under the gap timing, the final answer's under
     /// either.
     gap_firings: Vec<Firing>,
+    /// The steps since the last refutation fork of each source (#878) -- a
+    /// failed command's, the operator's message's -- each cooled on its own;
+    /// and what this turn last showed wrong: a failed command, by its call.
+    refute_steps: (u64, u64),
+    refute_due: Option<RefuteDue>,
     /// The operator's phase proposal the model has not yet answered
     /// (#788): the phase it proposes, and whether an accepted move
     /// meditates.
@@ -2605,6 +2616,9 @@ impl State {
             deferred: None,
             step_counters: crate::drive::warrants::Counters::default(),
             gap_firings: Vec::new(),
+            // As far past the cooldown as `trouble`'s counter starts (#783).
+            refute_steps: (99, 99),
+            refute_due: None,
             operator_proposal: None,
             move_after_turn: None,
             declared_after_pool: None,
@@ -3442,6 +3456,7 @@ impl<S: Streaming + 'static> Session<S> {
         // its own (#783).
         state.step_counters.covered.clear();
         state.gap_firings.clear();
+        state.refute_due = None;
         let turn = state.turns;
         let seq = state.push(Event::Asked {
             turn,
@@ -4145,6 +4160,7 @@ impl<S: Streaming + 'static> Session<S> {
                 tangent,
                 index: 0,
             },
+            refuted: None,
         };
         let Some(interview) = state.interview.as_mut() else {
             unreachable!("a live entry was checked above");
@@ -5235,6 +5251,7 @@ pub fn line_of(logged: &Logged) -> log::Line {
             tangent,
             reason,
             merged,
+            refuted,
         } => log::Event::Patch {
             fork: *fork,
             lane: lane.clone(),
@@ -5244,6 +5261,7 @@ pub fn line_of(logged: &Logged) -> log::Line {
             tangent: tangent.clone(),
             reason: reason.clone(),
             merged: merged.clone(),
+            refuted: refuted.clone(),
         },
         Event::PhaseRuled {
             call,
@@ -8096,6 +8114,7 @@ fn restates(state: &State, id: &str, content: &str) -> Option<Refusal> {
                 tangent: None,
                 index: 0,
             },
+            refuted: None,
         })
         .is_err()
         .then_some(Refusal::Restates)
@@ -8597,14 +8616,15 @@ fn audit_holding(state: &State, shape: &RequestShape) -> u64 {
 
 /// The live notes an audit asks over, in chunks of the regimen's
 /// [`crate::meditation::policy::MEDITATION_AUDIT_CHUNK_NOTES`]: the notes the
-/// operator changed first, then the newest.
+/// operator changed first, then the newest -- every one the audit may prune,
+/// so never a refuted claim's correction (#878).
 fn audit_chunks_of(state: &State) -> Vec<Vec<String>> {
     let Some(interview) = state.interview.as_ref() else {
         return Vec::new();
     };
     let items: Vec<Note> = interview
         .object
-        .live()
+        .auditable()
         .map(|entry| (entry.id.clone(), entry.content.clone()))
         .collect();
     let mut order = newest_first(&interview.object, &items);
@@ -8701,9 +8721,10 @@ fn audit_asked(
         .filter(|interview| interview.meditations.audit)?;
     // The gate's re-ask (#150) puts the same ask over only the notes whose
     // changes are left: `only`.
+    // A correction of a refuted claim is never put to it (#878).
     let items: Vec<(crate::object::EntryId, String)> = interview
         .object
-        .live()
+        .auditable()
         .filter(|entry| only.is_none_or(|only| only.iter().any(|id| id == entry.id.as_str())))
         .map(|entry| (entry.id.clone(), entry.content.clone()))
         .collect();
@@ -9166,6 +9187,7 @@ fn audit_folded(
                     content: note.clone(),
                     voids: target,
                     provenance: provenance(line.number),
+                    refuted: None,
                 }),
                 Judgment::Remove(_) | Judgment::DupOf(_) => Some(Patch::Retire {
                     target,
@@ -10517,6 +10539,13 @@ fn gap<S>(shared: &Shared<S>, state: &mut State, turn: u32, at: u64) -> Option<F
     if !state.ending {
         fired.extend(content);
     }
+    // And last, the refutation interview (#878): it lists the notes as the
+    // gap's other forks leave them to fold into.
+    if let Some(firing) = refutation_firing(state, turn)
+        && !state.ending
+    {
+        fired.push_back(firing);
+    }
     let Some(first) = fired.pop_front() else {
         turn_over(&shared.template, state);
         return None;
@@ -10693,6 +10722,8 @@ fn cut_step<S: Streaming + 'static>(
         return;
     }
     let ids: Vec<String> = calls.iter().map(|call| call.id.clone()).collect();
+    // A failed command, for the refutation interview at the gap (#878).
+    refutation_seen(state, at.1, &ids);
     // What the step produced (#783): every step's gates count, either timing.
     let content = content_firings(state, (at.0, at.1), (said, &ids), verdict);
     if !state
@@ -11047,6 +11078,215 @@ fn verdict_gates(
             classified_gates(warrants, counters, step, (&[], *open_gated))
         }
     }
+}
+
+/// The regimen key that turns the refutation interview on (#878): `on`, or
+/// `true`; off unless declared.
+pub const REFUTATION_INTERVIEW: &str = "refutation_interview";
+
+/// The regimen key for the steps a failed command waits after the last
+/// failed command's refutation fork (#878): a whole number above 0. Cooled,
+/// as `trouble`'s errors were not: those were T1's measured overcollector.
+pub const REFUTATION_FAILED_COOLDOWN_STEPS: &str = "refutation_failed_cooldown_steps";
+
+/// The regimen key for the steps the operator's message waits after the last
+/// operator message's refutation fork (#878): a whole number above 0.
+pub const REFUTATION_OPERATOR_COOLDOWN_STEPS: &str = "refutation_operator_cooldown_steps";
+
+/// Each cooldown when undeclared: `trouble`'s (#783).
+pub const REFUTATION_COOLDOWN_DEFAULT: u64 = 3;
+
+/// The refutation interview `regimen` declares (#878): its two cooldowns in
+/// steps -- failed commands', the operator's messages' -- or `None` when it
+/// is off.
+///
+/// # Errors
+///
+/// A word other than `on`, `off`, `true` or `false`; a cooldown that is not a
+/// whole number above 0; or a cooldown with the interview off.
+pub fn refutation_interview(regimen: &Regimen) -> Result<Option<(u64, u64)>, String> {
+    let on = match regimen.get(REFUTATION_INTERVIEW) {
+        None => false,
+        Some(regimen::Value::Boolean(on)) => *on,
+        Some(regimen::Value::String(word)) if word == "on" || word == "off" => word == "on",
+        Some(_) => {
+            return Err(format!(
+                "`{REFUTATION_INTERVIEW}` is `true`, `false`, `on` or `off`"
+            ));
+        }
+    };
+    let cooldown = |key: &str| match regimen.get(key) {
+        None => Ok(None),
+        Some(regimen::Value::Integer(n)) if *n > 0 => Ok(u64::try_from(*n).ok()),
+        Some(_) => Err(format!("`{key}` is a whole number above 0")),
+    };
+    let failed = cooldown(REFUTATION_FAILED_COOLDOWN_STEPS)?;
+    let operator = cooldown(REFUTATION_OPERATOR_COOLDOWN_STEPS)?;
+    if !on {
+        return match failed.or(operator) {
+            Some(_) => Err(format!(
+                "a refutation cooldown is set but `{REFUTATION_INTERVIEW}` is off"
+            )),
+            None => Ok(None),
+        };
+    }
+    Ok(Some((
+        failed.unwrap_or(REFUTATION_COOLDOWN_DEFAULT),
+        operator.unwrap_or(REFUTATION_COOLDOWN_DEFAULT),
+    )))
+}
+
+/// The refutation interview's word for the session's start (#878): `off`,
+/// or `on:failed-cooldown-<n>-steps:operator-cooldown-<m>-steps`, each with
+/// `:default` after it when the regimen names none;
+/// [`crate::drive::regimen::UNDECLARED`] for one serve refuses.
+#[must_use]
+pub fn refutation_lever(regimen: &Regimen) -> String {
+    let default = |key: &str| {
+        if regimen.get(key).is_none() {
+            ":default"
+        } else {
+            ""
+        }
+    };
+    match refutation_interview(regimen) {
+        Ok(None) => "off".to_owned(),
+        Ok(Some((failed, operator))) => format!(
+            "on:failed-cooldown-{failed}-steps{}:operator-cooldown-{operator}-steps{}",
+            default(REFUTATION_FAILED_COOLDOWN_STEPS),
+            default(REFUTATION_OPERATOR_COOLDOWN_STEPS)
+        ),
+        Err(_) => crate::drive::regimen::UNDECLARED.to_owned(),
+    }
+}
+
+/// What a refutation interview is asked about (#878): the trigger's word on
+/// the fork line, where it was shown (the pointer a correction carries), and
+/// how the ask puts it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct RefuteDue {
+    trigger: String,
+    pointer: String,
+    source: String,
+}
+
+/// The step of request `request` counted toward both refutation cooldowns
+/// (#878), and -- once failed commands' has passed -- its failed command -- one that ran and exited non-zero or
+/// timed out, or showed an error, as `trouble` reads one (#783), but never a
+/// background job's start -- kept as what the gap asks about: the step's
+/// last.
+fn refutation_seen(state: &mut State, request: u64, ids: &[String]) {
+    let Some((cooldown, _)) = state
+        .interview
+        .as_ref()
+        .and_then(|interview| interview.refutation)
+    else {
+        return;
+    };
+    state.refute_steps.0 = state.refute_steps.0.saturating_add(1);
+    state.refute_steps.1 = state.refute_steps.1.saturating_add(1);
+    // Failed commands cooled too: `trouble` fired on every one, and was T1's
+    // measured overcollector (#878's ruling).
+    if state.refute_steps.0 < cooldown {
+        return;
+    }
+    let failed = state
+        .log
+        .iter()
+        .filter_map(|logged| match &logged.event {
+            Event::ToolCalled(line) if line.request == request && ids.contains(&line.id) => {
+                Some(line.as_ref())
+            }
+            _ => None,
+        })
+        // A background job's start is not its outcome (#614): what it shows
+        // lists the statuses it may end in, `failed` among them.
+        .rfind(|line| {
+            line.outcome == log::ToolOutcome::Ran
+                && line.background.is_none()
+                && (line.exit.is_some_and(|exit| exit != 0)
+                    || line.timeout_ms.is_some()
+                    || crate::drive::warrants::shows_an_error(
+                        line.shown.as_deref().unwrap_or_default(),
+                    ))
+        });
+    if let Some(line) = failed {
+        let shown = line.shown.as_deref().unwrap_or_default();
+        let tail: String = shown
+            .chars()
+            .rev()
+            .take(800)
+            .collect::<Vec<_>>()
+            .into_iter()
+            .rev()
+            .collect();
+        let pointer = format!("call {}", line.id);
+        state.refute_due = Some(RefuteDue {
+            trigger: line.id.clone(),
+            source: format!(
+                "The command {} ({pointer}) failed. What it showed ended:\n{}",
+                crate::drive::warrants::ident(&line.name, &line.arguments),
+                tail.trim_end()
+            ),
+            pointer,
+        });
+    }
+}
+
+/// The gap's refutation fork (#878), when the interview is on: after a
+/// failed command, else after the operator's message -- each once the
+/// cooldown's steps have passed since that source's last, the turn's answer
+/// counted as a step. It asks `REFUTE_Q` over the live notes, by id.
+fn refutation_firing(state: &mut State, turn: u32) -> Option<Firing> {
+    use crate::dogma::{Hole, Template};
+    let (_, cooldown) = state.interview.as_ref()?.refutation?;
+    state.refute_steps.0 = state.refute_steps.0.saturating_add(1);
+    state.refute_steps.1 = state.refute_steps.1.saturating_add(1);
+    let failed = state.refute_due.take();
+    if failed.is_some() {
+        state.refute_steps.0 = 0;
+    }
+    let due = failed.or_else(|| {
+        (state.refute_steps.1 >= cooldown)
+            .then(|| {
+                state.log.iter().find_map(|logged| match &logged.event {
+                    Event::Asked { turn: at, text, .. } if *at == turn => Some(RefuteDue {
+                        trigger: logged.seq.to_string(),
+                        pointer: format!("log seq {}", logged.seq),
+                        source: format!("The operator said:\n{text}"),
+                    }),
+                    _ => None,
+                })
+            })
+            .flatten()
+            .inspect(|_| state.refute_steps.1 = 0)
+    })?;
+    let object = &state.interview.as_ref()?.object;
+    let items: Vec<String> = object
+        .live()
+        .map(|entry| {
+            format!(
+                "{}\t{}",
+                entry.id.as_str(),
+                entry.content.replace('\n', " ")
+            )
+        })
+        .collect();
+    let items = if items.is_empty() {
+        "(none)".to_owned()
+    } else {
+        items.join("\n")
+    };
+    let question = Template::RefuteQ
+        .fill(&[(Hole::Source, &due.source), (Hole::Items, &items)])
+        .ok()?;
+    Some(Firing {
+        why: log::Warrant::Refutation,
+        ask: AskKind::Generic,
+        pinned: Some(Template::RefuteQ),
+        question,
+        trigger: format!("refutation:{}", due.trigger),
+    })
 }
 
 /// The forks the step gates `fired` for the trunk step of request
@@ -12191,6 +12431,17 @@ fn folded(state: &mut State, text: &str, turn: u32, fork: u64) -> (log::ForkOutc
         return (log::ForkOutcome::Unparseable, Vec::new());
     };
     let patches = unclashed(patches, &interview.object, (turn, fork));
+    // A refutation fork's REFUTED fields, each the supersede it asks for
+    // (#878), under the ids `unclashed` gave them; any other fork's,
+    // recorded as nothing.
+    let patches = refuted_from(
+        patches,
+        &interview.object,
+        refutation_pointer(&state.log, fork).as_deref(),
+    );
+    if patches.is_empty() {
+        return (log::ForkOutcome::Decline, Vec::new());
+    }
     let Cited { patches, reasons } = cited(patches, &interview.object);
     // Made under an open tangent (#22): stamped with it from birth, so its
     // close finds them by provenance and never by recency.
@@ -12232,6 +12483,159 @@ fn folded(state: &mut State, text: &str, turn: u32, fork: u64) -> (log::ForkOutc
         }
     }
     (outcome, lines)
+}
+
+/// The pointer a refutation fork's corrections carry (#878): where its
+/// trigger was shown -- `call <id>` for a failed command, `log seq <n>` for
+/// the operator's message. `None` for any other fork.
+fn refutation_pointer(log: &[Logged], fork: u64) -> Option<String> {
+    log.iter().find_map(|logged| match &logged.event {
+        Event::Forked {
+            why: log::Warrant::Refutation,
+            trigger,
+            ..
+        } if logged.seq == fork => {
+            let at = trigger.strip_prefix("refutation:")?;
+            Some(if at.chars().all(|c| c.is_ascii_digit()) {
+                format!("log seq {at}")
+            } else {
+                format!("call {at}")
+            })
+        }
+        _ => None,
+    })
+}
+
+/// The kind a `REFUTED` field gives a claim never written down (#878): the
+/// answer names none, and a quoted claim is the model's own statement of
+/// what it took to be so.
+const QUOTED_CLAIM_KIND: &str = "fact";
+
+/// `patches` with each `refuted: ` addition the fold made (#878) turned into
+/// the supersede it asks for, when `pointer` names a refutation fork's
+/// trigger: `<id or "quoted claim"> — held: <word> — because: <why> — now:
+/// <claim>`. The note `<id>` names, live, is voided by the claim believed
+/// now, of its own kind, carrying how firmly it was held, why it is wrong and
+/// `pointer`; a quoted claim is first added as a `fact` and voided at once,
+/// so it renders the same way. A field that does not read so, or names no
+/// live note, is dropped -- as is every `refuted: ` addition of any other
+/// fork. The rest pass through, renumbered in order.
+fn refuted_from(
+    patches: Vec<Patch>,
+    object: &crate::object::WorkingObject,
+    pointer: Option<&str>,
+) -> Vec<Patch> {
+    const PREFIX: &str = "refuted: ";
+    if !patches
+        .iter()
+        .any(|patch| matches!(patch, Patch::Add { content, .. } if content.starts_with(PREFIX)))
+    {
+        return patches;
+    }
+    let mut out = Vec::new();
+    for patch in patches {
+        let Patch::Add {
+            id,
+            content,
+            provenance,
+        } = &patch
+        else {
+            out.push(patch);
+            continue;
+        };
+        let Some(value) = content.strip_prefix(PREFIX) else {
+            out.push(patch);
+            continue;
+        };
+        let (Some(pointer), Some(read)) = (pointer, refutation_read(value)) else {
+            continue;
+        };
+        let (target, quoted, held, because, now) = read;
+        let refuted = Some(crate::object::Refutation {
+            held,
+            because,
+            pointer: pointer.to_owned(),
+        });
+        if quoted {
+            let Ok(claim) = crate::object::EntryId::new(&format!("{}-claim", id.as_str())) else {
+                continue;
+            };
+            out.push(Patch::Add {
+                id: claim.clone(),
+                content: format!("{QUOTED_CLAIM_KIND}: {target}"),
+                provenance: provenance.clone(),
+            });
+            out.push(Patch::Supersede {
+                id: id.clone(),
+                content: format!("{QUOTED_CLAIM_KIND}: {now}"),
+                voids: claim,
+                provenance: provenance.clone(),
+                refuted,
+            });
+            continue;
+        }
+        let Some(voids) = crate::object::EntryId::new(&target)
+            .ok()
+            .and_then(|named| object.canonical(&named))
+            .filter(|named| {
+                object
+                    .entry(named)
+                    .is_some_and(|entry| entry.state.is_live())
+            })
+        else {
+            continue;
+        };
+        let kind = object
+            .entry(&voids)
+            .and_then(|entry| crate::dedupe::kind_of(&entry.content))
+            .map(|(kind, _)| kind);
+        out.push(Patch::Supersede {
+            id: id.clone(),
+            content: kind.map_or_else(|| now.clone(), |kind| format!("{kind}: {now}")),
+            voids,
+            provenance: provenance.clone(),
+            refuted,
+        });
+    }
+    // In order, each its own position (a quoted claim's addition before the
+    // supersede that voids it).
+    for (at, patch) in out.iter_mut().enumerate() {
+        provenance_of(patch).index = u32::try_from(at).unwrap_or(u32::MAX);
+    }
+    out
+}
+
+/// A `REFUTED` field's value (#878): the note's id or the claim quoted (and
+/// whether quoted), how firmly it was held, why it is wrong, and what is
+/// believed now -- its parts parted by em dashes. `None` when a part is
+/// missing or `held` is not `guess`, `belief` or `conclusion`.
+fn refutation_read(value: &str) -> Option<(String, bool, crate::object::Held, String, String)> {
+    let mut parts = value.split(" — ").map(str::trim);
+    let target = parts.next()?.trim();
+    let mut held = None;
+    let mut because = None;
+    let mut now = None;
+    for part in parts {
+        let (key, said) = part.split_once(':')?;
+        let said = said.trim().to_owned();
+        match key.trim().to_lowercase().as_str() {
+            "held" => held = crate::object::Held::of(said.trim_end_matches('.')),
+            "because" => because = Some(said),
+            "now" => now = Some(said),
+            _ => return None,
+        }
+    }
+    let quoted = ['"', '\u{201c}']
+        .iter()
+        .any(|open| target.starts_with(*open));
+    let target = target
+        .trim_matches(|c| matches!(c, '"' | '\u{201c}' | '\u{201d}'))
+        .to_owned();
+    let (because, now) = (
+        because.filter(|b| !b.is_empty())?,
+        now.filter(|n| !n.is_empty())?,
+    );
+    (!target.is_empty()).then_some((target, quoted, held?, because, now))
 }
 
 /// A fork's `patches`, applied to the working object (every op the format
@@ -12392,6 +12796,7 @@ fn cited(patches: Vec<Patch>, object: &WorkingObject) -> Cited {
                 content,
                 voids,
                 provenance,
+                refuted: None,
             };
             read.remove(at);
         }
@@ -12537,6 +12942,7 @@ fn superseding(
             content: rest.to_owned(),
             voids,
             provenance: provenance.clone(),
+            refuted: None,
         },
     }))
 }
@@ -12583,6 +12989,18 @@ fn patched(fork: Option<u64>, patch: &Patch, object: &WorkingObject) -> Event {
             Patch::Add { id, .. } => object.merged(id).map(|(into, cosine)| log::Merged {
                 into: into.as_str().to_owned(),
                 cosine: cosine.to_owned(),
+            }),
+            _ => None,
+        },
+        // What showed the voided entry wrong (#878), as the line carries it.
+        refuted: match patch {
+            Patch::Supersede {
+                refuted: Some(refuted),
+                ..
+            } => Some(log::Refuted {
+                held: refuted.held.word().to_owned(),
+                because: refuted.because.clone(),
+                pointer: refuted.pointer.clone(),
             }),
             _ => None,
         },
@@ -13667,6 +14085,158 @@ pub(in crate::drive) mod tests {
                 ),
                 "{arrow}: {patches:?}"
             );
+        }
+    }
+
+    /// #878: a REFUTED field's parts, a quoted claim's among them; and what
+    /// does not read so is nothing.
+    #[test]
+    fn a_refuted_field_reads_as_its_parts_or_not_at_all() {
+        use crate::object::Held;
+        assert_eq!(
+            refutation_read("e1 — held: conclusion — because: it failed — now: it is elsewhere"),
+            Some((
+                "e1".to_owned(),
+                false,
+                Held::Conclusion,
+                "it failed".to_owned(),
+                "it is elsewhere".to_owned()
+            ))
+        );
+        assert_eq!(
+            refutation_read(
+                "\u{201c}the port is 8080\u{201d} — held: guess — because: it bound 9090 — now: the port is 9090"
+            ),
+            Some((
+                "the port is 8080".to_owned(),
+                true,
+                Held::Guess,
+                "it bound 9090".to_owned(),
+                "the port is 9090".to_owned()
+            ))
+        );
+        for bad in [
+            "e1 — held: certain — because: x — now: y",
+            "e1 — held: belief — now: y",
+            "e1 — held: belief — because: x",
+            "e1 — held: belief — because: x — now: y — next: z",
+            "e1",
+        ] {
+            assert_eq!(refutation_read(bad), None, "{bad}");
+        }
+    }
+
+    /// #878: a refutation fork's REFUTED fields become the supersedes they
+    /// ask for, a quoted claim added and voided at once, each carrying the
+    /// fork's pointer; another fork's are dropped, and its other fields kept.
+    #[test]
+    fn a_refutation_forks_fields_supersede_and_another_forks_are_dropped() {
+        let mut object = WorkingObject::open(regime());
+        object
+            .apply(&Patch::Add {
+                id: entry_id("e1"),
+                content: "decision: the loader reads ./config.toml".to_owned(),
+                provenance: from_fork(0),
+            })
+            .expect("the claim");
+        let fold = |text: &str| {
+            super::super::fold(text, 2, super::super::INTERVIEW, Some("f/9"))
+                .expect("folded")
+                .0
+        };
+        let answer = "REFUTED: e1 — held: belief — because: it failed — now: the path is unknown\n\
+                      REFUTED: \"the port is 8080\" — held: guess — because: it bound 9090 — now: the port is 9090\n";
+        let patches = refuted_from(fold(answer), &object, Some("call c"));
+        let shape: Vec<(String, Option<String>, Option<String>)> = patches
+            .iter()
+            .map(|patch| match patch {
+                Patch::Add { content, .. } => (content.clone(), None, None),
+                Patch::Supersede {
+                    content,
+                    voids,
+                    refuted,
+                    ..
+                } => (
+                    content.clone(),
+                    Some(voids.as_str().to_owned()),
+                    refuted.as_ref().map(|r| r.pointer.clone()),
+                ),
+                other => panic!("{other:?}"),
+            })
+            .collect();
+        assert_eq!(
+            shape,
+            [
+                (
+                    "decision: the path is unknown".to_owned(),
+                    Some("e1".to_owned()),
+                    Some("call c".to_owned())
+                ),
+                ("fact: the port is 8080".to_owned(), None, None),
+                (
+                    "fact: the port is 9090".to_owned(),
+                    Some("interview-t2-1-claim".to_owned()),
+                    Some("call c".to_owned())
+                ),
+            ]
+        );
+        let other = refuted_from(
+            fold("DECISION: keep it\nREFUTED: e1 — held: belief — because: x — now: y\n"),
+            &object,
+            None,
+        );
+        assert!(
+            matches!(&other[..], [Patch::Add { content, .. }] if content == "decision: keep it"),
+            "{other:?}"
+        );
+    }
+
+    /// #878: "nothing" is said either way -- the bare `NONE` the ask
+    /// names, or the field's own `REFUTED: NONE` -- and either way the fold
+    /// has nothing to write.
+    #[test]
+    fn a_refutation_answered_none_either_way_writes_nothing() {
+        let object = WorkingObject::open(regime());
+        for answer in ["NONE\n", "REFUTED: NONE\n"] {
+            let (patches, _) = super::super::fold(answer, 2, super::super::INTERVIEW, Some("f/9"))
+                .expect("a NONE answer folds");
+            assert!(
+                refuted_from(patches, &object, Some("call c")).is_empty(),
+                "{answer:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn the_refutation_interview_is_off_unless_declared_and_refuses_a_bad_cooldown() {
+        let read = |text: &str| {
+            refutation_interview(&crate::formats::regimen::parse(text).expect("a regimen"))
+        };
+        assert_eq!(read(""), Ok(None));
+        assert_eq!(read("refutation_interview = \"on\"\n"), Ok(Some((3, 3))));
+        assert_eq!(
+            read("refutation_interview = true\nrefutation_operator_cooldown_steps = 50\n"),
+            Ok(Some((3, 50)))
+        );
+        let word = |text: &str| {
+            refutation_lever(&crate::formats::regimen::parse(text).expect("a regimen"))
+        };
+        assert_eq!(word(""), "off");
+        assert_eq!(
+            word("refutation_interview = \"on\"\n"),
+            "on:failed-cooldown-3-steps:default:operator-cooldown-3-steps:default"
+        );
+        assert_eq!(
+            word("refutation_interview = \"on\"\nrefutation_failed_cooldown_steps = 5\n"),
+            "on:failed-cooldown-5-steps:operator-cooldown-3-steps:default"
+        );
+        for bad in [
+            "refutation_interview = 1\n",
+            "refutation_interview = true\nrefutation_failed_cooldown_steps = 0\n",
+            "refutation_interview = true\nrefutation_operator_cooldown_steps = \"3\"\n",
+            "refutation_operator_cooldown_steps = 2\n",
+        ] {
+            assert!(read(bad).is_err(), "{bad}");
         }
     }
 
@@ -15018,6 +15588,7 @@ pub(in crate::drive) mod tests {
                 tangent: Some("t/1".to_owned()),
                 reason: None,
                 merged: None,
+                refuted: None,
             },
             Event::Meditated {
                 phase_document: None,
@@ -15573,6 +16144,7 @@ pub(in crate::drive) mod tests {
                 tangent: Some("t/1".to_owned()),
                 reason: None,
                 merged: None,
+                refuted: None,
             },
             log::Event::Meditation {
                 phase_document: None,
@@ -18771,6 +19343,7 @@ pub(in crate::drive) mod tests {
             step: crate::drive::warrants::StepWarrants::DEFAULTS,
             operator_unilateral: true,
             served_batch: None,
+            refutation: None,
         }
     }
 
@@ -20524,6 +21097,7 @@ pub(in crate::drive) mod tests {
             tangent: None,
             reason: None,
             merged: None,
+            refuted: None,
         };
         for op in [
             log::PatchOp::Park,
@@ -23170,6 +23744,7 @@ pub(in crate::drive) mod tests {
                 content: "fact a, corrected".to_owned(),
                 voids: entry_id("seed-a"),
                 provenance: from_fork(0),
+                refuted: None,
             },
             Patch::Resolve {
                 target: entry_id("seed-b"),
