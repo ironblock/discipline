@@ -86,9 +86,6 @@ pub enum FieldKind {
     Rationale,
     /// The earlier entry a supersede question is asked about.
     Recorded,
-    /// A belief the answer says was wrong (#878): the entry it was, or the
-    /// claim quoted, then `held:`, `because:` and `now:` after em dashes.
-    Refuted,
     /// What the turn could not get past.
     Stuck,
     /// An earlier record this turn changes or replaces.
@@ -251,20 +248,10 @@ impl FieldKind {
         Self::Pointer,
         Self::Rationale,
         Self::Recorded,
-        Self::Refuted,
         Self::Stuck,
         Self::Supersede,
         Self::Verdict,
     ];
-
-    /// Whether a note is recorded under this kind. Every kind but
-    /// [`Self::Refuted`]: that one answers the refutation ask alone (#878),
-    /// and its fold supersedes the note it names rather than recording one,
-    /// so the record tools' contract does not offer it.
-    #[must_use]
-    pub fn is_recorded(self) -> bool {
-        self != Self::Refuted
-    }
 
     /// The canonical tag for this kind, lower case and underscored.
     #[must_use]
@@ -288,7 +275,6 @@ impl FieldKind {
             Self::Pointer => "pointer",
             Self::Rationale => "rationale",
             Self::Recorded => "recorded",
-            Self::Refuted => "refuted",
             Self::Stuck => "stuck",
             Self::Supersede => "supersede",
             Self::Verdict => "verdict",

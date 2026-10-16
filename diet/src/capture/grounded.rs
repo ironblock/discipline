@@ -112,7 +112,7 @@ impl FieldKind {
     /// What this field can be grounded against.
     ///
     /// The scoping was ruled after the third incident, and it is narrow on
-    /// purpose: fifteen of the twenty-two kinds are judgment, and the gate
+    /// purpose: fourteen of the twenty-one kinds are judgment, and the gate
     /// does not touch them. Growing the vocabulary to the dogma's tags did
     /// not widen the gate -- every new kind that has no source to be present
     /// in went to judgment, because the failure this scoping exists to
@@ -158,9 +158,6 @@ impl FieldKind {
             | Self::Plan
             | Self::PlanImpact
             | Self::Rationale
-            // What the model says it believed and why it was wrong (#878):
-            // its own account, with no source to be present in.
-            | Self::Refuted
             | Self::Stuck
             | Self::Verdict => FieldClass::Judgment,
         }

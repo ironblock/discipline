@@ -26,7 +26,7 @@ PHASE_OPERATOR_PROPOSAL	ad5989df9ec7dc4f	207
 PHASE_PROPOSED	af937667ab675b2e	98
 PHASE_TOOL	8b8d7df46e991ee5	206
 RATIONALE	907cc0a084083c54	938
-REFUTE_Q	1b3e6f0973539b64	480
+REFUTE_Q	56989f7c284353a3	465
 SUPERSEDE	361484c54e8cab75	376
 TURN_BOUNDARY	c28112e37572cf28	508
 self-capture/c1/contract	f486cca9dbcbf4da	854
@@ -35,6 +35,7 @@ self-capture/c1/sweep	f30c90a6c82e2959	58
 self-capture/c2/contract	407353f6ddb315d4	1240
 self-capture/c2/reminder	d647fcc4a028d32e	29
 self-capture/c2/sweep	f30c90a6c82e2959	58
+refutation/tool	5a3fc99182df8130	859
 fork-asks/v3/api_surface	f23f9b8e6012614e	354
 fork-asks/v3/change	dd3d2627552842f0	297
 fork-asks/v3/finding	5095cdcf72f94ec2	272

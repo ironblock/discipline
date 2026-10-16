@@ -53,6 +53,7 @@ use std::fmt;
 pub mod asks;
 pub mod audits;
 pub mod capture;
+pub mod refutation;
 pub mod vocabulary;
 
 /// The version of the dogma this crate carries.
@@ -122,11 +123,13 @@ pub mod vocabulary;
 ///   operator's proposal to it. `propose_phase_transition` left the `c1`
 ///   and `c2` contracts, so both sets' contract pins moved.
 /// * 12, 2026-10-16: `REFUTE_Q` joined (#878): the refutation interview's
-///   ask, put after a failed command or the operator's message -- what it
-///   shows was wrong of what the model believed, by note id or quoted claim,
-///   how firmly it was held, why and what is believed now. Track 3's draft,
-///   for the maintainer's approval of the wording before it ships. No
-///   template already pinned changed.
+///   ask, put after a failed command or the operator's message over the
+///   live notes most like it, naming the one tool it is answered through;
+///   and `refutation/tool`, that tool's definition, `refute_belief` -- one
+///   call per belief shown wrong, by note id or quoted claim, how firmly it
+///   was held then (1 to 10), why and what is believed now. Track 3's
+///   redraft after the maintainer's review, for his approval of the wording
+///   before it ships. No template already pinned changed.
 pub const VERSION: u32 = 12;
 
 /// The digest of `diet/dogma/MANIFEST.tsv` that [`VERSION`] was declared
@@ -137,7 +140,7 @@ pub const VERSION: u32 = 12;
 /// that recomputes it fails until both lines are edited together. Without it
 /// the manifest could be regenerated after an edit and the version left at
 /// what it was, which is a bump that never happened.
-pub const MANIFEST_DIGEST: &str = "5168035a2bd4d9d7";
+pub const MANIFEST_DIGEST: &str = "809c0b17746bfffc";
 
 /// The per-model operating points, as TOML text, exactly as pinned.
 ///
@@ -801,6 +804,8 @@ mod tests {
             .filter(|line| !line.starts_with("fork-asks/"))
             // The tools-route audit sets' lines, held by `audits`' own test.
             .filter(|line| !line.starts_with("audit-tools/"))
+            // The refutation tool's line, held by `refutation`'s own test.
+            .filter(|line| !line.starts_with("refutation/"))
             .map(|line| {
                 let mut fields = line.split('\t');
                 let name = fields.next().expect("a manifest line starts with a name");

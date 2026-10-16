@@ -185,7 +185,7 @@
       "op": "supersede",
       "refuted": {
         "because": "pnpm install changed nothing",
-        "held": "conclusion",
+        "confidence": 8,
         "pointer": "log seq 14"
       },
       "seq": 22,

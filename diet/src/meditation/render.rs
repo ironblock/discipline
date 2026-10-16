@@ -85,9 +85,9 @@ fn shown(object: &WorkingObject) -> impl Iterator<Item = &crate::object::Entry> 
 fn said(entry: &crate::object::Entry) -> std::borrow::Cow<'_, str> {
     match &entry.refuted {
         Some(refuted) if !entry.state.is_live() => std::borrow::Cow::Owned(format!(
-            "was: {} (held as a {}), wrong because {} [{}]",
+            "was: {} (held at {}/10), wrong because {} [{}]",
             entry.content,
-            refuted.held.word(),
+            refuted.confidence.get(),
             refuted.because,
             refuted.pointer
         )),
@@ -710,7 +710,7 @@ mod review_tests {
 #[cfg(test)]
 mod refutation_tests {
     use super::{Budget, OverBudget, rendered};
-    use crate::object::{EntryId, Held, Patch, Provenance, Refutation, WorkingObject};
+    use crate::object::{Confidence, EntryId, Patch, Provenance, Refutation, WorkingObject};
 
     fn object() -> WorkingObject {
         let source = r#"{"source":{"kind":"live"},"record":"start","regime":{"arm":"baseline","dogma_version":0,"substrates":[{"id":"local","engine":{"name":"a-runtime","version_or_digest":"1.0"},"weights":{"kind":"digest","sha256":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"},"hardware_fingerprint":"aaa9402664f1a41f40ebbc52c9993eb66aeb366602958fdfaa283b71e64db123","sampler_card":{"seed":0},"reasoning":"on"}]}}"#;
@@ -748,7 +748,7 @@ mod refutation_tests {
                 voids: id("e1"),
                 provenance: at(3),
                 refuted: Some(Refutation {
-                    held: Held::Conclusion,
+                    confidence: Confidence::new(9).expect("in range"),
                     because: "cat config.toml failed".to_owned(),
                     pointer: "call call-c".to_owned(),
                 }),
@@ -757,7 +757,7 @@ mod refutation_tests {
         object
     }
 
-    const WAS: &str = "e1\twas: decision: the loader reads ./config.toml (held as a conclusion), \
+    const WAS: &str = "e1\twas: decision: the loader reads ./config.toml (held at 9/10), \
                        wrong because cat config.toml failed [call call-c]\n";
 
     /// #878: a refuted claim stays in the refill, as what was believed, how

@@ -63,8 +63,8 @@
 {"reply":{"when":"You just read a document","text":"LEARNED: notes.md reads back as written\nEVIDENCE: decision: one line per decision\nSTUCK: NONE"}}
 {"reply":{"when":"You just ingested a large piece","text":"EXCERPT: xxxxxxxxxx\nPOINTER: the long line is 9000 x's (the output of call-b2)"}}
 {"reply":{"when":"did anything behave differently","text":"GOTCHA: missing.txt does not exist — IMPLICATION: create it before showing it"}}
-{"reply":{"when":"show that something you believed was wrong","text":"NONE"}}
-{"reply":{"when":"show that something you believed was wrong","text":"REFUTED: \"the build finishes in a few seconds\" — held: belief — because: the command timed out after 16000ms — now: the build takes longer than the step's timeout"}}
+{"reply":{"when":"show that something you believed was wrong","text":"Nothing I believed is shown wrong."}}
+{"reply":{"when":"show that something you believed was wrong","text":"","calls":[{"id":"refute-1","name":"refute_belief","arguments":"{\"claim\":\"the build finishes in a few seconds\",\"confidence\":7,\"because\":\"the command timed out after 16000ms\",\"now\":\"the build takes longer than the step's timeout\"}"}]}}
 {"reply":{"when":"Two questions about where you are right now","text":"OPEN: whether the build in the background finished\nNEXT: read its output"}}
 {"reply":{"when":"What did this turn establish","text":"LEARNED: notes.md reads back exactly as it was written\nEVIDENCE: NONE\nSTUCK: NONE"}}
 {"reply":{"when":"What did this turn establish","text":"LEARNED: NONE\nEVIDENCE: NONE\nSTUCK: NONE"}}
@@ -142,8 +142,8 @@
 {"expect":"phase.ruled","where":{"by":"operator","choice":"keep","from":"test","to":"build"},"after":"operator-build"}
 {"expect":"patch","where":{"lane":"mechanical","entry.id":"mechanical/notes.md"}}
 {"expect":"fork","name":"refuted","where":{"why":"refutation","ask":"refute_q","trigger":"refutation:call:call-b7"}}
-{"expect":"patch","name":"corrected","where":{"op":"supersede","entry.text":"fact: the build takes longer than the step's timeout","refuted.held":"belief","refuted.pointer":"call call-b7"},"after":"refuted"}
-{"expect":"meditation","where":{"render~":"was: fact: the build finishes in a few seconds (held as a belief), wrong because the command timed out after 16000ms [call call-b7]"},"after":"corrected"}
+{"expect":"patch","name":"corrected","where":{"op":"supersede","entry.text":"fact: the build takes longer than the step's timeout","refuted.pointer":"call call-b7","refuted.confidence":"7"},"after":"refuted"}
+{"expect":"meditation","where":{"render~":"was: fact: the build finishes in a few seconds (held at 7/10), wrong because the command timed out after 16000ms [call call-b7]"},"after":"corrected"}
 {"expect":"patch","where":{"op":"add","entry.text":"learned: notes.md reads back as written","merged":"interview-t1-0","cosine":"0.6857"}}
 {"expect":"fork","where":{"timing":"during_turn","trigger~":"call:edit:call-w1","view_overridden":"last_turn"}}
 {"expect":"request","where":{"lane":"trunk","beside":"1"}}

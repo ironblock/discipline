@@ -1,6 +1,4 @@
 Pause. {source}
-Does this show that something you believed was wrong? Your working notes, by id:
+Does this show that something you believed was wrong? Your working notes most like it, by id:
 {items}
-For each belief it shows wrong, answer one line:
-REFUTED: <the note's id, or the claim in quotes if you never wrote it down> — held: <guess, belief or conclusion> — because: <what shows it is wrong> — now: <what you believe now>
-Say how firmly you held it then, not now. A change of plan is not a belief shown wrong. If nothing you believed is shown wrong, reply NONE.
+For each belief it shows wrong, call refute_belief once: name a listed note by its id, or quote the belief as a claim if you never wrote it down. Say how firmly you held it then, not now, from 1 (absolute uncertainty) to 10 (complete conviction). A change of plan is not a belief shown wrong. If nothing you believed is shown wrong, call nothing.

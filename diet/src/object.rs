@@ -266,44 +266,39 @@ pub struct Entry {
     pub refuted: Option<Refutation>,
 }
 
-/// How firmly a refuted claim was held (#878): the model's own word for it.
+/// How firmly a refuted claim was held then (#878): an integer from 1,
+/// absolute uncertainty, to 10, complete conviction.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
-pub enum Held {
-    /// A guess.
-    Guess,
-    /// A belief.
-    Belief,
-    /// A conclusion.
-    Conclusion,
-}
+pub struct Confidence(u8);
 
-impl Held {
-    /// Every word, in order of firmness.
-    pub const ALL: [Self; 3] = [Self::Guess, Self::Belief, Self::Conclusion];
+impl Confidence {
+    /// The least: absolute uncertainty.
+    pub const LEAST: u8 = 1;
+    /// The most: complete conviction.
+    pub const MOST: u8 = 10;
 
-    /// The word.
+    /// `n` as a confidence; `None` outside 1--10.
     #[must_use]
-    pub fn word(self) -> &'static str {
-        match self {
-            Self::Guess => "guess",
-            Self::Belief => "belief",
-            Self::Conclusion => "conclusion",
-        }
+    pub fn new(n: i64) -> Option<Self> {
+        u8::try_from(n)
+            .ok()
+            .filter(|n| (Self::LEAST..=Self::MOST).contains(n))
+            .map(Self)
     }
 
-    /// The firmness `word` names.
+    /// The integer.
     #[must_use]
-    pub fn of(word: &str) -> Option<Self> {
-        Self::ALL.into_iter().find(|held| held.word() == word)
+    pub const fn get(self) -> u8 {
+        self.0
     }
 }
 
-/// What refuted a claim (#878): how firmly it was held, why it is wrong, and
-/// where that was shown -- a durable pointer, never "earlier".
+/// What refuted a claim (#878): how firmly it was held then, why it is
+/// wrong, and where that was shown -- a durable pointer, never "earlier".
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Refutation {
-    /// How firmly it was held.
-    pub held: Held,
+    /// How firmly it was held then, not now.
+    pub confidence: Confidence,
     /// What shows it is wrong.
     pub because: String,
     /// Where: the failed call, or the operator's ask, by its log position.
@@ -1134,7 +1129,7 @@ fn entry_value(entry: &Entry, aliases: &[&EntryId]) -> Value {
         members.insert("supersedes".to_owned(), Value::String(superseded.0.clone()));
     }
     if let Some(Refutation {
-        held,
+        confidence,
         because,
         pointer,
     }) = &entry.refuted
@@ -1142,7 +1137,10 @@ fn entry_value(entry: &Entry, aliases: &[&EntryId]) -> Value {
         members.insert(
             "refuted".to_owned(),
             Value::Object(BTreeMap::from([
-                ("held".to_owned(), Value::String(held.word().to_owned())),
+                (
+                    "confidence".to_owned(),
+                    Value::Integer(i64::from(confidence.get())),
+                ),
                 ("because".to_owned(), Value::String(because.clone())),
                 ("pointer".to_owned(), Value::String(pointer.clone())),
             ])),
@@ -1448,6 +1446,21 @@ mod tests {
         );
     }
 
+    /// #878: a confidence is 1 to 10, both ends included; 0 and 11 are none.
+    #[test]
+    fn a_confidence_is_one_to_ten() {
+        for n in [0, 11, -1, 256] {
+            assert_eq!(super::Confidence::new(n), None, "{n}");
+        }
+        for n in [1, 9, 10] {
+            assert_eq!(
+                super::Confidence::new(n).map(super::Confidence::get),
+                u8::try_from(n).ok(),
+                "{n}"
+            );
+        }
+    }
+
     /// #878: a refutation's supersede leaves on the voided entry how firmly
     /// it was held, what showed it wrong and where, and the dump says so.
     #[test]
@@ -1461,7 +1474,7 @@ mod tests {
             ))
             .expect("the claim");
         let refuted = super::Refutation {
-            held: super::Held::Conclusion,
+            confidence: super::Confidence::new(9).expect("in range"),
             because: "cat config.toml failed".to_owned(),
             pointer: "call call-c".to_owned(),
         };
@@ -1489,7 +1502,7 @@ mod tests {
         );
         assert!(
             object.dump().contains(
-                r#""refuted":{"because":"cat config.toml failed","held":"conclusion","pointer":"call call-c"}"#
+                r#""refuted":{"because":"cat config.toml failed","confidence":9,"pointer":"call call-c"}"#
             ),
             "{}",
             object.dump()
@@ -1529,7 +1542,7 @@ mod tests {
                 voids: id("e1"),
                 provenance: from(2, "interview", None),
                 refuted: Some(super::Refutation {
-                    held: super::Held::Belief,
+                    confidence: super::Confidence::new(6).expect("in range"),
                     because: "cat config.toml failed".to_owned(),
                     pointer: "call call-c".to_owned(),
                 }),

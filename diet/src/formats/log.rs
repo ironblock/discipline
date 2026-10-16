@@ -768,6 +768,10 @@ vocabulary! {
         Denylist => "denylist",
         /// The operator was asked and said no (v4).
         Declined => "declined",
+        /// The trunk called a tool that answers an interview fork only
+        /// (v9, #878): `refute_belief`, a correction offered unprompted.
+        /// Nothing was written, and the turn goes on.
+        InterviewOnly => "interview_only",
     }
 }
 
@@ -1480,6 +1484,10 @@ pub enum Event {
         /// `meditation_audit_concurrency`. Chunks of one audit may run beside
         /// each other; the gate's re-ask over the notes left carries none.
         chunk: Option<u64>,
+        /// The live notes a refutation interview offered, by id (v9, #878):
+        /// those most like its trigger's text, in that order. A refutation
+        /// fork only, and on every one, empty when no note was live.
+        offered: Option<Vec<String>>,
     },
     /// How a fork ended (v5, #374).
     ForkSettled {
@@ -2024,11 +2032,12 @@ pub struct RenderBudget {
 }
 
 /// What showed the entry a `supersede` voids wrong (v9, #878): how firmly it
-/// was held, why it is wrong, and where that was shown.
+/// was held then, why it is wrong, and where that was shown.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Refuted {
-    /// How firmly it was held: `guess`, `belief` or `conclusion`.
-    pub held: String,
+    /// How firmly it was held then, not now: 1, absolute uncertainty, to 10,
+    /// complete conviction.
+    pub confidence: u64,
     /// What shows it wrong.
     pub because: String,
     /// Where that was shown: `call <id>`, or `log seq <n>`.
@@ -3703,6 +3712,7 @@ fn from_object(object: &BTreeMap<String, Value>) -> Result<Line, String> {
             reserved: fields.optional_count("reserved")?,
             prefix_shared: fields.optional_flag("prefix_shared")?,
             chunk: fields.optional_count("chunk")?,
+            offered: fields.optional_strings("offered")?,
         },
         Kind::ForkSettled => Event::ForkSettled {
             fork: fields.count("fork")?,
@@ -4991,10 +5001,10 @@ pub const SERVED_FIELD: &[Field] = &[
 /// The keys of a `patch`'s entry: its id and text always, its category when
 /// the fold names one. Arrived in v5.
 /// The keys of a supersede's refutation (v9, #878): how firmly the claim it
-/// voids was held (`guess`, `belief` or `conclusion`), what shows it wrong,
-/// and where that was shown.
+/// voids was held then (an integer, 1 to 10), what shows it wrong, and where
+/// that was shown.
 pub const REFUTED: &[Field] = &[
-    must_v9("held", Holds::Text),
+    must_v9("confidence", Holds::Count),
     must_v9("because", Holds::Text),
     must_v9("pointer", Holds::Text),
 ];
@@ -5242,6 +5252,9 @@ fn two_keys(tags: Tags, tag: &str) -> bool {
 #[allow(clippy::too_many_lines)] // one table of arrivals, written out
 pub fn tag_introduced(tags: Tags, tag: &str) -> i64 {
     if tags == Tags::Warrant && Warrant::from_tag(tag) == Some(Warrant::Refutation) {
+        return 9;
+    }
+    if tags == Tags::ToolRefusal && ToolRefusal::from_tag(tag) == Some(ToolRefusal::InterviewOnly) {
         return 9;
     }
     if tags == Tags::Refusal
@@ -5569,6 +5582,7 @@ pub fn schema(kind: Kind) -> &'static [Field] {
                 may_v8("reserved", Count),
                 may_v8("prefix_shared", Holds::Flag),
                 may_v8("chunk", Count),
+                may_v9("offered", Holds::Strings),
             ];
             F
         }
@@ -6653,6 +6667,7 @@ fn to_value(line: &Line) -> Value {
             reserved,
             prefix_shared,
             chunk,
+            offered,
         } => {
             put("lane", text(lane.tag()));
             put("of_turn", count(u64::from(*of_turn)));
@@ -6698,6 +6713,12 @@ fn to_value(line: &Line) -> Value {
             }
             if let Some(chunk) = chunk {
                 put("chunk", count(*chunk));
+            }
+            if let Some(offered) = offered {
+                put(
+                    "offered",
+                    Value::Array(offered.iter().map(|id| text(id)).collect()),
+                );
             }
             Kind::Fork
         }
@@ -6755,7 +6776,7 @@ fn to_value(line: &Line) -> Value {
                 put("cosine", text(cosine));
             }
             if let Some(Refuted {
-                held,
+                confidence,
                 because,
                 pointer,
             }) = refuted
@@ -6763,7 +6784,7 @@ fn to_value(line: &Line) -> Value {
                 put(
                     "refuted",
                     Value::Object(BTreeMap::from([
-                        ("held".to_owned(), text(held)),
+                        ("confidence".to_owned(), count(*confidence)),
                         ("because".to_owned(), text(because)),
                         ("pointer".to_owned(), text(pointer)),
                     ])),
@@ -7912,18 +7933,18 @@ impl Fields<'_> {
 
     /// A `patch`'s `entry`: an object of [`PATCH_ENTRY`]'s keys (v5).
     /// A `patch`'s `refuted`: an object of [`REFUTED`]'s keys (v9), its
-    /// `held` one of the three words.
+    /// `confidence` 1 to 10.
     fn refuted(&self, key: &str) -> Result<Refuted, String> {
         let inner = Fields(self.object(key, REFUTED)?);
         let within = |why: String| format!("`{key}`: {why}");
-        let held = inner.string("held").map_err(within)?;
-        if !["guess", "belief", "conclusion"].contains(&held.as_str()) {
+        let confidence = inner.count("confidence").map_err(within)?;
+        if !(1..=10).contains(&confidence) {
             return Err(format!(
-                "`{key}`: `held` is `{held}`, not `guess`, `belief` or `conclusion`"
+                "`{key}`: `confidence` is {confidence}, not an integer from 1 to 10"
             ));
         }
         Ok(Refuted {
-            held,
+            confidence,
             because: inner.string("because").map_err(within)?,
             pointer: inner.string("pointer").map_err(within)?,
         })
@@ -8727,6 +8748,8 @@ mod tests {
                 prefix_shared: Some(true),
                 reserved: Some(212),
                 chunk: None,
+                // A refutation fork's offered notes (v9, #878).
+                offered: Some(vec!["e1".to_owned(), "e2".to_owned()]),
             },
             Event::Request {
                 turn: 5,
@@ -8817,7 +8840,7 @@ mod tests {
                 merged: None,
                 // What showed the claim it voids wrong (v9, #878).
                 refuted: Some(Refuted {
-                    held: "belief".to_owned(),
+                    confidence: 6,
                     because: "the operator said the tracker is the team's".to_owned(),
                     pointer: "log seq 1".to_owned(),
                 }),
@@ -10353,7 +10376,7 @@ mod tests {
         );
         assert_eq!(
             tags(ToolRefusal::ALL.iter().map(|it| it.tag()).collect()),
-            "not_allowed max_steps unparsable unknown_tool denylist declined"
+            "not_allowed max_steps unparsable unknown_tool denylist declined interview_only"
         );
         assert_eq!(
             tags(ApprovalScope::ALL.iter().map(|it| it.tag()).collect()),

@@ -168,6 +168,7 @@ export type ToolRefusal =
   | "unknown_tool"
   | "denylist"
   | "declined"
+  | "interview_only"
 ;
 
 export type EngineIdentity =
@@ -380,7 +381,7 @@ export interface PatchEntry {
 }
 
 export interface Refuted {
-  held: string;
+  confidence: number;
   because: string;
   pointer: string;
 }
@@ -595,6 +596,7 @@ export type ForkLine = {
   reserved?: number;
   prefix_shared?: boolean;
   chunk?: number;
+  offered?: string[];
 } & ({ substrate: string; model: string } | { substrate?: never; model?: never });
 
 export type ForkSettledLine = {

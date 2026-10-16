@@ -20,4 +20,4 @@
 {"fork":18,"kind":"request","lane":"interview","seq":19,"t":95,"turn":2}
 {"kind":"response","seq":20,"t":100,"text":"REFUTED: f/7#1 — held: conclusion — because: pnpm install changed nothing — now: the lockfile is fresh; the failure is elsewhere","to_request":19}
 {"fork":18,"kind":"fork.settled","outcome":"value","seq":21,"t":105}
-{"entry":{"id":"f/18#1","text":"gotcha: the lockfile is fresh; the failure is elsewhere"},"fork":18,"kind":"patch","op":"supersede","refuted":{"because":"pnpm install changed nothing","held":"certain","pointer":"log seq 14"},"seq":22,"supersedes":"f/7#1","t":110}
+{"entry":{"id":"f/18#1","text":"gotcha: the lockfile is fresh; the failure is elsewhere"},"fork":18,"kind":"patch","op":"supersede","refuted":{"because":"pnpm install changed nothing","confidence":0,"pointer":"log seq 14"},"seq":22,"supersedes":"f/7#1","t":110}

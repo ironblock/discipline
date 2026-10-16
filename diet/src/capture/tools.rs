@@ -1600,7 +1600,7 @@ mod tests {
             .parameter("field")
             .expect("`update_record` takes a field");
         assert_eq!(field.kind, ParamType::Choice);
-        for kind in FieldKind::ALL.iter().filter(|kind| kind.is_recorded()) {
+        for kind in FieldKind::ALL {
             assert!(
                 field.choices.iter().any(|of| of == kind.canonical_tag()),
                 "the contract does not admit `{}`, so the model cannot record \
@@ -1612,7 +1612,7 @@ mod tests {
             assert!(
                 FieldKind::ALL
                     .iter()
-                    .any(|kind| kind.is_recorded() && kind.canonical_tag() == choice),
+                    .any(|kind| kind.canonical_tag() == choice),
                 "the contract admits `{choice}`, which is not an interview field"
             );
         }

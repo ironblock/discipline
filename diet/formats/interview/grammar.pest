@@ -117,7 +117,7 @@ tag_word = _{
   | ^"plan_delta" | ^"plan_impact" | ^"plan"
   | ^"constraint" | ^"dark" | ^"decision" | ^"evidence" | ^"excerpt"
   | ^"fact" | ^"followup" | ^"gotcha" | ^"latest" | ^"learned" | ^"map"
-  | ^"next" | ^"note" | ^"open" | ^"pointer" | ^"rationale" | ^"recorded" | ^"refuted"
+  | ^"next" | ^"note" | ^"open" | ^"pointer" | ^"rationale" | ^"recorded"
   | ^"stuck" | ^"supersede" | ^"surface" | ^"verdict"
 }
 tag_char = _{ ASCII_ALPHANUMERIC | "_" }
