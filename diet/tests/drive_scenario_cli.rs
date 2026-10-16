@@ -427,3 +427,41 @@ fn a_scenario_shows_its_model_the_same_bytes_under_any_roots() {
     assert_eq!(first.1, second.1, "the kept outputs' bytes differ");
     let _ = std::fs::remove_dir_all(&dir);
 }
+
+/// #882: a phased session declares the phase tool, and its record rebuilds
+/// every request's head from the log as any other session's does: the
+/// sidecar of the shipped two-phase scenario names no head it could not
+/// rebuild.
+#[test]
+fn a_phased_sessions_request_heads_are_rebuilt_from_its_log() {
+    let dir = scratch("phased-heads");
+    let out = dir.join("out");
+    let (code, said) = run(&root().join("diet/scenarios/two-phases.jsonl"), &out);
+    assert_eq!(code, Some(0), "{said}");
+    let log = std::fs::read_to_string(out.join("session.log")).expect("the log");
+    let start: serde_json::Value =
+        serde_json::from_str(log.lines().next().expect("a start")).expect("JSON");
+    assert!(
+        start["tools"]
+            .as_array()
+            .is_some_and(|tools| tools.iter().any(|tool| tool == "propose_phase_transition")),
+        "the session declared the phase tool: {start}"
+    );
+    let sidecar: serde_json::Value = serde_json::from_str(
+        &std::fs::read_to_string(out.join("session.record.jsonl.unspellable.json"))
+            .expect("the sidecar"),
+    )
+    .expect("JSON");
+    let unrebuilt: Vec<&serde_json::Value> = sidecar["unspellable"]
+        .as_array()
+        .expect("unspellable")
+        .iter()
+        .filter(|item| {
+            item["why"]
+                .as_str()
+                .is_some_and(|why| why.contains("could not be rebuilt"))
+        })
+        .collect();
+    assert!(unrebuilt.is_empty(), "{unrebuilt:#?}");
+    let _ = std::fs::remove_dir_all(&dir);
+}
