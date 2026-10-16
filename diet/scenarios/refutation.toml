@@ -2,7 +2,9 @@
 # command fails warrants the pinned REFUTE_Q ask in the turn's gap, and an
 # answer naming an entry supersedes it carrying how firmly it was held, why it
 # is wrong and the failed call; the next refill renders the claim as it was.
-# Turn 1's scoping fork records the claim the failure later refutes.
+# Turn 1's scoping fork records the claim the failure later refutes. The
+# failing call's id is all digits, as a server may issue one: its pointer is
+# still a call's, never a log position.
 arm = "rehearsal"
 dogma_version = 0
 

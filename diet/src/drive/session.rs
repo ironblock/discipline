@@ -11222,7 +11222,9 @@ fn refutation_seen(state: &mut State, request: u64, ids: &[String]) {
             .collect();
         let pointer = format!("call {}", line.id);
         state.refute_due = Some(RefuteDue {
-            trigger: line.id.clone(),
+            // Its kind named: a server's call id may be all digits, and a
+            // trigger read as a log position would point at the wrong line.
+            trigger: format!("call:{}", line.id),
             source: format!(
                 "The command {} ({pointer}) failed. What it showed ended:\n{}",
                 crate::drive::warrants::ident(&line.name, &line.arguments),
@@ -12486,8 +12488,10 @@ fn folded(state: &mut State, text: &str, turn: u32, fork: u64) -> (log::ForkOutc
 }
 
 /// The pointer a refutation fork's corrections carry (#878): where its
-/// trigger was shown -- `call <id>` for a failed command, `log seq <n>` for
-/// the operator's message. `None` for any other fork.
+/// trigger was shown -- `call <id>` for a failed command, its trigger
+/// `refutation:call:<id>`; `log seq <n>` for the operator's message, its
+/// trigger `refutation:<n>`, a line's seq as every warrant's trigger names
+/// one. `None` for any other fork, or a trigger of neither form.
 fn refutation_pointer(log: &[Logged], fork: u64) -> Option<String> {
     log.iter().find_map(|logged| match &logged.event {
         Event::Forked {
@@ -12496,11 +12500,13 @@ fn refutation_pointer(log: &[Logged], fork: u64) -> Option<String> {
             ..
         } if logged.seq == fork => {
             let at = trigger.strip_prefix("refutation:")?;
-            Some(if at.chars().all(|c| c.is_ascii_digit()) {
-                format!("log seq {at}")
-            } else {
-                format!("call {at}")
-            })
+            match at.strip_prefix("call:") {
+                Some(id) => Some(format!("call {id}")),
+                None => at
+                    .chars()
+                    .all(|c| c.is_ascii_digit())
+                    .then(|| format!("log seq {at}")),
+            }
         }
         _ => None,
     })
