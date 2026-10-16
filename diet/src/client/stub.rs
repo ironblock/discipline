@@ -519,11 +519,39 @@ fn routed(routes: &mut Routes, read: &io::Result<(String, String)>) -> Result<Ac
         .map(|(_, body)| last_message(body))
         .unwrap_or_default();
     let act = routes.take(&last).ok_or(last)?;
-    let job = read.as_ref().ok().and_then(|(_, body)| last_job(body));
-    Ok(match job {
+    let Ok((_, body)) = read.as_ref() else {
+        return Ok(act);
+    };
+    let act = match last_job(body) {
         Some(job) => with_job(act, &job),
         None => act,
-    })
+    };
+    Ok(with_entries(act, &decoded(body)))
+}
+
+/// Every string a JSON `body` holds, decoded and joined by newlines, so an
+/// id after an escaped newline stands as a word; `body` itself when it is
+/// not JSON.
+fn decoded(body: &str) -> String {
+    fn walk(value: &serde_json::Value, out: &mut String) {
+        match value {
+            serde_json::Value::String(text) => {
+                out.push_str(text);
+                out.push('\n');
+            }
+            serde_json::Value::Array(items) => items.iter().for_each(|item| walk(item, out)),
+            serde_json::Value::Object(fields) => fields.values().for_each(|field| walk(field, out)),
+            _ => {}
+        }
+    }
+    serde_json::from_str::<serde_json::Value>(body).map_or_else(
+        |_| body.to_owned(),
+        |value| {
+            let mut out = String::new();
+            walk(&value, &mut out);
+            out
+        },
+    )
 }
 
 /// The last background job id in `body` (#798): `bg_` and eight hex
@@ -538,14 +566,76 @@ fn last_job(body: &str) -> Option<String> {
 
 /// `act` with each `$job` in what it sends replaced by `job`.
 fn with_job(act: Act, job: &str) -> Act {
-    let named = |text: String| text.replace("$job", job);
+    named(act, &|text: String| text.replace("$job", job))
+}
+
+/// What an `$entry:` placeholder may name: a call id's and a field's
+/// characters, and the `/` between them.
+fn entry_char(c: char) -> bool {
+    c.is_ascii_alphanumeric() || matches!(c, '-' | '_' | '.' | '/')
+}
+
+/// `act` with each `$entry:<call>/<field>` in what it sends replaced by the
+/// last record entry id for that call and field in `body`: `r`, digits,
+/// then `/<call>/<field>`, standing as a word of its own. One `body` carries
+/// none of stays as written.
+fn with_entries(act: Act, body: &str) -> Act {
+    const MARK: &str = "$entry:";
+    let resolve = |text: String| {
+        if !text.contains(MARK) {
+            return text;
+        }
+        let mut out = String::new();
+        let mut rest = text.as_str();
+        while let Some(at) = rest.find(MARK) {
+            out.push_str(&rest[..at]);
+            let after = &rest[at + MARK.len()..];
+            let end = after.find(|c: char| !entry_char(c)).unwrap_or(after.len());
+            let suffix = &after[..end];
+            match last_entry(body, suffix) {
+                Some(id) if !suffix.is_empty() => out.push_str(&id),
+                _ => out.push_str(&rest[at..at + MARK.len() + end]),
+            }
+            rest = &after[end..];
+        }
+        out.push_str(rest);
+        out
+    };
+    named(act, &resolve)
+}
+
+/// The last `r<digits>/<suffix>` in `body` standing as a word of its own.
+fn last_entry(body: &str, suffix: &str) -> Option<String> {
+    let tail = format!("/{suffix}");
+    body.match_indices(&tail)
+        .filter_map(|(at, _)| {
+            let end = at + tail.len();
+            if body[end..].chars().next().is_some_and(entry_char) {
+                return None;
+            }
+            let digits = body[..at]
+                .chars()
+                .rev()
+                .take_while(char::is_ascii_digit)
+                .count();
+            let start = at.checked_sub(digits + 1)?;
+            let word = digits > 0
+                && body[start..].starts_with('r')
+                && !body[..start].chars().next_back().is_some_and(entry_char);
+            word.then(|| body[start..end].to_owned())
+        })
+        .last()
+}
+
+/// `act` with `named` applied to the text it sends.
+fn named(act: Act, named: &dyn Fn(String) -> String) -> Act {
     match act {
         Act::Answer(text) => Act::Answer(named(text)),
         // A canned reply's head declares its body's length: counted again.
         Act::Raw(bytes) => Act::Raw(match String::from_utf8(bytes) {
             Ok(text) => match text.split_once("\r\n\r\n") {
-                Some((head, body)) if body.contains("$job") => {
-                    let body = named(body.to_owned());
+                Some((head, sent)) if named(sent.to_owned()) != sent => {
+                    let body = named(sent.to_owned());
                     let head = head
                         .lines()
                         .map(|line| {
@@ -978,6 +1068,66 @@ mod tests {
             .map_or("", |(_, b)| b)
             .to_owned();
         (status, body)
+    }
+
+    /// A routed reply's `$entry:<call>/<field>` is the last record entry id
+    /// for that call and field the request carries -- `r`, the request count
+    /// diet built it at, then `/<call>/<field>` -- so a scenario names an
+    /// entry its run will make without counting requests ahead of the run;
+    /// it stays as written when the request carries none.
+    #[test]
+    fn a_routed_reply_names_the_record_entry_its_request_carries() {
+        let stub = Stub::routing(
+            vec![
+                Route::when(
+                    "recorded",
+                    Act::Answer("resolve $entry:call-r1/decision".to_owned()),
+                ),
+                Route::ordered(Act::Answer("resolve $entry:call-r1/decision".to_owned())),
+                Route::ordered(Act::Answer("resolve $entry:call-r1/decision".to_owned())),
+            ],
+            "build",
+            0,
+        )
+        .expect("loopback");
+        assert_eq!(
+            ask(
+                &stub,
+                "recorded: r12/call-r9/decision; recorded: r16/call-r1/decision; r7/call-r1/plan"
+            ),
+            (200, "resolve r16/call-r1/decision".to_owned())
+        );
+        // After a newline, as a working-memory render lists it.
+        assert_eq!(
+            ask(&stub, "# working set\nr5/call-r1/decision\nr6/call-r2/plan"),
+            (200, "resolve r5/call-r1/decision".to_owned())
+        );
+        assert_eq!(
+            ask(&stub, "xr3/call-r1/decision is not an id"),
+            (200, "resolve $entry:call-r1/decision".to_owned())
+        );
+        // In a canned reply's arguments, escaped as JSON: counted again.
+        let Act::Raw(sent) = with_entries(
+            Act::Raw(crate::drive::canned::streamed(
+                "",
+                &[crate::drive::canned::StreamedCall {
+                    id: "call-v1",
+                    name: "resolve_entry",
+                    arguments: r#"{"entry": "$entry:call-r1/decision"}"#,
+                }],
+            )),
+            "the record: r6/call-r1/decision",
+        ) else {
+            unreachable!("raw stays raw");
+        };
+        let sent = String::from_utf8(sent).expect("text");
+        let (head, body) = sent.split_once("\r\n\r\n").expect("a head");
+        assert!(body.contains("r6/call-r1/decision"), "{body}");
+        assert!(!body.contains("$entry"), "{body}");
+        assert!(
+            head.contains(&format!("Content-Length: {}", body.len())),
+            "the declared length is the body's: {head}"
+        );
     }
 
     /// #798: a routed reply's `$job` is the last background job id the
