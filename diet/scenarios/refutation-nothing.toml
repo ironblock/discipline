@@ -1,11 +1,12 @@
 # The refutation interview (#878) answered with no call: a failed command
 # warrants the REFUTE_Q ask, the model answers in prose -- the retired
 # `REFUTED:` line grammar -- and calls nothing, so nothing is written and the
-# fork settles `decline`. The next turn's command fails too, two steps later,
-# and asks nothing: failed commands wait out their cooldown (a fork no reply
-# was scripted for would fail the run). Turn 3's trunk calls `refute_belief`
-# unprompted: refused `interview_only`, nothing written, and the turn settles
-# `final`.
+# fork settles `unparseable`, apart from a `[]` answer's `decline`. The next
+# turn's command fails too, two steps later, and asks nothing: failed commands
+# wait out their cooldown (a fork no reply was scripted for would fail the
+# run). Turn 3's trunk calls `refute_beliefs` unprompted: its refutation is
+# written on the `trunk` lane, pointing at the step's request, and the turn
+# settles `final`.
 arm = "rehearsal"
 dogma_version = 0
 

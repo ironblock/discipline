@@ -768,10 +768,6 @@ vocabulary! {
         Denylist => "denylist",
         /// The operator was asked and said no (v4).
         Declined => "declined",
-        /// The trunk called a tool that answers an interview fork only
-        /// (v9, #878): `refute_belief`, a correction offered unprompted.
-        /// Nothing was written, and the turn goes on.
-        InterviewOnly => "interview_only",
     }
 }
 
@@ -5252,9 +5248,6 @@ fn two_keys(tags: Tags, tag: &str) -> bool {
 #[allow(clippy::too_many_lines)] // one table of arrivals, written out
 pub fn tag_introduced(tags: Tags, tag: &str) -> i64 {
     if tags == Tags::Warrant && Warrant::from_tag(tag) == Some(Warrant::Refutation) {
-        return 9;
-    }
-    if tags == Tags::ToolRefusal && ToolRefusal::from_tag(tag) == Some(ToolRefusal::InterviewOnly) {
         return 9;
     }
     if tags == Tags::Refusal
@@ -10376,7 +10369,7 @@ mod tests {
         );
         assert_eq!(
             tags(ToolRefusal::ALL.iter().map(|it| it.tag()).collect()),
-            "not_allowed max_steps unparsable unknown_tool denylist declined interview_only"
+            "not_allowed max_steps unparsable unknown_tool denylist declined"
         );
         assert_eq!(
             tags(ApprovalScope::ALL.iter().map(|it| it.tag()).collect()),

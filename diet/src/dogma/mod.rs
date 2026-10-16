@@ -125,11 +125,12 @@ pub mod vocabulary;
 /// * 12, 2026-10-16: `REFUTE_Q` joined (#878): the refutation interview's
 ///   ask, put after a failed command or the operator's message over the
 ///   live notes most like it, naming the one tool it is answered through;
-///   and `refutation/tool`, that tool's definition, `refute_belief` -- one
-///   call per belief shown wrong, by note id or quoted claim, how firmly it
-///   was held then (1 to 10), why and what is believed now. Track 3's
-///   redraft after the maintainer's review, for his approval of the wording
-///   before it ships. No template already pinned changed.
+///   and `refutation/tool`, that tool's definition, `refute_beliefs` -- one
+///   call listing every belief shown wrong, each by note id or quoted claim,
+///   how firmly it was held then (1 to 10), why and what is believed now,
+///   `[]` for none; offered on the trunk too. The maintainer's wording from
+///   his second review, approved verbatim on 2026-10-16 (relayed by
+///   Dispatch). No template already pinned changed.
 pub const VERSION: u32 = 12;
 
 /// The digest of `diet/dogma/MANIFEST.tsv` that [`VERSION`] was declared
@@ -140,7 +141,7 @@ pub const VERSION: u32 = 12;
 /// that recomputes it fails until both lines are edited together. Without it
 /// the manifest could be regenerated after an edit and the version left at
 /// what it was, which is a bump that never happened.
-pub const MANIFEST_DIGEST: &str = "809c0b17746bfffc";
+pub const MANIFEST_DIGEST: &str = "08858477b245db35";
 
 /// The per-model operating points, as TOML text, exactly as pinned.
 ///

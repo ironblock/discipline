@@ -1,7 +1,8 @@
 # The refutation interview (#878) on the canned scenario substrate: a step whose
 # command fails warrants the pinned REFUTE_Q ask in the turn's gap, and a
-# `refute_belief` call naming an entry supersedes it carrying how firmly it was
-# held, why it is wrong and the failed call; the next refill renders the claim as it was.
+# `refute_beliefs` item naming an entry supersedes it carrying how firmly it
+# was held, why it is wrong and the failed call -- the call's bad item refused
+# beside it; the next refill renders the claim as it was.
 # Turn 1's scoping fork records the claim the failure later refutes. The
 # failing call's id is all digits, as a server may issue one: its pointer is
 # still a call's, never a log position.

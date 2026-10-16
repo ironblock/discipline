@@ -6510,7 +6510,26 @@ fn capture_call<S>(
     // Each patch it applied, as the `patch` line a fork's would be: one
     // place for every working-memory change.
     let mut lines = Vec::new();
-    let (outcome, entries, why) = match capture_patches(&mut state, (turn, request), call) {
+    // A refutation on the trunk (#878) points at this step's request: the
+    // model had seen what showed it wrong by then.
+    let refuting = call.name == crate::dogma::refutation::NAME;
+    let mut items = Vec::new();
+    let read = if refuting {
+        let pointer = format!("log seq {request}");
+        refute_patches(
+            &state,
+            (turn, request),
+            call,
+            (&pointer, log::Lane::Trunk.tag()),
+        )
+        .map(|(patches, refused)| {
+            items = refused;
+            patches
+        })
+    } else {
+        capture_patches(&mut state, (turn, request), call)
+    };
+    let (outcome, entries, why) = match read {
         Err(why) => ("refused", Vec::new(), Some(why)),
         Ok(patches) => {
             let (refused, written) = state.interview.as_mut().map_or_else(
@@ -6548,7 +6567,11 @@ fn capture_call<S>(
                     (refused, entries_of(&kept))
                 },
             );
-            capture_outcome(&call.name, refused, written)
+            if refuting {
+                refute_outcome(refused, written, &items)
+            } else {
+                capture_outcome(&call.name, refused, written)
+            }
         }
     };
     if call.name == CaptureTool::UpdateRecord.tag() && outcome == "recorded" {
@@ -6993,10 +7016,6 @@ fn prune_call<S>(
     (line, Some(meditation.answer().to_owned()))
 }
 
-/// What the trunk is shown of its own call to the refutation tool (#878).
-const REFUTE_ON_THE_TRUNK: &str =
-    "refute_belief answers a refutation interview only; nothing was recorded.";
-
 /// One call, to its line and what the model is shown of it (`None` when
 /// nothing goes back: an undeclared tool, the step limit, a stop).
 #[allow(clippy::too_many_lines)]
@@ -7036,15 +7055,10 @@ fn one_call<S: Streaming>(
     {
         return phase_call(shared, (turn, request), call);
     }
-    // The refutation tool (#878) answers a refutation fork only: the trunk's
-    // call writes nothing, and the model is told so. Its own refusal word,
-    // so a correction offered unprompted is counted apart from a call that
-    // did not parse.
+    // The refutation tool (#878) works on the trunk as in a fork: its
+    // refutations are written as a fork's are, pointing at this step.
     if declared && call.name == crate::dogma::refutation::NAME {
-        return (
-            refused(log::ToolRefusal::InterviewOnly),
-            Some(REFUTE_ON_THE_TRUNK.to_owned()),
-        );
+        return capture_call(shared, (turn, request), call);
     }
     // Self-capture (#609): the contract's tools write working memory and
     // nothing else, so no gate, no confinement and no approval decide them.
@@ -12373,17 +12387,18 @@ fn captured_in(
 ) -> (log::ForkOutcome, Vec<Event>) {
     let mut lines = Vec::new();
     let mut wrote = false;
-    // A refutation fork's own tool's calls are its answer too (#878), each
-    // naming a note it was offered.
+    // A refutation fork's own tool's calls are its answer too (#878): every
+    // one of them, each item of each read.
     let pointer = refutation_pointer(&state.log, fork).filter(|_| lane == Lane::Interview);
-    let offered = refutation_offered(&state.log, fork);
     let refuting = |call: &Call| pointer.is_some() && call.name == crate::dogma::refutation::NAME;
     let capture_calls: Vec<&Call> = calls
         .iter()
         .filter(|call| record_tool(call) || refuting(call))
         .collect();
     if capture_calls.is_empty() {
-        let outcome = if calls.is_empty() {
+        // A refutation fork that made no call gave no answer: `[]` is its
+        // "nothing", a decline (#878).
+        let outcome = if calls.is_empty() && pointer.is_none() {
             log::ForkOutcome::Decline
         } else {
             log::ForkOutcome::Unparseable
@@ -12391,9 +12406,15 @@ fn captured_in(
         return (outcome, lines);
     }
     for call in capture_calls {
+        let mut items = Vec::new();
         let read = match pointer.as_deref() {
             Some(pointer) if refuting(call) => {
-                refute_patches(state, (turn, request), call, (pointer, &offered))
+                refute_patches(state, (turn, request), call, (pointer, lane.tag())).map(
+                    |(patches, refused)| {
+                        items = refused;
+                        patches
+                    },
+                )
             }
             _ => capture_patches(state, (turn, request), call),
         };
@@ -12427,10 +12448,7 @@ fn captured_in(
             }
         };
         let (outcome, entries, why) = if refuting(call) {
-            match refused {
-                Some(why) => ("refused", Vec::new(), Some(why)),
-                None => ("refuted", entries, None),
-            }
+            refute_outcome(refused, entries, &items)
         } else {
             capture_outcome(&call.name, refused, entries)
         };
@@ -12591,21 +12609,6 @@ fn folded(state: &mut State, text: &str, turn: u32, fork: u64) -> (log::ForkOutc
     (outcome, lines)
 }
 
-/// The notes refutation fork `fork` offered, by id (#878), as its line
-/// names them; none for any other fork.
-fn refutation_offered(log: &[Logged], fork: u64) -> Vec<String> {
-    log.iter()
-        .find_map(|logged| match &logged.event {
-            Event::Forked {
-                why: log::Warrant::Refutation,
-                offered: Some(offered),
-                ..
-            } if logged.seq == fork => Some(offered.clone()),
-            _ => None,
-        })
-        .unwrap_or_default()
-}
-
 /// The pointer a refutation fork's corrections carry (#878): where its
 /// trigger was shown -- `call <id>` for a failed command, its trigger
 /// `refutation:call:<id>`; `log seq <n>` for the operator's message, its
@@ -12636,44 +12639,37 @@ fn refutation_pointer(log: &[Logged], fork: u64) -> Option<String> {
 /// took to be so.
 const QUOTED_CLAIM_KIND: &str = "fact";
 
-/// The supersede a refutation fork's `refute_belief` call asks for (#878),
-/// under the call's own id, as a record tool's entry is named: the live note
-/// `note_id` names, one of those `offered`, voided by what is believed `now`, of the note's own
-/// kind, carrying how firmly it was held then, why it is wrong and
-/// `pointer`; or a quoted `claim` first added as a `fact` and voided at
-/// once, so it renders the same way. Refused, writing nothing, unless it
-/// names exactly one of the two, its `confidence` is an integer from 1 to
-/// 10, and `because` and `now` say something.
+/// What a `refute_beliefs` call asks for (#878), wherever it was made: each
+/// item of its `refuted` list read on its own, the patches of the items that
+/// read and, item by item, why each other was refused. An item names exactly
+/// one of a live note, by `note_id`, or a quoted `claim`, and says
+/// `confidence`, an integer from 1 to 10, `because` and `now`. A note is
+/// voided by what is believed `now`, of its own kind, carrying how firmly it
+/// was held then, why it is wrong and `pointer`; a quoted claim is first
+/// added as a `fact` and voided at once, so it renders the same way. Item
+/// `i`, from 1, is entry `r<request>/<call>.<i>`, as a record tool's entry
+/// is named. Refused whole when the arguments are no object with a
+/// `refuted` list; `[]` asks for nothing.
 fn refute_patches(
     state: &State,
     (turn, request): (u32, u64),
     call: &Call,
-    (pointer, offered): (&str, &[String]),
-) -> Result<Vec<Patch>, String> {
+    (pointer, lane): (&str, &str),
+) -> Result<(Vec<Patch>, Vec<String>), String> {
     use crate::formats::record::json::Value;
     let args = crate::formats::record::json::line(&call.arguments)
         .map_err(|why| format!("the arguments are not a JSON object: {why}"))?;
-    let said = |key: &str| match args.get(key) {
-        Some(Value::String(text)) if !text.trim().is_empty() => Some(text.trim().to_owned()),
-        _ => None,
+    let Some(Value::Array(items)) = args.get("refuted") else {
+        return Err("`refuted` is a list".to_owned());
     };
-    let confidence = match args.get("confidence") {
-        Some(Value::Integer(n)) => crate::object::Confidence::new(*n),
-        _ => None,
-    }
-    .ok_or("`confidence` is an integer from 1 to 10")?;
-    let because = said("because").ok_or("`because` says nothing")?;
-    let now = said("now").ok_or("`now` says nothing")?;
     let object = &state
         .interview
         .as_ref()
-        .ok_or("no interview is running")?
+        .ok_or("the session keeps no working memory")?
         .object;
-    let id = crate::object::EntryId::new(&format!("r{request}/{}", call.id))
-        .map_err(|why| why.to_string())?;
     let provenance = crate::object::Provenance {
         turn,
-        lane: super::INTERVIEW.to_owned(),
+        lane: lane.to_owned(),
         fork: None,
         tangent: state
             .tangent
@@ -12681,6 +12677,58 @@ fn refute_patches(
             .map(|(tangent, _)| tangent.id().to_owned()),
         index: 0,
     };
+    let mut patches = Vec::new();
+    let mut refused = Vec::new();
+    let mut voided = Vec::new();
+    for (at, item) in items.iter().enumerate() {
+        let n = at + 1;
+        let read = match item {
+            Value::Object(item) => {
+                crate::object::EntryId::new(&format!("r{request}/{}.{n}", call.id))
+                    .map_err(|why| why.to_string())
+                    .and_then(|id| refuted_item(object, item, id, (&provenance, pointer), &voided))
+            }
+            _ => Err("not an object".to_owned()),
+        };
+        match read {
+            Ok(item) => {
+                voided.extend(item.iter().filter_map(|patch| match patch {
+                    Patch::Supersede { voids, .. } => Some(voids.clone()),
+                    _ => None,
+                }));
+                patches.extend(item);
+            }
+            Err(why) => refused.push(format!("item {n}: {why}")),
+        }
+    }
+    for (at, patch) in patches.iter_mut().enumerate() {
+        provenance_of(patch).index = u32::try_from(at).unwrap_or(u32::MAX);
+    }
+    Ok((patches, refused))
+}
+
+/// One item of a `refute_beliefs` call's `refuted` list, as entry `id`
+/// (#878): its supersede, after a quoted claim's addition; or why it is
+/// refused. A note another item of the call already voided is refused.
+fn refuted_item(
+    object: &crate::object::WorkingObject,
+    item: &BTreeMap<String, crate::formats::record::json::Value>,
+    id: crate::object::EntryId,
+    (provenance, pointer): (&crate::object::Provenance, &str),
+    voided: &[crate::object::EntryId],
+) -> Result<Vec<Patch>, String> {
+    use crate::formats::record::json::Value;
+    let said = |key: &str| match item.get(key) {
+        Some(Value::String(text)) if !text.trim().is_empty() => Some(text.trim().to_owned()),
+        _ => None,
+    };
+    let confidence = match item.get("confidence") {
+        Some(Value::Integer(n)) => crate::object::Confidence::new(*n),
+        _ => None,
+    }
+    .ok_or("`confidence` is an integer from 1 to 10")?;
+    let because = said("because").ok_or("`because` says nothing")?;
+    let now = said("now").ok_or("`now` says nothing")?;
     let refuted = Some(crate::object::Refutation {
         confidence,
         because,
@@ -12688,9 +12736,6 @@ fn refute_patches(
     });
     match (said("note_id"), said("claim")) {
         (Some(named), None) => {
-            if !offered.contains(&named) {
-                return Err(format!("`{named}` is not a note this interview listed"));
-            }
             let voids = crate::object::EntryId::new(&named)
                 .ok()
                 .and_then(|named| object.canonical(&named))
@@ -12700,6 +12745,9 @@ fn refute_patches(
                         .is_some_and(|entry| entry.state.is_live())
                 })
                 .ok_or_else(|| format!("`{named}` is no live note"))?;
+            if voided.contains(&voids) {
+                return Err(format!("`{named}` is refuted by an item before it"));
+            }
             let kind = object
                 .entry(&voids)
                 .and_then(|entry| crate::dedupe::kind_of(&entry.content))
@@ -12708,7 +12756,7 @@ fn refute_patches(
                 id,
                 content: kind.map_or_else(|| now.clone(), |kind| format!("{kind}: {now}")),
                 voids,
-                provenance,
+                provenance: provenance.clone(),
                 refuted,
             }])
         }
@@ -12725,15 +12773,30 @@ fn refute_patches(
                     id,
                     content: format!("{QUOTED_CLAIM_KIND}: {now}"),
                     voids: quoted,
-                    provenance: crate::object::Provenance {
-                        index: 1,
-                        ..provenance
-                    },
+                    provenance: provenance.clone(),
                     refuted,
                 },
             ])
         }
         _ => Err("give exactly one of `note_id` and `claim`".to_owned()),
+    }
+}
+
+/// What a `refute_beliefs` call came to (#878), as its `capture` line says:
+/// `refused` whole, or with every item refused; `refuted` when it wrote,
+/// each refused item's reason beside the entries; `judged` for `[]`, which
+/// says nothing was shown wrong.
+fn refute_outcome(
+    refused: Option<String>,
+    entries: Vec<String>,
+    items: &[String],
+) -> (&'static str, Vec<String>, Option<String>) {
+    let items = Some(items.join("; ")).filter(|why| !why.is_empty());
+    match refused {
+        Some(why) => ("refused", Vec::new(), Some(why)),
+        None if !entries.is_empty() => ("refuted", entries, items),
+        None if items.is_some() => ("refused", Vec::new(), items),
+        None => ("judged", Vec::new(), None),
     }
 }
 
@@ -14259,7 +14322,7 @@ pub(in crate::drive) mod tests {
         )
     }
 
-    /// A `refute_belief` call carrying `arguments`.
+    /// A `refute_beliefs` call carrying `arguments`.
     fn refute(arguments: &str) -> Call {
         Call {
             index: 0,
@@ -14269,68 +14332,78 @@ pub(in crate::drive) mod tests {
         }
     }
 
-    /// #878: a call naming a live note supersedes it under the call's id, of
-    /// the note's kind, carrying its confidence, why and the pointer; a
-    /// quoted claim is added and voided at once.
+    /// #878: an item naming a live note supersedes it under the call's id
+    /// and the item's place, of the note's kind, carrying its confidence, why
+    /// and the pointer; a quoted claim is added and voided at once. A live
+    /// note is nameable whether or not the interview listed it.
     #[test]
-    fn a_refute_call_supersedes_the_note_or_the_claim_it_names() {
-        let session = refuting(&["the loader reads ./config.toml"], 8);
-        let state = session.shared.lock();
-        let offered = ["e1".to_owned()];
-        let patches = refute_patches(
-            &state,
-            (2, 9),
-            &refute(r#"{"note_id":"e1","confidence":9,"because":"it failed","now":"the path is unknown"}"#),
-            ("call c", &offered),
-        )
-        .expect("it reads");
-        assert!(
-            matches!(
-                &patches[..],
-                [Patch::Supersede { id, content, voids, refuted: Some(refuted), .. }]
-                    if id.as_str() == "r9/c"
-                        && content == "decision: the path is unknown"
-                        && voids.as_str() == "e1"
-                        && refuted.confidence.get() == 9
-                        && refuted.because == "it failed"
-                        && refuted.pointer == "call c"
-            ),
-            "{patches:?}"
+    fn a_refute_call_supersedes_the_note_or_the_claim_each_item_names() {
+        let session = refuting(
+            &["the loader reads ./config.toml", "the tests run in CI"],
+            1,
         );
-        let patches = refute_patches(
+        let state = session.shared.lock();
+        let (patches, refused) = refute_patches(
             &state,
             (2, 9),
-            &refute(r#"{"claim":"the port is 8080","confidence":3,"because":"it bound 9090","now":"the port is 9090"}"#),
-            ("call c", &offered),
+            &refute(
+                r#"{"refuted":[{"note_id":"e1","confidence":9,"because":"it failed","now":"the path is unknown"},{"note_id":"e2","confidence":4,"because":"no CI ran","now":"the tests run by hand"},{"claim":"the port is 8080","confidence":3,"because":"it bound 9090","now":"the port is 9090"}]}"#,
+            ),
+            ("call c", "interview"),
         )
         .expect("it reads");
+        assert!(refused.is_empty(), "{refused:?}");
         assert!(
             matches!(
                 &patches[..],
                 [
+                    Patch::Supersede { id: first, content: one, voids: e1, refuted: Some(held), .. },
+                    Patch::Supersede { id: second, voids: e2, .. },
                     Patch::Add { id: claim, content: said, .. },
-                    Patch::Supersede { content, voids, refuted: Some(refuted), .. },
-                ] if said == "fact: the port is 8080"
-                    && content == "fact: the port is 9090"
+                    Patch::Supersede { id: third, content: now, voids, refuted: Some(quoted), .. },
+                ] if first.as_str() == "r9/c.1"
+                    && one == "decision: the path is unknown"
+                    && e1.as_str() == "e1"
+                    && held.confidence.get() == 9
+                    && held.because == "it failed"
+                    && held.pointer == "call c"
+                    && second.as_str() == "r9/c.2"
+                    && e2.as_str() == "e2"
+                    && third.as_str() == "r9/c.3"
+                    && claim.as_str() == "r9/c.3-claim"
+                    && said == "fact: the port is 8080"
+                    && now == "fact: the port is 9090"
                     && voids == claim
-                    && refuted.confidence.get() == 3
+                    && quoted.confidence.get() == 3
             ),
             "{patches:?}"
         );
+        assert_eq!(
+            refute_patches(
+                &state,
+                (2, 9),
+                &refute(r#"{"refuted":[]}"#),
+                ("call c", "interview")
+            ),
+            Ok((Vec::new(), Vec::new())),
+            "`[]` asks for nothing"
+        );
     }
 
-    /// #878: a confidence of 0 or 11, or one that is no integer, is
-    /// refused; so is a call naming both a note and a claim, or neither, a
-    /// note that is not live or was not listed, or one missing why or what
-    /// is believed now.
+    /// #878: each item is checked on its own. A confidence of 0 or 11, or
+    /// one that is no integer, is refused; so is an item naming both a note
+    /// and a claim, or neither, a note that is not live or that an item
+    /// before it refuted, or one missing why or what is believed now. The
+    /// good item beside each still writes. A call with no `refuted` list is
+    /// refused whole.
     #[test]
-    fn a_refute_call_out_of_its_bounds_is_refused() {
+    fn a_refute_calls_bad_item_is_refused_and_its_good_one_writes() {
         let session = refuting(
             &["the loader reads ./config.toml", "the tests run in CI"],
             8,
         );
         let state = session.shared.lock();
-        let offered = ["e1".to_owned()];
+        let good = r#"{"note_id":"e2","confidence":5,"because":"x","now":"y"}"#;
         for bad in [
             r#"{"note_id":"e1","confidence":0,"because":"x","now":"y"}"#,
             r#"{"note_id":"e1","confidence":11,"because":"x","now":"y"}"#,
@@ -14339,23 +14412,69 @@ pub(in crate::drive) mod tests {
             r#"{"note_id":"e1","claim":"z","confidence":5,"because":"x","now":"y"}"#,
             r#"{"confidence":5,"because":"x","now":"y"}"#,
             r#"{"note_id":"e7","confidence":5,"because":"x","now":"y"}"#,
-            // Live, but not one the interview listed.
             r#"{"note_id":"e2","confidence":5,"because":"x","now":"y"}"#,
             r#"{"note_id":"e1","confidence":5,"now":"y"}"#,
             r#"{"note_id":"e1","confidence":5,"because":"x","now":" "}"#,
+            r#""e1""#,
         ] {
+            let (patches, refused) = refute_patches(
+                &state,
+                (2, 9),
+                &refute(&format!(r#"{{"refuted":[{good},{bad}]}}"#)),
+                ("call c", "interview"),
+            )
+            .expect("the call reads");
             assert!(
-                refute_patches(&state, (2, 9), &refute(bad), ("call c", &offered)).is_err(),
-                "{bad}"
+                matches!(&patches[..], [Patch::Supersede { voids, .. }] if voids.as_str() == "e2"),
+                "{bad}: {patches:?}"
+            );
+            assert!(
+                matches!(&refused[..], [why] if why.starts_with("item 2: ")),
+                "{bad}: {refused:?}"
+            );
+        }
+        for whole in [r#"{}"#, r#"{"refuted":{"note_id":"e1"}}"#, "not json"] {
+            assert!(
+                refute_patches(&state, (2, 9), &refute(whole), ("call c", "interview")).is_err(),
+                "{whole}"
             );
         }
     }
 
-    /// #878: the tool is declared from the first request when the interview
-    /// is on, and only then; the trunk's own call to it writes nothing, is
-    /// answered saying so, and leaves the turn running.
+    /// #878: what a call came to, as its `capture` line says: `judged` for
+    /// `[]`, `refuted` with its refused items beside what it wrote, and
+    /// `refused` when nothing of it wrote.
     #[test]
-    fn the_trunks_refute_call_writes_nothing_and_says_so() {
+    fn a_refute_calls_outcome_says_what_it_came_to() {
+        let items = ["item 2: `now` says nothing".to_owned()];
+        assert_eq!(
+            refute_outcome(None, Vec::new(), &[]),
+            ("judged", Vec::new(), None)
+        );
+        assert_eq!(
+            refute_outcome(None, vec!["r1/c.1".to_owned()], &items),
+            ("refuted", vec!["r1/c.1".to_owned()], Some(items[0].clone()))
+        );
+        assert_eq!(
+            refute_outcome(None, Vec::new(), &items),
+            ("refused", Vec::new(), Some(items[0].clone()))
+        );
+        assert_eq!(
+            refute_outcome(Some("`refuted` is a list".to_owned()), Vec::new(), &[]),
+            (
+                "refused",
+                Vec::new(),
+                Some("`refuted` is a list".to_owned())
+            )
+        );
+    }
+
+    /// #878: the tool is declared from the first request when the interview
+    /// is on, and only then; the trunk's own call to it writes its
+    /// refutations as a fork's would, on the trunk's lane, pointing at the
+    /// step's request.
+    #[test]
+    fn the_trunks_refute_call_writes_a_refutation_at_its_step() {
         let declared = |on: bool| {
             let mut interview = interviewing(&[]);
             interview.refutation = on.then_some((3, 3, 8));
@@ -14383,16 +14502,27 @@ pub(in crate::drive) mod tests {
         let (line, shown) = one_call(
             &session.shared,
             &Cancel::new(),
-            (1, 1),
-            &refute(r#"{"claim":"x","confidence":5,"because":"y","now":"z"}"#),
+            (1, 4),
+            &refute(r#"{"refuted":[{"claim":"x","confidence":5,"because":"y","now":"z"}]}"#),
             false,
         );
-        assert_eq!(line.outcome, log::ToolOutcome::Refused);
-        assert_eq!(line.reason, Some(log::ToolRefusal::InterviewOnly));
-        assert_eq!(shown.as_deref(), Some(REFUTE_ON_THE_TRUNK));
+        assert_eq!(line.outcome, log::ToolOutcome::Ran);
+        assert_eq!(shown.as_deref(), Some("refuted: r4/c.1-claim"));
         let state = session.shared.lock();
         let object = &state.interview.as_ref().expect("interviewing").object;
-        assert_eq!(object.live().count(), 0, "nothing was written");
+        let claim = object
+            .entry(&entry_id("r4/c.1-claim"))
+            .expect("the claim, kept as what was believed");
+        let refuted = claim.refuted.as_ref().expect("refuted");
+        assert_eq!(refuted.pointer, "log seq 4");
+        assert_eq!(claim.provenances[0].lane, "trunk");
+        assert_eq!(
+            object
+                .live()
+                .map(|entry| entry.content.as_str())
+                .collect::<Vec<_>>(),
+            ["fact: z"]
+        );
     }
 
     /// #878: a large working memory offers only the lever's count of notes,

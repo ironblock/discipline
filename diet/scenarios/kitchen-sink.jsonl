@@ -65,8 +65,8 @@
 {"reply":{"when":"You just read a document","text":"LEARNED: notes.md reads back as written\nEVIDENCE: decision: one line per decision\nSTUCK: NONE"}}
 {"reply":{"when":"You just ingested a large piece","text":"EXCERPT: xxxxxxxxxx\nPOINTER: the long line is 9000 x's (the output of call-b2)"}}
 {"reply":{"when":"did anything behave differently","text":"GOTCHA: missing.txt does not exist — IMPLICATION: create it before showing it"}}
-{"reply":{"when":"show that something you believed was wrong","text":"Nothing I believed is shown wrong."}}
-{"reply":{"when":"show that something you believed was wrong","text":"","calls":[{"id":"refute-1","name":"refute_belief","arguments":"{\"claim\":\"the build finishes in a few seconds\",\"confidence\":7,\"because\":\"the command timed out after 16000ms\",\"now\":\"the build takes longer than the step's timeout\"}"}]}}
+{"reply":{"when":"show that something you believed was wrong","text":"","calls":[{"id":"refute-0","name":"refute_beliefs","arguments":"{\"refuted\":[]}"}]}}
+{"reply":{"when":"show that something you believed was wrong","text":"","calls":[{"id":"refute-1","name":"refute_beliefs","arguments":"{\"refuted\":[{\"claim\":\"the build finishes in a few seconds\",\"confidence\":7,\"because\":\"the command timed out after 16000ms\",\"now\":\"the build takes longer than the step's timeout\"}]}"}]}}
 {"reply":{"when":"Two questions about where you are right now","text":"OPEN: whether the build in the background finished\nNEXT: read its output"}}
 {"reply":{"when":"What did this turn establish","text":"LEARNED: notes.md reads back exactly as it was written\nEVIDENCE: NONE\nSTUCK: NONE"}}
 {"reply":{"when":"What did this turn establish","text":"LEARNED: NONE\nEVIDENCE: NONE\nSTUCK: NONE"}}

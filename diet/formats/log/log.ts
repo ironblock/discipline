@@ -168,7 +168,6 @@ export type ToolRefusal =
   | "unknown_tool"
   | "denylist"
   | "declined"
-  | "interview_only"
 ;
 
 export type EngineIdentity =

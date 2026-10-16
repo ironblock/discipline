@@ -1,5 +1,5 @@
-//! The refutation interview's tool (#878): `refute_belief`, the one way a
-//! refutation fork answers.
+//! The refutation interview's tool (#878): `refute_beliefs`, the one way a
+//! refutation fork answers, and the trunk's way to say a belief was wrong.
 //!
 //! Its definition is one JSON object under `diet/dogma/refutation/`: its
 //! name, its description and its parameters' schema, sent as written. The
@@ -12,7 +12,7 @@ use super::digest;
 pub const TOOL: &str = include_str!("../../dogma/refutation/tool.json");
 
 /// The tool's name, as the definition gives it.
-pub const NAME: &str = "refute_belief";
+pub const NAME: &str = "refute_beliefs";
 
 /// The definition's manifest line, as `MANIFEST.tsv` writes it.
 #[must_use]
@@ -78,35 +78,53 @@ mod tests {
         assert_eq!(files, ["tool.json"]);
     }
 
-    /// It reads: its name, a description, and an object schema whose
-    /// `confidence` is an integer from 1 to 10 and whose required keys are
-    /// the three every call carries.
+    /// It reads: its name, a description, and an object schema whose one
+    /// required key, `refuted`, is a list of items whose `confidence` is an
+    /// integer from 1 to 10 and whose required keys are the three every item
+    /// carries.
     #[test]
     fn the_definition_reads() {
         use crate::formats::record::json::Value;
+        let strings = |keys: &[&str]| {
+            Value::Array(
+                keys.iter()
+                    .map(|key| Value::String((*key).to_owned()))
+                    .collect(),
+            )
+        };
         let tool = definition();
         assert_eq!(tool.name, NAME);
         assert!(tool.description.is_some_and(|text| !text.is_empty()));
         let Value::Object(schema) = &tool.schema else {
             panic!("{:?}", tool.schema);
         };
+        assert_eq!(schema.get("required"), Some(&strings(&["refuted"])));
         let Some(Value::Object(properties)) = schema.get("properties") else {
             panic!("{schema:?}");
         };
-        let keys: Vec<&str> = properties.keys().map(String::as_str).collect();
-        assert_eq!(keys, ["because", "claim", "confidence", "note_id", "now"]);
-        let Some(Value::Object(confidence)) = properties.get("confidence") else {
+        let Some(Value::Object(refuted)) = properties.get("refuted") else {
             panic!("{properties:?}");
+        };
+        assert_eq!(
+            refuted.get("type"),
+            Some(&Value::String("array".to_owned()))
+        );
+        let Some(Value::Object(item)) = refuted.get("items") else {
+            panic!("{refuted:?}");
+        };
+        let Some(Value::Object(fields)) = item.get("properties") else {
+            panic!("{item:?}");
+        };
+        let keys: Vec<&str> = fields.keys().map(String::as_str).collect();
+        assert_eq!(keys, ["because", "claim", "confidence", "note_id", "now"]);
+        let Some(Value::Object(confidence)) = fields.get("confidence") else {
+            panic!("{fields:?}");
         };
         assert_eq!(confidence.get("minimum"), Some(&Value::Integer(1)));
         assert_eq!(confidence.get("maximum"), Some(&Value::Integer(10)));
         assert_eq!(
-            schema.get("required"),
-            Some(&Value::Array(
-                ["confidence", "because", "now"]
-                    .map(|key| Value::String(key.to_owned()))
-                    .to_vec()
-            ))
+            item.get("required"),
+            Some(&strings(&["confidence", "because", "now"]))
         );
     }
 }

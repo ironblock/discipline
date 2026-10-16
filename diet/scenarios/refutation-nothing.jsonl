@@ -4,14 +4,15 @@
 {"reply":{"when":"show that something you believed was wrong","text":"REFUTED: \"config.toml exists\" — held: belief — because: it is missing — now: there is none"}}
 {"reply":{"when":"Run it again","text":"Once more.","calls":[{"id":"call-d","name":"bash","arguments":"{\"command\": \"cat config.toml\"}"}]}}
 {"reply":{"text":"Still no config.toml, as expected."}}
-{"reply":{"when":"Anything to correct","text":"","calls":[{"id":"call-e","name":"refute_belief","arguments":"{\"claim\":\"config.toml exists\",\"confidence\":6,\"because\":\"cat config.toml failed twice\",\"now\":\"there is no config.toml\"}"}]}}
+{"reply":{"when":"Anything to correct","text":"","calls":[{"id":"call-e","name":"refute_beliefs","arguments":"{\"refuted\":[{\"claim\":\"config.toml exists\",\"confidence\":6,\"because\":\"cat config.toml failed twice\",\"now\":\"there is no config.toml\"}]}"}]}}
 {"reply":{"text":"Understood: nothing was recorded."}}
 {"step":"ask","text":"Run the loader."}
 {"step":"ask","text":"Run it again."}
 {"step":"ask","text":"Anything to correct?"}
 {"step":"end"}
 {"expect":"fork","name":"asked","where":{"why":"refutation","ask":"refute_q","trigger":"refutation:call:call-c"}}
-{"expect":"fork.settled","where":{"outcome":"decline"},"after":"asked"}
+{"expect":"fork.settled","where":{"outcome":"unparseable"},"after":"asked"}
 {"expect":"turn.settled","where":{"turn":"2","reason":"final"}}
-{"expect":"tool_call","name":"unprompted","where":{"name":"refute_belief","outcome":"refused","reason":"interview_only","turn":"3"}}
+{"expect":"tool_call","name":"unprompted","where":{"name":"refute_beliefs","outcome":"ran","turn":"3"}}
+{"expect":"patch","name":"trunk-refuted","where":{"op":"supersede","lane":"trunk","entry.text":"fact: there is no config.toml","refuted.confidence":"6","refuted.pointer":"log seq 34"}}
 {"expect":"turn.settled","where":{"turn":"3","reason":"final"},"after":"unprompted"}
