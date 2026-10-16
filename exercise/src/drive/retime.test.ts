@@ -39,3 +39,33 @@ describe('the kitchen sink on the compose clock (#798)', () => {
     expect(t(4) - t(2)).toBeGreaterThanOrEqual((tokensOf(ANSWER) / RATES.trunkDecode) * 1000);
   });
 });
+
+/** Two runs of one scenario: the same lines, each tool's wall-clock run its own (#891). */
+const RUN = (wall: (seq: number) => number) =>
+  [
+    { seq: 0, t: 0, kind: 'session.start', version: 8, opened: 1, model: 'm', head: [{ role: 'system', content: 's' }] },
+    { seq: 1, t: 2, kind: 'ask', turn: 1, text: 'Build it' },
+    { seq: 2, t: 3, kind: 'request', lane: 'trunk', turn: 1 },
+    { seq: 3, t: 5, kind: 'delta', request: 2, tool_call: { index: 0, id: 'c1', name: 'bash', arguments: '{"command":"make"}' } },
+    { seq: 4, t: 6 + wall(4), kind: 'tool_call', request: 2, turn: 1, id: 'c1', name: 'bash', arguments: '{"command":"make"}', outcome: 'ran', exit: 0 },
+    { seq: 5, t: 7 + wall(4), kind: 'request', lane: 'trunk', turn: 1 },
+    { seq: 6, t: 9 + wall(4), kind: 'delta', request: 5, tool_call: { index: 0, id: 'c2', name: 'bash', arguments: '{"command":"make slow"}' } },
+    { seq: 7, t: 10 + wall(4) + wall(7), kind: 'tool_call', request: 5, turn: 1, id: 'c2', name: 'bash', arguments: '{"command":"make slow"}', outcome: 'ran', timeout_ms: 16000 },
+    { seq: 8, t: 11 + wall(4) + wall(7), kind: 'request', lane: 'trunk', turn: 1 },
+    { seq: 9, t: 12 + wall(4) + wall(7), kind: 'response', to_request: 8, text: 'Built, slowly.' },
+  ] as unknown as LogLine[];
+
+describe('a tool’s run placed from its line, not its wall clock (#891)', () => {
+  const once = retime(RUN((seq) => (seq === 4 ? 3 : 15990)));
+  const again = retime(RUN((seq) => (seq === 4 ? 912 : 16007)));
+  const t = (log: readonly LogLine[], seq: number) => log.find((line) => line.seq === seq)!.t;
+
+  it('places two runs of one scenario on the same `t`s', () => {
+    expect(again.map((line) => line.t)).toEqual(once.map((line) => line.t));
+  });
+
+  it('runs a command at the floor, and a timed-out one for its timeout', () => {
+    expect(t(once, 4) - t(once, 3)).toBe(150);
+    expect(t(once, 7) - t(once, 6)).toBe(16000);
+  });
+});
