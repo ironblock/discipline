@@ -1137,6 +1137,11 @@ pub enum Event {
         /// absent, an earlier log's notes followed the ask as messages of
         /// their own.
         notes_in_the_ask: Option<bool>,
+        /// Whether a window meditation's compaction of a running turn
+        /// persists (v8, #886): `true` from this build on; absent, an
+        /// earlier log's compacted steps rejoined the trunk when the turn
+        /// settled.
+        compaction_persists: Option<bool>,
         /// The commit the serving binary was built from (v8, #757): 40 hex
         /// digits, from the build script, so a run's build is read off its
         /// log rather than typed from memory. With `build_dirty`, or neither.
@@ -3413,6 +3418,7 @@ fn from_object(object: &BTreeMap<String, Value>) -> Result<Line, String> {
                 fork_delivery: fields.optional_tag("fork_delivery", ForkDelivery::from_tag)?,
                 levers: fields.optional_words("levers")?,
                 notes_in_the_ask: fields.optional_flag("notes_in_the_ask")?,
+                compaction_persists: fields.optional_flag("compaction_persists")?,
                 build_commit: build_of(&fields)?.0,
                 build_dirty: build_of(&fields)?.1,
                 fork_asks: match fields.optional_string("fork_asks")? {
@@ -5323,6 +5329,7 @@ pub fn schema(kind: Kind) -> &'static [Field] {
                 may_v7("fork_delivery", Tag(Tags::ForkDelivery)),
                 may_v7("levers", Holds::Words),
                 may_v7("notes_in_the_ask", Holds::Flag),
+                may_v8("compaction_persists", Holds::Flag),
                 may_v8("build_commit", Holds::Text),
                 may_v8("build_dirty", Holds::Flag),
                 may_v7("fork_asks", Text),
@@ -6081,6 +6088,7 @@ fn to_value(line: &Line) -> Value {
             fork_delivery,
             levers,
             notes_in_the_ask,
+            compaction_persists,
             build_commit,
             build_dirty,
             fork_asks,
@@ -6141,6 +6149,9 @@ fn to_value(line: &Line) -> Value {
             }
             if let Some(in_the_ask) = notes_in_the_ask {
                 put("notes_in_the_ask", Value::Boolean(*in_the_ask));
+            }
+            if let Some(persists) = compaction_persists {
+                put("compaction_persists", Value::Boolean(*persists));
             }
             if let Some(commit) = build_commit {
                 put("build_commit", text(commit));
@@ -8309,6 +8320,7 @@ mod tests {
                     digest: Some("0123456789abcdef".to_owned()),
                 }),
                 notes_in_the_ask: Some(true),
+                compaction_persists: Some(true),
                 build_commit: Some("a".repeat(40)),
                 build_dirty: Some(false),
             },
@@ -9625,6 +9637,7 @@ mod tests {
             levers,
             fork_asks,
             notes_in_the_ask,
+            compaction_persists,
             build_commit,
             build_dirty,
             shown_roots,
@@ -9641,6 +9654,7 @@ mod tests {
         *levers = None;
         *fork_asks = None;
         *notes_in_the_ask = None;
+        *compaction_persists = None;
         *build_commit = None;
         *build_dirty = None;
         *shown_roots = None;

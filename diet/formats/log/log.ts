@@ -398,6 +398,7 @@ export type SessionStartLine = {
   fork_delivery?: ForkDelivery;
   levers?: Record<string, string>;
   notes_in_the_ask?: boolean;
+  compaction_persists?: boolean;
   build_commit?: string;
   build_dirty?: boolean;
   fork_asks?: string;
