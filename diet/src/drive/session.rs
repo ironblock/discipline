@@ -6510,25 +6510,8 @@ fn capture_call<S>(
     // Each patch it applied, as the `patch` line a fork's would be: one
     // place for every working-memory change.
     let mut lines = Vec::new();
-    // A refutation on the trunk (#878) points at this step's request: the
-    // model had seen what showed it wrong by then.
     let refuting = call.name == crate::dogma::refutation::NAME;
-    let mut items = Vec::new();
-    let read = if refuting {
-        let pointer = format!("log seq {request}");
-        refute_patches(
-            &state,
-            (turn, request),
-            call,
-            (&pointer, log::Lane::Trunk.tag()),
-        )
-        .map(|(patches, refused)| {
-            items = refused;
-            patches
-        })
-    } else {
-        capture_patches(&mut state, (turn, request), call)
-    };
+    let (read, items) = trunk_patches(&mut state, (turn, request), call);
     let (outcome, entries, why) = match read {
         Err(why) => ("refused", Vec::new(), Some(why)),
         Ok(patches) => {
@@ -7014,6 +6997,29 @@ fn prune_call<S>(
     drop(state);
     shared.changed.notify_all();
     (line, Some(meditation.answer().to_owned()))
+}
+
+/// The patches a trunk call to a capture tool asks for, and a refutation's
+/// refused items: a refutation (#878) points at this step's request, since
+/// the model had seen what showed it wrong by then.
+fn trunk_patches(
+    state: &mut State,
+    (turn, request): (u32, u64),
+    call: &Call,
+) -> (Result<Vec<Patch>, String>, Vec<String>) {
+    if call.name != crate::dogma::refutation::NAME {
+        return (capture_patches(state, (turn, request), call), Vec::new());
+    }
+    let pointer = format!("log seq {request}");
+    match refute_patches(
+        state,
+        (turn, request),
+        call,
+        (&pointer, log::Lane::Trunk.tag()),
+    ) {
+        Ok((patches, refused)) => (Ok(patches), refused),
+        Err(why) => (Err(why), Vec::new()),
+    }
 }
 
 /// One call, to its line and what the model is shown of it (`None` when
@@ -14433,7 +14439,7 @@ pub(in crate::drive) mod tests {
                 "{bad}: {refused:?}"
             );
         }
-        for whole in [r#"{}"#, r#"{"refuted":{"note_id":"e1"}}"#, "not json"] {
+        for whole in ["{}", r#"{"refuted":{"note_id":"e1"}}"#, "not json"] {
             assert!(
                 refute_patches(&state, (2, 9), &refute(whole), ("call c", "interview")).is_err(),
                 "{whole}"
