@@ -126,6 +126,50 @@ export function byLane(lines: readonly LogLine[]): Record<string, readonly unkno
   return lanes;
 }
 
+/** Each line's place: its lane, and its index among that lane's lines -- what `byLane` compares a line by. */
+function placesOf(lines: readonly LogLine[]): Map<number, string> {
+  const laneOf = lanesOf(lines);
+  const counts = new Map<string, number>();
+  const places = new Map<number, string>();
+  for (const line of lines as unknown as readonly Line[]) {
+    const lane = laneOf.get(line.seq)!;
+    const n = counts.get(lane) ?? 0;
+    counts.set(lane, n + 1);
+    places.set(line.seq, `${lane}#${n}`);
+  }
+  return places;
+}
+
+/** Each line of `written` with its wall-clock fields (`CLOCK`) carried from the line at the same lane and place in
+ * `previous`, the published example it replaces, when that line is of the same kind and holds the field: wall time
+ * differs every run and is never compared, so carried, a rewrite changes only what the session changed. A field with
+ * no such line keeps this run's value. How many were carried and how many kept their own. */
+export function clockCarried(
+  previous: readonly LogLine[],
+  written: readonly LogLine[],
+): { readonly log: LogLine[]; readonly carried: number; readonly own: number } {
+  const before = placesOf(previous);
+  const at = new Map<string, Line>();
+  for (const line of previous as unknown as readonly Line[]) at.set(before.get(line.seq)!, line);
+  const places = placesOf(written);
+  let carried = 0;
+  let own = 0;
+  const log = (written as unknown as readonly Line[]).map((line) => {
+    const keys = Object.keys(line).filter((key) => CLOCK.has(key));
+    if (keys.length === 0) return line as unknown as LogLine;
+    const was = at.get(places.get(line.seq)!);
+    const out: Record<string, unknown> = { ...line };
+    for (const key of keys) {
+      if (was !== undefined && was.kind === line.kind && key in was) {
+        out[key] = was[key];
+        carried += 1;
+      } else own += 1;
+    }
+    return out as unknown as LogLine;
+  });
+  return { log, carried, own };
+}
+
 /** The fields two lines of the same kind hold differently, by name; none when either is missing or the kinds differ. */
 function fieldsApart(a: unknown, b: unknown): string[] {
   if (typeof a !== 'object' || a === null || typeof b !== 'object' || b === null) return [];
