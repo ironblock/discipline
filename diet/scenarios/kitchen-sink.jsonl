@@ -30,7 +30,7 @@
 {"reply":{"when":"count-three","text":"Four.","calls":[{"id":"call-c4","name":"bash","arguments":"{\"command\": \"echo count-four\"}"}],"delay_ms":300}}
 {"reply":{"when":"Tidy up","text":"Checking first.","calls":[{"id":"call-t1","name":"bash","arguments":"{\"command\": \"echo tidy-check\"}"}],"delay_ms":300}}
 {"reply":{"when":"tidy-check","text":"Now the tidier.","calls":[{"id":"call-t2","name":"tidy_everything","arguments":"{}"}],"delay_ms":300}}
-{"reply":{"when":"Is the scope done","text":"It is.","calls":[{"id":"call-v1","name":"resolve_entry","arguments":"{\"entry\": \"r5/call-r1/decision\", \"verdict\": \"done\"}"}],"delay_ms":300}}
+{"reply":{"when":"Is the scope done","text":"It is.","calls":[{"id":"call-v1","name":"resolve_entry","arguments":"{\"entry\": \"$entry:call-r1/decision\", \"verdict\": \"done\"}"}],"delay_ms":300}}
 {"reply":{"when":"resolved","text":"Marked the scope done.","delay_ms":300}}
 {"reply":{"when":"Change of scope","text":"Noted: notes.md becomes a Markdown list of decisions.","delay_ms":400}}
 {"reply":{"when":"Oriented enough","text":"Proposing the plan phase.","calls":[{"id":"call-p1","name":"propose_phase_transition","arguments":"{\"to\": \"plan\", \"reason\": \"the scope is settled\"}"}],"delay_ms":400}}

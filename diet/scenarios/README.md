@@ -38,6 +38,7 @@ The format has no grammar of its own, so it has no directory under `diet/formats
 - A request no reply is left for is refused `500` and fails the run, naming its last message.
 - `calls` are the tool calls the reply makes; `arguments` is the JSON text the model would write.
 - A `$job` anywhere in a reply is the last background job id (`bg_` and eight hex digits) the request carries: what `task_stop` names, which no script can know ahead of the run.
+- A `$entry:<call>/<field>` anywhere in a reply is the last record entry id for that call and field the request carries, read from the request's decoded text: `r`, the seq diet built it at, then `/<call>/<field>`, as `resolve_entry` names it. A line logged earlier moves the seq, so a reply names the entry by its call and field instead. With none in the request, it stays as written.
 - `prompt_tokens` (optional) is the prompt the reply's usage reports, in tokens; absent, the canned server's 600. A trunk that large is what a budget meditation measures.
 - `delay_ms` (optional) holds the reply back that long, its events trickled after the delay (#782). The stub answers each request on its own thread, so a held reply orders a trunk's answer after a fork beside it.
 - A re-fire on an endpoint ignores every reply.
