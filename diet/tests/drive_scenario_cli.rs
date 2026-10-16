@@ -428,6 +428,27 @@ fn a_scenario_shows_its_model_the_same_bytes_under_any_roots() {
     let _ = std::fs::remove_dir_all(&dir);
 }
 
+/// The heads in `out`'s record sidecar that could not be rebuilt from the
+/// log.
+fn unrebuilt(out: &Path) -> Vec<serde_json::Value> {
+    let sidecar: serde_json::Value = serde_json::from_str(
+        &std::fs::read_to_string(out.join("session.record.jsonl.unspellable.json"))
+            .expect("the sidecar"),
+    )
+    .expect("JSON");
+    sidecar["unspellable"]
+        .as_array()
+        .expect("unspellable")
+        .iter()
+        .filter(|item| {
+            item["why"]
+                .as_str()
+                .is_some_and(|why| why.contains("could not be rebuilt"))
+        })
+        .cloned()
+        .collect()
+}
+
 /// #882: a phased session declares the phase tool, and its record rebuilds
 /// every request's head from the log as any other session's does: the
 /// sidecar of the shipped two-phase scenario names no head it could not
@@ -447,21 +468,28 @@ fn a_phased_sessions_request_heads_are_rebuilt_from_its_log() {
             .is_some_and(|tools| tools.iter().any(|tool| tool == "propose_phase_transition")),
         "the session declared the phase tool: {start}"
     );
-    let sidecar: serde_json::Value = serde_json::from_str(
-        &std::fs::read_to_string(out.join("session.record.jsonl.unspellable.json"))
-            .expect("the sidecar"),
-    )
-    .expect("JSON");
-    let unrebuilt: Vec<&serde_json::Value> = sidecar["unspellable"]
-        .as_array()
-        .expect("unspellable")
-        .iter()
-        .filter(|item| {
-            item["why"]
-                .as_str()
-                .is_some_and(|why| why.contains("could not be rebuilt"))
-        })
-        .collect();
+    let unrebuilt = unrebuilt(&out);
+    assert!(unrebuilt.is_empty(), "{unrebuilt:#?}");
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// #884: a window meditation that splits a running turn (#813) refills the
+/// trunk mid-turn, and the record rebuilds every request's head after it:
+/// the sidecar of the shipped split-turn scenario names none it could not.
+#[test]
+fn a_split_turns_request_heads_are_rebuilt_from_its_log() {
+    let dir = scratch("split-heads");
+    let out = dir.join("out");
+    let (code, said) = run(&root().join("diet/scenarios/split-turn.jsonl"), &out);
+    assert_eq!(code, Some(0), "{said}");
+    let log = std::fs::read_to_string(out.join("session.log")).expect("the log");
+    assert!(
+        log.lines()
+            .any(|line| line.contains(r#""kind":"meditation""#)
+                && line.contains(r#""turn_steps_kept""#)),
+        "the session split a turn"
+    );
+    let unrebuilt = unrebuilt(&out);
     assert!(unrebuilt.is_empty(), "{unrebuilt:#?}");
     let _ = std::fs::remove_dir_all(&dir);
 }

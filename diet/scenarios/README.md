@@ -2,7 +2,7 @@
 
 A scenario (#760) is a drive written down as steps and expectations. `diet-drive scenario` runs it. Every `*.jsonl` here runs in `./verify.sh`'s `scenarios` check on the canned scenario substrate.
 
-`split-turn.jsonl` (#813) runs on the same windowed substrate: a turn whose own steps outgrow the window, split by the window meditation inside it.
+`split-turn.jsonl` (#813) runs on the same windowed substrate: a turn whose own steps outgrow the window, split by the window meditation inside it, then a second ask whose request carries the split turn whole: the steps the split compacted rejoin the trunk when the turn settles (#884).
 
 `kitchen-sink.jsonl` (#798) is one session showing every lever that writes a line to the log, each with an `expect`; its log is the page's `kitchen-sink` example. It runs on `canned-scenario-windowed`, the scenario substrate with a declared 24000-token window, so its budget meditation fires at a turn's end and its window meditation inside a later turn. `meditation_at_working_set_bytes` is not shown: serve refuses it (`NotServed`), and only the scripted drive takes it. Its replies are routed by `when` and provisioned one per request, so a request nobody wrote a reply for fails the run rather than taking another's. It gates its step warrants by a classifier (`warrant_gate = "classifier"`, #850), scored by its own `classify` lines, so every step logs `warrant.gated` decisions, fired and not. Its audits ask in chunks of eight notes, two in flight at once (`meditation_audit_concurrency = 2`, #854), each fork carrying its `chunk`. Similar notes are merged at write time (`note_dedupe = "on"`): a fork's LEARNED restating a live one is folded into it, its `patch` line carrying `merged` and `cosine`.
 
