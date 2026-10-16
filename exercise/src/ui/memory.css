@@ -151,6 +151,16 @@
   color: var(--ink-faint);
 }
 
+/* The notes merged into an entry as similar (#872): under its text, quiet, one a line. */
+.ex-memory__merges {
+  grid-column: 2;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  color: var(--ink-faint);
+  font: var(--size-chrome) / 1.4 var(--font-chrome);
+}
+
 .ex-memory__actions {
   grid-column: 2;
   display: flex;

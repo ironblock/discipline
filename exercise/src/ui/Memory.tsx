@@ -77,6 +77,16 @@ export function Memory({ entries, seenThrough = -1, onSeen, act }: MemoryProps) 
                   </span>
                   {/* The operator's flag (#150), kept until a meditation addresses it; and the model's writes refused over their entry. */}
                   {e.flag !== undefined ? <span className="ex-memory__flag">flag · {e.flag}</span> : null}
+                  {/* The notes merged into it as similar (#872): each one's id, how similar, and what it said. */}
+                  {e.merges && e.merges.length > 0 ? (
+                    <ul className="ex-memory__merges" aria-label={`merged into #${e.id}`}>
+                      {e.merges.map((m) => (
+                        <li key={m.id} className="ex-memory__merge" title={`merged as similar by patch #${m.by}`}>
+                          {`merged #${m.id} · cosine ${m.cosine} · ${m.text}`}
+                        </li>
+                      ))}
+                    </ul>
+                  ) : null}
                   {e.refusedWrites && e.refusedWrites.length > 0 ? (
                     <span className="ex-memory__refused" title="the model tried to change your entry, and was refused">
                       refused: {e.refusedWrites.map((w) => `${w.op} by ${w.by}`).join(', ')}

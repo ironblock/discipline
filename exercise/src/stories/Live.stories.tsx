@@ -29,6 +29,7 @@ import toolCallRan from '../../../diet/formats/log/fixtures/valid/a-v3-tool-call
 import forks from '../../../diet/formats/log/fixtures/valid/a-v5-scoping-fork-that-patched-and-a-read-fork-that-declined.jsonl?raw';
 import { App } from '../App.tsx';
 import { respelled } from '../drive/spelling.ts';
+import { tokens } from '../ui/format.ts';
 import { outcomeOf } from '../ui/sets.ts';
 import { png } from '../drive/png.ts';
 import type { EventSourceLike, Web } from '../drive/http.ts';
@@ -806,8 +807,10 @@ export const ServedPhaseEvidence: Story = {
   args: { drive: true, web: posting(lines(MODEL_PROPOSED)) },
   play: async ({ canvasElement }) => {
     const ruling = await within(canvasElement).findByRole('region', { name: 'the model proposes orient → plan' });
-    await expect(within(ruling).getByRole('definition', { name: 'phase length' })).toHaveTextContent('35 steps · 4.9k tokens');
-    await expect(within(ruling).getByRole('definition', { name: 'since the last meditation' })).toHaveTextContent('0 tokens');
+    // The evidence as logged (#875): read from the proposal's line, not pinned.
+    const proposed = MODEL_PROPOSED.findLast((line) => line.kind === 'phase.proposed') as { phase_steps: number; phase_tokens: number; tokens_since_meditation: number };
+    await expect(within(ruling).getByRole('definition', { name: 'phase length' })).toHaveTextContent(`${proposed.phase_steps} steps · ${tokens(proposed.phase_tokens)} tokens`);
+    await expect(within(ruling).getByRole('definition', { name: 'since the last meditation' })).toHaveTextContent(`${tokens(proposed.tokens_since_meditation)} tokens`);
     posted.length = 0;
     await userEvent.click(within(ruling).getByRole('button', { name: 'Stay in orient' }));
     await waitFor(async () => expect(posted).toEqual([{ kind: 'ratify-phase', call: 'call-p1', choice: 'stay' }]));
