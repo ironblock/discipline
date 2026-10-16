@@ -14,7 +14,7 @@ describe('the two keys (#788), as the kitchen sink logged them, folded for the p
       from: 'orient',
       to: 'plan',
       reason: 'the scope is settled',
-      evidence: { steps: 35, tokens: 4951, sinceMeditation: 0, manualMeditation: false },
+      evidence: { steps: 35, tokens: 4948, sinceMeditation: 0, manualMeditation: false },
     });
   });
 

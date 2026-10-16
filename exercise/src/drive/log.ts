@@ -291,6 +291,10 @@ export interface Patch extends At {
   readonly authority?: Authority;
   /** The tangent open when it was made (log v7, #608): the entry is that tangent's, to be ruled on at its close. */
   readonly tangent?: string;
+  /** On a merged `add` (log v8, `note_dedupe`, #872): the live note of its kind it was merged into, as similar. With `cosine`. */
+  readonly merged?: string;
+  /** Their TF-IDF cosine, four decimals as diet wrote it. With `merged`. */
+  readonly cosine?: string;
 }
 
 /** The operator opened a tangent (log v7, #608): the trunk as it stood is the point a close rolls back to. */

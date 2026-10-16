@@ -401,6 +401,9 @@ export interface MemoryEntry extends Provenance {
   readonly flag?: string;
   /** The model's writes refused over this operator entry (log v7's `patch.refused`, #150): each op, and who tried it. */
   readonly refusedWrites?: readonly { readonly op: string; readonly by: string }[];
+  /** The notes merged into it as similar (a merged `add`, `note_dedupe`, #872): each one's id, now this entry's alias,
+   * its text, their cosine as diet wrote it, and the patch that merged it. Its own text is unchanged. */
+  readonly merges?: readonly { readonly id: string; readonly text: string; readonly cosine: string; readonly by: string }[];
 }
 
 export type SessionState = 'connecting' | 'awaiting' | 'turn' | 'capture' | 'ratify' | 'ended';
@@ -880,6 +883,18 @@ export function fold(written: readonly LogLine[]): Session {
         if (e.fork !== undefined) forks.get(e.fork)?.patches.push(e);
         // An id diet aliased to the entry holding its content names that entry (`WorkingObject::add`'s `Deduped`).
         const held = (entry: string) => aliases.get(entry) ?? entry;
+        // A merged add (#872): similar, not the same, so diet names the note it merged into. Its id is that note's alias,
+        // and the note, its text unchanged, shows the merge.
+        if (e.op === 'add' && e.merged !== undefined && e.cosine !== undefined) {
+          const into = held(e.merged);
+          const holder = entries.get(into);
+          aliases.set(e.entry.id, into);
+          if (holder) {
+            const merge = { id: e.entry.id, text: e.entry.text, cosine: e.cosine, by: id(e.seq) };
+            entries.set(into, { ...holder, merges: [...(holder.merges ?? []), merge], from: [...holder.from, e.seq] });
+          }
+          break;
+        }
         // A restated add -- its content, whitespace collapsed, already a live entry's -- is diet's alias, not an entry.
         if (e.op === 'add' && !entries.has(e.entry.id)) {
           const key = normalised(e.entry.text);

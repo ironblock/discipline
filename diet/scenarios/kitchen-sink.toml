@@ -45,6 +45,9 @@ reconcile_gate = "refuse"
 # than eight notes asks in chunks of eight, each line carrying its `chunk`.
 meditation_audit_chunk_notes = 8
 meditation_audit_concurrency = 2
+# Similar notes merged at write time: a fork's LEARNED restating a live one
+# is folded into it, its `patch` line naming the entry and their cosine.
+note_dedupe = "on"
 
 # The step warrants' gate by a classifier (#850): every step's probes are
 # scored and logged as `warrant.gated`. On the canned substrate the scenario's

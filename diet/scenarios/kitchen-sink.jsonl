@@ -64,7 +64,7 @@
 {"reply":{"when":"You just ingested a large piece","text":"EXCERPT: xxxxxxxxxx\nPOINTER: the long line is 9000 x's (the output of call-b2)"}}
 {"reply":{"when":"did anything behave differently","text":"GOTCHA: missing.txt does not exist — IMPLICATION: create it before showing it"}}
 {"reply":{"when":"Two questions about where you are right now","text":"OPEN: whether the build in the background finished\nNEXT: read its output"}}
-{"reply":{"when":"What did this turn establish","text":"LEARNED: NONE\nEVIDENCE: NONE\nSTUCK: NONE"}}
+{"reply":{"when":"What did this turn establish","text":"LEARNED: notes.md reads back exactly as it was written\nEVIDENCE: NONE\nSTUCK: NONE"}}
 {"reply":{"when":"What did this turn establish","text":"LEARNED: NONE\nEVIDENCE: NONE\nSTUCK: NONE"}}
 {"reply":{"when":"What did this turn establish","text":"LEARNED: NONE\nEVIDENCE: NONE\nSTUCK: NONE"}}
 {"reply":{"when":"What did this turn establish","text":"LEARNED: NONE\nEVIDENCE: NONE\nSTUCK: NONE"}}
@@ -139,6 +139,7 @@
 {"expect":"phase.answered","where":{"call":"call-a2","accepted":"false"},"after":"operator-build"}
 {"expect":"phase.ruled","where":{"by":"operator","choice":"keep","from":"test","to":"build"},"after":"operator-build"}
 {"expect":"patch","where":{"lane":"mechanical","entry.id":"mechanical/notes.md"}}
+{"expect":"patch","where":{"op":"add","entry.text":"learned: notes.md reads back as written","merged":"interview-t1-0","cosine":"0.6857"}}
 {"expect":"fork","where":{"timing":"during_turn","trigger~":"call:edit:call-w1","view_overridden":"last_turn"}}
 {"expect":"request","where":{"lane":"trunk","beside":"1"}}
 {"expect":"fork","where":{"why":"evidence","trigger":"evidence:call-b2"}}
