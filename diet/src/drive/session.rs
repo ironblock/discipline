@@ -10604,6 +10604,7 @@ fn fire_next<S>(shared: &Shared<S>, state: &mut State) -> Option<Fired> {
 
 /// One of the gap's forks, fired: born off the warm trunk -- what the view
 /// shows of it, then the question -- and never appended to it.
+#[allow(clippy::too_many_lines)]
 fn fire<S>(
     shared: &Shared<S>,
     state: &mut State,
@@ -12204,7 +12205,7 @@ fn settle_fork<S>(
         calls
             .iter()
             .filter(|call| {
-                !record_tool(call) && !(refuting && call.name == crate::dogma::refutation::NAME)
+                !record_tool(call) && (!refuting || call.name != crate::dogma::refutation::NAME)
             })
             .count(),
     )
@@ -12390,13 +12391,13 @@ fn captured_in(
         return (outcome, lines);
     }
     for call in capture_calls {
-        let patches = match pointer.as_deref() {
+        let read = match pointer.as_deref() {
             Some(pointer) if refuting(call) => {
                 refute_patches(state, (turn, request), call, (pointer, &offered))
             }
             _ => capture_patches(state, (turn, request), call),
         };
-        let (refused, entries, patched) = match patches {
+        let (refused, entries, patched) = match read {
             Err(why) => (Some(why), Vec::new(), Vec::new()),
             Ok(mut patches) => {
                 for patch in &mut patches {
