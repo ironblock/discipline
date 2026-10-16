@@ -638,6 +638,10 @@ struct Walk<'a> {
     /// Each turn's tool steps so far, in order: what the session sent after
     /// the ask, and what it put back on the trunk.
     steps: BTreeMap<u32, Vec<Step>>,
+    /// Each turn's steps a window meditation compacted out of its requests
+    /// (#813, #884): the session's exchange keeps them, and they rejoin the
+    /// trunk with the turn when it settles.
+    compacted: BTreeMap<u32, Vec<Step>>,
     /// Why the trunk stopped being rebuildable, from the first turn whose
     /// attachment could not be read back: every later head names it (#471's
     /// review, NB3).
@@ -871,6 +875,7 @@ impl<'a> Walk<'a> {
             stepped,
             cancelled_text: BTreeMap::new(),
             steps: BTreeMap::new(),
+            compacted: BTreeMap::new(),
             trunk_unrebuilt: None,
             refilled: false,
             side_heads: BTreeMap::new(),
@@ -1364,12 +1369,25 @@ impl<'a> Walk<'a> {
             operator_changes,
             unaddressed,
             phase_document,
+            turn_steps,
             ..
         } = &line.event
         else {
             return;
         };
         let (seq, at_turn, tail_tokens) = (line.seq, *at_turn, tail_tokens.unwrap_or(0));
+        // A running turn it split (#813, #884): the session compacted the
+        // turn's oldest steps with the turns before it, and its ask and the
+        // steps it kept ride after the refill -- so do they here. Its
+        // exchange still holds the compacted ones, and they rejoin the trunk
+        // with the turn when it settles.
+        if let Some(log::TurnSteps { compacted, .. }) = turn_steps
+            && let Some(steps) = self.steps.get_mut(&at_turn)
+        {
+            let compacted = usize::try_from(*compacted).unwrap_or(usize::MAX);
+            let out: Vec<Step> = steps.drain(..compacted.min(steps.len())).collect();
+            self.compacted.entry(at_turn).or_default().extend(out);
+        }
         // Every change addressed is the log's `unaddressed: []` and the
         // record's `unaddressed` absent beside its `operator_changes`: a
         // record row's list is never empty (#688).
@@ -1841,7 +1859,14 @@ impl<'a> Walk<'a> {
         let notes = self.notes.get(&turn).cloned().unwrap_or_default();
         let opening = self.with_notes(asked, notes);
         self.trunk.extend(opening);
-        let taken = self.steps.remove(&turn).unwrap_or_default();
+        // The steps a split compacted from its requests first: the session's
+        // exchange kept them (#884), and counts of steps count them.
+        let compacted = self.compacted.remove(&turn).unwrap_or_default();
+        let steps = steps.saturating_add(compacted.len());
+        let taken: Vec<Step> = compacted
+            .into_iter()
+            .chain(self.steps.remove(&turn).unwrap_or_default())
+            .collect();
         for step in taken.iter().take(steps) {
             if let Some(why) = &step.unrebuilt {
                 self.trunk_unrebuilt
@@ -1903,7 +1928,9 @@ impl<'a> Walk<'a> {
             .and_then(|steps| steps.last())
             .is_some_and(|step| Some(step.request) == last_request);
         let completed = steps - usize::from(unfinished);
-        if completed == 0 {
+        // None completed since a split, but the steps it compacted did
+        // (#884): they join the trunk, as the session's ran steps do.
+        if completed == 0 && !self.compacted.contains_key(&turn) {
             self.steps.remove(&turn);
             return;
         }
