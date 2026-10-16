@@ -3,6 +3,9 @@ import { describe, expect, it } from 'vitest';
 import { MODEL_PROPOSAL_KEPT, MODEL_PROPOSED, OPERATOR_ACCEPTED, OPERATOR_ASKED, OPERATOR_DECLINED, PHASE_IDLE, PHASE_OPENED, PHASE_STARTED } from '../drive/phase-keys.ts';
 import { fold } from './fold.ts';
 
+/** The model's proposal as logged, whose evidence the fold reads (#875: from the line, not pinned). */
+const PROPOSED = MODEL_PROPOSED.findLast((line) => line.kind === 'phase.proposed') as Extract<(typeof MODEL_PROPOSED)[number], { kind: 'phase.proposed' }>;
+
 describe('the two keys (#788), as the kitchen sink logged them, folded for the phase control (#789)', () => {
   it('knows every line of them', () => {
     for (const log of [MODEL_PROPOSAL_KEPT, OPERATOR_DECLINED, OPERATOR_ACCEPTED, PHASE_STARTED]) expect([...fold(log).unknown.keys()]).toEqual([]);
@@ -14,7 +17,7 @@ describe('the two keys (#788), as the kitchen sink logged them, folded for the p
       from: 'orient',
       to: 'plan',
       reason: 'the scope is settled',
-      evidence: { steps: 35, tokens: 4948, sinceMeditation: 0, manualMeditation: false },
+      evidence: { steps: PROPOSED.phase_steps, tokens: PROPOSED.phase_tokens, sinceMeditation: PROPOSED.tokens_since_meditation, manualMeditation: PROPOSED.meditated_by_hand },
     });
   });
 

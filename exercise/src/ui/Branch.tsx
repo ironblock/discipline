@@ -7,7 +7,7 @@ import { edgeOf, readingOf, warmOf, writingOf } from './flow.ts';
 import { Flowing } from './Flowing.tsx';
 import { useNow } from './surface.tsx';
 import { took, tokens } from './format.ts';
-import { alarmOf, failOf, hazardOf, opOf, outcomeOf } from './sets.ts';
+import { alarmOf, failOf, hazardOf, outcomeOf, patchOpOf } from './sets.ts';
 import './branch.css';
 
 /**
@@ -152,7 +152,7 @@ export function BranchBar({ node, onOpen }: { readonly node: Folded<BranchNode>;
       onClick={onOpen}
     >
       {node.patches.map((p) => (
-        <span key={p.id} className="ex-bar__tick" data-level={opOf(p.op).level} />
+        <span key={p.id} className="ex-bar__tick" data-level={patchOpOf(p).level} />
       ))}
     </button>
   );
@@ -191,12 +191,16 @@ function TaggedAnswer({ text }: { readonly text: string }) {
 
 /** How many patches of each op, in the op's glyph and colour: `+3 ↻1 −1`. */
 function PatchSummary({ patches }: { readonly patches: readonly Folded<PatchNode>[] }) {
-  const counts = new Map<string, number>();
-  for (const p of patches) counts.set(p.op, (counts.get(p.op) ?? 0) + 1);
+  const counts = new Map<string, { readonly drawn: ReturnType<typeof patchOpOf>; n: number }>();
+  for (const p of patches) {
+    const drawn = patchOpOf(p);
+    const count = counts.get(drawn.label) ?? { drawn, n: 0 };
+    count.n += 1;
+    counts.set(drawn.label, count);
+  }
   return (
     <span className="ex-patchsum">
-      {[...counts].map(([op, n]) => {
-        const drawn = opOf(op);
+      {[...counts].map(([op, { drawn, n }]) => {
         return (
           <span key={op} className="ex-patchsum__op" data-level={drawn.level} data-known={drawn.known ? '' : undefined} title={drawn.label}>
             {drawn.glyph}
@@ -209,11 +213,12 @@ function PatchSummary({ patches }: { readonly patches: readonly Folded<PatchNode
 }
 
 function PatchLine({ patch }: { readonly patch: Folded<PatchNode> }) {
-  const op = opOf(patch.op);
+  const op = patchOpOf(patch);
   return (
     <li
       className="ex-patch"
       data-op={patch.op}
+      data-merged={patch.merged?.into}
       data-level={op.level}
       data-known={op.known ? '' : undefined}
       data-from={patch.from.join(' ')}
@@ -229,6 +234,7 @@ function PatchLine({ patch }: { readonly patch: Folded<PatchNode> }) {
       </span>
       {!op.known ? <span className="ex-patch__note">{op.label}</span> : null}
       {patch.supersedes ? <span className="ex-patch__note">replaces #{patch.supersedes}</span> : null}
+      {patch.merged ? <span className="ex-patch__note">{`into #${patch.merged.into} · cosine ${patch.merged.cosine}`}</span> : null}
     </li>
   );
 }

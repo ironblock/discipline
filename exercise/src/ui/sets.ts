@@ -147,6 +147,12 @@ const OPS: Readonly<Record<string, Omit<Op, 'known'>>> = {
   edit: { glyph: '✎', label: 'edit', level: 'ok' },
 };
 
+/** An add merged into a live note as similar (#872): no new entry, so not drawn as one. */
+const MERGED: Op = { glyph: '≈', label: 'merged as similar', level: 'quiet', known: true };
+
+/** A patch as drawn: its op, or a merge when its add joined a note (#875). */
+export const patchOpOf = (patch: { readonly op: PatchOp; readonly merged?: unknown }): Op => (patch.merged !== undefined ? MERGED : opOf(patch.op));
+
 export function opOf(op: PatchOp): Op {
   const entry = Object.hasOwn(OPS, op) ? OPS[op] : undefined;
   return entry ? { ...entry, known: true } : { glyph: '·', label: op, level: 'quiet', known: false };

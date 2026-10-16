@@ -1,8 +1,9 @@
 import type { Meta, StoryObj } from '@storybook/react-vite';
-import { expect, waitFor } from 'storybook/test';
+import { expect, userEvent, waitFor } from 'storybook/test';
 
 import { PHASES } from '../App.tsx';
 import { AUTHORED } from '../drive/examples.ts';
+import { CHUNKED_AUDITS, GATED, MERGE, QUIET_STEP, WHOLE_AUDITS, firedStep, latencyOf } from '../drive/moments.ts';
 import { placed, recordedAt } from '../drive/recorded.ts';
 import { fold } from '../session/fold.ts';
 import { SessionView } from '../ui/SessionView.tsx';
@@ -100,14 +101,17 @@ export const Condensed: Story = {
 export const WarrantGate: Story = {
   name: '4 · the warrant gate on each step',
   play: async ({ canvasElement }) => {
-    const gate = (step: string) => canvasElement.querySelector<HTMLElement>(`.ex-trunk [data-id="${step}"] .ex-gate`);
-    await waitFor(async () => expect(canvasElement.querySelectorAll('.ex-trunk .ex-gate')).toHaveLength(new Set(log.filter((line) => line.kind === 'warrant.gated').map((line) => (line as { request: number }).request)).size));
+    const gate = (step: number) => canvasElement.querySelector<HTMLElement>(`.ex-trunk [data-id="${step}"] .ex-gate`);
+    await waitFor(async () => expect(canvasElement.querySelectorAll('.ex-trunk .ex-gate')).toHaveLength(GATED.size));
     // The missing-file step: three probes fired, strongest first; the background build's: one.
-    await expect([gate('185')?.textContent, gate('185')?.dataset['fired']]).toEqual(['gate · gotcha 0.93 · decision 0.71 · constraint 0.64', '']);
-    await expect(gate('185')?.closest<HTMLElement>('.ex-stat')?.title).toBe('decided by canned-scenario-classifier@0000000000000000000000000000000000000000 · threshold 0.5 · compute none · 2 ms\nconstraint 0.64 fired · decision 0.71 fired · gotcha 0.93 fired · open 0.04');
-    await expect(gate('228')?.textContent).toBe('gate · open 0.88');
+    const missing = firedStep('constraint', 'decision', 'gotcha');
+    await expect([gate(missing)?.textContent, gate(missing)?.dataset['fired']]).toEqual(['gate · gotcha 0.93 · decision 0.71 · constraint 0.64', '']);
+    await expect(gate(missing)?.closest<HTMLElement>('.ex-stat')?.title).toBe(
+      `decided by canned-scenario-classifier@0000000000000000000000000000000000000000 · threshold 0.5 · compute none · ${latencyOf(missing)} ms\nconstraint 0.64 fired · decision 0.71 fired · gotcha 0.93 fired · open 0.04`,
+    );
+    await expect(gate(firedStep('open'))?.textContent).toBe('gate · open 0.88');
     // A quiet step: decided, nothing fired.
-    await expect([gate('5')?.textContent, gate('5')?.dataset['fired']]).toEqual(['gate · quiet · ≤ 0.04', undefined]);
+    await expect([gate(QUIET_STEP)?.textContent, gate(QUIET_STEP)?.dataset['fired']]).toEqual(['gate · quiet · ≤ 0.04', undefined]);
   },
 };
 
@@ -115,11 +119,42 @@ export const WarrantGate: Story = {
 export const AuditChunks: Story = {
   name: '5 · an audit in concurrent chunks',
   play: async ({ canvasElement }) => {
-    const chunk = (fork: string) => canvasElement.querySelector(`[data-branch="${fork}"] .ex-branch__chunk`)?.textContent;
-    await waitFor(async () => expect(chunk('497')).toBe('chunk 1 of 2 · overlapped'));
-    await expect(['499', '640', '642', '684', '686'].map(chunk)).toEqual(['chunk 2 of 2 · overlapped', 'chunk 1 of 2 · overlapped', 'chunk 2 of 2 · overlapped', 'chunk 1 of 2 · overlapped', 'chunk 2 of 2 · overlapped']);
-    await expect(chunk('694')).toBeUndefined();
+    const chunk = (fork: { readonly seq: number }) => canvasElement.querySelector(`[data-branch="${fork.seq}"] .ex-branch__chunk`)?.textContent;
+    await waitFor(async () => expect(chunk(CHUNKED_AUDITS[0]![0]!)).toBe('chunk 1 of 2 · overlapped'));
+    await expect(CHUNKED_AUDITS.map((chunks) => chunks.map(chunk))).toEqual(CHUNKED_AUDITS.map(() => ['chunk 1 of 2 · overlapped', 'chunk 2 of 2 · overlapped']));
+    await expect(WHOLE_AUDITS.map(chunk)).toEqual([undefined]);
     const answers = [...canvasElement.querySelectorAll('.ex-meditation__reconcile [data-part="answer"] pre')].map((pre) => pre.textContent ?? '');
     await expect(answers.filter((answer) => answer.includes('chunk 1 of 2\n') && answer.includes('chunk 2 of 2\n'))).toHaveLength(2);
+  },
+};
+
+/** A note merged into a live one as similar (#872, #875): drawn on the note it joined, and on its fork as a merge, not a new entry. */
+export const NoteMerged: Story = {
+  name: '6 · a note merged as similar',
+  play: async ({ canvasElement }) => {
+    const merge = MERGE!;
+    // Working memory: the note that absorbed it says what it absorbed, how similar, and which patch merged it.
+    const into = await waitFor(async () => {
+      const found = canvasElement.querySelector<HTMLElement>(`[id="memory/${merge.merged}"]`);
+      await expect(found).not.toBeNull();
+      return found!;
+    });
+    const merged = [...into.querySelectorAll<HTMLElement>('.ex-memory__merge')];
+    await expect(merged.map((m) => m.textContent)).toEqual([`merged #${merge.entry.id} · cosine ${merge.cosine} · ${merge.entry.text}`]);
+    await expect(merged[0]?.title).toBe(`merged as similar by patch #${merge.seq}`);
+    await expect(canvasElement.querySelector(`[id="memory/${merge.entry.id}"]`)).toBeNull();
+    // Its fork: the patch is a merge into that note, not a new entry.
+    const fork = canvasElement.querySelector<HTMLElement>(`[data-branch="${merge.fork}"]`)!;
+    await userEvent.click(fork.querySelector<HTMLElement>('.ex-branch__why')!);
+    const patch = await waitFor(async () => {
+      const found = [...fork.querySelectorAll<HTMLElement>('.ex-patch')].find((p) => p.querySelector('.ex-patch__id')?.textContent === `#${merge.entry.id}`);
+      await expect(found).toBeTruthy();
+      return found!;
+    });
+    await expect([patch.dataset['merged'], patch.querySelector('.ex-patch__op')?.textContent, patch.querySelector('.ex-patch__note')?.textContent]).toEqual([
+      merge.merged,
+      '≈',
+      `into #${merge.merged} · cosine ${merge.cosine}`,
+    ]);
   },
 };

@@ -265,6 +265,8 @@ export interface PatchNode extends Provenance {
   readonly supersedes?: string;
   /** How the entry was known (#117 naming 5). */
   readonly authority?: Authority;
+  /** An add merged into a live note as similar (#872): the note it joined, and their cosine as diet wrote it. */
+  readonly merged?: { readonly into: string; readonly cosine: string };
 }
 
 export interface BranchNode extends Provenance, Partial<Generation> {
@@ -1372,6 +1374,7 @@ export function fold(written: readonly LogLine[]): Session {
           text: p.entry.text,
           ...(p.supersedes ? { supersedes: p.supersedes } : {}),
           ...(p.authority ? { authority: p.authority } : {}),
+          ...(p.op === 'add' && p.merged !== undefined && p.cosine !== undefined ? { merged: { into: p.merged, cosine: p.cosine } } : {}),
           ...provenance(p),
         }),
       ),
