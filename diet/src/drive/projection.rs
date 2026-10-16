@@ -759,6 +759,10 @@ fn tools_of(
                 })
             } else if name == super::background::TASK_STOP {
                 Ok(super::background::task_stop_tool())
+            } else if name == super::session::PHASE_TOOL {
+                // The phase tool (#788), offered whenever a phase library is
+                // active: one fixed definition, whatever the library holds.
+                Ok(super::session::phase_tool())
             } else if let Some(tool) = super::standard::definitions()
                 .into_iter()
                 .chain([super::prune::definition()])
@@ -1139,6 +1143,14 @@ impl<'a> Walk<'a> {
                     | log::SettleReason::Timeout
                     | log::SettleReason::Cancelled),
             } => self.cut_short(*turn, *reason),
+            // A turn the model's own phase proposal ended (#788): its last
+            // step was a step, not an answer, and the session put the turn
+            // on the trunk with every step and its results, as here. A turn
+            // that ended with an answer has already put them there.
+            Line::TurnSettled {
+                turn,
+                reason: log::SettleReason::Final,
+            } if self.steps.contains_key(turn) => self.onto_the_trunk(*turn, usize::MAX),
             // Carried by the rows above: a delta by its response's text, a
             // settlement and a settled turn by the turn and response rows.
             Line::Delta { .. }
