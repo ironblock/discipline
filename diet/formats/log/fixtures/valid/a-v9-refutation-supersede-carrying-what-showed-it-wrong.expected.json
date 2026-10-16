@@ -1,0 +1,197 @@
+{
+  "events": [
+    {
+      "head": [
+        {
+          "content": "you are the trunk",
+          "role": "system"
+        }
+      ],
+      "kind": "session.start",
+      "model": "a-model",
+      "opened": 1790000000000,
+      "seq": 0,
+      "t": 0,
+      "version": 9
+    },
+    {
+      "kind": "ask",
+      "scoping": true,
+      "seq": 1,
+      "t": 5,
+      "text": "what are we building",
+      "turn": 1
+    },
+    {
+      "from": "awaiting",
+      "kind": "settlement",
+      "seq": 2,
+      "t": 10,
+      "to": "turn"
+    },
+    {
+      "kind": "request",
+      "lane": "trunk",
+      "seq": 3,
+      "t": 15,
+      "turn": 1
+    },
+    {
+      "kind": "response",
+      "seq": 4,
+      "t": 20,
+      "text": "a tracker for the team's bugs",
+      "to_request": 3
+    },
+    {
+      "kind": "turn.settled",
+      "reason": "final",
+      "seq": 5,
+      "t": 25,
+      "turn": 1
+    },
+    {
+      "from": "turn",
+      "kind": "settlement",
+      "seq": 6,
+      "t": 30,
+      "to": "awaiting"
+    },
+    {
+      "at": 3,
+      "kind": "fork",
+      "lane": "interview",
+      "of_turn": 1,
+      "question": "what did the operator decide",
+      "seq": 7,
+      "t": 35,
+      "why": "scoping"
+    },
+    {
+      "fork": 7,
+      "kind": "request",
+      "lane": "interview",
+      "seq": 8,
+      "t": 40,
+      "turn": 1
+    },
+    {
+      "kind": "response",
+      "seq": 9,
+      "t": 45,
+      "text": "GOTCHA: the pnpm lockfile is stale: run pnpm install before tests in packages/core",
+      "to_request": 8
+    },
+    {
+      "fork": 7,
+      "kind": "fork.settled",
+      "outcome": "value",
+      "seq": 10,
+      "t": 50
+    },
+    {
+      "entry": {
+        "id": "f/7#1",
+        "text": "gotcha: the pnpm lockfile is stale: run pnpm install before tests in packages/core"
+      },
+      "fork": 7,
+      "kind": "patch",
+      "op": "add",
+      "seq": 11,
+      "t": 55
+    },
+    {
+      "kind": "ask",
+      "seq": 12,
+      "t": 60,
+      "text": "run the tests",
+      "turn": 2
+    },
+    {
+      "from": "awaiting",
+      "kind": "settlement",
+      "seq": 13,
+      "t": 65,
+      "to": "turn"
+    },
+    {
+      "kind": "request",
+      "lane": "trunk",
+      "seq": 14,
+      "t": 70,
+      "turn": 2
+    },
+    {
+      "kind": "response",
+      "seq": 15,
+      "t": 75,
+      "text": "the lockfile is fine; the tests fail on a missing fixture",
+      "to_request": 14
+    },
+    {
+      "kind": "turn.settled",
+      "reason": "final",
+      "seq": 16,
+      "t": 80,
+      "turn": 2
+    },
+    {
+      "from": "turn",
+      "kind": "settlement",
+      "seq": 17,
+      "t": 85,
+      "to": "awaiting"
+    },
+    {
+      "at": 14,
+      "kind": "fork",
+      "lane": "interview",
+      "of_turn": 2,
+      "question": "what it shows was wrong",
+      "seq": 18,
+      "t": 90,
+      "trigger": "refutation:14",
+      "why": "refutation"
+    },
+    {
+      "fork": 18,
+      "kind": "request",
+      "lane": "interview",
+      "seq": 19,
+      "t": 95,
+      "turn": 2
+    },
+    {
+      "kind": "response",
+      "seq": 20,
+      "t": 100,
+      "text": "REFUTED: f/7#1 — held: conclusion — because: pnpm install changed nothing — now: the lockfile is fresh; the failure is elsewhere",
+      "to_request": 19
+    },
+    {
+      "fork": 18,
+      "kind": "fork.settled",
+      "outcome": "value",
+      "seq": 21,
+      "t": 105
+    },
+    {
+      "entry": {
+        "id": "f/18#1",
+        "text": "gotcha: the lockfile is fresh; the failure is elsewhere"
+      },
+      "fork": 18,
+      "kind": "patch",
+      "op": "supersede",
+      "refuted": {
+        "because": "pnpm install changed nothing",
+        "confidence": 8,
+        "pointer": "log seq 14"
+      },
+      "seq": 22,
+      "supersedes": "f/7#1",
+      "t": 110
+    }
+  ],
+  "torn": 0
+}

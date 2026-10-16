@@ -1099,6 +1099,7 @@ fn update_record(
                 content,
                 voids: EntryId::new(voids).map_err(ToolError::BadEntry)?,
                 provenance,
+                refuted: None,
             },
             None => Patch::Add {
                 id,
@@ -1862,6 +1863,7 @@ mod tests {
                 content,
                 voids,
                 provenance,
+                ..
             },
         ] = effect.patches.as_slice()
         else {

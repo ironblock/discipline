@@ -4,8 +4,8 @@
 // i64, and a JavaScript number is exact only to 2^53. A `timings`
 // millisecond may carry a fraction, written as the server wrote it.
 
-export const VERSION = 8;
-export const READS = [0, 1, 2, 3, 4, 5, 6, 7, 8] as const;
+export const VERSION = 9;
+export const READS = [0, 1, 2, 3, 4, 5, 6, 7, 8, 9] as const;
 export const PRESENCE_WINDOW_MS = 2000;
 
 export type Kind =
@@ -200,6 +200,7 @@ export type Warrant =
   | "evidence"
   | "trouble"
   | "open"
+  | "refutation"
 ;
 
 export type ForkOutcome =
@@ -378,11 +379,17 @@ export interface PatchEntry {
   category?: string;
 }
 
+export interface Refuted {
+  confidence: number;
+  because: string;
+  pointer: string;
+}
+
 export type SessionStartLine = {
   seq: number;
   t: number;
   kind: "session.start";
-  version: 0 | 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8;
+  version: 0 | 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9;
   opened: number;
   model: string;
   head: HeadMessage[];
@@ -588,6 +595,7 @@ export type ForkLine = {
   reserved?: number;
   prefix_shared?: boolean;
   chunk?: number;
+  offered?: string[];
 } & ({ substrate: string; model: string } | { substrate?: never; model?: never });
 
 export type ForkSettledLine = {
@@ -612,6 +620,7 @@ export type PatchLine = {
   supersedes?: string;
   tangent?: string;
   reason?: string;
+  refuted?: Refuted;
 } & ({ fork: number; lane?: never } | { lane: string; fork?: never }) & ({ merged: string; cosine: string } | { merged?: never; cosine?: never });
 
 export type MeditationLine = {

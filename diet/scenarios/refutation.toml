@@ -1,0 +1,31 @@
+# The refutation interview (#878) on the canned scenario substrate: a step whose
+# command fails warrants the pinned REFUTE_Q ask in the turn's gap, and a
+# `refute_beliefs` item naming an entry supersedes it carrying how firmly it
+# was held, why it is wrong and the failed call -- the call's bad item refused
+# beside it; the next refill renders the claim as it was.
+# Turn 1's scoping fork records the claim the failure later refutes. The
+# failing call's id is all digits, as a server may issue one: its pointer is
+# still a call's, never a log position.
+arm = "rehearsal"
+dogma_version = 0
+
+substrate = "canned-scenario"
+substrate_reasoning = "off"
+substrate_hardware = "b6bc80e9e8e4bc2342219f064dab89a8d17c02535600b32b84895fc0b9ba6513"
+
+isolation = "none"
+approval = "none"
+approval_policy = "approvals are off: every command runs without a gate decision or a prompt"
+
+capture_modality = "fields"
+fork_asks = "v4"
+interview_warrant = ["scoping"]
+refutation_interview = "on"
+
+[limits]
+max_steps = 4
+
+[sampler]
+temperature = 0.6
+top_p = 0.95
+seed = 7

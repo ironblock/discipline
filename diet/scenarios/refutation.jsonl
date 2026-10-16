@@ -1,0 +1,17 @@
+{"scenario":"refutation","regimen":"refutation.toml","head":"../drive/heads/floor.md"}
+{"reply":{"when":"Set up the config loader","text":"The loader reads ./config.toml."}}
+{"reply":{"when":"The turn has ended","text":"DECISION: the loader reads its settings from ./config.toml\nPLAN: NONE\nSUPERSEDE: NONE"}}
+{"reply":{"when":"show that something you believed was wrong","text":"","calls":[{"id":"r0","name":"refute_beliefs","arguments":"{\"refuted\":[]}"}]}}
+{"reply":{"when":"Run the loader","text":"Checking the file.","calls":[{"id":"4242","name":"bash","arguments":"{\"command\": \"cat config.toml\"}"}]}}
+{"reply":{"text":"There is no config.toml here."}}
+{"reply":{"when":"show that something you believed was wrong","text":"","calls":[{"id":"r1","name":"refute_beliefs","arguments":"{\"refuted\":[{\"note_id\":\"interview-t1-0\",\"confidence\":9,\"because\":\"cat config.toml failed, the file does not exist\",\"now\":\"the loader's settings path is not known yet\"},{\"claim\":\"the loader is fast\",\"confidence\":11,\"because\":\"it never ran\",\"now\":\"its speed is unknown\"}]}"}]}}
+{"step":"ask","text":"Set up the config loader.","scoping":true}
+{"step":"ask","text":"Run the loader."}
+{"step":"declare-meditation"}
+{"step":"end"}
+{"expect":"fork","name":"first","where":{"why":"refutation","trigger":"refutation:1"}}
+{"expect":"fork","name":"refuted","where":{"why":"refutation","ask":"refute_q","trigger":"refutation:call:4242","question~":"cat config.toml"}}
+{"expect":"patch","name":"corrected","where":{"op":"supersede","entry.text":"decision: the loader's settings path is not known yet","refuted.because":"cat config.toml failed, the file does not exist","refuted.pointer":"call 4242","refuted.confidence":"9"},"after":"refuted"}
+{"expect":"meditation","where":{"render~":"was: decision: the loader reads its settings from ./config.toml (held at 9/10), wrong because cat config.toml failed, the file does not exist [call 4242]"},"after":"corrected"}
+{"expect":"fork.settled","name":"nothing","where":{"outcome":"decline"},"after":"first"}
+{"expect":"capture","where":{"tool":"refute_beliefs","outcome":"refuted","why~":"item 2"},"after":"refuted"}

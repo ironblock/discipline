@@ -772,6 +772,10 @@ fn tools_of(
                 // The phase tool (#788), offered whenever a phase library is
                 // active: one fixed definition, whatever the library holds.
                 Ok(super::session::phase_tool())
+            } else if name == crate::dogma::refutation::NAME {
+                // The refutation tool (#878), offered whenever the interview
+                // is on: its pinned definition.
+                Ok(crate::dogma::refutation::definition())
             } else if let Some(tool) = super::standard::definitions()
                 .into_iter()
                 .chain([super::prune::definition()])
@@ -2343,6 +2347,7 @@ mod tests {
             tangent: None,
             reason: None,
             merged: None,
+            refuted: None,
         });
         let projection = project(&numbered(events), &regime(), None).expect("projected");
         let kinds: Vec<&str> = projection
@@ -3402,6 +3407,7 @@ mod tests {
             prefix_shared: None,
             reserved: None,
             chunk: None,
+            offered: None,
         };
         let call = |turn: u32, fork: u64| {
             [
@@ -3441,6 +3447,7 @@ mod tests {
             tangent: None,
             reason: None,
             merged: None,
+            refuted: None,
         };
         let mut events = vec![start()];
         events.extend(answered(1, 3, Some(warm()), None));

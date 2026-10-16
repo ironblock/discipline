@@ -738,6 +738,7 @@ mod tests {
                 content: "the resolver refuses a stale binary and says which".to_owned(),
                 voids: id("trunk-a"),
                 provenance: tangent.provenance(4, "interview", None, 0),
+                refuted: None,
             })
             .expect("the tangent corrected the trunk");
 
@@ -937,6 +938,7 @@ mod tests {
                 content: "the eviction policy is least recently used, by prefix".to_owned(),
                 voids: id("t1"),
                 provenance: tangent.provenance(5, "interview", None, 0),
+                refuted: None,
             })
             .expect("the tangent corrected itself");
 

@@ -1,0 +1,4 @@
+Pause. {source}
+Does this show that something you believed was wrong? Your working notes most like it, by id:
+{items}
+Answer by calling refute_beliefs once; that call ends this pause. In `refuted`, put each belief this shows wrong: name its note by id (listed here or any other in your working memory), or quote it as a claim if you never wrote it down. Say how firmly you held it then, not now, from 1 (absolute uncertainty) to 10 (complete conviction). A change of plan is not a belief shown wrong. If nothing you believed is shown wrong, pass an empty list.

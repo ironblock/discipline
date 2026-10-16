@@ -209,6 +209,23 @@ pub fn cosines(texts: &[&str]) -> Vec<Vec<f64>> {
         .collect()
 }
 
+/// Every entry of `held` with its cosine to `text`, IDF fitted on `held` and
+/// `text`, nearest first; equals in `held`'s order.
+#[must_use]
+pub fn ranked<'a, T>(held: &'a [(T, &str)], text: &str) -> Vec<(&'a T, f64)> {
+    let texts: Vec<&str> = held
+        .iter()
+        .map(|(_, held)| *held)
+        .chain(std::iter::once(text))
+        .collect();
+    let Some(row) = cosines(&texts).pop() else {
+        return Vec::new();
+    };
+    let mut ranked: Vec<(&T, f64)> = held.iter().map(|(id, _)| id).zip(row).collect();
+    ranked.sort_by(|a, b| b.1.total_cmp(&a.1));
+    ranked
+}
+
 /// The entry of `held` nearest `text` at `threshold` or above, and the cosine,
 /// IDF fitted on `held` and `text`; the first of equals. `None` when none
 /// reaches it.

@@ -458,6 +458,22 @@ fn a_drive_server_refuses_an_audit_concurrency_that_is_no_count() {
 }
 
 #[test]
+fn a_drive_server_refuses_a_refutation_cooldown_that_is_no_count() {
+    let stub = Stub::serving(Vec::new()).expect("loopback");
+    let regimen = regimen_registered_with(
+        "accel24-tabbyapi-exl3-qwen38-27b-3p00",
+        "refutation_interview = \"on\"\nrefutation_failed_cooldown_steps = 0\n",
+    );
+    let path = regimen.0.to_string_lossy().into_owned();
+    let (code, said) = run_briefly(&stub.url(), &["--regimen", &path]);
+    assert!(code.is_some_and(|code| code != 0), "{code:?}: {said}");
+    assert!(
+        said.contains("`refutation_failed_cooldown_steps` is a whole number above 0"),
+        "{said}"
+    );
+}
+
+#[test]
 fn a_drive_server_refuses_a_note_dedupe_threshold_out_of_range() {
     let stub = Stub::serving(Vec::new()).expect("loopback");
     let regimen = regimen_registered_with(
@@ -1123,7 +1139,7 @@ fn a_drive_server_confirms_a_declared_engines_model_settings_and_draft() {
         ]),
         "{start_line}"
     );
-    assert_eq!(start_line["version"], 8, "{start_line}");
+    assert_eq!(start_line["version"], 9, "{start_line}");
     // And its server speaks TabbyAPI's dialect, by name (#496).
     assert_eq!(start_line["serving"]["dialect"], "tabbyapi", "{start_line}");
 }

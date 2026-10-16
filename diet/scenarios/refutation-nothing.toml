@@ -1,0 +1,33 @@
+# The refutation interview (#878) answered with no call: a failed command
+# warrants the REFUTE_Q ask, the model answers in prose -- the retired
+# `REFUTED:` line grammar -- and calls nothing, so nothing is written and the
+# fork settles `unparseable`, apart from a `[]` answer's `decline`. The next
+# turn's command fails too, two steps later, and asks nothing: failed commands
+# wait out their cooldown (a fork no reply was scripted for would fail the
+# run). Turn 3's trunk calls `refute_beliefs` unprompted: its refutation is
+# written on the `trunk` lane, pointing at the step's request, and the turn
+# settles `final`.
+arm = "rehearsal"
+dogma_version = 0
+
+substrate = "canned-scenario"
+substrate_reasoning = "off"
+substrate_hardware = "b6bc80e9e8e4bc2342219f064dab89a8d17c02535600b32b84895fc0b9ba6513"
+
+isolation = "none"
+approval = "none"
+approval_policy = "approvals are off: every command runs without a gate decision or a prompt"
+
+capture_modality = "fields"
+fork_asks = "v4"
+refutation_interview = "on"
+# The operator's messages never ask here, so only failed commands do.
+refutation_operator_cooldown_steps = 200
+
+[limits]
+max_steps = 4
+
+[sampler]
+temperature = 0.6
+top_p = 0.95
+seed = 7

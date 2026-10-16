@@ -1416,54 +1416,61 @@ fn serving_interview(
     // Write-time dedupe of similar notes: off unless declared, and refused
     // at start when malformed.
     let dedupe = diet::dedupe::declared(&read).map_err(|why| format!("{path}: {why}"))?;
+    // The refutation interview (#878): off unless declared, refused at start
+    // when malformed.
+    let refutation =
+        session::refutation_interview(&read).map_err(|why| format!("{path}: {why}"))?;
     let object = diet::object::WorkingObject::open(regime.clone());
     let object = match &dedupe {
         Some(threshold) => object.merging_similar(threshold),
         None => object,
     };
     Ok(
-        (!rules.is_empty() || self_capture.is_some() || mechanical).then(|| Interview {
-            rules,
-            object,
-            meditations,
-            delivery,
-            phases,
-            // #566: how archived items are recalled; off unless declared.
-            recall: diet::drive::archive::Recall::of(&read),
-            // Undeclared is left to the seat (#570): the whole trunk warm,
-            // the last turn offboard.
-            view: read
-                .get(session::FORK_VIEW)
-                .is_some()
-                .then(|| session::fork_view(&read)),
-            self_capture,
-            // #609: c1 unless the regimen names another set.
-            capture_contract: session::self_capture_contract(&read),
-            asks,
-            capture,
-            // #564: when a fork fires, and on what; one per gap unless declared.
-            cadence: session::interview_cadence(&read),
-            threshold_bytes: session::interview_threshold_bytes(&read),
-            // #611: off unless declared.
-            skip_self_recorded: session::interview_skip_self_recorded(&read),
-            mechanical_capture: mechanical,
-            role: session::interview_role(&read),
-            // #612: whether the model may prune its tool results; off unless
-            // declared.
-            prune: diet::drive::prune::of(&read),
-            // #406: a fork's tail; 8,192 or the output cap if less, unless
-            // declared (#826).
-            fork_tail: session::fork_tail(&read),
-            timing,
-            fork_slots,
-            fork_backlog,
-            prefix_pages,
-            warrant_gate,
-            pool_chunk,
-            served_batch,
-            step,
-            operator_unilateral,
-        }),
+        (!rules.is_empty() || self_capture.is_some() || mechanical || refutation.is_some()).then(
+            || Interview {
+                rules,
+                object,
+                meditations,
+                delivery,
+                phases,
+                // #566: how archived items are recalled; off unless declared.
+                recall: diet::drive::archive::Recall::of(&read),
+                // Undeclared is left to the seat (#570): the whole trunk warm,
+                // the last turn offboard.
+                view: read
+                    .get(session::FORK_VIEW)
+                    .is_some()
+                    .then(|| session::fork_view(&read)),
+                self_capture,
+                // #609: c1 unless the regimen names another set.
+                capture_contract: session::self_capture_contract(&read),
+                asks,
+                capture,
+                // #564: when a fork fires, and on what; one per gap unless declared.
+                cadence: session::interview_cadence(&read),
+                threshold_bytes: session::interview_threshold_bytes(&read),
+                // #611: off unless declared.
+                skip_self_recorded: session::interview_skip_self_recorded(&read),
+                mechanical_capture: mechanical,
+                role: session::interview_role(&read),
+                // #612: whether the model may prune its tool results; off unless
+                // declared.
+                prune: diet::drive::prune::of(&read),
+                // #406: a fork's tail; 8,192 or the output cap if less, unless
+                // declared (#826).
+                fork_tail: session::fork_tail(&read),
+                timing,
+                fork_slots,
+                fork_backlog,
+                prefix_pages,
+                warrant_gate,
+                pool_chunk,
+                served_batch,
+                step,
+                operator_unilateral,
+                refutation,
+            },
+        ),
     )
 }
 

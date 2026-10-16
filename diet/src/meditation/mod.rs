@@ -1292,6 +1292,7 @@ mod tests {
                     content: "the parser refuses a bare tilde only in command position".to_owned(),
                     voids: id("e1"),
                     provenance: provenance(2, 0),
+                    refuted: None,
                 }],
             ]),
         );

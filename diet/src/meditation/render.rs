@@ -72,6 +72,29 @@ pub const TIER_CHARS: usize = 80;
 /// the goal and the constraints, by the fold's `<kind>: ` prefix.
 const BRIEF: &[&str] = &["goal: ", "constraint: "];
 
+/// The entries the render shows, in id order: every live one, and every
+/// voided one a refutation voided (#878), which stays as what was believed.
+fn shown(object: &WorkingObject) -> impl Iterator<Item = &crate::object::Entry> {
+    object
+        .entries()
+        .filter(|entry| entry.state.is_live() || entry.refuted.is_some())
+}
+
+/// What `entry`'s line says: its content; or, refuted (#878), the claim as it
+/// was held, why it is wrong, and where that was shown.
+fn said(entry: &crate::object::Entry) -> std::borrow::Cow<'_, str> {
+    match &entry.refuted {
+        Some(refuted) if !entry.state.is_live() => std::borrow::Cow::Owned(format!(
+            "was: {} (held at {}/10), wrong because {} [{}]",
+            entry.content,
+            refuted.confidence.get(),
+            refuted.because,
+            refuted.pointer
+        )),
+        _ => std::borrow::Cow::Borrowed(&entry.content),
+    }
+}
+
 /// The working object rendered as the prompt's prefix.
 ///
 /// The regime is carried at the top, because a prompt whose record cannot say
@@ -131,9 +154,9 @@ pub fn rendered_marked(
     let compose = |reduced: &std::collections::BTreeSet<&crate::object::EntryId>| {
         let mut out = head.clone();
         let mut count = 0_u64;
-        for entry in object.live() {
+        for entry in shown(object) {
             if !reduced.contains(&entry.id) {
-                out.push_str(&line(&entry.id, &entry.content));
+                out.push_str(&line(&entry.id, &said(entry)));
                 continue;
             }
             match over {
@@ -180,11 +203,11 @@ pub fn rendered_marked(
     // reduced lines and its count still does not fit, one more is reduced,
     // until it fits or nothing is left to reduce (levers run A: a render
     // that counted only the whole lines overshot its budget).
-    let brief = |content: &str| BRIEF.iter().any(|kind| content.starts_with(kind));
-    let mut rest: Vec<_> = object
-        .live()
-        .filter(|entry| !brief(&entry.content))
-        .collect();
+    // A refuted claim is kept whole, as the brief is (#878).
+    let brief = |entry: &crate::object::Entry| {
+        BRIEF.iter().any(|kind| entry.content.starts_with(kind)) || !entry.state.is_live()
+    };
+    let mut rest: Vec<_> = shown(object).filter(|entry| !brief(entry)).collect();
     rest.sort_by(|a, b| {
         b.provenances
             .iter()
@@ -197,14 +220,13 @@ pub fn rendered_marked(
     // exactly, and reduced it.
     let chars = |text: &str| text.chars().count() as u64;
     let mut spent = chars(&head)
-        + object
-            .live()
-            .filter(|entry| brief(&entry.content))
-            .map(|entry| chars(&line(&entry.id, &entry.content)))
+        + shown(object)
+            .filter(|entry| brief(entry))
+            .map(|entry| chars(&line(&entry.id, &said(entry))))
             .sum::<u64>();
     let mut whole = 0;
     for entry in &rest {
-        let cost = chars(&line(&entry.id, &entry.content));
+        let cost = chars(&line(&entry.id, &said(entry)));
         if (spent + cost).div_ceil(4) > budget.tokens {
             break;
         }
@@ -682,5 +704,80 @@ mod review_tests {
             tail(&turns, 100).is_empty(),
             "a turn of over 1,000 tokens kept under a 100-token tail budget"
         );
+    }
+}
+
+#[cfg(test)]
+mod refutation_tests {
+    use super::{Budget, OverBudget, rendered};
+    use crate::object::{Confidence, EntryId, Patch, Provenance, Refutation, WorkingObject};
+
+    fn object() -> WorkingObject {
+        let source = r#"{"source":{"kind":"live"},"record":"start","regime":{"arm":"baseline","dogma_version":0,"substrates":[{"id":"local","engine":{"name":"a-runtime","version_or_digest":"1.0"},"weights":{"kind":"digest","sha256":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"},"hardware_fingerprint":"aaa9402664f1a41f40ebbc52c9993eb66aeb366602958fdfaa283b71e64db123","sampler_card":{"seed":0},"reasoning":"on"}]}}"#;
+        let regime = crate::formats::record::parse(source)
+            .expect("a record")
+            .regime()
+            .clone();
+        let at = |turn: u32| Provenance {
+            turn,
+            lane: "interview".to_owned(),
+            fork: None,
+            tangent: None,
+            index: 0,
+        };
+        let id = |text: &str| EntryId::new(text).expect("an id");
+        let mut object = WorkingObject::open(regime);
+        object
+            .apply(&Patch::Add {
+                id: id("e1"),
+                content: "decision: the loader reads ./config.toml".to_owned(),
+                provenance: at(1),
+            })
+            .expect("the claim");
+        object
+            .apply(&Patch::Add {
+                id: id("e2"),
+                content: format!("learned: {}", "a long note that goes on ".repeat(20)),
+                provenance: at(2),
+            })
+            .expect("a long note");
+        object
+            .apply(&Patch::Supersede {
+                id: id("e3"),
+                content: "decision: the settings path is not known yet".to_owned(),
+                voids: id("e1"),
+                provenance: at(3),
+                refuted: Some(Refutation {
+                    confidence: Confidence::new(9).expect("in range"),
+                    because: "cat config.toml failed".to_owned(),
+                    pointer: "call call-c".to_owned(),
+                }),
+            })
+            .expect("the refutation");
+        object
+    }
+
+    const WAS: &str = "e1\twas: decision: the loader reads ./config.toml (held at 9/10), \
+                       wrong because cat config.toml failed [call call-c]\n";
+
+    /// #878: a refuted claim stays in the refill, as what was believed, how
+    /// firmly, why it is wrong and where that was shown.
+    #[test]
+    fn a_refuted_claim_renders_as_what_was_believed() {
+        let text = rendered(&object(), None, None).text;
+        assert!(text.contains(WAS), "{text}");
+        assert!(
+            text.contains("e3\tdecision: the settings path is not known yet\n"),
+            "{text}"
+        );
+    }
+
+    /// And it is kept whole, as the brief is, whatever the budget.
+    #[test]
+    fn a_refuted_claim_is_never_reduced() {
+        for over in [OverBudget::Tier, OverBudget::Elide] {
+            let text = rendered(&object(), None, Some(Budget { tokens: 1, over })).text;
+            assert!(text.contains(WAS), "{over:?}: {text}");
+        }
     }
 }

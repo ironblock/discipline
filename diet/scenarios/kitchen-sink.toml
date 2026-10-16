@@ -49,6 +49,13 @@ meditation_audit_concurrency = 2
 # is folded into it, its `patch` line naming the entry and their cosine.
 note_dedupe = "on"
 
+# The refutation interview (#878): a failed command asks REFUTE_Q in the
+# turn's gap, each source cooled on its own. The operator's cooldown is long
+# enough that the operator's messages never warrant one here, so each
+# refutation fork is a failed command's.
+refutation_interview = "on"
+refutation_operator_cooldown_steps = 200
+
 # The step warrants' gate by a classifier (#850): every step's probes are
 # scored and logged as `warrant.gated`. On the canned substrate the scenario's
 # own classifier answers on the substrate's port (`diet-drive scenario`

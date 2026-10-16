@@ -1040,6 +1040,7 @@ mod tests {
                     tangent: None,
                     index: 0,
                 },
+                refuted: None,
             })
             .expect("superseded");
         let senses = shipped_senses().expect("the shipped senses");
