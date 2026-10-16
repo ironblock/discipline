@@ -817,7 +817,9 @@ pub fn call(serve: &Serve, name: &str, arguments: &Map<String, Value>) -> Result
 /// warmup come before it.
 const START_PATIENCE: Duration = Duration::from_secs(120);
 
-/// How long `stop` waits for a serve it started to exit after `end`.
+/// How long `stop` waits for a serve it started to log `ended` after `end`:
+/// one that has not by then is killed. One that has is writing its record,
+/// and is waited for however long that takes (#879).
 const STOP_PATIENCE: Duration = Duration::from_secs(30);
 
 /// How long `ask` waits for its turn unless told (#772): 30 minutes.
@@ -1029,6 +1031,8 @@ pub struct Driver {
     config: Option<std::path::PathBuf>,
     /// Where a profile's `~` points.
     home: Option<std::path::PathBuf>,
+    /// How long `stop` waits for a serve it started: [`STOP_PATIENCE`].
+    stop_patience: Duration,
 }
 
 /// A credential file's `user:password`, one trailing newline taken off.
@@ -1060,6 +1064,7 @@ impl Driver {
             exe,
             config,
             home,
+            stop_patience: STOP_PATIENCE,
         }
     }
 
@@ -1133,8 +1138,11 @@ impl Driver {
     }
 
     /// `stop` (#717): the session ended, and a serve this server started
-    /// waited for -- killed if it has not exited in [`STOP_PATIENCE`] -- so
-    /// nothing is left behind; the server is then attached to nothing.
+    /// waited for, so nothing is left behind; the server is then attached to
+    /// nothing. Once serve has logged `ended` it is writing its record --
+    /// projected from the whole log, which on a long session takes minutes
+    /// -- and it is waited for with no limit (#879); one that has neither
+    /// exited nor logged `ended` in [`STOP_PATIENCE`] is killed.
     fn stop(&mut self) -> Result<Value, String> {
         let Some(serve) = self.serve.take() else {
             return Err("not driving a serve: `start` a profile, or attach with --url".to_owned());
@@ -1145,13 +1153,24 @@ impl Driver {
             stopped = ended.json();
         }
         if let Some(Started { mut child }) = self.started.take() {
-            let until = Instant::now() + STOP_PATIENCE;
+            let until = Instant::now() + self.stop_patience;
+            let mut ended = false;
+            let mut asked = Instant::now();
             let exited = loop {
                 match child.try_wait() {
                     Ok(Some(status)) => {
                         break status.code().map_or(json!("by signal"), |code| json!(code));
                     }
-                    Ok(None) if Instant::now() < until => {
+                    Ok(None) if ended || Instant::now() < until => {
+                        // Whether it has logged `ended`, asked twice a second.
+                        if !ended && asked.elapsed() >= Duration::from_millis(500) {
+                            asked = Instant::now();
+                            if serve.get("/state").is_ok_and(|state| {
+                                state.body.get("session").and_then(Value::as_str) == Some("ended")
+                            }) {
+                                ended = true;
+                            }
+                        }
                         std::thread::sleep(Duration::from_millis(50));
                     }
                     _ => {
@@ -1240,7 +1259,9 @@ fn lifecycle_tools() -> Vec<Value> {
         ),
         tool(
             "stop",
-            "End the session, and the serve process `start` launched: nothing is left running.",
+            "End the session, and the serve process `start` launched: nothing is left running. \
+             Once serve has logged `ended` it is writing its record, and this waits for it to \
+             exit however long that takes.",
             none(),
         ),
     ]
@@ -1461,6 +1482,89 @@ mod tests {
         )
         .expect("an answer");
         assert_eq!(reply["result"]["isError"], true);
+    }
+
+    /// A serve that answers `end` with 200 and `/state` with `session`, on
+    /// a thread for as long as the test runs.
+    fn ending_serve(session: &'static str) -> Serve {
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").expect("a port");
+        let address = std::net::TcpListener::local_addr(&listener).expect("its address");
+        std::thread::spawn(move || {
+            for stream in listener.incoming() {
+                let Ok(mut stream) = stream else { continue };
+                let mut head = Vec::new();
+                let mut byte = [0_u8; 1];
+                while !head.ends_with(b"\r\n\r\n") && stream.read(&mut byte).is_ok_and(|n| n == 1) {
+                    head.push(byte[0]);
+                }
+                let head = String::from_utf8_lossy(&head).into_owned();
+                let length: usize = head
+                    .lines()
+                    .find_map(|line| line.strip_prefix("Content-Length: "))
+                    .and_then(|n| n.trim().parse().ok())
+                    .unwrap_or(0);
+                let mut body = vec![0_u8; length];
+                let _ = stream.read_exact(&mut body);
+                let answer = if head.starts_with("GET /state") {
+                    json!({"session": session}).to_string()
+                } else {
+                    "{}".to_owned()
+                };
+                let _ = write!(
+                    stream,
+                    "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{answer}",
+                    answer.len()
+                );
+            }
+        });
+        Serve::new(&format!("http://{address}"), None).expect("an address")
+    }
+
+    /// A driver attached to `serve`, having started `child` as it, waiting
+    /// `patience` for it.
+    fn started(serve: Serve, child: std::process::Child, patience: Duration) -> Driver {
+        let mut driver = Driver::new(
+            Some(serve),
+            std::path::PathBuf::from("/nowhere/diet-drive"),
+            None,
+            None,
+        );
+        driver.started = Some(Started { child });
+        driver.stop_patience = patience;
+        driver
+    }
+
+    /// #879: a serve that has logged `ended` is writing its record, which on
+    /// a long session takes longer than any fixed wait; `stop` waits for it
+    /// to exit, however long that takes, and never kills it mid-write.
+    #[test]
+    fn stop_waits_out_a_serve_writing_its_record() {
+        let writing = std::process::Command::new("/bin/sleep")
+            .arg("3")
+            .spawn()
+            .expect("a slow writer");
+        let mut driver = started(ending_serve("ended"), writing, Duration::from_secs(1));
+        let stopped = driver.stop().expect("stopped");
+        assert_eq!(stopped["exited"], 0, "{stopped}");
+    }
+
+    /// And a serve that never logged `ended` is killed once `stop` has
+    /// waited its patience.
+    #[test]
+    fn stop_kills_a_serve_that_never_logged_ended() {
+        let stuck = std::process::Command::new("/bin/sleep")
+            .arg("30")
+            .spawn()
+            .expect("a stuck serve");
+        let begun = Instant::now();
+        let mut driver = started(ending_serve("running"), stuck, Duration::from_secs(1));
+        let stopped = driver.stop().expect("stopped");
+        assert_eq!(stopped["exited"], "killed", "{stopped}");
+        assert!(
+            begun.elapsed() < Duration::from_secs(10),
+            "{:?}",
+            begun.elapsed()
+        );
     }
 
     #[test]
