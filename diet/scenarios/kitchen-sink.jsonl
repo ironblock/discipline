@@ -57,6 +57,8 @@
 {"reply":{"when":"Output 8 lines and nothing else","text":"1. KEEP\n2. KEEP\n3. KEEP\n4. KEEP\n5. KEEP\n6. KEEP\n7. KEEP\n8. KEEP\n"}}
 {"reply":{"when":"Output 7 lines and nothing else","text":"1. KEEP\n2. KEEP\n3. KEEP\n4. KEEP\n5. KEEP\n6. KEEP\n7. KEEP\n"}}
 {"reply":{"when":"Output 1 lines and nothing else","text":"1. KEEP\n"}}
+{"reply":{"when":"Output 8 lines and nothing else","text":"1. KEEP\n2. KEEP\n3. KEEP\n4. KEEP\n5. KEEP\n6. KEEP\n7. KEEP\n8. KEEP\n"}}
+{"reply":{"when":"Output 7 lines and nothing else","text":"1. KEEP\n2. KEEP\n3. KEEP\n4. KEEP\n5. KEEP\n6. KEEP\n7. KEEP\n"}}
 {"reply":{"when":"The turn has ended","text":"DECISION: notes.md holds one line per decision\nPLAN: write it, then read it back\nSUPERSEDE: NONE"}}
 {"reply":{"when":"The turn has ended","text":"DECISION: NONE\nPLAN: NONE\nSUPERSEDE: interview-t1-0 decision: notes.md holds the decisions as a Markdown list"}}
 {"reply":{"when":"You just changed something","text":"LEARNED: notes.md now holds the first decision\nEVIDENCE: the write of notes.md\nSTUCK: NONE"}}

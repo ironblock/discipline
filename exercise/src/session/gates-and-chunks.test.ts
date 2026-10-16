@@ -81,7 +81,8 @@ describe('a meditation’s audit in concurrent chunks (#854, #862)', () => {
         { n: 2, of: 2, overlapped: true },
       ]),
     );
-    expect(CHUNKED_AUDITS).toHaveLength(3);
+    // Turn 14's cadence audit among them since its sizing stopped taking a fork's (#889).
+    expect(CHUNKED_AUDITS).toHaveLength(4);
     // The operator's reconcile audit is not chunked.
     expect(WHOLE_AUDITS.map((fork) => branch(fork.seq)?.chunk)).toEqual([undefined]);
   });
