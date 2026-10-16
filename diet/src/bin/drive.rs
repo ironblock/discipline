@@ -86,6 +86,9 @@ const CHECK: &str = "check";
 /// The scenario runner's subcommand (#760).
 const SCENARIO: &str = "scenario";
 
+/// The subcommand that projects a finished log's record offline (#879).
+const RECORD: &str = "record";
+
 /// The port `diet-drive replay` listens on unless told another.
 const REPLAY_PORT: u16 = 7902;
 
@@ -1934,6 +1937,29 @@ fn written_record(
     // kept beside the record and the line says so (#645).
     let (kept, sidecar_path, sidecar) = projection::kept(&mut projected, path, &mut file)?;
     let refused = matches!(kept, projection::Kept::Refused { .. });
+    let mut report = kept_report(path, kept, (sidecar_path, &sidecar), &projected);
+    report.extend([
+        ("product".to_owned(), Value::String(product_path)),
+        (
+            "product_sha256".to_owned(),
+            Value::String(diet::digest::sha256_hex(product.as_bytes())),
+        ),
+    ]);
+    let mut out = String::new();
+    json::render(&Value::Object(report), &mut out);
+    Ok((out, refused))
+}
+
+/// What `serve` reports of a record once [`projection::kept`] has kept it:
+/// where it went and its digest -- or, refused, where its rows went and why
+/// -- and its sidecar, with the sidecar's own fields.
+fn kept_report(
+    path: &str,
+    kept: diet::drive::projection::Kept,
+    (sidecar_path, sidecar): (String, &str),
+    projected: &diet::drive::projection::Projection,
+) -> BTreeMap<String, Value> {
+    use diet::drive::projection;
     let mut report = match kept {
         projection::Kept::Record(text) => BTreeMap::from([
             ("record".to_owned(), Value::String(path.to_owned())),
@@ -1962,18 +1988,11 @@ fn written_record(
             "sidecar_sha256".to_owned(),
             Value::String(diet::digest::sha256_hex(sidecar.as_bytes())),
         ),
-        ("product".to_owned(), Value::String(product_path)),
-        (
-            "product_sha256".to_owned(),
-            Value::String(diet::digest::sha256_hex(product.as_bytes())),
-        ),
     ]);
-    if let Value::Object(fields) = projection::sidecar_value(&projected) {
+    if let Value::Object(fields) = projection::sidecar_value(projected) {
         report.extend(fields);
     }
-    let mut out = String::new();
-    json::render(&Value::Object(report), &mut out);
-    Ok((out, refused))
+    report
 }
 
 /// A serve call's total: none, by the vote (#569). A day, not unbounded, only
@@ -2627,6 +2646,282 @@ fn replay(args: &[String]) -> ExitCode {
     }
 }
 
+fn record_usage() -> String {
+    String::from(
+        "usage: diet-drive record --log FILE --regimen FILE --out FILE [--recording DIR]\n\
+         Project a finished session's record from its log, offline (#879): the\n\
+         record serve writes after `ended`, at --out, with its sidecar\n\
+         (FILE.unspellable.json) and, when the regimen runs commands, its receipt\n\
+         (FILE.receipt.json). --regimen is the one the session ran under; the\n\
+         registry is this build's, and a log whose `registry_sha256` differs is\n\
+         refused. --recording is where the session's attached files were kept,\n\
+         the log's directory unless given. What only the running session held is\n\
+         not written: the line on stdout, the sidecar and the receipt name it\n\
+         under `unfilled`, each with why: the
+         summary's product digest (the working memory at the end), and the\n\
+         receipt's `allow` and `reference_modified` (and `tmpdir` under a\n\
+         sandbox). Exit 0 when written, 1 when an input is unusable, 2 on a\n\
+         usage error, 3 when the record could not be written.\n",
+    )
+}
+
+/// `diet-drive record` (#879): a finished log's record, sidecar and receipt,
+/// projected offline as `serve` would have written them after `ended`, but
+/// for what only the running session held, which is named.
+fn record_from_log(args: &[String]) -> ExitCode {
+    use diet::drive::projection;
+    let Some((log_path, regimen_path, out_path, recording)) = record_flags(args) else {
+        eprint!("{}", record_usage());
+        return ExitCode::from(EXIT_USAGE);
+    };
+    let lines = match finished_log(&log_path) {
+        Ok(lines) => lines,
+        Err(why) => return fail(EXIT_INPUT, &why),
+    };
+    let (regime, read) = match registered_regime(&regimen_path, None) {
+        Ok(two) => two,
+        Err(why) => return fail(EXIT_INPUT, &why),
+    };
+    let recording = recording.map_or_else(
+        || {
+            std::path::Path::new(&log_path)
+                .parent()
+                .filter(|dir| !dir.as_os_str().is_empty())
+                .map_or_else(
+                    || std::path::PathBuf::from("."),
+                    std::path::Path::to_path_buf,
+                )
+        },
+        std::path::PathBuf::from,
+    );
+    let engine =
+        diet::drive::registry::identity(diet::drive::registry::REGISTRY, &regime.substrates[0].id)
+            .ok()
+            .and_then(|identity| projection::cited(&identity));
+    let mut projected = match projection::project_in(&lines, &regime, engine, Some(&recording)) {
+        Ok(projected) => projected,
+        Err(why) => return fail(EXIT_INPUT, &format!("{log_path}: {why}")),
+    };
+    if let Some(diet::formats::record::Event::Start { regimen_sha256, .. }) =
+        projected.events.first_mut()
+    {
+        *regimen_sha256 = Some(read.regimen_sha256.clone());
+    }
+    // No summary row: what it digests is not in the log.
+    projected.unfilled.insert(
+        "summary.product_sha256".to_owned(),
+        "the product is the working memory at the session's end, dumped with each entry's \
+         provenance; a fork's patch lines do not carry each patch's index in its answer, so \
+         the dump cannot be rebuilt, and a digest that is nearly right would be fabricated"
+            .to_owned(),
+    );
+    let receipt = match offline_receipt(&regimen_path, &lines) {
+        Ok(receipt) => receipt,
+        Err(why) => return fail(EXIT_INPUT, &why),
+    };
+    if let Some((_, missing)) = &receipt {
+        projected.unfilled.extend(
+            missing
+                .iter()
+                .map(|(key, why)| (format!("receipt.{key}"), (*why).to_owned())),
+        );
+    }
+    let mut file = match std::fs::File::create(&out_path) {
+        Ok(file) => file,
+        Err(why) => return fail(EXIT_OUTPUT, &format!("{out_path}: {why}")),
+    };
+    let (kept, sidecar_path, sidecar) = match projection::kept(&mut projected, &out_path, &mut file)
+    {
+        Ok(three) => three,
+        Err(why) => return fail(EXIT_OUTPUT, &why),
+    };
+    let refused = matches!(kept, projection::Kept::Refused { .. });
+    // The sidecar's fields, `unfilled` with them, are the report's too.
+    let mut report = kept_report(&out_path, kept, (sidecar_path, &sidecar), &projected);
+    if let Some((mut receipt, _)) = receipt {
+        if let (Value::Object(fields), Value::Object(sidecar_fields)) =
+            (&mut receipt, projection::sidecar_value(&projected))
+            && let Some(gaps) = sidecar_fields.get("unfilled")
+        {
+            fields.insert("unfilled".to_owned(), gaps.clone());
+        }
+        match written_receipt(&receipt, &format!("{out_path}.receipt.json")) {
+            Ok(written) => {
+                if let Ok(mut objects) = json::objects(&written)
+                    && let Some(fields) = objects.pop()
+                {
+                    report.extend(fields);
+                }
+            }
+            Err(why) => return fail(EXIT_OUTPUT, &why),
+        }
+    }
+    let mut out = String::new();
+    json::render(&Value::Object(report), &mut out);
+    println!("{out}");
+    if refused {
+        return ExitCode::from(EXIT_OUTPUT);
+    }
+    ExitCode::SUCCESS
+}
+
+/// `record`'s flags: the log, the regimen, the record's path, and the
+/// recording's directory when given; `None` on a usage error.
+fn record_flags(args: &[String]) -> Option<(String, String, String, Option<String>)> {
+    let (mut log, mut regimen, mut out, mut recording) = (None, None, None, None);
+    let mut rest = args.iter();
+    while let Some(flag) = rest.next() {
+        let slot = match flag.as_str() {
+            "--log" => &mut log,
+            "--regimen" => &mut regimen,
+            "--out" => &mut out,
+            "--recording" => &mut recording,
+            _ => return None,
+        };
+        *slot = Some(rest.next()?.clone());
+    }
+    Some((log?, regimen?, out?, recording))
+}
+
+/// The log at `path`, read, when its session finished -- `ended` is the
+/// last line serve writes before its record -- under this build's registry:
+/// a log written under another would be projected against entries it never
+/// ran under.
+fn finished_log(path: &str) -> Result<Vec<diet::formats::log::Line>, String> {
+    use diet::formats::log;
+    let bytes = std::fs::read(path).map_err(|why| format!("{path} cannot be read: {why}"))?;
+    let lines = log::decode(&bytes)
+        .map_err(|why| why.to_string())
+        .and_then(|text| log::parse(text).map_err(|why| format!("{why:?}")))
+        .map_err(|why| format!("{path} is not a log: {why}"))?;
+    if !lines.last().is_some_and(|line| {
+        matches!(
+            line.event,
+            log::Event::Settlement {
+                to: log::State::Ended,
+                ..
+            }
+        )
+    }) {
+        return Err(format!(
+            "{path} does not end with `ended`: its session has not finished"
+        ));
+    }
+    let registry = diet::drive::registry::registry_sha256();
+    if let Some(log::Event::SessionStart {
+        claim:
+            Some(log::SubstrateClaim {
+                registry_sha256: logged,
+                ..
+            }),
+        ..
+    }) = lines.first().map(|line| &line.event)
+        && *logged != registry
+    {
+        return Err(format!(
+            "{path} was written under registry {logged}, and this build's is {registry}: \
+             project it with the build that ran it"
+        ));
+    }
+    Ok(lines)
+}
+
+/// The receipt's keys left out, each with why.
+type Unfilled = Vec<(&'static str, &'static str)>;
+
+/// The receipt `serve` writes for a regimen that runs commands, from the
+/// regimen and the log `lines` -- and the keys only the running session
+/// held, left out: `allow` (the pre-seeds' digests read the worktree at
+/// start, and the workspace store's entries are not logged),
+/// `reference_modified` (its baseline was taken at start), and, under a
+/// sandbox, `tmpdir` (made at start). `None` for a regimen that runs none.
+fn offline_receipt(
+    regimen_path: &str,
+    lines: &[diet::formats::log::Line],
+) -> Result<Option<(Value, Unfilled)>, String> {
+    use diet::formats::log;
+    let text = std::fs::read_to_string(regimen_path)
+        .map_err(|why| format!("{regimen_path} cannot be read: {why}"))?;
+    let read =
+        regimen::parse(&text).map_err(|why| format!("{regimen_path} is not a regimen: {why:?}"))?;
+    let Some(declared) =
+        tool_loop::declared(&read).map_err(|why| format!("{regimen_path}: {why}"))?
+    else {
+        return Ok(None);
+    };
+    let policy = IsolationPolicy::from_regimen(&read)
+        .map_err(|why| format!("{regimen_path}: its isolation policy: {why}"))?;
+    // Each decision once: a call an earlier grant covered carries that
+    // grant's scope and `decided_at` again.
+    let mut decided = std::collections::BTreeSet::new();
+    let mut counts = tool_loop::Counts {
+        once: 0,
+        session: 0,
+        workspace: 0,
+        preseeded: 0,
+        declined: 0,
+    };
+    for line in lines {
+        let log::Event::ToolCall {
+            approval, reason, ..
+        } = &line.event
+        else {
+            continue;
+        };
+        if *reason == Some(log::ToolRefusal::Declined) {
+            counts.declined += 1;
+        }
+        let Some(log::Approval {
+            scope,
+            decided_at: Some(at),
+            ..
+        }) = approval
+        else {
+            continue;
+        };
+        if !decided.insert((scope.tag(), *at)) {
+            continue;
+        }
+        match scope {
+            log::ApprovalScope::Once => counts.once += 1,
+            log::ApprovalScope::Session => counts.session += 1,
+            log::ApprovalScope::Workspace => counts.workspace += 1,
+            log::ApprovalScope::Preseeded | log::ApprovalScope::Off => {}
+        }
+    }
+    let mut receipt = tool_loop::receipt(
+        &[],
+        counts,
+        declared.approval_policy.as_deref(),
+        &policy,
+        &BTreeMap::new(),
+    );
+    let mut missing = vec![
+        (
+            "allow",
+            "the pre-seeds' digests read the worktree at the session's start, and the \
+             workspace store's entries the session opened with are not logged",
+        ),
+        (
+            "reference_modified",
+            "it compares the writable directories with a baseline taken at the session's \
+             start, which the log does not hold",
+        ),
+    ];
+    if policy.isolation == isolation::Isolation::Sandbox {
+        missing.push((
+            "tmpdir",
+            "the session's own TMPDIR was made at its start and is not logged",
+        ));
+    }
+    if let Value::Object(fields) = &mut receipt {
+        for (key, _) in &missing {
+            fields.remove(*key);
+        }
+    }
+    Ok(Some((receipt, missing)))
+}
+
 fn mcp_usage() -> String {
     String::from(
         "usage: diet-drive mcp [--url http://HOST:PORT] [--auth-file FILE] [--config FILE]\n\
@@ -2919,6 +3214,14 @@ fn main() -> ExitCode {
     // and the assembler it hands to runs with the environment it was given.
     if args.first().map(String::as_str) == Some(SCENARIO) {
         return scenario(&args[1..]);
+    }
+    // Nor does the offline projection: it reads a log and writes a record.
+    if args.first().map(String::as_str) == Some(RECORD) {
+        if asks_for_help(&args[1..]) {
+            print!("{}", record_usage());
+            return ExitCode::SUCCESS;
+        }
+        return record_from_log(&args[1..]);
     }
     if let Err(refused) = with_profile_flags(&mut args) {
         return refused;

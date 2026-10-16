@@ -188,6 +188,19 @@ pub fn sidecar_value(projection: &Projection) -> crate::formats::record::json::V
     if let Some(refusal) = &projection.refusal {
         fields.insert("refusal".to_owned(), Value::String(refusal.clone()));
     }
+    // An offline projection's gaps (#879): absent for serve's own.
+    if !projection.unfilled.is_empty() {
+        fields.insert(
+            "unfilled".to_owned(),
+            Value::Object(
+                projection
+                    .unfilled
+                    .iter()
+                    .map(|(field, why)| (field.clone(), Value::String(why.clone())))
+                    .collect(),
+            ),
+        );
+    }
     Value::Object(fields)
 }
 
@@ -221,6 +234,10 @@ pub struct Projection {
     /// [`read_back`]'s table could repair it (#645): the projected rows are
     /// kept beside it, never passed off as a record.
     pub refusal: Option<String>,
+    /// What a projection made offline from a finished log left out because
+    /// only the running session held it (#879), each with why: a field's
+    /// dotted name, and the reason.
+    pub unfilled: BTreeMap<String, String>,
 }
 
 /// What [`kept`] wrote for a projection (#645).
@@ -551,6 +568,7 @@ pub fn project_in(
         engine,
         repairs: Vec::new(),
         refusal: None,
+        unfilled: BTreeMap::new(),
     })
 }
 

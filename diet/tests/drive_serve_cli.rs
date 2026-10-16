@@ -2479,8 +2479,11 @@ struct Drove {
     prompt: serde_json::Value,
     call: serde_json::Value,
     receipt: serde_json::Value,
-    log: PathBuf,
-    record: PathBuf,
+    log: HeadFile,
+    record: HeadFile,
+    /// The regimen it ran under, and the sidecar serve wrote.
+    regimen: HeadFile,
+    sidecar: String,
 }
 
 /// T1's path through the binary: `serve` with a regimen that runs
@@ -2582,7 +2585,9 @@ fn drive_t1(
             String::from_utf8_lossy(&checked.stdout)
         );
     }
-    let _ = std::fs::remove_file(format!("{record_path}.unspellable.json"));
+    let sidecar_path = format!("{record_path}.unspellable.json");
+    let sidecar = std::fs::read_to_string(&sidecar_path).expect("the sidecar");
+    let _ = std::fs::remove_file(&sidecar_path);
     let written = std::fs::read_to_string(&log.0).expect("the log");
     let called: Vec<serde_json::Value> = written
         .lines()
@@ -2594,8 +2599,10 @@ fn drive_t1(
         prompt,
         call: called[0].clone(),
         receipt,
-        log: log.0.clone(),
-        record: record.0.clone(),
+        log,
+        record,
+        regimen,
+        sidecar,
     }
 }
 
@@ -2705,7 +2712,149 @@ fn a_drive_server_runs_an_approved_call_records_it_and_writes_its_receipt() {
             .is_none(),
         "nothing of the drive's was written into the worktree"
     );
-    let _ = (drove.log, drove.record);
+}
+
+/// #879: a record lost after its log was written is projected again
+/// offline, from the log alone: the rows serve wrote, the sidecar it wrote,
+/// and the receipt's fields the regimen and log give -- and the fields only
+/// the session itself held named, not guessed.
+#[test]
+fn a_finished_logs_record_is_projected_offline_as_serve_wrote_it() {
+    let tree = Dir::new("offline-tree");
+    let state = Dir::new("offline-state");
+    let reference = Dir::new("offline-reference");
+    let reference_path = a_reference(&reference);
+    let top = format!(
+        "allowed_commands = []\nenv_passthrough = [\"XDG_STATE_HOME\"]\n\
+         approval_policy = \"approve what stays in the worktree\"\n\
+         sandbox_writable = [\"{reference_path}\"]\n"
+    );
+    let drove = drive_t1(
+        Act::Raw(I0_CALL.to_vec()),
+        (&top, "isolation = \"none\""),
+        (&tree, &state, &file_holding("auth", "author:s3cret\n")),
+        "session",
+        |_| {},
+    );
+    let out = file_holding("offline-record", "");
+    let out_path = out.0.to_string_lossy().into_owned();
+    let projected = Command::new(DRIVE)
+        .arg("record")
+        .arg("--log")
+        .arg(&drove.log.0)
+        .arg("--regimen")
+        .arg(&drove.regimen.0)
+        .args(["--out", &out_path])
+        .output()
+        .expect("diet-drive runs");
+    let said = String::from_utf8_lossy(&projected.stdout).into_owned();
+    assert_eq!(
+        projected.status.code(),
+        Some(0),
+        "{said}{}",
+        String::from_utf8_lossy(&projected.stderr)
+    );
+    let report = log_line_object(said.trim_end());
+    // The rows serve wrote, but its summary: the product is the working
+    // memory at the end, which the log does not hold.
+    let served = std::fs::read_to_string(&drove.record.0).expect("serve's record");
+    let (rows, summary) = served
+        .trim_end()
+        .rsplit_once('\n')
+        .expect("rows and a summary");
+    assert!(summary.contains(r#""record":"summary""#), "{summary}");
+    let offline = std::fs::read_to_string(&out.0).expect("the offline record");
+    assert_eq!(offline, format!("{rows}\n"));
+    // Serve's sidecar, and what the offline one adds: the fields it could
+    // not fill, each with why.
+    let sidecar_path = format!("{out_path}.unspellable.json");
+    let mut sidecar =
+        log_line_object(&std::fs::read_to_string(&sidecar_path).expect("the offline sidecar"));
+    let gaps = sidecar
+        .as_object_mut()
+        .and_then(|fields| fields.remove("unfilled"))
+        .expect("the sidecar names what it left out");
+    assert_eq!(sidecar, log_line_object(&drove.sidecar));
+    let receipt_path = format!("{out_path}.receipt.json");
+    let receipt = log_line_object(&std::fs::read_to_string(&receipt_path).expect("the receipt"));
+    for key in [
+        "approvals",
+        "approval_policy",
+        "denylist_sha256",
+        "env_passthrough",
+        "lifecycle_scripts",
+    ] {
+        assert_eq!(receipt[key], drove.receipt[key], "{key}: {receipt}");
+    }
+    let named: Vec<&str> = gaps
+        .as_object()
+        .expect("field and why")
+        .iter()
+        .map(|(field, why)| {
+            assert!(
+                why.as_str().is_some_and(|why| why.len() > 20),
+                "{field}: {why}"
+            );
+            field.as_str()
+        })
+        .collect();
+    assert_eq!(
+        named,
+        [
+            "receipt.allow",
+            "receipt.reference_modified",
+            "summary.product_sha256"
+        ]
+    );
+    assert_eq!(receipt["unfilled"], gaps, "{receipt}");
+    assert_eq!(report["unfilled"], gaps, "{report}");
+    assert_eq!(report["record"], out_path.as_str(), "{report}");
+    for path in [sidecar_path, receipt_path] {
+        let _ = std::fs::remove_file(path);
+    }
+}
+
+/// And it refuses what it cannot project faithfully: a log whose session has
+/// not ended, and a log written under another registry than this build's.
+#[test]
+fn an_unfinished_log_or_another_registrys_is_not_projected_offline() {
+    let tree = Dir::new("refused-tree");
+    let state = Dir::new("refused-state");
+    let drove = drive_t1(
+        Act::Raw(I0_CALL.to_vec()),
+        ("allowed_commands = []\n", "isolation = \"none\""),
+        (&tree, &state, &file_holding("auth", "author:s3cret\n")),
+        "session",
+        |_| {},
+    );
+    let written = std::fs::read_to_string(&drove.log.0).expect("the log");
+    let (unended, _) = written.trim_end().rsplit_once('\n').expect("lines");
+    let start = written.lines().next().expect("a start");
+    let logged = log_line_object(start)["registry_sha256"]
+        .as_str()
+        .expect("a registry digest")
+        .to_owned();
+    let other = written.replacen(&logged, &"0".repeat(64), 1);
+    for (log, refusal) in [
+        (format!("{unended}\n"), "does not end with `ended`"),
+        (other, "was written under registry"),
+    ] {
+        let log = file_holding("refused-log", &log);
+        let out = file_holding("refused-record", "");
+        let projected = Command::new(DRIVE)
+            .arg("record")
+            .arg("--log")
+            .arg(&log.0)
+            .arg("--regimen")
+            .arg(&drove.regimen.0)
+            .arg("--out")
+            .arg(&out.0)
+            .output()
+            .expect("diet-drive runs");
+        let said = String::from_utf8_lossy(&projected.stdout).into_owned();
+        assert_eq!(projected.status.code(), Some(1), "{said}");
+        assert!(said.contains(refusal), "{said}");
+    }
 }
 
 /// T1's path under the Mac's real sandbox (#298 review round 1, findings
@@ -2805,7 +2954,6 @@ fn a_drive_server_runs_t1s_path_under_seatbelt_and_no_command_forges_an_approval
         serde_json::json!({ reference_path: "?? touched\n" }),
         "the reference checkout, as the command left it"
     );
-    let _ = (drove.log, drove.record);
 }
 
 // ---------------------------------------------------------------------------
