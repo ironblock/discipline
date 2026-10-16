@@ -124,7 +124,7 @@ export const AuditChunks: Story = {
     await expect(CHUNKED_AUDITS.map((chunks) => chunks.map(chunk))).toEqual(CHUNKED_AUDITS.map(() => ['chunk 1 of 2 · overlapped', 'chunk 2 of 2 · overlapped']));
     await expect(WHOLE_AUDITS.map(chunk)).toEqual([undefined]);
     const answers = [...canvasElement.querySelectorAll('.ex-meditation__reconcile [data-part="answer"] pre')].map((pre) => pre.textContent ?? '');
-    await expect(answers.filter((answer) => answer.includes('chunk 1 of 2\n') && answer.includes('chunk 2 of 2\n'))).toHaveLength(2);
+    await expect(answers.filter((answer) => answer.includes('chunk 1 of 2\n') && answer.includes('chunk 2 of 2\n'))).toHaveLength(3);
   },
 };
 
