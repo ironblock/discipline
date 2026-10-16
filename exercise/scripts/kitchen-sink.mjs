@@ -2,6 +2,12 @@
 // The kitchen sink (#798): the published example is the log `diet-drive scenario` writes for
 // diet/scenarios/kitchen-sink.jsonl, scrubbed of the run's own paths and placed on the compose clock.
 //
+// `write` composes it with src/drive/kitchen-sink.ts: each gate's `latency_ms` -- wall time on the machine that ran,
+// which `check` never compares (scenario-log.ts's CLOCK) -- is carried from the example it replaces, matched by lane
+// and place as `check` compares lines, so a rewrite changes only what the session changed and writing the same log
+// twice gives the same bytes. The migration says so, with how many were carried and how many are this run's own.
+// Nothing pins the values: the tests and stories read them from the example (src/drive/moments.ts, #875).
+//
 //   node exercise/scripts/kitchen-sink.mjs write   run the scenario, scrub, retime, and write src/drive/examples/kitchen-sink.json
 //   node exercise/scripts/kitchen-sink.mjs check   run the scenario and fail unless each lane's lines, in order, are the published ones
 //
@@ -15,13 +21,12 @@ import { hostname, tmpdir, userInfo } from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-import { retime } from '../src/drive/retime.ts';
-import { declarationsKept, imagesOf, laneDiff, residue, scrub } from '../src/drive/scenario-log.ts';
+import { KITCHEN_SINK_SCENARIO, kitchenSinkExample } from '../src/drive/kitchen-sink.ts';
+import { imagesOf, laneDiff, residue, scrub } from '../src/drive/scenario-log.ts';
 import { serialize } from '../src/replay/payload.ts';
-import { EXAMPLE_LABEL } from '../src/replay/published.ts';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
-const SCENARIO = 'diet/scenarios/kitchen-sink.jsonl';
+const SCENARIO = KITCHEN_SINK_SCENARIO;
 const EXAMPLE = 'exercise/src/drive/examples/kitchen-sink.json';
 /** The images the example publishes beside it, by digest (#372's layout): `<dir>/<name>/files/<sha256>`. */
 const FILES = 'exercise/src/drive/examples/kitchen-sink/files';
@@ -83,21 +88,10 @@ if (left.length > 0) {
 }
 
 if (mode === 'write') {
-  // A person's Declared-clean lines are kept for the images still named; the script never writes one.
-  const before = existsSync(path.join(ROOT, EXAMPLE)) ? (JSON.parse(readFileSync(path.join(ROOT, EXAMPLE), 'utf8')).migration ?? []) : [];
-  const example = {
-    title: 'The kitchen sink: every lever, written by a scenario',
-    migration: [
-      `Authored: ${EXAMPLE_LABEL}`,
-      `written by diet-drive scenario ${SCENARIO} on the canned scenario substrate: every line is diet's own, the model's replies are the scenario's`,
-      "the run's temporary and home paths are written /work/..., and its background jobs bg_1, bg_2, ... (src/drive/scenario-log.ts)",
-      'retimed: every t is placed on assumed rates (src/drive/retime.ts), not measured',
-      ...declarationsKept(before, [...images.keys()]),
-    ],
-    carried: {},
-    timing: 'retimed',
-    log: retime(log),
-  };
+  // The example it replaces: a person's Declared-clean lines kept for the images still named (the script never writes
+  // one), and its clocks carried.
+  const before = existsSync(path.join(ROOT, EXAMPLE)) ? JSON.parse(readFileSync(path.join(ROOT, EXAMPLE), 'utf8')) : undefined;
+  const example = kitchenSinkExample(log, before, [...images.keys()]);
   writeFileSync(path.join(ROOT, EXAMPLE), serialize(example));
   // Exactly the images it names: a file left from an earlier write is removed, as admission would refuse it.
   const files = path.join(ROOT, FILES);
