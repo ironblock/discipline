@@ -493,3 +493,32 @@ fn a_split_turns_request_heads_are_rebuilt_from_its_log() {
     assert!(unrebuilt.is_empty(), "{unrebuilt:#?}");
     let _ = std::fs::remove_dir_all(&dir);
 }
+
+/// #886: a window meditation's compaction of a running turn persists, as
+/// in `OpenCode` 2 and Pi: the steps it compacted do not come back when the
+/// turn settles, so the next ask -- its trunk the refill, the split turn's
+/// ask and the steps it kept -- has nothing to drop and fires no meditation.
+#[test]
+fn a_split_turns_compaction_persists_past_its_settle() {
+    let dir = scratch("split-persists");
+    let out = dir.join("out");
+    let (code, said) = run(&root().join("diet/scenarios/split-turn.jsonl"), &out);
+    assert_eq!(code, Some(0), "{said}");
+    let log = std::fs::read_to_string(out.join("session.log")).expect("the log");
+    let lines: Vec<serde_json::Value> = log
+        .lines()
+        .map(|line| serde_json::from_str(line).expect("JSON"))
+        .collect();
+    assert_eq!(lines[0]["compaction_persists"], true, "{}", lines[0]);
+    let second = lines
+        .iter()
+        .position(|line| line["kind"] == "ask" && line["turn"] == 2)
+        .expect("a second ask");
+    let refired: Vec<&serde_json::Value> = lines[second..]
+        .iter()
+        .filter(|line| line["kind"] == "meditation")
+        .collect();
+    assert!(refired.is_empty(), "{refired:#?}");
+    assert!(unrebuilt(&out).is_empty(), "{:#?}", unrebuilt(&out));
+    let _ = std::fs::remove_dir_all(&dir);
+}

@@ -511,6 +511,7 @@ pub fn project_in(
                 levers,
                 bash_timeout_ms,
                 notes_in_the_ask,
+                compaction_persists,
                 phase_document,
                 ..
             },
@@ -535,6 +536,7 @@ pub fn project_in(
     walk.model.clone_from(model);
     // Where its notes ride (#609): in the ask's message, from this build on.
     walk.notes_in_the_ask = notes_in_the_ask.unwrap_or(false);
+    walk.compaction_persists = compaction_persists.unwrap_or(false);
     walk.head = head
         .iter()
         .map(|message| Message::new(role_of(message.role), message.content.clone()))
@@ -619,6 +621,9 @@ struct Walk<'a> {
     notes: BTreeMap<u32, Vec<String>>,
     /// Whether the log's notes ride in their ask's message (#609).
     notes_in_the_ask: bool,
+    /// Whether the log's mid-turn compactions persist (#886): absent, an
+    /// earlier log's compacted steps rejoined the trunk at the settle.
+    compaction_persists: bool,
     /// The phase the session is in (#787), by its document, and the one
     /// the record last named: a turn row names its phase when they differ.
     phase: Option<crate::formats::record::PhaseNamed>,
@@ -868,6 +873,7 @@ impl<'a> Walk<'a> {
             ask_files: BTreeMap::new(),
             notes: BTreeMap::new(),
             notes_in_the_ask: false,
+            compaction_persists: false,
             phase: None,
             phase_named: None,
             tools: Ok(Vec::new()),
@@ -1378,15 +1384,18 @@ impl<'a> Walk<'a> {
         let (seq, at_turn, tail_tokens) = (line.seq, *at_turn, tail_tokens.unwrap_or(0));
         // A running turn it split (#813, #884): the session compacted the
         // turn's oldest steps with the turns before it, and its ask and the
-        // steps it kept ride after the refill -- so do they here. Its
-        // exchange still holds the compacted ones, and they rejoin the trunk
-        // with the turn when it settles.
+        // steps it kept ride after the refill -- so do they here. The
+        // compaction persists (#886); before it did, the session's exchange
+        // still held the compacted steps, and they rejoined the trunk with
+        // the turn when it settled.
         if let Some(log::TurnSteps { compacted, .. }) = turn_steps
             && let Some(steps) = self.steps.get_mut(&at_turn)
         {
             let compacted = usize::try_from(*compacted).unwrap_or(usize::MAX);
             let out: Vec<Step> = steps.drain(..compacted.min(steps.len())).collect();
-            self.compacted.entry(at_turn).or_default().extend(out);
+            if !self.compaction_persists {
+                self.compacted.entry(at_turn).or_default().extend(out);
+            }
         }
         // Every change addressed is the log's `unaddressed: []` and the
         // record's `unaddressed` absent beside its `operator_changes`: a
@@ -2298,6 +2307,7 @@ mod tests {
             opening_phase: None,
             fork_asks: None,
             notes_in_the_ask: None,
+            compaction_persists: None,
             build_dirty: None,
             build_commit: None,
         }

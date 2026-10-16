@@ -4818,6 +4818,9 @@ pub fn line_of(logged: &Logged) -> log::Line {
             }),
             levers: levers.clone(),
             notes_in_the_ask: notes_in_the_ask.then_some(true),
+            // A mid-turn compaction persists past the turn's settle (#886):
+            // always, from this build on.
+            compaction_persists: Some(true),
             // #563: the graph, and the phase it opens in; nothing when none.
             phases: phases.as_ref().map(|(names, _, _)| names.clone()),
             phase_transitions: phases.as_ref().map(|(_, moves, _)| moves.clone()),
@@ -5993,6 +5996,7 @@ fn step<S: Streaming + 'static>(
             if overflow.is_some()
                 && let Some(next) = retried(&shared.template, &mut state, shape, (turn, cancel))
             {
+                compacted_out(&mut state, shape, exchange);
                 drop(state);
                 shared.changed.notify_all();
                 // The same step sent again (#728): no step of its own.
@@ -6018,6 +6022,7 @@ fn step<S: Streaming + 'static>(
             if overflow.is_some()
                 && let Some(next) = retried(&shared.template, &mut state, shape, (turn, cancel))
             {
+                compacted_out(&mut state, shape, exchange);
                 drop(state);
                 shared.changed.notify_all();
                 // The same step sent again (#728): no step of its own.
@@ -6223,7 +6228,9 @@ fn run_calls<S: Streaming + 'static>(
     shape.messages.push(said);
     shape.messages.extend(results);
     // The automatic meditation (#617), between the turn's steps too.
-    window_meditation(&shared.template, &mut state, shape, false);
+    if window_meditation(&shared.template, &mut state, shape, false) {
+        compacted_out(&mut state, shape, exchange);
+    }
     // Never more on the server than its pool holds: the forks in flight
     // leave it its cap, or it waits for them.
     let (mut state, max_tokens) = trunk_sized(shared, state, shape, (turn, cancel));
@@ -9257,6 +9264,20 @@ fn window_meditation(
     shape.messages.extend(own);
     shape.messages.extend(kept);
     true
+}
+
+/// The running turn's exchange after a window meditation refilled the trunk
+/// under it (#886): what its requests now carry after the trunk -- its ask
+/// and the steps the split kept -- so the steps it compacted do not rejoin
+/// the trunk when the turn settles. A compaction persists, as in `OpenCode` 2
+/// and Pi.
+fn compacted_out(state: &mut State, shape: &RequestShape, exchange: &mut Vec<Message>) {
+    *exchange = shape
+        .messages
+        .get(state.trunk.len()..)
+        .unwrap_or_default()
+        .to_vec();
+    state.ran.clone_from(exchange);
 }
 
 /// Where the running turn's own messages `own` -- its ask, then its steps,
@@ -15317,6 +15338,7 @@ pub(in crate::drive) mod tests {
                     digest: Some(crate::dogma::asks::V4.digest()),
                 }),
                 notes_in_the_ask: Some(true),
+                compaction_persists: Some(true),
                 build_commit: Some("a".repeat(40)),
                 build_dirty: Some(false),
             },
