@@ -4,9 +4,10 @@ import { lanesOf } from './scenario-log.ts';
 /**
  * The kitchen sink placed on a working drive's cadence (#798). A scenario's log is on the canned substrate's clock:
  * each reply after its `delay_ms`, the operator instant. This keeps every line and its order and gives each a `t`
- * from assumed rates -- a person's time to ask, prefill and decode from a text's tokens, a tool's run as logged with
- * a floor -- so the published example reads at a drive's pace. Its `t` is ours, not measured; the example says so
- * (`timing: 'retimed'`).
+ * from assumed rates -- a person's time to ask, prefill and decode from a text's tokens, a tool's run from what its
+ * line says (#891): its `timeout_ms` when it timed out, else a floor -- so the published example reads at a drive's
+ * pace. Its `t` is ours, not measured, and reads nothing of the run's clock, so two runs of one scenario place every
+ * line alike; the example says so (`timing: 'retimed'`).
  *
  * Lanes overlap as logged: each lane keeps its own clock, and a line is placed when its lane is due, never before the
  * line logged ahead of it.
@@ -26,8 +27,11 @@ const askTime = (text: string) => Math.min(12_000, 1800 + text.length * 45);
 const COMMAND_MS = 1500;
 /** Before a request's first token: its prompt read, past the cache. */
 const FIRST_TOKEN_MS = { trunk: 350, side: 150 } as const;
-/** A tool's run, at least: the canned substrate runs one in a millisecond or two. */
+/** A tool's run that did not time out: the canned substrate runs one in a millisecond or two. */
 const TOOL_FLOOR_MS = 150;
+
+/** A tool's run from its line (#891): the timeout it ran into, else the floor. */
+const toolTime = (line: Line) => (typeof line['timeout_ms'] === 'number' ? line['timeout_ms'] : TOOL_FLOOR_MS);
 
 type Line = LogLine & Readonly<Record<string, unknown>>;
 
@@ -50,15 +54,12 @@ export function retime(lines: readonly LogLine[]): LogLine[] {
   const laneOf = lanesOf(lines);
   const requests = new Map<number, { readonly lane: string; streamed: boolean }>();
   const clock = new Map<string, number>();
-  const logged = new Map<string, number>();
   let last = 0;
   return lines.map((original, index) => {
     const line = original as Line;
     const lane = laneOf.get(line.seq) ?? 'session';
     const side = lane !== 'trunk' && lane !== 'session';
     const decode = side ? RATES.sideDecode : RATES.trunkDecode;
-    const loggedGap = Math.max(0, line.t - (logged.get(lane) ?? line.t));
-    logged.set(lane, line.t);
     const own = clock.get(lane) ?? last;
     let due: number;
     const asked = operatorTime(line);
@@ -76,7 +77,7 @@ export function retime(lines: readonly LogLine[]): LogLine[] {
       const request = requests.get(line['to_request'] as number);
       const text = typeof line['text'] === 'string' ? line['text'] : '';
       due = request?.streamed ? own + 5 : own + FIRST_TOKEN_MS[side ? 'side' : 'trunk'] + (tokensOf(text) / decode) * 1000;
-    } else if (line.kind === 'tool_call') due = own + Math.max(TOOL_FLOOR_MS, loggedGap);
+    } else if (line.kind === 'tool_call') due = own + toolTime(line);
     else if (line.kind === 'fork') due = last + 5;
     else due = own + 5;
     const t = Math.round(Math.max(last, due));
