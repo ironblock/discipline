@@ -522,3 +522,28 @@ fn a_split_turns_compaction_persists_past_its_settle() {
     assert!(unrebuilt(&out).is_empty(), "{:#?}", unrebuilt(&out));
     let _ = std::fs::remove_dir_all(&dir);
 }
+
+/// A step's `patience` is how long it may take to settle: a reply held back
+/// longer than the ask's patience fails the drive, naming it, and the same
+/// ask under a longer patience passes.
+#[test]
+fn a_step_that_outlives_its_patience_fails_the_drive_and_a_longer_patience_passes() {
+    let body = |patience: u64| {
+        format!(
+            "{}\n{}\n{}\n",
+            r#"{"reply":{"when":"take your time","text":"Done.","delay_ms":4000}}"#,
+            serde_json::json!({"step": "ask", "text": "take your time", "patience": patience}),
+            r#"{"step":"end"}"#,
+        )
+    };
+    let dir = scratch("patience");
+    let short = scenario(&dir, "short", &body(1));
+    let (code, said) = run(&short, &dir.join("short-out"));
+    assert_eq!(code, Some(1), "{said}");
+    assert!(said.to_string().contains("not idle after 1s"), "{said}");
+    let long = scenario(&dir, "long", &body(60));
+    let (code, said) = run(&long, &dir.join("long-out"));
+    assert_eq!(code, Some(0), "{said}");
+    assert_eq!(said["ok"], true, "{said}");
+    let _ = std::fs::remove_dir_all(&dir);
+}
