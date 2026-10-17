@@ -363,8 +363,12 @@ fn ripgrep() -> Option<&'static Path> {
 /// How a standard tool's call ended.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Done {
-    /// It returned this result, an error's text included.
+    /// It returned this result.
     Shown(String),
+    /// It failed, and returned this, the error it reports (#894): the
+    /// model is shown it as any result, and the step warrants read it as a
+    /// failure, where content a result quotes never is one.
+    Failed(String),
     /// `read` returned an image (#557): its bytes, delivered to the model as
     /// an image part of the tool's result, as Pi and `OpenCode` 2 deliver it.
     Image {
@@ -537,7 +541,7 @@ pub fn run(name: &str, raw: &str, tools: &Tools, stop: &dyn Fn() -> bool) -> Don
     });
     match result {
         Ok(done) => done,
-        Err(why) => Done::Shown(why),
+        Err(why) => Done::Failed(why),
     }
 }
 
@@ -545,7 +549,7 @@ pub fn run(name: &str, raw: &str, tools: &Tools, stop: &dyn Fn() -> bool) -> Don
 fn failed(why: Option<String>, describe: impl FnOnce(String) -> String) -> Done {
     why.map_or_else(
         || Done::Cancelled(String::new()),
-        |why| Done::Shown(describe(why)),
+        |why| Done::Failed(describe(why)),
     )
 }
 
@@ -556,10 +560,10 @@ fn read(args: &Args, tools: &Tools, stop: &dyn Fn() -> bool) -> Done {
         optional_count(args, "limit"),
     ) {
         (Ok(path), Ok(offset), Ok(limit)) => (path, offset, limit),
-        (Err(why), _, _) | (_, Err(why), _) | (_, _, Err(why)) => return Done::Shown(why),
+        (Err(why), _, _) | (_, Err(why), _) | (_, _, Err(why)) => return Done::Failed(why),
     };
     if let Some(refused) = refused_tilde(path) {
-        return Done::Shown(refused);
+        return Done::Failed(refused);
     }
     let bytes = match read_bytes(tools, &located(tools, path), stop) {
         Ok(bytes) => bytes,
@@ -567,7 +571,7 @@ fn read(args: &Args, tools: &Tools, stop: &dyn Fn() -> bool) -> Done {
     };
     if let Some(media_type) = image_type(&bytes) {
         if u64::try_from(bytes.len()).unwrap_or(u64::MAX) > super::attach::MAX_BYTES {
-            return Done::Shown(format!(
+            return Done::Failed(format!(
                 "Cannot read image file {path}: it is larger than {} bytes",
                 super::attach::MAX_BYTES
             ));
@@ -575,13 +579,13 @@ fn read(args: &Args, tools: &Tools, stop: &dyn Fn() -> bool) -> Done {
         return Done::Image { media_type, bytes };
     }
     let Ok(content) = String::from_utf8(bytes) else {
-        return Done::Shown(format!("Cannot read binary file: {path}"));
+        return Done::Failed(format!("Cannot read binary file: {path}"));
     };
     let lines: Vec<&str> = content.split_inclusive('\n').collect();
     let total = lines.len();
     let start = offset.unwrap_or(1) - 1;
     if start >= total && total > 0 {
-        return Done::Shown(format!(
+        return Done::Failed(format!(
             "Offset {} is beyond end of file ({total} lines total)",
             start + 1
         ));
@@ -609,10 +613,10 @@ fn read(args: &Args, tools: &Tools, stop: &dyn Fn() -> bool) -> Done {
 fn write(args: &Args, tools: &Tools, stop: &dyn Fn() -> bool) -> Done {
     let (path, content) = match (required(args, "path"), required(args, "content")) {
         (Ok(path), Ok(content)) => (path, content),
-        (Err(why), _) | (_, Err(why)) => return Done::Shown(why),
+        (Err(why), _) | (_, Err(why)) => return Done::Failed(why),
     };
     let at = match refused_tilde(path) {
-        Some(refused) => return Done::Shown(refused),
+        Some(refused) => return Done::Failed(refused),
         None => located(tools, path),
     };
     match write_text(tools, &at, content.as_bytes(), stop) {
@@ -631,22 +635,22 @@ fn edit(args: &Args, tools: &Tools, stop: &dyn Fn() -> bool) -> Done {
         required(args, "new_string"),
     ) {
         (Ok(path), Ok(old), Ok(new)) => (path, old, new),
-        (Err(why), _, _) | (_, Err(why), _) | (_, _, Err(why)) => return Done::Shown(why),
+        (Err(why), _, _) | (_, Err(why), _) | (_, _, Err(why)) => return Done::Failed(why),
     };
     let replace_all = match args.get("replace_all") {
         None | Some(serde_json::Value::Null) => false,
         Some(serde_json::Value::Bool(all)) => *all,
-        Some(_) => return Done::Shown("params/replace_all must be boolean".to_owned()),
+        Some(_) => return Done::Failed("params/replace_all must be boolean".to_owned()),
     };
     // Pi and `OpenCode` 2 both refuse an empty `old_string` (Qwen Code would
     // create a file); the refusal's words are `OpenCode` 2's.
     if old.is_empty() {
-        return Done::Shown(
+        return Done::Failed(
             "old_string must not be empty. Use write to create or overwrite a file.".to_owned(),
         );
     }
     if let Some(refused) = refused_tilde(path) {
-        return Done::Shown(refused);
+        return Done::Failed(refused);
     }
     let at = located(tools, path);
     // The file's bytes, edited as bytes (#734): nothing outside a match
@@ -657,7 +661,7 @@ fn edit(args: &Args, tools: &Tools, stop: &dyn Fn() -> bool) -> Done {
     };
     let occurrences = found_at(&current, old.as_bytes()).len();
     if occurrences == 0 {
-        return Done::Shown(format!(
+        return Done::Failed(format!(
             "Failed to edit, 0 occurrences found for old_string in {path}. No edits made. The \
              exact text in old_string was not found. Ensure you're not escaping content \
              incorrectly and check whitespace, indentation, and context. Use {READ} tool to \
@@ -665,13 +669,13 @@ fn edit(args: &Args, tools: &Tools, stop: &dyn Fn() -> bool) -> Done {
         ));
     }
     if !replace_all && occurrences > 1 {
-        return Done::Shown(format!(
+        return Done::Failed(format!(
             "Failed to edit. Found {occurrences} occurrences for old_string in {path} but \
              replace_all was not enabled."
         ));
     }
     if old == new {
-        return Done::Shown(format!(
+        return Done::Failed(format!(
             "No changes to apply. The old_string and new_string are identical in file: {path}"
         ));
     }
@@ -859,7 +863,7 @@ fn grep(args: &Args, tools: &Tools, stop: &dyn Fn() -> bool) -> Done {
     ) {
         (Ok(pattern), Ok(filter), Ok(path), Ok(limit)) => (pattern, filter, path, limit),
         (Err(why), ..) | (_, Err(why), ..) | (_, _, Err(why), _) | (.., Err(why)) => {
-            return Done::Shown(why);
+            return Done::Failed(why);
         }
     };
     let target = path.map_or_else(
@@ -881,7 +885,7 @@ fn grep(args: &Args, tools: &Tools, stop: &dyn Fn() -> bool) -> Done {
     let filtered = filter.map_or_else(String::new, |filter| format!(" (filter: \"{filter}\")"));
     let stdout = match whole_text(&ran) {
         Ok(stdout) => stdout,
-        Err(why) => return Done::Shown(format!("Error during grep search operation: {why}")),
+        Err(why) => return Done::Failed(format!("Error during grep search operation: {why}")),
     };
     // Exit 2 with matches is a search that could not finish -- an entry it
     // could not read (#734): Pi and `OpenCode` 2 differ, so Qwen Code's,
@@ -892,7 +896,7 @@ fn grep(args: &Args, tools: &Tools, stop: &dyn Fn() -> bool) -> Done {
         Some(0) => {}
         Some(2) if !stdout.trim().is_empty() => {}
         Some(2) => {
-            return Done::Shown(format!(
+            return Done::Failed(format!(
                 "Search did not complete for pattern \"{pattern}\" {location}{filtered}. No \
                  valid matches were returned; do not treat this as no matches. Error: {}",
                 said(&ran)
@@ -904,7 +908,7 @@ fn grep(args: &Args, tools: &Tools, stop: &dyn Fn() -> bool) -> Done {
             ));
         }
         _ => {
-            return Done::Shown(format!(
+            return Done::Failed(format!(
                 "Error during grep search operation: {}",
                 said(&ran)
             ));
@@ -965,7 +969,7 @@ fn glob(args: &Args, tools: &Tools, stop: &dyn Fn() -> bool) -> Done {
         optional_count(args, "limit"),
     ) {
         (Ok(pattern), Ok(path), Ok(limit)) => (pattern, path, limit),
-        (Err(why), ..) | (_, Err(why), _) | (.., Err(why)) => return Done::Shown(why),
+        (Err(why), ..) | (_, Err(why), _) | (.., Err(why)) => return Done::Failed(why),
     };
     let root = path.map_or_else(|| tools.worktree.clone(), |path| searched_path(tools, path));
     let root_text = root.to_string_lossy().into_owned();
@@ -1032,12 +1036,12 @@ fn glob(args: &Args, tools: &Tools, stop: &dyn Fn() -> bool) -> Done {
     );
     let stdout = match whole_text(&ran) {
         Ok(stdout) => stdout,
-        Err(why) => return Done::Shown(format!("Error during glob search operation: {why}")),
+        Err(why) => return Done::Failed(format!("Error during glob search operation: {why}")),
     };
     // Exit 2 with files listed keeps them (#734), as `grep` keeps its
     // matches.
     if ran.exit.is_some_and(|code| code > 2) || (ran.exit == Some(2) && stdout.trim().is_empty()) {
-        return Done::Shown(format!(
+        return Done::Failed(format!(
             "Error during glob search operation: {}",
             said(&ran)
         ));
@@ -1106,7 +1110,7 @@ mod tests {
 
     fn shown(done: Done) -> String {
         match done {
-            Done::Shown(text) => text,
+            Done::Shown(text) | Done::Failed(text) => text,
             Done::Cancelled(_) => panic!("cancelled"),
             Done::Image { media_type, .. } => panic!("an image: {media_type}"),
         }
@@ -1114,6 +1118,40 @@ mod tests {
 
     fn call(name: &str, args: &serde_json::Value, tools: &Tools) -> String {
         shown(run(name, &args.to_string(), tools, &|| false))
+    }
+
+    /// #894: a tool's own failure is `Failed`; what it returns on success
+    /// is `Shown`, error-shaped content and no matches included.
+    #[test]
+    fn a_tools_own_failure_is_failed_and_its_results_are_shown() {
+        let tree = scratch("std-failed");
+        let tools = unconfined(&tree);
+        std::fs::write(tree.join("a.py"), "print(f'error: x')\n").expect("the file");
+        let kind = |name: &str, args: serde_json::Value| match run(
+            name,
+            &args.to_string(),
+            &tools,
+            &|| false,
+        ) {
+            Done::Shown(_) => "shown",
+            Done::Failed(_) => "failed",
+            Done::Image { .. } => "image",
+            Done::Cancelled(_) => "cancelled",
+        };
+        let edit = |old: &str| serde_json::json!({"file_path": "a.py", "old_string": old, "new_string": "y"});
+        assert_eq!(kind(EDIT, edit("nowhere")), "failed");
+        assert_eq!(
+            kind(EDIT, serde_json::json!({"file_path": "a.py"})),
+            "failed"
+        );
+        assert_eq!(
+            kind(READ, serde_json::json!({"path": "missing.py"})),
+            "failed"
+        );
+        assert_eq!(kind(READ, serde_json::json!({"path": "a.py"})), "shown");
+        assert_eq!(kind(EDIT, edit("x")), "shown");
+        assert_eq!(kind(GLOB, serde_json::json!({"pattern": "*.rs"})), "shown");
+        std::fs::remove_dir_all(&tree).ok();
     }
 
     /// `write` creates a file and its parent directories, then overwrites

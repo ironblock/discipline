@@ -1084,6 +1084,10 @@ pub struct ToolLine {
     pub background: Option<String>,
     /// The timeout that ended it, in milliseconds (#613).
     pub timeout_ms: Option<u64>,
+    /// A standard tool's own failure (#894): its result is the error it
+    /// reported -- an `old_string` not found, a file it could not read --
+    /// not content it quoted. Read by the step warrants; never logged.
+    pub failed: bool,
 }
 
 impl ToolLine {
@@ -1113,6 +1117,7 @@ impl ToolLine {
             recovered_from: None,
             background: None,
             timeout_ms: None,
+            failed: false,
         }
     }
 }
@@ -5091,6 +5096,8 @@ pub fn line_of(logged: &Logged) -> log::Line {
                 recovered_from,
                 background,
                 timeout_ms,
+                // In-session only (#894): the log line is as before.
+                failed: _,
             } = line.as_ref().clone();
             log::Event::ToolCall {
                 request,
@@ -6878,6 +6885,14 @@ fn standard_call(
     match super::standard::run(&call.name, &call.arguments, tools, &|| cancel.is_asked()) {
         super::standard::Done::Shown(result) => {
             let mut line = ToolLine::of(request, turn, call, log::ToolOutcome::Ran);
+            let shown = shown_capped(tools, &result, &mut line);
+            (line, Some(shown))
+        }
+        // Its own failure (#894), shown as any result and marked for the
+        // step warrants.
+        super::standard::Done::Failed(result) => {
+            let mut line = ToolLine::of(request, turn, call, log::ToolOutcome::Ran);
+            line.failed = true;
             let shown = shown_capped(tools, &result, &mut line);
             (line, Some(shown))
         }
@@ -11093,7 +11108,9 @@ fn content_firings(
             ident: ident(&line.name, &line.arguments),
             shown: line.shown.clone().unwrap_or_default(),
             errored: line.outcome == log::ToolOutcome::Ran
-                && (line.exit.is_some_and(|exit| exit != 0) || line.timeout_ms.is_some()),
+                && (line.exit.is_some_and(|exit| exit != 0)
+                    || line.timeout_ms.is_some()
+                    || line.failed),
             excluded: matches!(
                 line.outcome,
                 log::ToolOutcome::Refused | log::ToolOutcome::Cancelled
@@ -11268,14 +11285,18 @@ fn refutation_seen(state: &mut State, request: u64, ids: &[String]) {
         })
         // A background job's start is not its outcome (#614): what it shows
         // lists the statuses it may end in, `failed` among them.
+        // A standard tool's result quotes content, which is never its
+        // failure (#894): only its own report is, as `trouble` reads one.
         .rfind(|line| {
             line.outcome == log::ToolOutcome::Ran
                 && line.background.is_none()
-                && (line.exit.is_some_and(|exit| exit != 0)
-                    || line.timeout_ms.is_some()
-                    || crate::drive::warrants::shows_an_error(
-                        line.shown.as_deref().unwrap_or_default(),
-                    ))
+                && crate::drive::warrants::failed(
+                    &line.name,
+                    line.exit.is_some_and(|exit| exit != 0)
+                        || line.timeout_ms.is_some()
+                        || line.failed,
+                    line.shown.as_deref().unwrap_or_default(),
+                )
         });
     if let Some(line) = failed {
         let shown = line.shown.as_deref().unwrap_or_default();
@@ -11293,12 +11314,33 @@ fn refutation_seen(state: &mut State, request: u64, ids: &[String]) {
             // trigger read as a log position would point at the wrong line.
             trigger: format!("call:{}", line.id),
             source: format!(
-                "The command {} ({pointer}) failed. What it showed ended:\n{}",
-                crate::drive::warrants::ident(&line.name, &line.arguments),
+                "{} What it showed ended:\n{}",
+                failure_said(line, &pointer),
                 tail.trim_end()
             ),
             pointer,
         });
+    }
+}
+
+/// How a refutation's ask names the failure it follows (#894), saying only
+/// what the line holds: "The command" for `bash` alone, with its exit, its
+/// timeout, or that its output looks like an error; a standard tool's call by
+/// its tool, as reporting a failure, which it did.
+fn failure_said(line: &ToolLine, pointer: &str) -> String {
+    let ident = crate::drive::warrants::ident(&line.name, &line.arguments);
+    if line.name != BASH {
+        return format!(
+            "The {} call {ident} ({pointer}) reported a failure.",
+            line.name
+        );
+    }
+    match (line.timeout_ms, line.exit.filter(|exit| *exit != 0)) {
+        (Some(ms), _) => format!("The command {ident} ({pointer}) timed out after {ms} ms."),
+        (None, Some(exit)) => format!("The command {ident} ({pointer}) exited {exit}."),
+        (None, None) => {
+            format!("The command {ident} ({pointer}) showed what looks like an error.")
+        }
     }
 }
 
@@ -14475,6 +14517,110 @@ pub(in crate::drive) mod tests {
         );
     }
 
+    /// A step's call of `name`, as it ran: what it showed, its exit, and
+    /// whether the standard tool reported its own failure (#894).
+    fn ran_line(
+        request: u64,
+        name: &str,
+        shown: &str,
+        exit: Option<u64>,
+        failed: bool,
+    ) -> ToolLine {
+        let arguments = if name == BASH {
+            r#"{"command":"python3 linkcheck.py"}"#
+        } else {
+            r#"{"file_path":"linkcheck.py"}"#
+        };
+        let call = Call {
+            index: 0,
+            id: "c".to_owned(),
+            name: name.to_owned(),
+            arguments: arguments.to_owned(),
+        };
+        ToolLine {
+            exit,
+            failed,
+            shown: Some(shown.to_owned()),
+            ..ToolLine::of(request, 2, &call, log::ToolOutcome::Ran)
+        }
+    }
+
+    /// What a refutation interview is asked about after a step whose one call
+    /// is `line`, its failed commands' cooldown passed (#894).
+    fn refuted_after(line: ToolLine) -> Option<String> {
+        let session = refuting(&[], 8);
+        let mut state = session.shared.lock();
+        let request = line.request;
+        state.push(Event::ToolCalled(Box::new(line)));
+        refutation_seen(&mut state, request, &["c".to_owned()]);
+        state.refute_due.take().map(|due| due.source)
+    }
+
+    /// #894: a successful `edit` whose result quotes error-shaped content
+    /// asks nothing; a failed `edit` asks, naming the tool, never "the
+    /// command"; and `bash`'s error-shaped output still asks, saying it
+    /// looks like an error rather than that it failed.
+    #[test]
+    fn only_a_failure_the_tool_reported_or_bash_showed_asks_a_refutation() {
+        let echoed = "The file: linkcheck.py has been updated. \
+                      print(f'error: {docs}/ not found', file=sys.stderr)";
+        assert_eq!(
+            refuted_after(ran_line(5, "edit", echoed, None, false)),
+            None
+        );
+        let failed = refuted_after(ran_line(
+            5,
+            "edit",
+            "Failed to edit, 0 occurrences found for old_string in linkcheck.py.",
+            None,
+            true,
+        ))
+        .expect("a failed edit asks");
+        assert!(
+            failed.starts_with("The edit call edit of linkcheck.py (call c) reported a failure."),
+            "{failed}"
+        );
+        assert!(!failed.contains("The command"), "{failed}");
+        let shown = refuted_after(ran_line(
+            5,
+            "bash",
+            "error: docs/ not found",
+            Some(0),
+            false,
+        ))
+        .expect("bash's error-shaped output asks");
+        assert!(
+            shown.starts_with(
+                "The command bash of python3 linkcheck.py (call c) showed what looks like an error."
+            ),
+            "{shown}"
+        );
+        let exited = refuted_after(ran_line(5, "bash", "", Some(2), false)).expect("an exit asks");
+        assert!(exited.contains("(call c) exited 2."), "{exited}");
+    }
+
+    /// #894: a standard tool's own failure is marked on its line, and its
+    /// success is not, whatever content it quotes.
+    #[test]
+    fn a_standard_tools_own_failure_is_marked_on_its_line() {
+        let tree = scratch("standard-failed");
+        std::fs::write(tree.join("a.py"), "print(f'error: x')\n").expect("the file");
+        let mut tools = tools(Confinement::Unconfined, &tree, &[], None, Decider::Decline);
+        tools.surface = tool_loop::ToolSurface::Standard;
+        let edit = |old: &str| Call {
+            index: 0,
+            id: "c".to_owned(),
+            name: "edit".to_owned(),
+            arguments: format!(r#"{{"file_path":"a.py","old_string":"{old}","new_string":"y"}}"#),
+        };
+        let (missing, _) = standard_call(&tools, &Cancel::new(), (1, 1), &edit("nowhere"), false);
+        assert!(missing.failed, "{:?}", missing.shown);
+        let (made, shown) = standard_call(&tools, &Cancel::new(), (1, 1), &edit("x"), false);
+        assert!(!made.failed, "{shown:?}");
+        assert!(shown.is_some_and(|shown| shown.contains("error")));
+        tidy(&[&tree]);
+    }
+
     /// #878: the tool is declared from the first request when the interview
     /// is on, and only then; the trunk's own call to it writes its
     /// refutations as a fork's would, on the trunk's lane, pointing at the
@@ -15895,6 +16041,7 @@ pub(in crate::drive) mod tests {
                 recovered_from: None,
                 background: None,
                 timeout_ms: None,
+                failed: false,
             })),
             Event::Forked {
                 of_turn: 1,
