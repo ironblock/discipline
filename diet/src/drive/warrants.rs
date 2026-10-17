@@ -94,6 +94,14 @@ fn folded_at(chars: &[char], at: usize, word: &[char]) -> bool {
     })
 }
 
+/// Whether a call failed, as the step warrants read one (#894): `errored`,
+/// its own report -- `bash`'s exit or timeout, a standard tool's failure --
+/// or, for `bash` alone, output that [`shows_an_error`].
+#[must_use]
+pub fn failed(tool: &str, errored: bool, shown: &str) -> bool {
+    errored || (tool == crate::drive::tool_loop::BASH && shows_an_error(shown))
+}
+
 /// Whether a call's shown output `text` matches [`ERROR_PATTERN`].
 #[must_use]
 pub fn shows_an_error(text: &str) -> bool {
@@ -204,7 +212,8 @@ pub struct StepCall {
     pub ident: String,
     /// What the model was shown of its result.
     pub shown: String,
-    /// It ran and exited non-zero, or its timeout ended it.
+    /// It ran and exited non-zero, or its timeout ended it, or -- a
+    /// standard tool -- it reported its own failure (#894).
     pub errored: bool,
     /// The gate refused it or the operator declined it, or it never ran
     /// (cancelled): no output of its own.
@@ -279,7 +288,7 @@ pub fn gates(warrants: &StepWarrants, counters: &mut Counters, step: &Step) -> V
             .calls
             .iter()
             .filter(|call| !call.excluded)
-            .any(|call| call.errored || shows_an_error(&call.shown));
+            .any(|call| failed(&call.tool, call.errored, &call.shown));
         if saw_error
             || (surprises(&step.said) && counters.since_trio >= warrants.trouble_cooldown_steps)
         {
@@ -366,6 +375,58 @@ mod tests {
 
     const VECTORS: &str = include_str!("../../tests/fixtures/step-warrants/vectors.jsonl");
     const GENERATOR: &str = include_str!("../../tests/fixtures/step-warrants/generate.py");
+
+    /// #894: `trouble` reads a standard tool as the trigger does: its own
+    /// reported failure fires it, and content its result quotes never does.
+    #[test]
+    fn trouble_fires_on_a_standard_tools_failure_never_on_its_content() {
+        let warrants = all_on();
+        let mut counters = Counters::default();
+        // A standard tool's result quoting error-shaped content is no
+        // failure (#894)...
+        let quoted = Step {
+            said: String::new(),
+            calls: vec![call(
+                "edit",
+                "The file: linkcheck.py has been updated. print(f'error: {docs}/ not found')",
+            )],
+        };
+        assert!(gates(&warrants, &mut counters, &quoted).is_empty());
+        // ...but its own reported failure is one.
+        let failed_edit = Step {
+            said: String::new(),
+            calls: vec![StepCall {
+                errored: true,
+                ..call(
+                    "edit",
+                    "Failed to edit, 0 occurrences found for old_string in a.py.",
+                )
+            }],
+        };
+        assert_eq!(
+            gates(&warrants, &mut counters, &failed_edit),
+            [Gate::Trouble]
+        );
+    }
+
+    /// #894: a call failed by its own report; for `bash` alone, also by
+    /// error-shaped output. A standard tool's result quotes content, and
+    /// content is never a failure.
+    #[test]
+    fn only_bash_output_reads_as_a_failure_by_its_text() {
+        let echoed = "The file: a.py has been updated. print(f'error: {docs}/ not found')";
+        assert!(!failed("edit", false, echoed));
+        assert!(!failed("read", false, "Traceback (most recent call last):"));
+        assert!(!failed(
+            "write",
+            false,
+            "Successfully overwrote file: error.log."
+        ));
+        assert!(failed("edit", true, "Failed to edit, 0 occurrences found"));
+        assert!(failed("bash", false, "error: no such file"));
+        assert!(failed("bash", true, ""));
+        assert!(!failed("bash", false, "all good"));
+    }
 
     fn call(tool: &str, shown: &str) -> StepCall {
         StepCall {
