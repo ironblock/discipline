@@ -37,6 +37,9 @@ pub struct Scenario {
     pub classified: Vec<Classify>,
     /// What the runner drives, in order.
     pub steps: Vec<Step>,
+    /// How long a settling step may take, in seconds, by its place in
+    /// `steps`; a step absent here takes [`STEP_PATIENCE`].
+    pub patience: BTreeMap<usize, u64>,
     /// What the log must show.
     pub expects: Vec<Expect>,
 }
@@ -181,7 +184,38 @@ pub enum Step {
     End,
 }
 
+impl Scenario {
+    /// How long step `at` may take to settle: its `patience`, or
+    /// [`STEP_PATIENCE`].
+    #[must_use]
+    pub fn patience(&self, at: usize) -> std::time::Duration {
+        self.patience.get(&at).map_or(STEP_PATIENCE, |seconds| {
+            std::time::Duration::from_secs(*seconds)
+        })
+    }
+}
+
 impl Step {
+    /// Whether the runner waits for the session to settle after this step:
+    /// an ask that is to be admitted, and each step that is one command.
+    fn settles(&self) -> bool {
+        match self {
+            Self::Ask { refused, .. } => refused.is_none(),
+            Self::DeclareMeditation
+            | Self::RefillAnyway
+            | Self::RulePhase { .. }
+            | Self::StartPhase { .. }
+            | Self::ProposePhase { .. }
+            | Self::MovePhase { .. } => true,
+            Self::OpenTangent { .. }
+            | Self::CloseTangent { .. }
+            | Self::Flag { .. }
+            | Self::Edit { .. }
+            | Self::Wait { .. }
+            | Self::End => false,
+        }
+    }
+
     /// The `POST /commands` body of a step that is one command and waits
     /// for the session to settle after it.
     fn command(&self) -> serde_json::Value {
@@ -404,7 +438,11 @@ pub fn parse(text: &str) -> Result<Scenario, ScenarioError> {
             fields.done()?;
             scenario.classified.push(classify_of(Fields::of(rule, at))?);
         } else if fields.has("step") {
-            scenario.steps.push(step_of(fields)?);
+            let (step, patience) = step_of(fields)?;
+            if let Some(seconds) = patience {
+                scenario.patience.insert(scenario.steps.len(), seconds);
+            }
+            scenario.steps.push(step);
         } else if fields.has("expect") {
             let expect = expect_of(fields, &names)?;
             if let Some(name) = &expect.name {
@@ -457,6 +495,7 @@ fn header(mut fields: Fields) -> Result<Scenario, ScenarioError> {
         replies: Vec::new(),
         classified: Vec::new(),
         steps: Vec::new(),
+        patience: BTreeMap::new(),
         expects: Vec::new(),
     })
 }
@@ -532,7 +571,13 @@ fn reply_of(mut fields: Fields) -> Result<Reply, ScenarioError> {
     })
 }
 
-fn step_of(mut fields: Fields) -> Result<Step, ScenarioError> {
+/// One `step` line, and the `patience` it names: whole seconds above 0, on a
+/// step that waits for the session to settle and on no other.
+fn step_of(mut fields: Fields) -> Result<(Step, Option<u64>), ScenarioError> {
+    let patience = fields.maybe_count("patience")?;
+    if patience == Some(0) {
+        return Err(fields.wrong("`patience` whole seconds above 0"));
+    }
     let step = match fields.text("step")?.as_str() {
         "ask" => Step::Ask {
             text: fields.text("text")?,
@@ -593,8 +638,11 @@ fn step_of(mut fields: Fields) -> Result<Step, ScenarioError> {
         "end" => Step::End,
         _ => return Err(fields.wrong("a step the runner knows")),
     };
+    if patience.is_some() && !step.settles() {
+        return Err(fields.wrong("`patience` only on a step that waits for the session to settle"));
+    }
     fields.done()?;
-    Ok(step)
+    Ok((step, patience))
 }
 
 fn expect_of(mut fields: Fields, names: &[String]) -> Result<Expect, ScenarioError> {
@@ -736,7 +784,8 @@ impl fmt::Display for Failure {
     }
 }
 
-/// How long one step may take to settle before the drive fails.
+/// How long one step may take to settle before the drive fails, unless the
+/// step names its own `patience`.
 pub const STEP_PATIENCE: std::time::Duration = std::time::Duration::from_secs(900);
 
 /// The names steps bound, each to an entry id.
@@ -842,11 +891,21 @@ impl Driver {
 
     /// Wait until the session is idle, answering each prompt that waits on
     /// the operator with `approvals`' scope; a prompt with no scope to
-    /// answer it fails the drive, as does [`STEP_PATIENCE`] passing.
-    fn settle(&self, approvals: Option<&str>) -> Result<serde_json::Value, Failure> {
-        let give_up = std::time::Instant::now() + STEP_PATIENCE;
+    /// answer it fails the drive, as does `patience` passing.
+    fn settle(
+        &self,
+        approvals: Option<&str>,
+        patience: std::time::Duration,
+    ) -> Result<serde_json::Value, Failure> {
+        let give_up = std::time::Instant::now() + patience;
         loop {
-            let state = self.get("/wait?until=idle&timeout=30")?;
+            // Each wait asks no longer than the patience left, so a short
+            // patience is not outlasted by one long wait.
+            let left = give_up
+                .saturating_duration_since(std::time::Instant::now())
+                .as_secs()
+                .clamp(1, 30);
+            let state = self.get(&format!("/wait?until=idle&timeout={left}"))?;
             if state["idle"] == true {
                 return Ok(state);
             }
@@ -865,9 +924,7 @@ impl Driver {
                 }
             }
             if std::time::Instant::now() >= give_up {
-                return Err(Failure(format!(
-                    "not idle after {STEP_PATIENCE:?}: {state}"
-                )));
+                return Err(Failure(format!("not idle after {patience:?}: {state}")));
             }
         }
     }
@@ -914,7 +971,7 @@ impl Driver {
         &self,
         (text, scoping, attach): (&str, bool, &[String]),
         refused: Option<&str>,
-        approvals: Option<&str>,
+        (approvals, patience): (Option<&str>, std::time::Duration),
     ) -> Result<(), Failure> {
         let mut ask = serde_json::json!({"kind": "ask", "text": text});
         if scoping {
@@ -929,7 +986,7 @@ impl Driver {
         }
         let Some(refused) = refused else {
             self.command(&ask)?;
-            return self.settle(approvals).map(|_| ());
+            return self.settle(approvals, patience).map(|_| ());
         };
         let (status, body) = self.post("/commands", &ask)?;
         let tag = serde_json::from_str::<serde_json::Value>(&body)
@@ -1001,7 +1058,11 @@ pub fn drive(scenario: &Scenario, driver: &Driver) -> Result<Bindings, Failure> 
             } => {
                 mark = driver.last_seq().map_err(failed)?;
                 driver
-                    .asked((text, *scoping, attach), refused.as_deref(), approvals)
+                    .asked(
+                        (text, *scoping, attach),
+                        refused.as_deref(),
+                        (approvals, scenario.patience(at)),
+                    )
                     .map_err(failed)?;
             }
             Step::Flag { pick, note, bind } => {
@@ -1031,7 +1092,9 @@ pub fn drive(scenario: &Scenario, driver: &Driver) -> Result<Bindings, Failure> 
             | Step::MovePhase { .. } => {
                 mark = driver.last_seq().map_err(failed)?;
                 driver.command(&step.command()).map_err(failed)?;
-                driver.settle(approvals).map_err(failed)?;
+                driver
+                    .settle(approvals, scenario.patience(at))
+                    .map_err(failed)?;
             }
             Step::OpenTangent { id } => {
                 driver
@@ -1709,6 +1772,11 @@ mod tests {
             (r#"{"expect":"fork","at_least":0}"#, 2),
             (r#"{"step":"end","reply":{"text":"x"}}"#, 2),
             (r#"{"step":"wait"}"#, 2),
+            (r#"{"step":"ask","text":"a","patience":0}"#, 2),
+            (r#"{"step":"ask","text":"a","patience":"long"}"#, 2),
+            (r#"{"step":"flag","pick":0,"note":"n","patience":60}"#, 2),
+            (r#"{"step":"wait","until":"idle","patience":60}"#, 2),
+            (r#"{"step":"end","patience":60}"#, 2),
             (r#"{"classify":{"when":"x","hypothesis":"y"}}"#, 2),
             (
                 r#"{"classify":{"when":"x","hypothesis":"y","score":"1.5"}}"#,
@@ -1749,5 +1817,30 @@ mod tests {
             )),
             Err(ScenarioError::Line(1, _))
         ));
+    }
+
+    /// A step that waits for the session to settle takes its own
+    /// `patience`, in seconds; one that names none keeps
+    /// [`STEP_PATIENCE`].
+    #[test]
+    fn a_settling_step_reads_its_patience_and_the_rest_keep_the_default() {
+        let text = concat!(
+            r#"{"scenario":"s","regimen":"r.toml","head":"h.md"}"#,
+            "\n",
+            r#"{"step":"ask","text":"a","patience":3600}"#,
+            "\n",
+            r#"{"step":"declare-meditation","patience":120}"#,
+            "\n",
+            r#"{"step":"ask","text":"b"}"#,
+            "\n",
+            r#"{"step":"end"}"#,
+            "\n",
+        );
+        let read = parse(text).expect("it reads");
+        assert_eq!(read.steps.len(), 4);
+        assert_eq!(read.patience(0), std::time::Duration::from_secs(3600));
+        assert_eq!(read.patience(1), std::time::Duration::from_secs(120));
+        assert_eq!(read.patience(2), STEP_PATIENCE);
+        assert_eq!(read.patience(3), STEP_PATIENCE);
     }
 }

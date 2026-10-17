@@ -77,6 +77,7 @@ The format has no grammar of its own, so it has no directory under `diet/formats
 | `end` | | |
 
 - After each admitted ask, meditation or refill, the runner waits until `GET /state` is `idle`.
+- `patience` (optional) on a step it waits after -- an ask to be admitted, `declare-meditation`, `refill-anyway`, `rule-phase`, `start-phase`, `propose-phase` or `move-phase` -- is how long, in whole seconds above 0, that wait may take before the drive fails; absent, 900. A live re-fire whose turns run long names one, and always a number: a hung run still ends. Any other step refuses it.
 - `pick` names a live entry, read from `GET /memory`: a number is its place in id order, and text is the first entry whose content holds it.
 
 ## `expect`: what the log must show
