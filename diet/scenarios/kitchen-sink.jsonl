@@ -1,4 +1,5 @@
 {"scenario":"kitchen-sink","regimen":"kitchen-sink.toml","head":"../drive/heads/floor.md","seed":{"AGENTS.md":"kitchen-sink.agents.md"}}
+{"reply":{"when":"show that something you believed was wrong","text":"","calls":[{"id":"refute-a","name":"refute_beliefs","arguments":"{\"refuted\":[]}"}]}}
 {"reply":{"when":"Scope: a notes file","text":"Scoped: notes.md holds one line per decision, read back after each write.","calls":[{"id":"call-r1","name":"update_record","arguments":"{\"field\": \"decision\", \"content\": \"notes.md holds one line per decision\"}"}],"delay_ms":400}}
 {"reply":{"when":"recorded: ","text":"Recorded the scope.","delay_ms":300}}
 {"reply":{"when":"Write notes.md","text":"Writing the first decision.","calls":[{"id":"call-w1","name":"write","arguments":"{\"path\": \"notes.md\", \"content\": \"decision: one line per decision\\n\"}"}],"delay_ms":600}}
@@ -143,6 +144,9 @@
 {"expect":"phase.answered","where":{"call":"call-a2","accepted":"false"},"after":"operator-build"}
 {"expect":"phase.ruled","where":{"by":"operator","choice":"keep","from":"test","to":"build"},"after":"operator-build"}
 {"expect":"patch","where":{"lane":"mechanical","entry.id":"mechanical/notes.md"}}
+{"expect":"fork","name":"arrived","where":{"why":"refutation","timing":"arrival","of_turn":"6","trigger~":"refutation:","question~":"Show missing.txt"}}
+{"expect":"fork","name":"failed-same-turn","where":{"why":"refutation","of_turn":"6","trigger":"refutation:call:call-b4"},"after":"arrived"}
+{"expect":"fork.settled","where":{"outcome":"decline"},"after":"arrived"}
 {"expect":"fork","name":"refuted","where":{"why":"refutation","ask":"refute_q","trigger":"refutation:call:call-b7"}}
 {"expect":"patch","name":"corrected","where":{"op":"supersede","entry.text":"fact: the build takes longer than the step's timeout","refuted.pointer":"call call-b7","refuted.confidence":"7"},"after":"refuted"}
 {"expect":"meditation","where":{"render~":"was: fact: the build finishes in a few seconds (held at 7/10), wrong because the command timed out after 16000ms [call call-b7]"},"after":"corrected"}

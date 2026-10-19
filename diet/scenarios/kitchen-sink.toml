@@ -50,11 +50,14 @@ meditation_audit_concurrency = 2
 note_dedupe = "on"
 
 # The refutation interview (#878): a failed command asks REFUTE_Q in the
-# turn's gap, each source cooled on its own. The operator's cooldown is long
-# enough that the operator's messages never warrant one here, so each
-# refutation fork is a failed command's.
+# turn's gap, and the operator's message as it arrives, before the turn reads
+# it (#904), each source cooled on its own. The operator's cooldown is 112
+# steps: its counter starts at 99 and reaches 112 at turn 6's ask, so that ask
+# is asked about on arrival -- the turn whose `cat missing.txt` fails and takes
+# the gap's fork, both triggers in one turn -- and no later ask comes 112 steps
+# after it.
 refutation_interview = "on"
-refutation_operator_cooldown_steps = 200
+refutation_operator_cooldown_steps = 112
 
 # The step warrants' gate by a classifier (#850): every step's probes are
 # scored and logged as `warrant.gated`. On the canned substrate the scenario's
