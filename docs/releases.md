@@ -172,3 +172,4 @@ Work that serves no open release waits in a `Later —` milestone named for the 
 | Later — substrate ladder | admission instruments and substrate work the loop does not need | with the ladder program |
 | Later — gate redesign | defects in the gate and its kept checks | with the gate redesign, after feature complete |
 | Later — lever candidates | levers proposed but not built: a find tool for working memory (#664), how far back a prune may reach (#665), model-elected pruning shown live (#710) | when a run shows the need, or the feature a candidate extends is turned on |
+| Later — rigor | detector and instrument studies that ran ahead of the third initiative: small-model triggers, the tense rule, the stance codebook, closure verification (#907) | with the third initiative, on initiative 2's lever pairs (the maintainer, 2026-10-19) |
