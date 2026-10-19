@@ -192,8 +192,27 @@ impl Routes {
     }
 }
 
-/// A chat-completions body's last message's text: its `content` string, or
-/// its text parts joined. Empty when the body does not read.
+/// A message's `content` as its texts: a string, or its text parts, a
+/// Messages `tool_result`'s own content read the same way (#555).
+fn texts(content: &serde_json::Value) -> Vec<String> {
+    match content {
+        serde_json::Value::String(text) => vec![text.clone()],
+        serde_json::Value::Array(parts) => parts
+            .iter()
+            .flat_map(|part| match part["text"].as_str() {
+                Some(text) => vec![text.to_owned()],
+                None if part["type"] == "tool_result" => texts(&part["content"]),
+                None => Vec::new(),
+            })
+            .collect(),
+        _ => Vec::new(),
+    }
+}
+
+/// A chat-completions or Messages body's last message's text: its
+/// `content` string, or its text parts joined -- a Messages `tool_result`'s
+/// own text parts among them (#555), where a tool's output sits one level
+/// down. Empty when the body does not read.
 fn last_message(body: &str) -> String {
     let Ok(value) = serde_json::from_str::<serde_json::Value>(body) else {
         return String::new();
@@ -201,15 +220,7 @@ fn last_message(body: &str) -> String {
     let Some(last) = value["messages"].as_array().and_then(|all| all.last()) else {
         return String::new();
     };
-    match &last["content"] {
-        serde_json::Value::String(text) => text.clone(),
-        serde_json::Value::Array(parts) => parts
-            .iter()
-            .filter_map(|part| part["text"].as_str())
-            .collect::<Vec<_>>()
-            .join("\n"),
-        _ => String::new(),
-    }
+    texts(&last["content"]).join("\n")
 }
 
 /// What an [`Act::StreamThenHold`] saw of its client while it held.
@@ -1038,6 +1049,25 @@ fn write_undercount(stream: &mut TcpStream, body: &str, short_by: usize) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A Messages body's last message reads through its `tool_result`s
+    /// (#555): a tool's output, a string or text parts, is what a reply's
+    /// `when` matches.
+    #[test]
+    fn a_messages_tool_result_is_read_as_the_last_messages_text() {
+        let body = serde_json::json!({"messages": [
+            {"role": "user", "content": "first"},
+            {"role": "user", "content": [
+                {"type": "tool_result", "tool_use_id": "a", "content": "a.txt"},
+                {"type": "tool_result", "tool_use_id": "b", "content": [
+                    {"type": "text", "text": "b.txt"},
+                ]},
+                {"type": "text", "text": "after"},
+            ]},
+        ]})
+        .to_string();
+        assert_eq!(last_message(&body), "a.txt\nb.txt\nafter");
+    }
 
     /// One chat-completions POST whose last message says `last`: the
     /// reply's status and body.

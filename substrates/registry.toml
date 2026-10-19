@@ -1380,6 +1380,28 @@ engine_single_digest_suffices = "the server is this repository's own code, and t
 engine_build_info = "canned-e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
 engine_build_info_is = "derived, not read from a server: canned::scenario_build_info(), \"canned-\" + the digest of no acts; what `diet-drive scenario` reports at GET /props"
 recommended_absent = "a scenario's own replies, routed on loopback: every answer is one the scenario wrote, nothing is sampled"
+[substrate.canned-scenario-hosted]
+equipment = "canned-loopback-scenario"
+description = "the scenario substrate on the hosted path (#555): `diet-drive scenario` serves a scenario's own replies on loopback as Anthropic's Messages API streams them -- thinking with a constructed signature, text, tool_use, usage with cache counts, or an error status with its retry-after -- so a hosted session's wiring is rehearsed end to end with no live call. An `api` entry on canned weights: serve speaks the Messages wire, sends the runner's rehearsal key and never the operator's, and probes no engine. Rehearsal-only, never a claim substrate; every answer is one the scenario wrote"
+pinned = true
+server_kind = "api"
+dialect = "anthropic-messages"
+engine_name = "diet-drive scenario"
+serving_slots = 2
+serving_slots_is = "the routed stub answers each request on its own thread (#782), as on `canned-scenario`"
+engine_identity = "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+engine_identity_is = "the digest of no acts, as on `canned-scenario`: the routed server is fixed and plays nothing of its own; the `anthropic-version` it is spoken to at is the client's constant"
+engine_betas = "interleaved-thinking-2025-05-14"
+thinking = "adaptive"
+weights_kind = "canned"
+weights_acts_sha256 = "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+reproducible_by_config = true
+reproducible_because = "run the same scenario file and the same replies play again; exact match, no band"
+engine_single_digest_suffices = "the server is this repository's own code, and the scenario's replies, digested per run, are the whole of what it plays"
+engine_build_info = "canned-e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+engine_build_info_is = "derived, not read from a server: canned::scenario_build_info(), as on `canned-scenario`; an `api` entry is never asked it"
+recommended_absent = "a scenario's own replies, routed on loopback as Messages events: every answer is one the scenario wrote, nothing is sampled"
+
 [substrate.stub-hosted-api]
 equipment = "stub-hosted-api"
 description = "the hosted-API rehearsal substrate (#555): this crate's loopback stub playing constructed Anthropic Messages events, never a provider's model; a rehearsal substrate for a hosted session's wiring when no live call is allowed, and never a claim substrate: every answer is a constructed one"

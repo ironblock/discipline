@@ -786,6 +786,76 @@ pub(crate) mod tests {
         );
     }
 
+    /// A canned hosted reply (#555) decodes as what it was written as: the
+    /// signed thinking, the text, each call whole, the usage with its
+    /// cache counts, and the stop that asks for the calls.
+    #[test]
+    fn a_canned_hosted_reply_decodes_as_its_parts() {
+        use crate::drive::canned::{HOSTED_SIGNATURE, HostedReply, StreamedCall, hosted_events};
+        let calls = [StreamedCall {
+            id: "toolu_ls",
+            name: "bash",
+            arguments: r#"{"command": "ls"}"#,
+        }];
+        let events = hosted_events(&HostedReply {
+            thinking: Some("one ls"),
+            text: "Listing.",
+            calls: &calls,
+            prompt_tokens: 600,
+            cache_read: 512,
+            cache_write: 64,
+        });
+        let mut decoder = Decoder::default();
+        let (mut text, mut reasoning, mut signature, mut call) =
+            (String::new(), String::new(), String::new(), Vec::new());
+        let mut usage = None;
+        let mut ended = None;
+        for data in events
+            .lines()
+            .filter_map(|line| line.strip_prefix("data: "))
+        {
+            let mut on = |piece: Piece<'_>| match piece {
+                Piece::Text(t) => text.push_str(t),
+                Piece::Reasoning(t) => reasoning.push_str(t),
+                Piece::Signature(t) => signature.push_str(t),
+                Piece::Usage(u) => usage = Some(*u),
+                Piece::ToolCall {
+                    id,
+                    name,
+                    arguments,
+                    ..
+                } => {
+                    call.push((
+                        id.map(str::to_owned),
+                        name.map(str::to_owned),
+                        arguments.to_owned(),
+                    ));
+                }
+                _ => {}
+            };
+            if let Some(end) = decoder.event(data, &mut on).expect("decodes") {
+                ended = Some(end);
+            }
+        }
+        assert_eq!((text.as_str(), reasoning.as_str()), ("Listing.", "one ls"));
+        assert_eq!(signature, HOSTED_SIGNATURE);
+        let arguments: String = call.iter().map(|(_, _, a)| a.as_str()).collect();
+        assert_eq!(call[0].0.as_deref(), Some("toolu_ls"));
+        assert_eq!(call[0].1.as_deref(), Some("bash"));
+        assert_eq!(arguments, r#"{"command": "ls"}"#);
+        let usage = usage.expect("a usage");
+        assert_eq!(usage.input_tokens, Some(24));
+        assert_eq!(usage.cache_read_input_tokens, Some(512));
+        assert_eq!(usage.cache_creation_input_tokens, Some(64));
+        assert_eq!(usage.ephemeral_5m_input_tokens, Some(64));
+        assert_eq!(usage.prompt_tokens(), Some(600));
+        assert_eq!(usage.output_tokens, Some(7));
+        assert!(
+            matches!(&ended, Some(Ended::Finished { finish_reason: Some(r), .. }) if r == "tool_calls"),
+            "{ended:?}"
+        );
+    }
+
     /// What has no Anthropic parameter is refused, never dropped; reasoning
     /// with no signature goes back as text; a budget is `enabled`.
     #[test]
