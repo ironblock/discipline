@@ -15,7 +15,7 @@
     {
       "approvals_off": true,
       "bash_timeout_ms": 120000,
-      "build_commit": "5945d082b8bab9ba7d5125a76984c8f9b1199280",
+      "build_commit": "71dd1fa8620ecd9334a8dffe7edf921877f8c946",
       "build_dirty": false,
       "compaction_persists": true,
       "fork_asks": "v4",
@@ -78,11 +78,11 @@
         "tool_call_text_fallback": "off",
         "tool_output_disposition": "cap-on-arrival:20-lines:51200-bytes+meditation:reference",
         "tool_surface": "standard",
-        "warrant_gate": "classifier:canned-scenario-classifier@0000000000000000000000000000000000000000"
+        "warrant_gate": "classifier:canned-scenario-classifier@0000000000000000000000000000000000000000:windowing-899"
       },
       "model": "scenario",
       "notes_in_the_ask": true,
-      "opened": 1792208250800,
+      "opened": 1792436574766,
       "opening_phase": "plan",
       "phase_document": {
         "digest": "c3c3afe17657994b1403ed749e7352bdf4ad1eb47c688b6e60bb0e122db95e8e",
@@ -3654,16 +3654,31 @@
       "turn": 7
     },
     {
+      "files": [
+        {
+          "bytes": 0,
+          "media_type": "text/plain",
+          "path": "files/e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        }
+      ],
+      "job": "bg_2",
+      "kind": "background.ended",
+      "seq": 271,
+      "status": "cancelled",
+      "t": 51774
+    },
+    {
       "kind": "delta",
       "request": 269,
-      "seq": 271,
+      "seq": 272,
       "t": 52134,
       "text": "LEARNED: NONE\nEVIDENCE: NONE\nSTUCK: NONE"
     },
     {
       "finish_reason": "stop",
       "kind": "response",
-      "seq": 272,
+      "seq": 273,
       "t": 52139,
       "text": "LEARNED: NONE\nEVIDENCE: NONE\nSTUCK: NONE",
       "timings": {
@@ -3681,23 +3696,8 @@
       "fork": 268,
       "kind": "fork.settled",
       "outcome": "decline",
-      "seq": 273,
-      "t": 52144
-    },
-    {
-      "files": [
-        {
-          "bytes": 0,
-          "media_type": "text/plain",
-          "path": "files/e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
-          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
-        }
-      ],
-      "job": "bg_2",
-      "kind": "background.ended",
       "seq": 274,
-      "status": "cancelled",
-      "t": 52149
+      "t": 52144
     },
     {
       "kind": "delta",
