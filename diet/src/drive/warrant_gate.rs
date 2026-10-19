@@ -393,8 +393,9 @@ fn windows_for<'a>(input: Input, this: &'a Windows, previous: Option<&'a Windows
 }
 
 /// `text`'s sentence windows, as the trouble-detector register windows
-/// them: each line, stripped -- code-fence lines skipped -- is split after
-/// `.`, `!`, `?` or `:` at the whitespace before the next word; a sentence
+/// them but for one rule: each line, stripped -- code-fence lines skipped --
+/// is split after `.`, `!` or `?` at the whitespace before the next word, and
+/// never after `:` (#899), so a line still ends a sentence that ends in one; a sentence
 /// longer than `chars` is chopped at its last space before `chars` (at
 /// `chars` when that space falls in the first half); a sentence with fewer
 /// than three word characters is dropped; and the sentences are packed,
@@ -444,8 +445,9 @@ pub fn prose_windows(text: &str, sentences: usize, chars: usize) -> Vec<String> 
     windows
 }
 
-/// `line` split at each run of whitespace that follows `.`, `!`, `?` or `:`
-/// and comes before a non-space.
+/// `line` split at each run of whitespace that follows `.`, `!` or `?` and
+/// comes before a non-space. A colon never ends a sentence (#899): a
+/// "label: content" line and object notation stay whole.
 fn split_sentences(line: &str) -> Vec<String> {
     let letters: Vec<char> = line.chars().collect();
     let mut out = Vec::new();
@@ -453,7 +455,7 @@ fn split_sentences(line: &str) -> Vec<String> {
     let mut at = 0;
     while at < letters.len() {
         let c = letters[at];
-        if c.is_whitespace() && at > 0 && matches!(letters[at - 1], '.' | '!' | '?' | ':') {
+        if c.is_whitespace() && at > 0 && matches!(letters[at - 1], '.' | '!' | '?') {
             let mut end = at;
             while end < letters.len() && letters[end].is_whitespace() {
                 end += 1;
@@ -1363,10 +1365,11 @@ threshold = 0.8
                 3,
                 400
             ),
+            // "Four: five six." is one sentence: a colon never ends one
+            // (#899), where the register's split made it two.
             [
                 "One. Two! Three?",
-                "Four: five six. Seven eight nine.",
-                "code line here"
+                "Four: five six. Seven eight nine. code line here"
             ]
         );
         // Fewer than three word characters: dropped.
@@ -1547,8 +1550,33 @@ threshold = 0.8
         // One call for the prose probes, one for the output's.
         assert_eq!(sidekick.calls.load(std::sync::atomic::Ordering::SeqCst), 2);
     }
+    /// #899: a colon never ends a sentence: a "label: content" line, with
+    /// a second label after it, is one; `.`, `!` and `?` still end one; and a
+    /// line that ends in a colon still ends at the line.
+    #[test]
+    fn a_colon_never_ends_a_sentence() {
+        assert_eq!(
+            split_sentences("decision: keep it — WHY: the bundle needs it."),
+            ["decision: keep it — WHY: the bundle needs it."]
+        );
+        assert_eq!(
+            split_sentences("`{ x: Math.sin(this.yaw), z: Math.cos(this.yaw) }`"),
+            ["`{ x: Math.sin(this.yaw), z: Math.cos(this.yaw) }`"]
+        );
+        assert_eq!(split_sentences("a. b"), ["a.", "b"]);
+        assert_eq!(
+            split_sentences("Done! Next? Yes"),
+            ["Done!", "Next?", "Yes"]
+        );
+        assert_eq!(
+            prose_windows("Let me check the scale:\nthe scale is fine here.", 1, 400),
+            ["Let me check the scale:", "the scale is fine here."]
+        );
+    }
+
     /// The windows of recorded steps, for a parity check against another
-    /// windowing run locally: reads JSON lines of `reasoning`, `text` and
+    /// windowing run locally -- the trouble-detector register's, which still
+    /// splits after `:`, so the two differ by that one rule (#899): reads JSON lines of `reasoning`, `text` and
     /// `calls` (each `arguments` and `shown`) from the path in
     /// `WARRANT_GATE_PARITY_IN`, writes each step's `prose` and `tool`
     /// windows to `WARRANT_GATE_PARITY_OUT`. Run by hand; nothing private
