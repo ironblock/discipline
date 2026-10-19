@@ -15,7 +15,7 @@
     {
       "approvals_off": true,
       "bash_timeout_ms": 120000,
-      "build_commit": "363705246549bda9c18e4689d6f464758e359957",
+      "build_commit": "b4220b26a153a691fdb2a5ee5e5deebbd5fef805",
       "build_dirty": false,
       "compaction_persists": true,
       "fork_asks": "v4",
@@ -82,7 +82,7 @@
       },
       "model": "scenario",
       "notes_in_the_ask": true,
-      "opened": 1792449783025,
+      "opened": 1792452208610,
       "opening_phase": "plan",
       "phase_document": {
         "digest": "c3c3afe17657994b1403ed749e7352bdf4ad1eb47c688b6e60bb0e122db95e8e",
@@ -132,7 +132,7 @@
         "quick",
         "test"
       ],
-      "registry_sha256": "dfc4c70971002395ab2f46fbe55d90f02cc470b3daa8a96618eed3e403ffc700",
+      "registry_sha256": "33def9baa27d36ddb8551e9fe5e8870bbaecc5ab6c43789b4132115b78057f29",
       "scenario_fixed": [
         "job_ids",
         "pids"
@@ -3633,6 +3633,21 @@
       "turn": 7
     },
     {
+      "files": [
+        {
+          "bytes": 0,
+          "media_type": "text/plain",
+          "path": "files/e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        }
+      ],
+      "job": "bg_2",
+      "kind": "background.ended",
+      "seq": 270,
+      "status": "cancelled",
+      "t": 51959
+    },
+    {
       "class": "constraint",
       "compute_units": "none",
       "fired": false,
@@ -3644,7 +3659,7 @@
       "request": 265,
       "revision": "0000000000000000000000000000000000000000",
       "score": "0.040000",
-      "seq": 270,
+      "seq": 271,
       "t": 51959,
       "threshold": "0.5"
     },
@@ -3660,7 +3675,7 @@
       "request": 265,
       "revision": "0000000000000000000000000000000000000000",
       "score": "0.040000",
-      "seq": 271,
+      "seq": 272,
       "t": 51964,
       "threshold": "0.5"
     },
@@ -3676,7 +3691,7 @@
       "request": 265,
       "revision": "0000000000000000000000000000000000000000",
       "score": "0.040000",
-      "seq": 272,
+      "seq": 273,
       "t": 51969,
       "threshold": "0.5"
     },
@@ -3692,7 +3707,7 @@
       "request": 265,
       "revision": "0000000000000000000000000000000000000000",
       "score": "0.040000",
-      "seq": 273,
+      "seq": 274,
       "t": 51974,
       "threshold": "0.5"
     },
@@ -3706,7 +3721,7 @@
       "prefix_shared": false,
       "question": "Answer from this turn alone.\nWhat did this turn establish that a later turn would need? Answer with the fields LEARNED, EVIDENCE and STUCK, one per line, and write NONE for a field with nothing to record.\n",
       "reserved": 706,
-      "seq": 274,
+      "seq": 275,
       "t": 51979,
       "timing": "during_turn",
       "trigger": "call:unknown:call-s1",
@@ -3714,12 +3729,12 @@
       "why": "read"
     },
     {
-      "fork": 274,
+      "fork": 275,
       "head_sha256": "afc15f4cf8c621229e0e5fdf615fae4e481ac18e6d7f89a1b7583aaa0efb36e3",
       "kind": "request",
       "lane": "interview",
       "max_tokens": 512,
-      "seq": 275,
+      "seq": 276,
       "t": 52039,
       "turn": 7
     },
@@ -3729,28 +3744,13 @@
       "kind": "request",
       "lane": "trunk",
       "max_tokens": 512,
-      "seq": 276,
+      "seq": 277,
       "t": 52099,
       "turn": 7
     },
     {
-      "files": [
-        {
-          "bytes": 0,
-          "media_type": "text/plain",
-          "path": "files/e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
-          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
-        }
-      ],
-      "job": "bg_2",
-      "kind": "background.ended",
-      "seq": 277,
-      "status": "cancelled",
-      "t": 52104
-    },
-    {
       "kind": "delta",
-      "request": 275,
+      "request": 276,
       "seq": 278,
       "t": 52464,
       "text": "LEARNED: NONE\nEVIDENCE: NONE\nSTUCK: NONE"
@@ -3766,14 +3766,14 @@
         "predicted_n": 7,
         "prompt_n": 600
       },
-      "to_request": 275,
+      "to_request": 276,
       "usage": {
         "completion_tokens": 7,
         "prompt_tokens": 600
       }
     },
     {
-      "fork": 274,
+      "fork": 275,
       "kind": "fork.settled",
       "outcome": "decline",
       "seq": 280,
@@ -3781,7 +3781,7 @@
     },
     {
       "kind": "delta",
-      "request": 276,
+      "request": 277,
       "seq": 281,
       "t": 52782,
       "text": "The build runs on; the watcher is stopped."
@@ -3797,7 +3797,7 @@
         "predicted_n": 7,
         "prompt_n": 600
       },
-      "to_request": 276,
+      "to_request": 277,
       "usage": {
         "completion_tokens": 7,
         "prompt_tokens": 600
@@ -3826,7 +3826,7 @@
       "model": "canned-scenario-classifier@0000000000000000000000000000000000000000",
       "outcome": "decided",
       "probe": "constraint",
-      "request": 276,
+      "request": 277,
       "revision": "0000000000000000000000000000000000000000",
       "score": "0.040000",
       "seq": 285,
@@ -3842,7 +3842,7 @@
       "model": "canned-scenario-classifier@0000000000000000000000000000000000000000",
       "outcome": "decided",
       "probe": "decision",
-      "request": 276,
+      "request": 277,
       "revision": "0000000000000000000000000000000000000000",
       "score": "0.040000",
       "seq": 286,
@@ -3858,7 +3858,7 @@
       "model": "canned-scenario-classifier@0000000000000000000000000000000000000000",
       "outcome": "decided",
       "probe": "gotcha",
-      "request": 276,
+      "request": 277,
       "revision": "0000000000000000000000000000000000000000",
       "score": "0.040000",
       "seq": 287,
@@ -3874,7 +3874,7 @@
       "model": "canned-scenario-classifier@0000000000000000000000000000000000000000",
       "outcome": "decided",
       "probe": "open",
-      "request": 276,
+      "request": 277,
       "revision": "0000000000000000000000000000000000000000",
       "score": "0.040000",
       "seq": 288,
