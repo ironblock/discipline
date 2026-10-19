@@ -516,6 +516,165 @@ pub fn streamed_events_reporting(
     body
 }
 
+/// What a hosted reply streams (#555): its thinking, its text, its calls,
+/// and the usage it reports -- the prompt, and of it what was read from the
+/// cache and what was written to it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct HostedReply<'a> {
+    /// The thinking before the answer, if any, signed.
+    pub thinking: Option<&'a str>,
+    /// The answer's text.
+    pub text: &'a str,
+    /// The calls it makes.
+    pub calls: &'a [StreamedCall<'a>],
+    /// The prompt its usage reports, in tokens.
+    pub prompt_tokens: u64,
+    /// Of the prompt, the tokens read from the cache.
+    pub cache_read: u64,
+    /// Of the prompt, the tokens written to the cache at the 5-minute
+    /// lifetime.
+    pub cache_write: u64,
+}
+
+/// The signature a hosted reply's thinking carries (#555): constructed,
+/// never a provider's.
+pub const HOSTED_SIGNATURE: &str = "canned-signature";
+
+/// A reply streamed as Anthropic's Messages API streams one (#555): the
+/// HTTP head, then server-sent events -- `message_start` with the usage,
+/// the thinking block and its signature when there is thinking, the text
+/// block when there is text, each call a `tool_use` block whose input
+/// arrives as one `input_json_delta`, `message_delta` with the stop reason
+/// (`tool_use` when there are calls, else `end_turn`), and `message_stop` --
+/// written out and closed. What a hosted scenario's replies are served as.
+#[must_use]
+pub fn hosted_streamed(reply: &HostedReply<'_>) -> Vec<u8> {
+    let body = hosted_events(reply);
+    format!(
+        "HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\nContent-Length: {}\r\n\
+         Connection: close\r\n\r\n{body}",
+        body.len()
+    )
+    .into_bytes()
+}
+
+/// [`hosted_streamed`]'s server-sent events alone, without the HTTP head:
+/// what a held-back hosted reply trickles.
+#[must_use]
+pub fn hosted_events(reply: &HostedReply<'_>) -> String {
+    use serde_json::json;
+    let fresh = reply
+        .prompt_tokens
+        .saturating_sub(reply.cache_read)
+        .saturating_sub(reply.cache_write);
+    let mut events = vec![(
+        "message_start",
+        json!({"type": "message_start", "message": {
+            "id": "msg_canned", "type": "message", "role": "assistant",
+            "model": "canned", "content": [], "stop_reason": null,
+            "usage": {
+                "input_tokens": fresh,
+                "cache_read_input_tokens": reply.cache_read,
+                "cache_creation_input_tokens": reply.cache_write,
+                "cache_creation": {
+                    "ephemeral_5m_input_tokens": reply.cache_write,
+                    "ephemeral_1h_input_tokens": 0,
+                },
+                "output_tokens": 1,
+            },
+        }}),
+    )];
+    let mut index = 0;
+    let mut block = |events: &mut Vec<(&str, serde_json::Value)>,
+                     start: serde_json::Value,
+                     deltas: Vec<serde_json::Value>| {
+        events.push((
+            "content_block_start",
+            json!({"type": "content_block_start", "index": index, "content_block": start}),
+        ));
+        for delta in deltas {
+            events.push((
+                "content_block_delta",
+                json!({"type": "content_block_delta", "index": index, "delta": delta}),
+            ));
+        }
+        events.push((
+            "content_block_stop",
+            json!({"type": "content_block_stop", "index": index}),
+        ));
+        index += 1;
+    };
+    if let Some(thinking) = reply.thinking {
+        block(
+            &mut events,
+            json!({"type": "thinking", "thinking": "", "signature": ""}),
+            vec![
+                json!({"type": "thinking_delta", "thinking": thinking}),
+                json!({"type": "signature_delta", "signature": HOSTED_SIGNATURE}),
+            ],
+        );
+    }
+    if !reply.text.is_empty() {
+        block(
+            &mut events,
+            json!({"type": "text", "text": ""}),
+            vec![json!({"type": "text_delta", "text": reply.text})],
+        );
+    }
+    for call in reply.calls {
+        block(
+            &mut events,
+            json!({"type": "tool_use", "id": call.id, "name": call.name, "input": {}}),
+            vec![json!({"type": "input_json_delta", "partial_json": call.arguments})],
+        );
+    }
+    let stop = if reply.calls.is_empty() {
+        "end_turn"
+    } else {
+        "tool_use"
+    };
+    events.push((
+        "message_delta",
+        json!({"type": "message_delta", "delta": {"stop_reason": stop}, "usage": {"output_tokens": 7}}),
+    ));
+    events.push(("message_stop", json!({"type": "message_stop"})));
+    let mut body = String::new();
+    for (name, data) in events {
+        body.push_str("event: ");
+        body.push_str(name);
+        body.push_str("\ndata: ");
+        body.push_str(&data.to_string());
+        body.push_str("\n\n");
+    }
+    body
+}
+
+/// An error in place of a hosted answer (#555), as Anthropic's API answers
+/// one: `status` with its error type -- `rate_limit_error` for 429,
+/// `overloaded_error` for 529, `api_error` otherwise -- and a `retry-after`
+/// header of `retry_after` seconds when given.
+#[must_use]
+pub fn hosted_error(status: u16, retry_after: Option<u64>) -> Vec<u8> {
+    let kind = match status {
+        429 => "rate_limit_error",
+        529 => "overloaded_error",
+        _ => "api_error",
+    };
+    let body = serde_json::json!({
+        "type": "error",
+        "error": {"type": kind, "message": "a canned error"},
+    })
+    .to_string();
+    let retry =
+        retry_after.map_or_else(String::new, |seconds| format!("retry-after: {seconds}\r\n"));
+    format!(
+        "HTTP/1.1 {status} {kind}\r\nContent-Type: application/json\r\n{retry}Content-Length: {}\r\n\
+         Connection: close\r\n\r\n{body}",
+        body.len()
+    )
+    .into_bytes()
+}
+
 /// One string, as a JSON string literal's interior.
 ///
 /// Four replies here escape the same way. Two of them spelled it out
@@ -588,6 +747,32 @@ mod tests {
             .get(table)
             .and_then(|fields| fields.get(key))
             .unwrap_or_else(|| panic!("the registry has no `{key}` in `[{table}]`"))
+    }
+
+    /// A hosted error is Anthropic's (#555): its status, its error type
+    /// by status, and a `retry-after` only when one is named.
+    #[test]
+    fn a_hosted_error_carries_its_type_and_its_retry_after() {
+        for (status, retry_after, kind) in [
+            (429, Some(7), "rate_limit_error"),
+            (529, None, "overloaded_error"),
+            (500, None, "api_error"),
+        ] {
+            let reply = String::from_utf8(super::hosted_error(status, retry_after)).expect("text");
+            let (head, body) = reply.split_once("\r\n\r\n").expect("a head");
+            assert!(head.starts_with(&format!("HTTP/1.1 {status} ")), "{head}");
+            assert_eq!(
+                head.contains("retry-after: 7\r\n"),
+                retry_after.is_some(),
+                "{head}"
+            );
+            assert!(
+                head.contains(&format!("Content-Length: {}", body.len())),
+                "{head}"
+            );
+            let value: serde_json::Value = serde_json::from_str(body).expect("JSON");
+            assert_eq!(value["error"]["type"], kind);
+        }
     }
 
     #[test]

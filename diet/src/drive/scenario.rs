@@ -60,6 +60,30 @@ pub struct Reply {
     /// The prompt its usage reports, in tokens (#798); absent, the canned
     /// server's own count.
     pub prompt_tokens: Option<u64>,
+    /// What it thinks before it answers, signed (#555): a hosted substrate's
+    /// thinking block, replayed on the next request as the API requires.
+    pub thinking: Option<String>,
+    /// The prompt tokens its usage reports read from the cache (#555), of
+    /// `prompt_tokens`: a hosted substrate's `cache_read_input_tokens`.
+    pub cache_read_tokens: Option<u64>,
+    /// The prompt tokens its usage reports written to the cache, at the
+    /// 5-minute lifetime (#555), of `prompt_tokens`.
+    pub cache_write_tokens: Option<u64>,
+    /// An error in place of an answer (#555): the status, and the seconds its
+    /// `retry-after` header names -- what a hosted API's 429 or 529 says.
+    pub status: Option<(u16, Option<u64>)>,
+}
+
+impl Reply {
+    /// Whether it says what only a hosted substrate's wire carries (#555):
+    /// thinking, cache counts, or an error status.
+    #[must_use]
+    pub fn is_hosted_only(&self) -> bool {
+        self.thinking.is_some()
+            || self.cache_read_tokens.is_some()
+            || self.cache_write_tokens.is_some()
+            || self.status.is_some()
+    }
 }
 
 /// One rule of the canned classifier (#862): a window holding `when` scores
@@ -273,9 +297,19 @@ impl Scenario {
     /// llama.cpp streams one, routed by its `when`, else in order.
     #[must_use]
     pub fn routes(&self) -> Vec<crate::client::stub::Route> {
+        self.routes_on(false)
+    }
+
+    /// [`Self::routes`], each reply streamed as Anthropic's Messages API
+    /// streams one when `hosted` (#555) -- its thinking, its cache counts, or
+    /// its error status with the `retry-after` it names -- else as llama.cpp
+    /// streams one.
+    #[must_use]
+    pub fn routes_on(&self, hosted: bool) -> Vec<crate::client::stub::Route> {
         use crate::client::stub::{Act, Route};
         use crate::drive::canned::{
-            PROMPT_TOKENS, StreamedCall, streamed_events_reporting, streamed_reporting,
+            HostedReply, PROMPT_TOKENS, StreamedCall, hosted_error, hosted_events, hosted_streamed,
+            streamed_events_reporting, streamed_reporting,
         };
         self.replies
             .iter()
@@ -292,12 +326,28 @@ impl Scenario {
                 // Held back: the same events, chunked, the first after the
                 // delay (#782).
                 let prompt = reply.prompt_tokens.unwrap_or(PROMPT_TOKENS);
-                let act = match reply.delay_ms {
-                    Some(ms) => Act::Trickle(
+                let hosted_reply = HostedReply {
+                    thinking: reply.thinking.as_deref(),
+                    text: &reply.text,
+                    calls: &calls,
+                    prompt_tokens: prompt,
+                    cache_read: reply.cache_read_tokens.unwrap_or(0),
+                    cache_write: reply.cache_write_tokens.unwrap_or(0),
+                };
+                let act = match (hosted, reply.status, reply.delay_ms) {
+                    (true, Some((status, retry_after)), _) => {
+                        Act::Raw(hosted_error(status, retry_after))
+                    }
+                    (true, None, Some(ms)) => Act::Trickle(
+                        std::time::Duration::from_millis(ms),
+                        vec![hosted_events(&hosted_reply)],
+                    ),
+                    (true, None, None) => Act::Raw(hosted_streamed(&hosted_reply)),
+                    (false, _, Some(ms)) => Act::Trickle(
                         std::time::Duration::from_millis(ms),
                         vec![streamed_events_reporting(&reply.text, &calls, prompt)],
                     ),
-                    None => Act::Raw(streamed_reporting(&reply.text, &calls, prompt)),
+                    (false, _, None) => Act::Raw(streamed_reporting(&reply.text, &calls, prompt)),
                 };
                 match &reply.when {
                     Some(text) => Route::when(text, act),
@@ -370,6 +420,24 @@ impl Scenario {
                     Value::Integer(i64::try_from(tokens).unwrap_or(i64::MAX)),
                 );
             }
+            // A hosted reply's own fields (#555), digested only when present:
+            // every scenario before them digests as it always has.
+            let count = |n: u64| Value::Integer(i64::try_from(n).unwrap_or(i64::MAX));
+            if let Some(thinking) = &reply.thinking {
+                members.insert("thinking".to_owned(), text(thinking));
+            }
+            if let Some(tokens) = reply.cache_read_tokens {
+                members.insert("cache_read_tokens".to_owned(), count(tokens));
+            }
+            if let Some(tokens) = reply.cache_write_tokens {
+                members.insert("cache_write_tokens".to_owned(), count(tokens));
+            }
+            if let Some((status, retry_after)) = reply.status {
+                members.insert("status".to_owned(), count(u64::from(status)));
+                if let Some(seconds) = retry_after {
+                    members.insert("retry_after".to_owned(), count(seconds));
+                }
+            }
             json::render(&Value::Object(members), &mut out);
             out.push('\n');
         }
@@ -387,6 +455,25 @@ impl Scenario {
         }
         crate::digest::sha256_hex(out.as_bytes())
     }
+}
+
+/// The key a canned hosted run sends (#555): a rehearsal's, never a
+/// provider's.
+pub const REHEARSAL_KEY: &str = "sk-rehearsal";
+
+/// Whether `substrate` is a hosted entry (#555), an `api` one whose replies
+/// are served as Anthropic's Messages API serves them; a reply that thinks,
+/// counts the cache or answers with an error on any other is refused.
+fn served_hosted(substrate: &str, replies: &[Reply]) -> Result<bool, Failure> {
+    let hosted = crate::drive::registry::identity(crate::drive::registry::REGISTRY, substrate)
+        .is_ok_and(|identity| identity.server_kind.as_deref() == Some("api"));
+    if !hosted && replies.iter().any(Reply::is_hosted_only) {
+        return Err(Failure(format!(
+            "a reply's `thinking`, cache counts or `status` are a hosted substrate's, and \
+             {substrate} is not one"
+        )));
+    }
+    Ok(hosted)
 }
 
 /// Why a scenario does not read.
@@ -538,7 +625,19 @@ fn classify_of(mut fields: Fields) -> Result<Classify, ScenarioError> {
 
 fn reply_of(mut fields: Fields) -> Result<Reply, ScenarioError> {
     let when = fields.maybe_text("when")?;
-    let text = fields.text("text")?;
+    let status = match fields.maybe_count("status")? {
+        None => None,
+        Some(code @ 400..=599) => Some((
+            u16::try_from(code).map_err(|_| fields.wrong("`status` an HTTP error status"))?,
+            fields.maybe_count("retry_after")?,
+        )),
+        Some(_) => return Err(fields.wrong("`status` an HTTP error status, 400 to 599")),
+    };
+    // An error answers nothing: its text is the scenario's to omit.
+    let text = match status {
+        Some(_) => fields.maybe_text("text")?.unwrap_or_default(),
+        None => fields.text("text")?,
+    };
     let calls = match fields.take("calls") {
         None => Vec::new(),
         Some(Value::Array(calls)) => calls
@@ -561,6 +660,9 @@ fn reply_of(mut fields: Fields) -> Result<Reply, ScenarioError> {
     };
     let delay_ms = fields.maybe_count("delay_ms")?;
     let prompt_tokens = fields.maybe_count("prompt_tokens")?;
+    let thinking = fields.maybe_text("thinking")?;
+    let cache_read_tokens = fields.maybe_count("cache_read_tokens")?;
+    let cache_write_tokens = fields.maybe_count("cache_write_tokens")?;
     fields.done()?;
     Ok(Reply {
         when,
@@ -568,6 +670,10 @@ fn reply_of(mut fields: Fields) -> Result<Reply, ScenarioError> {
         calls,
         delay_ms,
         prompt_tokens,
+        thinking,
+        cache_read_tokens,
+        cache_write_tokens,
+        status,
     })
 }
 
@@ -1348,6 +1454,10 @@ fn running(
         _ => return Err(Failure(format!("{} names no substrate", regimen.display()))),
     };
     said["substrate"] = serde_json::Value::String(substrate.clone());
+    // A hosted substrate (#555): an `api` entry, whose replies are served as
+    // Anthropic's Messages API serves them. A reply that thinks, counts the
+    // cache or answers with an error is said in that wire alone.
+    let hosted = served_hosted(&substrate, &scenario.replies)?;
     // Serve's own reading of whether the regimen runs commands.
     let runs_commands = crate::drive::tool_loop::declared(&read)
         .map_err(|why| Failure(format!("{}: {why}", regimen.display())))?
@@ -1374,9 +1484,9 @@ fn running(
         said["replies_sha256"] = serde_json::Value::String(scenario.replies_digest());
         let build_info = crate::drive::canned::scenario_build_info();
         let listening = match &classifier {
-            None => crate::client::stub::Stub::routing(scenario.routes(), &build_info, 0),
+            None => crate::client::stub::Stub::routing(scenario.routes_on(hosted), &build_info, 0),
             Some(classifier) => crate::client::stub::Stub::routing_classifying(
-                scenario.routes(),
+                scenario.routes_on(hosted),
                 &build_info,
                 0,
                 scenario.classifying(classifier),
@@ -1389,6 +1499,8 @@ fn running(
     };
     let endpoint = match (&options.endpoint, &stub) {
         (Some(endpoint), _) => endpoint.clone(),
+        // The Messages API's path, as a hosted entry is spoken to (#555).
+        (None, Some(stub)) if hosted => format!("http://{}/v1/messages", stub.address()),
         (None, Some(stub)) => stub.url(),
         (None, None) => unreachable!("a run is live or canned"),
     };
@@ -1436,6 +1548,15 @@ fn running(
         .stdout(std::process::Stdio::piped());
     if let Some(key_file) = &options.key_file {
         serve.arg("--key-file").arg(key_file);
+    } else if hosted && !live {
+        // A canned hosted run sends a rehearsal key (#555), written beside
+        // the run's credential, and never the operator's: the environment's
+        // key is withheld from serve, so no rehearsal can carry it.
+        let key_file = secrets.join("rehearsal.key");
+        std::fs::write(&key_file, REHEARSAL_KEY)
+            .map_err(|why| Failure(format!("the rehearsal key cannot be written: {why}")))?;
+        serve.arg("--key-file").arg(&key_file);
+        serve.env_remove(crate::drive::hosted::ANTHROPIC_API_KEY);
     }
     let mut worktree = None;
     if runs_commands {
@@ -1603,6 +1724,10 @@ mod tests {
                     calls: Vec::new(),
                     delay_ms: None,
                     prompt_tokens: None,
+                    thinking: None,
+                    cache_read_tokens: None,
+                    cache_write_tokens: None,
+                    status: None,
                 },
                 Reply {
                     when: None,
@@ -1614,6 +1739,10 @@ mod tests {
                     }],
                     delay_ms: None,
                     prompt_tokens: None,
+                    thinking: None,
+                    cache_read_tokens: None,
+                    cache_write_tokens: None,
+                    status: None,
                 },
                 Reply {
                     when: None,
@@ -1621,6 +1750,10 @@ mod tests {
                     calls: Vec::new(),
                     delay_ms: Some(250),
                     prompt_tokens: Some(1200),
+                    thinking: None,
+                    cache_read_tokens: None,
+                    cache_write_tokens: None,
+                    status: None,
                 },
             ]
         );
@@ -1757,6 +1890,51 @@ mod tests {
         assert_eq!(read.routes().len(), 3);
     }
 
+    /// A hosted reply's fields (#555): an error status takes its
+    /// `retry-after` and needs no text; thinking and cache counts are read;
+    /// a substrate that is not hosted refuses them, and a hosted one serves
+    /// them.
+    #[test]
+    fn a_hosted_reply_reads_and_only_a_hosted_substrate_takes_it() {
+        let text = concat!(
+            r#"{"scenario":"s","regimen":"r.toml","head":"h.md"}"#,
+            "\n",
+            r#"{"reply":{"thinking":"t","text":"a","cache_read_tokens":512,"cache_write_tokens":64}}"#,
+            "\n",
+            r#"{"reply":{"status":529,"retry_after":7}}"#,
+            "\n",
+            r#"{"reply":{"text":"plain"}}"#,
+            "\n",
+        );
+        let read = parse(text).expect("it reads");
+        assert_eq!(read.replies[0].thinking.as_deref(), Some("t"));
+        assert_eq!(read.replies[0].cache_read_tokens, Some(512));
+        assert_eq!(read.replies[0].cache_write_tokens, Some(64));
+        assert_eq!(read.replies[0].status, None);
+        assert_eq!(read.replies[1].status, Some((529, Some(7))));
+        assert_eq!(read.replies[1].text, "");
+        assert!(read.replies[0].is_hosted_only() && read.replies[1].is_hosted_only());
+        assert!(!read.replies[2].is_hosted_only());
+        let refused = served_hosted("canned-scenario", &read.replies).expect_err("refused");
+        assert!(
+            refused.0.contains("canned-scenario is not one"),
+            "{refused}"
+        );
+        assert_eq!(
+            served_hosted("canned-scenario", &read.replies[2..]).map_err(|f| f.0),
+            Ok(false)
+        );
+        assert_eq!(
+            served_hosted("canned-scenario-hosted", &read.replies).map_err(|f| f.0),
+            Ok(true)
+        );
+        // The digest moves with a hosted field, and a scenario without them
+        // digests as before.
+        let mut other = read.clone();
+        other.replies[1].status = Some((429, Some(7)));
+        assert_ne!(other.replies_digest(), read.replies_digest());
+    }
+
     /// Every way a line can be wrong is refused, naming its line.
     #[test]
     fn a_line_it_cannot_read_is_refused_by_its_number() {
@@ -1790,6 +1968,10 @@ mod tests {
                 r#"{"classify":{"when":"x","hypothesis":"y","score":"0.5","loud":true}}"#,
                 2,
             ),
+            (r#"{"reply":{"status":200}}"#, 2),
+            (r#"{"reply":{"status":600}}"#, 2),
+            (r#"{"reply":{"text":"x","retry_after":7}}"#, 2),
+            (r#"{"reply":{"text":"x","cache_read_tokens":"512"}}"#, 2),
         ] {
             let text = format!("{header}\n{body}\n");
             assert!(

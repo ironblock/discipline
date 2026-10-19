@@ -1,0 +1,28 @@
+# The hosted path rehearsed (#555): the scenario's replies served as Anthropic
+# Messages events by the routed stub, on `canned-scenario-hosted` -- an `api`
+# entry on canned weights, so serve speaks the Messages wire, sends a key (`diet-drive scenario`'s
+# rehearsal key, never the operator's), and probes no engine. Turn 1
+# thinks, calls `ls`, and answers from the cache it wrote; turn 2 is answered
+# 529 with a retry-after, and the turn fails, retried by nobody.
+arm = "rehearsal"
+dogma_version = 0
+
+substrate = "canned-scenario-hosted"
+substrate_reasoning = "on"
+# The `hardware_fingerprint` of equipment `canned-loopback-scenario` in
+# `substrates/registry.toml`.
+substrate_hardware = "b6bc80e9e8e4bc2342219f064dab89a8d17c02535600b32b84895fc0b9ba6513"
+
+isolation = "none"
+approval = "none"
+approval_policy = "approvals are off: every command runs without a gate decision or a prompt"
+
+[limits]
+max_steps = 4
+
+[reasoning]
+effort = "low"
+budget_tokens = "none"
+
+[sampler]
+temperature = 1
