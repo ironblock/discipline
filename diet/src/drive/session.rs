@@ -1388,6 +1388,10 @@ pub enum Timing {
     /// Cut from the trunk as it stood after the step's tool results and
     /// sent at once, in a spare slot, while the trunk goes on.
     DuringTurn,
+    /// Cut when the operator's message arrives, before the turn's first
+    /// trunk request, which waits for it (#904): the refutation interview's
+    /// operator fork. Never a regimen's word.
+    Arrival,
 }
 
 impl Timing {
@@ -1397,6 +1401,7 @@ impl Timing {
         match self {
             Self::Gap => "gap",
             Self::DuringTurn => "during_turn",
+            Self::Arrival => "arrival",
         }
     }
 }
@@ -2720,14 +2725,17 @@ impl State {
     /// How a fork's call on `shape` fits (#406). Its prompt: on the trunk's
     /// server and the trunk's prefix, sized as the trunk's is, from the
     /// trunk's measurement; otherwise the trunk's measurement says nothing
-    /// of it, and its estimate is all there is. Whether it may displace the
-    /// trunk's cache: on the trunk's server, off its prefix. Whether it is
+    /// of it, and its estimate is all there is. A prefix that extends the
+    /// trunk -- an arrival fork's, the trunk and the operator's message
+    /// (#904), the trunk's own next prompt -- is on it too. Whether it may
+    /// displace the trunk's cache: on the trunk's server, off its prefix. Whether it is
     /// refused unsent: its window leaves less than the clamp's floor (or
     /// `ceiling`, its tail, if that is less), the room the trunk's own clamp
     /// never goes below (#588).
     fn fork_fit(&self, shape: &RequestShape, offboard: bool, ceiling: u32) -> ForkFit {
         let before_the_ask = &shape.messages[..shape.messages.len() - 1];
-        let on_the_trunks_prefix = self.trunk.starts_with(before_the_ask);
+        let on_the_trunks_prefix =
+            self.trunk.starts_with(before_the_ask) || before_the_ask.starts_with(&self.trunk);
         let prompt = if !offboard && on_the_trunks_prefix {
             self.prompt_of(shape)
         } else {
@@ -3526,28 +3534,25 @@ impl<S: Streaming + 'static> Session<S> {
         }
         shape.messages.push(message.clone());
         let opening = vec![message];
+        // The operator's refutation fork, cut as the message arrives (#904):
+        // the trunk and the message, before the turn reads it. The trunk's
+        // first request waits for it, so it never sees a step of the turn.
+        let arrival = refutation_arrival(&mut state, seq, &opening[0].content).and_then(|firing| {
+            fire_on(
+                &self.shared,
+                &mut state,
+                (turn, seq),
+                firing,
+                (Some(shape.messages.clone()), Timing::Arrival),
+            )
+        });
         // Pushed here, under the lock that admits the ask, and never on the
         // turn's thread: a thread that cannot start still settles with a
         // `request.failed` that cites a request that exists (#117, R2c
-        // finding 21).
-        // The automatic meditation (#617), before the request is sized.
-        window_meditation(&self.shared.template, &mut state, &mut shape, false);
-        let max_tokens = state.sized(&mut shape, self.shared.template.limits.max_output_tokens);
-        let beside = state.trunk_beside();
-        let request = state.push(Event::Requested {
-            turn,
-            lane: Lane::Trunk,
-            head_sha256: crate::client::head::Head::of(&shape).digest().to_owned(),
-            fork: None,
-            max_tokens,
-            beside,
-        });
-        let cancel = Cancel::new();
-        state.flight = Some(Flight {
-            turn,
-            request,
-            cancel: cancel.clone(),
-        });
+        // finding 21) -- the trunk's, or the arrival fork's it waits for.
+        let first = arrival
+            .is_none()
+            .then(|| trunk_opening(&self.shared.template, &mut state, turn, &mut shape));
         drop(state);
         self.shared.changed.notify_all();
 
@@ -3560,7 +3565,15 @@ impl<S: Streaming + 'static> Session<S> {
                 // say why -- or the session sits in `turn` for good, refusing
                 // every ask (#120's first review).
                 let outcome = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-                    call(&shared, &shape, &cancel, opening, turn, request);
+                    let mut shape = shape;
+                    let first = first.or_else(|| {
+                        arrival.and_then(|forked| {
+                            on_arrival(&shared, &forked, turn, &opening, &mut shape)
+                        })
+                    });
+                    if let Some((request, cancel)) = first {
+                        call(&shared, &shape, &cancel, opening, turn, request);
+                    }
                     // A meditation the turn's end made due, queued for its audit
                     // or pre-warm (#504).
                     meditation_work(&shared);
@@ -7035,6 +7048,69 @@ fn trunk_patches(
         Ok((patches, refused)) => (Ok(patches), refused),
         Err(why) => (Err(why), Vec::new()),
     }
+}
+
+/// The turn's first trunk request, logged and in flight: the automatic
+/// meditation first (#617), then sized and sent from `shape`.
+fn trunk_opening(
+    template: &RequestShape,
+    state: &mut State,
+    turn: u32,
+    shape: &mut RequestShape,
+) -> (u64, Cancel) {
+    window_meditation(template, state, shape, false);
+    let max_tokens = state.sized(shape, template.limits.max_output_tokens);
+    let beside = state.trunk_beside();
+    let request = state.push(Event::Requested {
+        turn,
+        lane: Lane::Trunk,
+        head_sha256: crate::client::head::Head::of(shape).digest().to_owned(),
+        fork: None,
+        max_tokens,
+        beside,
+    });
+    let cancel = Cancel::new();
+    state.flight = Some(Flight {
+        turn,
+        request,
+        cancel: cancel.clone(),
+    });
+    (request, cancel)
+}
+
+/// The operator's arrival fork `forked` (#904), streamed and settled on the
+/// turn's thread; then the turn's first trunk request, which waited for it.
+/// A stop meanwhile ends the turn there, cancelled, the ask on the trunk with
+/// no answer, as a stopped trunk call leaves it.
+fn on_arrival<S: Streaming>(
+    shared: &Shared<S>,
+    forked: &Fired,
+    turn: u32,
+    opening: &[Message],
+    shape: &mut RequestShape,
+) -> Option<(u64, Cancel)> {
+    let run = stream_fork(shared, forked);
+    let mut state = shared.lock();
+    state.flight = None;
+    state.forking = None;
+    let outcome = state.aside_sizing(|state| settle_fork(shared, state, forked, run));
+    let first = if outcome == log::ForkOutcome::Cancelled {
+        state.trunk.extend(opening.iter().cloned());
+        state
+            .trunk
+            .push(Message::new(Role::Assistant, String::new()));
+        state.push(Event::TurnSettled {
+            turn,
+            reason: SettleReason::Cancelled,
+        });
+        state.move_to(Settlement::Awaiting);
+        None
+    } else {
+        Some(trunk_opening(&shared.template, &mut state, turn, shape))
+    };
+    drop(state);
+    shared.changed.notify_all();
+    first
 }
 
 /// One call, to its line and what the model is shown of it (`None` when
@@ -10639,13 +10715,26 @@ fn fire_next<S>(shared: &Shared<S>, state: &mut State) -> Option<Fired> {
 
 /// One of the gap's forks, fired: born off the warm trunk -- what the view
 /// shows of it, then the question -- and never appended to it.
-#[allow(clippy::too_many_lines)]
 fn fire<S>(
     shared: &Shared<S>,
     state: &mut State,
     turn: u32,
     at: u64,
     firing: Firing,
+) -> Option<Fired> {
+    fire_on(shared, state, (turn, at), firing, (None, Timing::Gap))
+}
+
+/// [`fire`], from `prefix` when given -- the trunk as an arrival fork sees
+/// it, the operator's message last (#904) -- else the trunk as the view
+/// shows it; its line saying `timing`.
+#[allow(clippy::too_many_lines)]
+fn fire_on<S>(
+    shared: &Shared<S>,
+    state: &mut State,
+    (turn, at): (u32, u64),
+    firing: Firing,
+    (prefix, timing): (Option<Vec<Message>>, Timing),
 ) -> Option<Fired> {
     let Firing {
         why,
@@ -10671,7 +10760,13 @@ fn fire<S>(
     } else {
         ForkView::Trunk
     });
-    shape.messages = viewed(&state.trunk, shared.template.messages.len(), view);
+    let view = if prefix.is_some() {
+        ForkView::Trunk
+    } else {
+        view
+    };
+    shape.messages =
+        prefix.unwrap_or_else(|| viewed(&state.trunk, shared.template.messages.len(), view));
     shape.messages.push(Message::new(role, question.clone()));
     let seat = shared.seat.as_ref().map(|seat| {
         shape.model.clone_from(&seat.model);
@@ -10708,7 +10803,7 @@ fn fire<S>(
         seat,
         displaces,
         cut: None,
-        timing: Timing::Gap,
+        timing,
         view_overridden: None,
         reserved: None,
         offered,
@@ -11345,34 +11440,41 @@ fn failure_said(line: &ToolLine, pointer: &str) -> String {
 }
 
 /// The gap's refutation fork (#878), when the interview is on: after a
-/// failed command, else after the operator's message -- each once the
-/// cooldown's steps have passed since that source's last, the turn's answer
-/// counted as a step. It asks `REFUTE_Q` over the live notes most like what
-/// it is asked about, by id, at most the lever's count of them.
-fn refutation_firing(state: &mut State, turn: u32) -> Option<Firing> {
-    use crate::dogma::{Hole, Template};
-    let (_, cooldown, candidates) = state.interview.as_ref()?.refutation?;
+/// failed command, once its cooldown's steps have passed since the last --
+/// the turn's answer counted as a step. The operator's message is asked about
+/// when it arrives instead ([`refutation_arrival`], #904), so the two never
+/// compete for the gap.
+fn refutation_firing(state: &mut State, _turn: u32) -> Option<Firing> {
+    let (_, _, candidates) = state.interview.as_ref()?.refutation?;
     state.refute_steps.0 = state.refute_steps.0.saturating_add(1);
     state.refute_steps.1 = state.refute_steps.1.saturating_add(1);
-    let failed = state.refute_due.take();
-    if failed.is_some() {
-        state.refute_steps.0 = 0;
+    let due = state.refute_due.take()?;
+    state.refute_steps.0 = 0;
+    refutation_asked(state, &due, candidates)
+}
+
+/// The operator's refutation fork (#904), when the interview is on and its
+/// cooldown's steps have passed since its last: asked about the message
+/// `text`, logged at `seq`, as it arrives -- its pointer that line, its
+/// source what the operator said, its notes those most like it.
+fn refutation_arrival(state: &mut State, seq: u64, text: &str) -> Option<Firing> {
+    let (_, cooldown, candidates) = state.interview.as_ref()?.refutation?;
+    if state.refute_steps.1 < cooldown {
+        return None;
     }
-    let due = failed.or_else(|| {
-        (state.refute_steps.1 >= cooldown)
-            .then(|| {
-                state.log.iter().find_map(|logged| match &logged.event {
-                    Event::Asked { turn: at, text, .. } if *at == turn => Some(RefuteDue {
-                        trigger: logged.seq.to_string(),
-                        pointer: format!("log seq {}", logged.seq),
-                        source: format!("The operator said:\n{text}"),
-                    }),
-                    _ => None,
-                })
-            })
-            .flatten()
-            .inspect(|_| state.refute_steps.1 = 0)
-    })?;
+    state.refute_steps.1 = 0;
+    let due = RefuteDue {
+        trigger: seq.to_string(),
+        pointer: format!("log seq {seq}"),
+        source: format!("The operator said:\n{text}"),
+    };
+    refutation_asked(state, &due, candidates)
+}
+
+/// The refutation fork `due` asks (#878): `REFUTE_Q` over the live notes most
+/// like what it is asked about, by id, at most `candidates` of them.
+fn refutation_asked(state: &State, due: &RefuteDue, candidates: u64) -> Option<Firing> {
+    use crate::dogma::{Hole, Template};
     let object = &state.interview.as_ref()?.object;
     let offered = refutation_candidates(object, &due.source, candidates);
     let items: Vec<String> = offered
@@ -14368,6 +14470,106 @@ pub(in crate::drive) mod tests {
             None,
             Some(interview),
         )
+    }
+
+    /// #904: the operator's message forks its refutation interview when it
+    /// arrives -- the turn's first request, before the trunk's, its prefix
+    /// the trunk and the message, no step of the turn in it -- and a failed
+    /// command in that same turn still gets the gap's fork.
+    #[test]
+    fn the_operators_refutation_fork_is_cut_on_arrival_and_a_failure_keeps_the_gap() {
+        let tree = scratch("refute-arrival");
+        let mut interview = interviewing(&[]);
+        interview.refutation = Some((3, 3, 8));
+        let mut shape = looping();
+        declare_self_capture(&mut shape, Some(&interview));
+        let heading = shape.messages.len();
+        let refute = |id: &str| {
+            vec![Step::call(
+                0,
+                id,
+                crate::dogma::refutation::NAME,
+                r#"{"refuted":[]}"#,
+            )]
+        };
+        let session = Session::open_with(
+            Canned::new([
+                refute("r-arrival"),
+                vec![bash("call-1", "false")],
+                deltas(&["it failed"]),
+                refute("r-gap"),
+            ]),
+            shape,
+            None,
+            Some(tools(
+                Confinement::Unconfined,
+                &tree,
+                &["false"],
+                None,
+                Decider::Decline,
+            )),
+            None,
+            Some(interview),
+        );
+        session.ask("Run the loader.", None).expect("accepted");
+        let log = wait_until(&session, "the turn and its gap", |log| {
+            turns_settled(log) == 1 && settled(log)
+        });
+        let asked = log
+            .iter()
+            .find(|logged| matches!(logged.event, Event::Asked { .. }))
+            .map(|logged| logged.seq)
+            .expect("the ask");
+        let forks: Vec<(u64, String, Timing)> = log
+            .iter()
+            .filter_map(|logged| match &logged.event {
+                Event::Forked {
+                    why: log::Warrant::Refutation,
+                    trigger,
+                    timing,
+                    displaces,
+                    ..
+                } => {
+                    // Its prefix is the trunk's next prompt: it warms the
+                    // trunk's cache, never displaces it.
+                    assert!(!displaces, "{trigger}");
+                    Some((logged.seq, trigger.clone(), *timing))
+                }
+                _ => None,
+            })
+            .collect();
+        let first_trunk = log
+            .iter()
+            .find(|logged| {
+                matches!(
+                    logged.event,
+                    Event::Requested {
+                        lane: Lane::Trunk,
+                        ..
+                    }
+                )
+            })
+            .map(|logged| logged.seq)
+            .expect("a trunk request");
+        assert!(
+            matches!(
+                &forks[..],
+                [(arrival, operator, Timing::Arrival), (_, failed, Timing::Gap)]
+                    if *operator == format!("refutation:{asked}")
+                        && *arrival < first_trunk
+                        && failed == "refutation:call:call-1"
+            ),
+            "{forks:?}"
+        );
+        // The arrival fork's request was the session's first, and its prefix
+        // the head, the ask and its question: no step of the turn.
+        let sent = session.shared.transport.sent();
+        let roles: Vec<Role> = sent[0].messages[heading..]
+            .iter()
+            .map(|message| message.role)
+            .collect();
+        assert_eq!(roles, [Role::User, Role::User], "{:?}", sent[0].messages);
+        tidy(&[&tree]);
     }
 
     /// A `refute_beliefs` call carrying `arguments`.

@@ -138,6 +138,16 @@
 //! may share a gap, each opened after the one before it settled; a fork
 //! with none is still its gap's only fork.
 //!
+//! v10 (#904) adds a fork cut as the operator's message arrives: `timing`
+//! `arrival`, its `at` the turn's `ask`. It is the refutation interview's
+//! operator fork, on `interview`, of the latest turn, logged before that
+//! turn's first trunk `request`, which waits for it: no trunk `request` of
+//! the turn while it is unsettled. A log that declares 9 or less and carries
+//! one is refused. For a reader of v9 logs, the migration is this one line
+//! shape: a v9 log's operator refutation fork is a gap fork, `at` its turn's
+//! trunk `request`, and reads in v10 unchanged; a v10 log's is an arrival
+//! fork, and its `at` names an `ask`, never a `request`.
+//!
 //! # A torn final line
 //!
 //! A writer killed mid-write leaves the start of an event with no line break
@@ -169,10 +179,10 @@ use super::record::vocabulary;
 struct LogParser;
 
 /// The version this module writes, as `session.start` states it.
-pub const VERSION: i64 = 9;
+pub const VERSION: i64 = 10;
 
 /// Every version this module reads.
-pub const READS: &[i64] = &[0, 1, 2, 3, 4, 5, 6, 7, 8, 9];
+pub const READS: &[i64] = &[0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10];
 
 /// How recent an input event must be, at the moment a turn settles, for the
 /// person to count as already present: `notice` is then zero (Q4 (a), ruled
@@ -1459,7 +1469,10 @@ pub enum Event {
         /// The `seq` of the step's last `tool_call` it was cut at, during the
         /// turn (v8, #782): the trunk as it stood after that result.
         cut: Option<u64>,
-        /// When it ran (v8, #782): `during_turn`; absent is the gap.
+        /// When it ran (v8, #782): `during_turn`; absent is the gap. Or
+        /// `arrival` (v10, #904): cut as the operator's message arrived, at
+        /// that `ask` (`at` names its seq), before the turn's first trunk
+        /// `request`, which waits for it.
         timing: Option<String>,
         /// The `fork_view` the regimen declared that a cut during the turn
         /// overrode (v8, #782): such a fork sees the whole trunk at the cut,
@@ -2692,6 +2705,13 @@ struct Forks {
     /// The chunks of a meditation's audit (v8): each may run beside the
     /// others.
     chunked: BTreeSet<u64>,
+    /// Each turn's `ask`, by its `seq` (v10): where an arrival fork is cut.
+    asks: BTreeMap<u32, u64>,
+    /// The forks cut as the operator's message arrived (v10, #904): each
+    /// before its turn's first trunk `request`, which waits for it.
+    arrivals: BTreeSet<u64>,
+    /// The fork line being checked, when it is cut on arrival.
+    arrival: Option<u64>,
 }
 
 impl Forks {
@@ -2714,6 +2734,14 @@ impl Forks {
         turns: u32,
         trunk: &BTreeMap<u32, u64>,
     ) -> Result<(), String> {
+        if self.arrival.take() == Some(seq) {
+            return self.arrival(
+                seq,
+                (lane, of_turn, at),
+                (cut, after_meditation),
+                (turns, trunk),
+            );
+        }
         if let Some(chunk) = chunk
             && lane != Lane::Audit
         {
@@ -2797,6 +2825,56 @@ impl Forks {
             ));
         }
         self.in_its_gap(seq, (of_turn, triggered), chunk)
+    }
+
+    /// A fork cut as the operator's message arrived (v10, #904): the
+    /// refutation interview's, on `interview`, of the latest turn, at its
+    /// `ask`, before the turn's first trunk `request`.
+    fn arrival(
+        &mut self,
+        seq: u64,
+        (lane, of_turn, at): (Lane, u32, u64),
+        (cut, after_meditation): (Option<u64>, Option<u64>),
+        (turns, trunk): (u32, &BTreeMap<u32, u64>),
+    ) -> Result<(), String> {
+        if lane != Lane::Interview || cut.is_some() || after_meditation.is_some() {
+            return Err(
+                "an `arrival` fork that is not an `interview` fork at an `ask`: only the \
+                 operator's refutation interview is cut as a message arrives"
+                    .to_owned(),
+            );
+        }
+        if of_turn != turns || self.asks.get(&of_turn) != Some(&at) {
+            return Err(format!(
+                "an `arrival` fork of turn {of_turn} at seq {at}, which is not the latest \
+                 turn's (here {turns}) `ask`"
+            ));
+        }
+        if trunk.contains_key(&of_turn) {
+            return Err(format!(
+                "an `arrival` fork of turn {of_turn} after its trunk `request`: the turn's \
+                 first request waits for it"
+            ));
+        }
+        self.arrivals.insert(seq);
+        self.of_turn.insert(seq, of_turn);
+        Ok(())
+    }
+
+    /// A trunk `request` of `turn` (v10): never while the turn's arrival fork
+    /// is unsettled, which it waits for.
+    fn trunk_after_arrival(&self, turn: u32) -> Result<(), String> {
+        match self
+            .arrivals
+            .iter()
+            .find(|fork| self.of_turn.get(fork) == Some(&turn) && !self.settled.contains_key(fork))
+        {
+            Some(fork) => Err(format!(
+                "a trunk request of turn {turn} while its `arrival` fork {fork} is unsettled: \
+                 the turn's first request waits for it"
+            )),
+            None => Ok(()),
+        }
     }
 
     /// A gap's fork after the gap's others: one alone, or each named by its
@@ -3112,6 +3190,10 @@ fn beyond(line: &Line, declared: i64) -> Option<String> {
     None
 }
 
+/// A fork's `timing` when it was cut as the operator's message arrived
+/// (v10, #904): the session's `Timing::Arrival` word.
+pub const ARRIVAL: &str = "arrival";
+
 /// Every rule that no single line can break alone.
 #[allow(clippy::too_many_lines)]
 fn check(lines: &[Line]) -> Result<(), LogError> {
@@ -3185,6 +3267,7 @@ fn check(lines: &[Line]) -> Result<(), LogError> {
                     return Err(at(index, format!("turn {turn} follows turn {turns}")));
                 }
                 turns = *turn;
+                forks.asks.insert(*turn, line.seq);
             }
             Event::Request {
                 turn, lane, fork, ..
@@ -3196,6 +3279,11 @@ fn check(lines: &[Line]) -> Result<(), LogError> {
                     ));
                 }
                 forks.request(*lane, *fork).map_err(|why| at(index, why))?;
+                if *lane == Lane::Trunk {
+                    forks
+                        .trunk_after_arrival(*turn)
+                        .map_err(|why| at(index, why))?;
+                }
                 requests.insert(line.seq);
                 request_turns.insert(line.seq, *turn);
                 if *lane == Lane::Trunk {
@@ -3253,16 +3341,32 @@ fn check(lines: &[Line]) -> Result<(), LogError> {
                 after_meditation,
                 cut,
                 chunk,
+                timing,
                 ..
-            } => forks
-                .fork(
-                    line.seq,
-                    (*lane, *of_turn, *forked_at, trigger.is_some()),
-                    (*after_meditation, *cut, *chunk),
-                    turns,
-                    &trunk,
-                )
-                .map_err(|why| at(index, why))?,
+            } => {
+                // Cut as the operator's message arrives (v10, #904).
+                if timing.as_deref() == Some(ARRIVAL) {
+                    if declared < 10 {
+                        return Err(at(
+                            index,
+                            format!(
+                                "a fork `timing` `{ARRIVAL}`, which arrived in v10, in a log \
+                                 that declares v{declared}"
+                            ),
+                        ));
+                    }
+                    forks.arrival = Some(line.seq);
+                }
+                forks
+                    .fork(
+                        line.seq,
+                        (*lane, *of_turn, *forked_at, trigger.is_some()),
+                        (*after_meditation, *cut, *chunk),
+                        turns,
+                        &trunk,
+                    )
+                    .map_err(|why| at(index, why))?;
+            }
             Event::ForkSettled { fork, outcome, .. } => forks
                 .settle(*fork, *outcome)
                 .map_err(|why| at(index, why))?,
@@ -8382,11 +8486,11 @@ mod tests {
         assert!(refused.why.contains("v8"), "{refused}");
     }
 
-    /// #583, #878: this module writes v9.
+    /// #583, #878, #904: this module writes v10.
     #[test]
-    fn this_module_writes_v9_and_reads_every_version_before_it() {
-        assert_eq!(super::VERSION, 9);
-        assert_eq!(super::READS, &[0, 1, 2, 3, 4, 5, 6, 7, 8, 9]);
+    fn this_module_writes_v10_and_reads_every_version_before_it() {
+        assert_eq!(super::VERSION, 10);
+        assert_eq!(super::READS, &[0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10]);
     }
 
     fn start() -> Line {
