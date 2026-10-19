@@ -92,6 +92,7 @@ A `phase.ruled` line records every ruling and move.
   - the truncation side;
   - the timeout;
   - the windowing (`prose_window_sentences`, `prose_window_chars`, `output_tail_chars`);
+  - `windowing`: the issue whose windowing rule the thresholds were fit on (#902), `899` for this build. A regimen naming another is refused, the refusal naming both: thresholds fit on other windows need a refit, as #900 refit #899's. The start row's `warrant_gate` word carries it (`classifier:<model>@<revision>:windowing-899`);
   - the windows one request carries (`batch`, the model's `max_batch`).
 - **Probes.** Each `[warrant_classifier.<name>]` table is a probe. It names:
   - its `class` (`gotcha`, `decision`, `constraint` or `open`);
@@ -101,8 +102,8 @@ A `phase.ruled` line records every ruling and move.
   - its `threshold`.
 - **Scoring.** Each hypothesis scores the max over the probe's windows, scored independently (`multi_label`). The probe's score is the max or mean over its hypotheses. Its class fires at or above the threshold.
 - **What fires.** A trouble fork asks only the trio classes that fired, with no cooldown. `open` fires on its class when a probe gates it; otherwise it fires on its cadence. `evidence` is unchanged.
-- **Windows.** They are the trouble-detector register's:
-  - prose split into sentences and packed into windows of at most 3 sentences and 400 characters;
+- **Windows.** They are the trouble-detector register's, but for one rule:
+  - prose split into sentences after `.`, `!` or `?`, never after a colon (#899), and packed into windows of at most 3 sentences and 400 characters;
   - each call's output as `$ <arguments>` and its last 800 characters, plus the first error-looking line.
 - **Holding the session.** The classifier is called with the session's lock released. A stop meanwhile drops the decision as `stale`.
 - **Logging.** Every probe's decision is a `warrant.gated` line: the step's trunk request, the class, score and threshold, whether it fired, the model, revision and compute units, and the latency.

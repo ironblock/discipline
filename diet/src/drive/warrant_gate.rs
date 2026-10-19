@@ -170,6 +170,9 @@ pub struct Classifier {
     pub output_tail_chars: usize,
     /// The windows one request carries, at most: the model's `max_batch`.
     pub batch: usize,
+    /// The windowing its thresholds were fit on: the issue that last
+    /// changed the windowing rule (#902).
+    pub windowing: u64,
     /// The probes, by name.
     pub probes: Vec<Probe>,
 }
@@ -265,8 +268,26 @@ fn classifier(table: &BTreeMap<String, Value>) -> Result<Classifier, String> {
         prose_window_chars: count("prose_window_chars")?,
         output_tail_chars: count("output_tail_chars")?,
         batch: count("batch")?,
+        windowing: windowing(table)?,
         probes,
     })
+}
+
+/// The windowing a classifier regimen's thresholds were fit on (#902):
+/// required, and this build's own, [`WINDOWING`].
+fn windowing(table: &BTreeMap<String, Value>) -> Result<u64, String> {
+    let at = format!("`{WARRANT_CLASSIFIER}.windowing`");
+    match table.get("windowing") {
+        Some(Value::Integer(n)) if u64::try_from(*n).ok() == Some(WINDOWING) => Ok(WINDOWING),
+        Some(Value::Integer(n)) => Err(format!(
+            "{at} is {n}, but this build windows prose by #{WINDOWING}: thresholds fit on \
+             #{n}'s windows need a refit on #{WINDOWING}'s"
+        )),
+        _ => Err(format!(
+            "{at} is required: the issue whose windowing the thresholds were fit on, as a \
+             number; this build windows prose by #{WINDOWING}"
+        )),
+    }
 }
 
 fn read_probe(name: &str, table: &BTreeMap<String, Value>) -> Result<Probe, String> {
@@ -444,6 +465,14 @@ pub fn prose_windows(text: &str, sentences: usize, chars: usize) -> Vec<String> 
     }
     windows
 }
+
+/// The windowing this build makes, named by the issue that last changed
+/// the rule: a classifier regimen declares it as `windowing`, and serve
+/// refuses one fit on another (#902). Rule: a change to how prose or output
+/// is windowed -- [`split_sentences`], [`prose_windows`], [`chop`] -- sets
+/// this to its own issue in the same PR, and thresholds fit before it need a
+/// refit, as #900 refit #899's.
+pub const WINDOWING: u64 = 899;
 
 /// `line` split at each run of whitespace that follows `.`, `!` or `?` and
 /// comes before a non-space. A colon never ends a sentence (#899): a
@@ -1151,6 +1180,7 @@ pub(crate) mod tests {
             prose_window_chars: 400,
             output_tail_chars: 800,
             batch: 8,
+            windowing: WINDOWING,
             probes,
         }
     }
@@ -1185,6 +1215,7 @@ prose_window_sentences = 3
 prose_window_chars = 400
 output_tail_chars = 800
 batch = 8
+windowing = 899
 
 [warrant_classifier.gotcha-prose]
 class = "gotcha"
@@ -1193,6 +1224,37 @@ hypotheses = ["A tool behaved unexpectedly.", "An assumption was wrong."]
 aggregate = "mean"
 threshold = 0.8
 "#;
+
+    /// #902: a classifier regimen names the windowing its thresholds were
+    /// fit on, by the issue that last changed it; a regimen fit on #850's
+    /// windows, or naming none, is refused, the refusal naming both values.
+    #[test]
+    fn a_regimen_fit_on_another_windowing_is_refused() {
+        let parse = |text: &str| read(&crate::formats::regimen::parse(text).expect("a regimen"));
+        let with = |windowing: &str| {
+            REGIMEN.replacen(
+                "windowing = 899\n",
+                &format!("windowing = {windowing}\n"),
+                1,
+            )
+        };
+        let refused = parse(&with("850")).expect_err("#850's windows are not this build's");
+        assert!(
+            refused.contains("850") && refused.contains("899"),
+            "{refused}"
+        );
+        let missing = parse(&REGIMEN.replacen("windowing = 899\n", "", 1))
+            .expect_err("a regimen naming no windowing");
+        assert!(
+            missing.contains("windowing") && missing.contains("899"),
+            "{missing}"
+        );
+        assert!(parse(&with("\"899\"")).is_err(), "an issue is a number");
+        assert!(matches!(
+            parse(&with("899")),
+            Ok(WarrantGate::Classifier(classifier)) if classifier.windowing == 899
+        ));
+    }
 
     #[test]
     fn the_gate_is_regex_unless_the_regimen_names_the_classifier_and_every_setting() {
@@ -1219,6 +1281,7 @@ threshold = 0.8
             "prose_window_chars",
             "output_tail_chars",
             "batch",
+            "windowing",
             "class",
             "input",
             "hypotheses",

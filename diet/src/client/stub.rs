@@ -1289,6 +1289,7 @@ mod tests {
             prose_window_chars: 400,
             output_tail_chars: 400,
             batch: 8,
+            windowing: crate::drive::warrant_gate::WINDOWING,
             probes: Vec::new(),
         };
         let labels = ["Something went wrong.", "A question is left open."];

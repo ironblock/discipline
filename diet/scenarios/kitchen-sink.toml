@@ -75,6 +75,8 @@ prose_window_sentences = 3
 prose_window_chars = 400
 output_tail_chars = 400
 batch = 8
+# The windowing its thresholds were fit on: the issue that last changed it (#902).
+windowing = 899
 
 [warrant_classifier.gotcha]
 class = "gotcha"

@@ -808,13 +808,17 @@ fn fork_backlog_lever(regimen: &Regimen) -> String {
 }
 
 /// The step warrants' gate lever's word: `regex`, or `classifier:` and the
-/// model and its revision; [`UNDECLARED`] for a gate serve refuses.
+/// model and its revision, then the windowing its thresholds were fit on
+/// (`:windowing-<issue>`, #902); [`UNDECLARED`] for a gate serve refuses.
 fn warrant_gate_lever(regimen: &Regimen) -> String {
     use crate::drive::warrant_gate::{WarrantGate, read};
     match read(regimen) {
         Ok(WarrantGate::Regex) => "regex".to_owned(),
         Ok(WarrantGate::Classifier(classifier)) => {
-            format!("classifier:{}@{}", classifier.model, classifier.revision)
+            format!(
+                "classifier:{}@{}:windowing-{}",
+                classifier.model, classifier.revision, classifier.windowing
+            )
         }
         Err(_) => UNDECLARED.to_owned(),
     }
