@@ -194,7 +194,7 @@
 {"expect":"tool_call","where":{"name":"tidy_everything","outcome":"refused","reason":"unknown_tool"}}
 {"expect":"turn.settled","where":{"reason":"failed"}}
 {"expect":"ask","where":{"files~":"image/png"}}
-{"expect":"session.start","where":{"levers.warrant_gate":"classifier:canned-scenario-classifier@0000000000000000000000000000000000000000","levers.meditation_audit_concurrency":"2:effective:2","levers.meditation_audit_chunk":"notes:8"}}
+{"expect":"session.start","where":{"levers.warrant_gate":"classifier:canned-scenario-classifier@0000000000000000000000000000000000000000:windowing-899","levers.meditation_audit_concurrency":"2:effective:2","levers.meditation_audit_chunk":"notes:8"}}
 {"expect":"warrant.gated","where":{"outcome":"decided","probe":"gotcha","class":"gotcha","score":"0.930000","threshold":"0.5","fired":"true","model":"canned-scenario-classifier@0000000000000000000000000000000000000000","compute_units":"none"},"name":"gated"}
 {"expect":"fork","where":{"why":"trouble","ask":"gotchas"},"after":"gated"}
 {"expect":"warrant.gated","where":{"outcome":"decided","probe":"open","fired":"true","score":"0.880000"},"name":"gated-open"}
