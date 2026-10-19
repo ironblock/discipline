@@ -454,6 +454,53 @@ mod tests {
         assert_eq!(serving_context(doc, "d"), None);
     }
 
+    /// #555: every Anthropic rung declares what its API would 400 on -- its
+    /// window, its output cap, its effort levels and its sampler -- each
+    /// with the `_is` that cites where it was read, so serve can refuse at
+    /// start what the API would refuse after a paid request.
+    #[test]
+    fn every_anthropic_rung_declares_its_window_cap_efforts_and_sampler() {
+        let rungs: Vec<(String, Table)> = tables(REGISTRY)
+            .into_iter()
+            .filter(|(_, table)| {
+                table.strings.get("weights_provider").map(String::as_str) == Some("Anthropic")
+            })
+            .collect();
+        assert!(
+            rungs.len() >= 2,
+            "{:?}",
+            rungs.iter().map(|(n, _)| n).collect::<Vec<_>>()
+        );
+        for (name, table) in &rungs {
+            let id = name.strip_prefix("substrate.").expect("a substrate");
+            assert!(
+                serving_context(REGISTRY, id).is_some(),
+                "{id}: serving_context"
+            );
+            assert!(
+                substrate_count(REGISTRY, id, "max_output_tokens").is_some(),
+                "{id}: max_output_tokens"
+            );
+            let efforts = table.lists.get("efforts").cloned().flatten();
+            assert!(efforts.is_some_and(|e| !e.is_empty()), "{id}: efforts");
+            for key in ["api_temperature", "api_top_p", "api_top_k"] {
+                assert!(table.strings.contains_key(key), "{id}: {key}");
+            }
+            for key in [
+                "serving_context_is",
+                "max_output_tokens_is",
+                "efforts_is",
+                "api_sampler_is",
+            ] {
+                let cited = table
+                    .strings
+                    .get(key)
+                    .is_some_and(|text| text.contains("https://platform.claude.com/docs/"));
+                assert!(cited, "{id}: {key} cites no docs page");
+            }
+        }
+    }
+
     /// #782: a substrate's `serving_slots`, from its own table only.
     #[test]
     fn a_substrates_serving_slots_are_read_from_its_own_table_only() {

@@ -1421,7 +1421,7 @@ recommended_absent = "this crate's stub playing constructed events, never a prov
 
 [substrate.anthropic-claude-haiku-5-5]
 equipment = "anthropic-api"
-description = "Claude Haiku 5.5 over Anthropic's Messages API (#555): the hosted rung nearest the 27B floor, the maintainer's choice. Its thinking is adaptive, as Pi (42a3497d, packages/ai/scripts/generate-models.ts:622-641, forceAdaptiveThinking for sonnet-5/haiku-5 ids) and OpenCode 2 (055d95bb, packages/opencode/src/provider/transform.ts:657-684, adaptive for claude ids at 4.7 and after) both declare it; no budget_tokens. No live call has been made against it"
+description = "Claude Haiku 5.5 over Anthropic's Messages API (#555): the hosted rung nearest the 27B floor, the maintainer's choice. Its thinking is adaptive, as Pi (42a3497d, packages/ai/scripts/generate-models.ts:622-641, forceAdaptiveThinking for sonnet-5/haiku-5 ids) and OpenCode 2 (055d95bb, packages/opencode/src/provider/transform.ts:657-684, adaptive for claude ids at 4.7 and after) both declare it; no budget_tokens. Its window, output cap, effort levels and sampler are declared from Anthropic's docs, each value's `_is` citing the page it was read from (2026-10-19), and never probed. No live call has been made against it"
 pinned = true
 server_kind = "api"
 dialect = "anthropic-messages"
@@ -1434,11 +1434,22 @@ weights_kind = "hosted"
 weights_provider = "Anthropic"
 weights_model_id = "claude-haiku-5-5"
 weights_version_or_date_observed = "2026-10-10"
+serving_context = 1000000
+serving_context_is = "the provider's declared context window, \"1M tokens\" for Claude Haiku 5.5 (https://platform.claude.com/docs/en/models/overview, the Context window row; https://platform.claude.com/docs/en/build-with-claude/context-windows#context-window-sizes-by-model, read 2026-10-19), read as 1,000,000: the docs give no exact figure, and if the window is 2^20 this undercounts it, refusing early rather than late. Input, cache reads and writes, tools and the output all count toward it; an input over it is a 400 `invalid_request_error`, \"prompt is too long\" (https://platform.claude.com/docs/en/build-with-claude/context-windows#context-window-overflow-behavior). Declared from the docs, never probed: no API call, not the Models API"
+max_output_tokens = 128000
+max_output_tokens_is = "the provider's synchronous Messages API limit on `max_tokens`, \"128K tokens\" for Claude Haiku 5.5 (https://platform.claude.com/docs/en/models/overview, the Max output row), \"up to 128k output tokens (`max_tokens`)\" (https://platform.claude.com/docs/en/build-with-claude/context-windows#context-window-sizes-by-model, read 2026-10-19); the Batches API's 300k beta does not apply to a streamed session"
+efforts = ["low", "medium", "high", "xhigh", "max"]
+efforts_is = "the `output_config.effort` levels Claude Haiku 5.5 takes (https://platform.claude.com/docs/en/build-with-claude/effort#effort-levels, the levels table and its Claude Haiku 5.5 section, read 2026-10-19): all five"
+api_temperature = "1"
+api_top_p = "0.99"
+api_top_k = "none"
+api_temperature_with_top_p = "refused"
+api_sampler_is = "the only sampler values the API accepts on Claude Haiku 5.5: \"If a request includes temperature, it must be 1. If it includes top_p, it must be 0.99, its default. Any other temperature or top_p value returns a 400 error, including a top_p of 1. So does any top_k value, and so does a request that includes both temperature and top_p\" (https://platform.claude.com/docs/en/models/haiku-5-5/migration-guide#remove-sampling-parameters, read 2026-10-19). `api_temperature` and `api_top_p` name the one value each accepts, `api_top_k = \"none\"` that no value is, and `api_temperature_with_top_p` that the two together are a 400"
 recommended_absent = "the provider publishes no recommended sampling for Claude Haiku 5.5, and its API fixes the sampler: \"If a request includes temperature, it must be 1. If it includes top_p, it must be 0.99, its default. Any other temperature or top_p value returns a 400 error, including a top_p of 1. So does any top_k value\" (https://platform.claude.com/docs/en/models/haiku-5-5/migration-guide#remove-sampling-parameters, read 2026-10-14). A run on it samples at the provider's defaults whatever a regimen intends, so a sampler range cannot be read against a card; a regimen that sets a non-default value is refused by the API (HTTP 400) rather than run. Read a result on it as sampled at the provider's fixed defaults, never as a characterisation; whether this key, written for substrates that sample nothing, is the right home for a provider-fixed sampler is flagged to Dispatch for a ruling"
 
 [substrate.anthropic-claude-sonnet-5-5]
 equipment = "anthropic-api"
-description = "Claude Sonnet 5.5 over Anthropic's Messages API (#555): the hosted rung near Qwen3.8-Flash-Next, the maintainer's choice over Sonnet 5, which sits closer and costs more. Its thinking is adaptive, as Pi (42a3497d, packages/ai/scripts/generate-models.ts:622-641, forceAdaptiveThinking for sonnet-5/haiku-5 ids) and OpenCode 2 (055d95bb, packages/opencode/src/provider/transform.ts:657-684, adaptive for claude ids at 4.7 and after) both declare it; no budget_tokens. No live call has been made against it"
+description = "Claude Sonnet 5.5 over Anthropic's Messages API (#555): the hosted rung near Qwen3.8-Flash-Next, the maintainer's choice over Sonnet 5, which sits closer and costs more. Its thinking is adaptive, as Pi (42a3497d, packages/ai/scripts/generate-models.ts:622-641, forceAdaptiveThinking for sonnet-5/haiku-5 ids) and OpenCode 2 (055d95bb, packages/opencode/src/provider/transform.ts:657-684, adaptive for claude ids at 4.7 and after) both declare it; no budget_tokens. Its window, output cap, effort levels and sampler are declared from Anthropic's docs, each value's `_is` citing the page it was read from (2026-10-19), and never probed. No live call has been made against it"
 pinned = true
 server_kind = "api"
 dialect = "anthropic-messages"
@@ -1451,6 +1462,16 @@ weights_kind = "hosted"
 weights_provider = "Anthropic"
 weights_model_id = "claude-sonnet-5-5"
 weights_version_or_date_observed = "2026-10-10"
+serving_context = 1000000
+serving_context_is = "the provider's declared context window, \"1M tokens\" for Claude Sonnet 5.5 (https://platform.claude.com/docs/en/models/overview, the Context window row; https://platform.claude.com/docs/en/build-with-claude/context-windows#context-window-sizes-by-model, read 2026-10-19), read as 1,000,000: the docs give no exact figure, and if the window is 2^20 this undercounts it, refusing early rather than late. Input, cache reads and writes, tools and the output all count toward it; an input over it is a 400 `invalid_request_error`, \"prompt is too long\" (https://platform.claude.com/docs/en/build-with-claude/context-windows#context-window-overflow-behavior). Declared from the docs, never probed: no API call, not the Models API"
+max_output_tokens = 128000
+max_output_tokens_is = "the provider's synchronous Messages API limit on `max_tokens`, \"128K tokens\" for Claude Sonnet 5.5 (https://platform.claude.com/docs/en/models/overview, the Max output row), \"up to 128k output tokens (`max_tokens`)\" (https://platform.claude.com/docs/en/build-with-claude/context-windows#context-window-sizes-by-model, read 2026-10-19); the Batches API's 300k beta does not apply to a streamed session"
+efforts = ["low", "medium", "high", "xhigh", "max"]
+efforts_is = "the `output_config.effort` levels Claude Sonnet 5.5 takes (https://platform.claude.com/docs/en/build-with-claude/effort#effort-levels, the levels table and its Claude Sonnet 5.5 section, read 2026-10-19): all five"
+api_temperature = "none"
+api_top_p = "none"
+api_top_k = "none"
+api_sampler_is = "Claude Sonnet 5.5's sampler: \"On Claude Sonnet 5.5, a non-default value returns a 400 error. Remove them\" for temperature, top_p and top_k (https://platform.claude.com/docs/en/models/sonnet-5-5/migration-guide#sonnet-46-breaking-changes, read 2026-10-19). The page publishes no default, so no value is known to pass and each is declared `none`: omitting them is the only request the docs say is accepted. A value equal to the unpublished default would pass the API and is refused here; that is this declaration's cost, said so"
 recommended_absent = "the provider publishes no recommended sampling for Claude Sonnet 5.5, and its API fixes the sampler: \"On Claude Sonnet 5.5, a non-default value returns a 400 error\" for temperature, top_p and top_k (https://platform.claude.com/docs/en/models/sonnet-5-5/migration-guide, read 2026-10-14). A run on it samples at the provider's defaults whatever a regimen intends, so a sampler range cannot be read against a card; a regimen that sets a non-default value is refused by the API (HTTP 400) rather than run. Read a result on it as sampled at the provider's fixed defaults, never as a characterisation; whether this key, written for substrates that sample nothing, is the right home for a provider-fixed sampler is flagged to Dispatch for a ruling"
 
 # The drive endpoint's engine commit and weights on this host's CPU, served for #29's I0
