@@ -392,7 +392,7 @@ pub fn phase_note(name: &str, ground_rules: &str) -> String {
 /// 2 carry a compaction summary: a user message, the text inside
 /// `<summary>` tags, opened and closed on lines of their own (Pi
 /// `core/messages.ts:11-17`, `OpenCode` 2 `session/runner/to-llm-message.ts:
-/// 147-158`). Their lead sentences differ and Qwen Code's summary message
+/// 311-325`). Their lead sentences differ and Qwen Code's summary message
 /// has none, so it has none; no harness but Qwen Code adds a trailer, so it
 /// has none.
 #[must_use]

@@ -1108,9 +1108,10 @@ struct Collected {
 
 /// How much of one output stream a call holds in memory whole (#734):
 /// past it, the whole stream goes to a file and memory keeps its head and
-/// tail -- Pi's and `OpenCode` 2's spill (`pi:core/tools/output-accumulator.ts`,
-/// `oc:tool/shell.ts` 439-503). Both bound memory and neither bounds the
-/// file, so neither does this.
+/// tail -- Pi's spill and `OpenCode` 2's at `055d95bb`
+/// (`pi:core/tools/output-accumulator.ts`, `oc:packages/opencode/src/tool/shell.ts`
+/// 439-503 there). Both bound memory and neither bounds the file, so neither
+/// does this.
 const HELD: usize = 2 * 1024 * 1024;
 
 /// Of a spilled stream, the head kept in memory: what the model's capped

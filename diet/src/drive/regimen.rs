@@ -542,9 +542,10 @@ pub const MAX_OUTPUT_TOKENS: &str = "max_output_tokens";
 /// one (#569), by the harness vote: Pi sends a local model's `maxTokens`,
 /// 16,384 unless its definition says otherwise
 /// (`pi:packages/coding-agent/src/core/provider-composer.ts:243`), and
-/// `OpenCode` 2 sends none on the `OpenAI` chat protocol
-/// (`oc:packages/llm/src/protocols/openai-chat.ts:361`, `generation.maxTokens`,
-/// which its session runner never sets). They differ, so Qwen Code decides: a
+/// `OpenCode` 2 at `055d95bb` sent none on the `OpenAI` chat protocol
+/// (`oc:packages/llm/src/protocols/openai-chat.ts:361` there,
+/// `generation.maxTokens`, which its session runner never set). They differ,
+/// so Qwen Code decides: a
 /// `qwen3.x` model's catalogued 64K output limit, clipped to its 64,000
 /// ceiling (`qc:packages/core/src/core/tokenLimits.ts:24,34,335,453-459`).
 pub const DEFAULT_MAX_OUTPUT_TOKENS: u32 = 64_000;

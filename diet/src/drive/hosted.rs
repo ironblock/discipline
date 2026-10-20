@@ -9,9 +9,16 @@
 //!
 //! **The betas sent are the betas declared.** A beta header changes how the
 //! API behaves, so the entry declares the ones it is sent (`engine_betas`),
-//! and serve refuses to start when what it would send differs.
+//! and serve refuses to start when what it would send differs. The
+//! interleaved-thinking beta goes with thinking: Pi sends it only with
+//! thinking (`packages/ai/src/api/anthropic-messages.ts:1108-1115` at
+//! `42a3497d`), `OpenCode` 2 always
+//! (`packages/ai/src/protocols/anthropic-messages.ts:1645-1648` at `v2.0.32`),
+//! and Qwen Code breaks the tie with Pi
+//! (`packages/core/src/core/anthropicContentGenerator/anthropicContentGenerator.ts:524-525`
+//! at `v0.25.3`). A reasoning-off session is not sent it, and does not owe it.
 
-use crate::client::anthropic::{Options, Thinking, Ttl, Ttls};
+use crate::client::anthropic::{INTERLEAVED_THINKING, Options, Thinking, Ttl, Ttls};
 use crate::client::shape::RequestShape;
 use crate::client::stream::{Bearer, HttpStream};
 use crate::drive::registry::Identity;
@@ -334,14 +341,21 @@ fn same_number(a: &str, b: &str) -> bool {
     plain(a) == plain(b)
 }
 
-/// Whether the betas `options` would send are the ones the entry declares.
+/// Whether the betas `options` would send are the ones the entry declares
+/// for the session's thinking: with thinking off, the interleaved-thinking
+/// beta is not owed.
 ///
 /// # Errors
 ///
 /// A beta sent and not declared, or declared and not sent, named.
 pub fn betas_agree(id: &str, identity: &Identity, options: &Options) -> Result<(), String> {
     let sent: Vec<&str> = options.beta().into_iter().collect();
-    let declared: Vec<&str> = identity.engine_betas.iter().map(String::as_str).collect();
+    let declared: Vec<&str> = identity
+        .engine_betas
+        .iter()
+        .map(String::as_str)
+        .filter(|beta| options.thinking != Thinking::Off || *beta != INTERLEAVED_THINKING)
+        .collect();
     if sent == declared {
         return Ok(());
     }
@@ -356,7 +370,6 @@ pub fn betas_agree(id: &str, identity: &Identity, options: &Options) -> Result<(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::client::anthropic::INTERLEAVED_THINKING;
     use crate::client::shape::{Pin, SamplerSetting};
 
     fn entry(thinking: &str, betas: &str) -> Identity {
@@ -734,10 +747,25 @@ mod tests {
         };
         let declaring = entry("", &format!("engine_betas = \"{INTERLEAVED_THINKING}\"\n"));
         assert_eq!(betas_agree("h", &declaring, &thinking), Ok(()));
-        assert!(betas_agree("h", &declaring, &Options::default()).is_err());
         let silent = entry("", "");
         assert_eq!(betas_agree("h", &silent, &Options::default()), Ok(()));
         let refused = betas_agree("h", &silent, &thinking).expect_err("undeclared");
         assert!(refused.contains(INTERLEAVED_THINKING), "{refused}");
+    }
+
+    /// The interleaved-thinking beta goes with thinking (Pi, Qwen Code), so
+    /// an entry that declares it is sent it only while reasoning is on: a
+    /// reasoning-off session agrees with it, and any other declared beta is
+    /// still owed.
+    #[test]
+    fn a_reasoning_off_session_owes_no_thinking_beta() {
+        let declaring = entry("", &format!("engine_betas = \"{INTERLEAVED_THINKING}\"\n"));
+        assert_eq!(betas_agree("h", &declaring, &Options::default()), Ok(()));
+        let more = entry(
+            "",
+            &format!("engine_betas = \"{INTERLEAVED_THINKING}, another-beta\"\n"),
+        );
+        let refused = betas_agree("h", &more, &Options::default()).expect_err("owed");
+        assert!(refused.contains("another-beta"), "{refused}");
     }
 }

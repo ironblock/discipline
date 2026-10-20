@@ -183,8 +183,8 @@ pub const BASH_DESCRIPTION_BACKGROUND: &str = "Executes a bash command (as `bash
      network access can be refused.";
 
 /// The most a call's `timeout` may say, in milliseconds (#613): `OpenCode`
-/// 2's and Qwen Code's 600000, which agree (`core/src/tool/bash.ts:20`,
-/// `tools/shell.ts:5765-5769`).
+/// 2's at `055d95bb` and Qwen Code's 600000, which agree
+/// (`oc:packages/core/src/tool/bash.ts:20` there, `tools/shell.ts:5765-5769`).
 pub const MAX_TIMEOUT_MS: u64 = 600_000;
 
 /// The default timeout when the regimen names none (#613): `OpenCode` 2's

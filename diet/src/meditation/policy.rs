@@ -46,13 +46,14 @@ pub const MEDITATION_TOOL_OUTPUTS: &str = "meditation_tool_outputs";
 /// [`WINDOW_RESERVE`] (or the output cap, if more) of the window.
 pub const MEDITATION_WINDOW: &str = "meditation_window";
 /// The room the automatic meditation keeps for a request's output (#617):
-/// `OpenCode` 2's `DEFAULT_BUFFER`, or the output cap when that is larger
-/// (`oc:packages/core/src/session/compaction.ts:12,236-240`).
+/// `OpenCode` 2's `DEFAULT_BUFFER` at `055d95bb`, or the output cap when
+/// that is larger (`oc:packages/core/src/session/compaction.ts:12,236-240`
+/// there).
 pub const WINDOW_RESERVE: u64 = 20_000;
 /// The running turn's recent steps a window meditation under it keeps
 /// (#813): a quarter of the usable window -- the window less the reserve --
-/// within these bounds, `OpenCode` 2's `preserveRecentBudget`
-/// (`oc:packages/opencode/src/session/compaction.ts:32-33,115-120`). Pi keeps
+/// within these bounds, `OpenCode` 2's `preserveRecentBudget` at `055d95bb`
+/// (`oc:packages/opencode/src/session/compaction.ts:32-33,115-120` there). Pi keeps
 /// a flat 20,000 (`pi:packages/coding-agent/src/core/settings-defaults.ts:11`,
 /// `keepRecentTokens`); Qwen Code keeps no tail at all, only a pending call's
 /// pair (`qc:packages/core/src/services/chatCompressionService.ts:535-539`),
