@@ -125,13 +125,15 @@ pub enum Key {
 ///
 /// No key; a key from the environment the regimen passes on to the
 /// model's commands, which would be theirs to read; a thinking convention
-/// the regime cannot meet; undeclared betas; a shape the API cannot carry.
+/// the regime cannot meet; undeclared betas; a shape the API cannot carry;
+/// what the entry declares its API refuses ([`refused_at_start`]). With the
+/// transport, the declarations the entry leaves out, which nothing checked.
 pub fn transport(
     transport: HttpStream,
     (identity, substrate): (&Identity, &Substrate),
     (key, ttl): (Key, Ttls),
     shape: &RequestShape,
-) -> Result<HttpStream, String> {
+) -> Result<(HttpStream, Vec<&'static str>), String> {
     let id = &substrate.id;
     let transport = match key {
         Key::Given => transport,
@@ -155,7 +157,101 @@ pub fn transport(
     betas_agree(id, identity, &options)?;
     crate::client::anthropic::body(shape, &options)
         .map_err(|why| format!("`{id}`'s requests: {why}"))?;
-    Ok(transport.with_anthropic(options))
+    let unchecked = refused_at_start(id, identity, shape, &options)?;
+    Ok((transport.with_anthropic(options), unchecked))
+}
+
+/// What the entry declares its API would refuse with a 400 (#555), checked
+/// against what this session would send, before anything is sent: its
+/// `max_tokens`, its effort, its sampler. Only the entry's declarations are
+/// read; what it leaves out is unchecked, and returned, so the session's
+/// start can say so.
+///
+/// # Errors
+///
+/// Every declared refusal the session would meet, each naming the
+/// declaration and what would be sent.
+pub fn refused_at_start(
+    id: &str,
+    identity: &Identity,
+    shape: &RequestShape,
+    options: &Options,
+) -> Result<Vec<&'static str>, String> {
+    let declared = &identity.api;
+    let mut refused = Vec::new();
+    let asked = u64::from(shape.limits.max_output_tokens);
+    if let Some(cap) = declared.max_output_tokens.filter(|cap| asked > *cap) {
+        refused.push(format!(
+            "it declares `max_output_tokens = {cap}`, and this session asks for {asked}"
+        ));
+    }
+    if let (
+        Some(levels),
+        Thinking::Adaptive {
+            effort: Some(effort),
+        },
+    ) = (&declared.efforts, &options.thinking)
+        && !levels.contains(effort)
+    {
+        refused.push(format!(
+            "it declares `efforts = [{}]`, and this session asks for \"{effort}\"",
+            levels
+                .iter()
+                .map(|level| format!("\"{level}\""))
+                .collect::<Vec<_>>()
+                .join(", ")
+        ));
+    }
+    let mut sent = Vec::new();
+    for (setting, pin) in shape.sampler.iter() {
+        let name = setting.tag();
+        let digits = match pin {
+            crate::client::shape::Pin::Decimal(value) => value.as_str().to_owned(),
+            crate::client::shape::Pin::Integer(value) => value.to_string(),
+        };
+        sent.push(name);
+        match declared.sampler.get(name).map(String::as_str) {
+            None => {}
+            Some("none") => refused.push(format!(
+                "it declares `api_{name} = \"none\"`, and this session sends {name} = {digits}"
+            )),
+            Some(accepted) if same_number(accepted, &digits) => {}
+            Some(accepted) => refused.push(format!(
+                "it declares `api_{name} = \"{accepted}\"`, and this session sends \
+                 {name} = {digits}"
+            )),
+        }
+    }
+    if declared.temperature_with_top_p_refused == Some(true)
+        && sent.contains(&"temperature")
+        && sent.contains(&"top_p")
+    {
+        refused.push(
+            "it declares `api_temperature_with_top_p = \"refused\"`, and this session sends both"
+                .to_owned(),
+        );
+    }
+    if refused.is_empty() {
+        return Ok(declared.unchecked());
+    }
+    Err(format!(
+        "`{id}`'s API would refuse this session's requests with a 400, as its entry declares \
+         from the provider's docs: {}",
+        refused.join("; ")
+    ))
+}
+
+/// Whether two decimals written as text are one number: `1`, `1.0` and
+/// `1.00` are; trailing zeros after the point say nothing.
+fn same_number(a: &str, b: &str) -> bool {
+    fn plain(digits: &str) -> &str {
+        if digits.contains('.') {
+            digits.trim_end_matches('0').trim_end_matches('.')
+        } else {
+            digits
+        }
+    }
+    plain(a) == plain(b)
 }
 
 /// Whether the betas `options` would send are the ones the entry declares.
@@ -181,6 +277,7 @@ pub fn betas_agree(id: &str, identity: &Identity, options: &Options) -> Result<(
 mod tests {
     use super::*;
     use crate::client::anthropic::INTERLEAVED_THINKING;
+    use crate::client::shape::{Pin, SamplerSetting};
 
     fn entry(thinking: &str, betas: &str) -> Identity {
         let registry = format!(
@@ -283,6 +380,150 @@ mod tests {
         }
     }
 
+    /// An entry declaring what its API refuses, as Haiku 5.5's and Sonnet
+    /// 5.5's do: `sampler` its `api_<setting>` lines.
+    fn declaring(sampler: &str) -> Identity {
+        entry(
+            &format!(
+                "thinking = \"adaptive\"\nserving_context = 1000000\n\
+                 max_output_tokens = 128000\nefforts = [\"low\", \"medium\", \"high\"]\n\
+                 {sampler}"
+            ),
+            "",
+        )
+    }
+
+    fn pinned(pins: &[(SamplerSetting, Pin)]) -> RequestShape {
+        let mut shape = shape();
+        for (setting, pin) in pins {
+            shape.sampler = shape.sampler.with(*setting, pin.clone());
+        }
+        shape
+    }
+
+    fn decimal(digits: &str) -> Pin {
+        Pin::Decimal(crate::formats::record::json::Decimal::new(digits).expect("digits"))
+    }
+
+    fn at(effort: &str) -> Options {
+        Options {
+            thinking: Thinking::Adaptive {
+                effort: Some(effort.to_owned()),
+            },
+            ..Options::default()
+        }
+    }
+
+    const HAIKU: &str = "api_temperature = \"1\"\napi_top_p = \"0.99\"\napi_top_k = \"none\"\n\
+                         api_temperature_with_top_p = \"refused\"\n";
+    const SONNET: &str = "api_temperature = \"none\"\napi_top_p = \"none\"\napi_top_k = \"none\"\n";
+
+    /// #555: what a rung declares its API would 400 on is refused at start,
+    /// each refusal naming the declaration and what would be sent; what it
+    /// accepts passes; a value is compared as a number, so `1.0` is `1`.
+    #[test]
+    fn what_a_rung_declares_its_api_refuses_is_refused_at_start() {
+        let haiku = declaring(HAIKU);
+        let mut big = shape();
+        big.limits.max_output_tokens = 200_000;
+        let refused = refused_at_start("h", &haiku, &big, &at("low")).expect_err("over the cap");
+        assert!(
+            refused.contains("max_output_tokens = 128000") && refused.contains("200000"),
+            "{refused}"
+        );
+        let refused =
+            refused_at_start("h", &haiku, &shape(), &at("max")).expect_err("an effort undeclared");
+        assert!(
+            refused.contains("efforts") && refused.contains("\"max\""),
+            "{refused}"
+        );
+        for (pins, names) in [
+            (
+                vec![(SamplerSetting::Temperature, decimal("0.6"))],
+                "api_temperature = \"1\"",
+            ),
+            (
+                vec![(SamplerSetting::TopP, Pin::Integer(1))],
+                "api_top_p = \"0.99\"",
+            ),
+            (
+                vec![(SamplerSetting::TopK, Pin::Integer(20))],
+                "api_top_k = \"none\"",
+            ),
+            (
+                vec![
+                    (SamplerSetting::Temperature, Pin::Integer(1)),
+                    (SamplerSetting::TopP, decimal("0.99")),
+                ],
+                "api_temperature_with_top_p",
+            ),
+        ] {
+            let refused =
+                refused_at_start("h", &haiku, &pinned(&pins), &at("low")).expect_err(names);
+            assert!(refused.contains(names), "{names}: {refused}");
+        }
+        // Every refusal at once, not the first alone.
+        let mut both = pinned(&[(SamplerSetting::TopK, Pin::Integer(20))]);
+        both.limits.max_output_tokens = 200_000;
+        let refused = refused_at_start("h", &haiku, &both, &at("low")).expect_err("two");
+        assert!(
+            refused.contains("api_top_k") && refused.contains("max_output_tokens"),
+            "{refused}"
+        );
+        for pins in [
+            vec![(SamplerSetting::Temperature, decimal("1.0"))],
+            vec![(SamplerSetting::TopP, decimal("0.990"))],
+            Vec::new(),
+        ] {
+            assert_eq!(
+                refused_at_start("h", &haiku, &pinned(&pins), &at("medium")),
+                Ok(Vec::new()),
+                "{pins:?}"
+            );
+        }
+        let sonnet = declaring(SONNET);
+        for setting in [
+            SamplerSetting::Temperature,
+            SamplerSetting::TopP,
+            SamplerSetting::TopK,
+        ] {
+            let refused = refused_at_start(
+                "h",
+                &sonnet,
+                &pinned(&[(setting, Pin::Integer(1))]),
+                &at("low"),
+            )
+            .expect_err("none passes");
+            assert!(
+                refused.contains(&format!("api_{} = \"none\"", setting.tag())),
+                "{refused}"
+            );
+        }
+        // Sonnet declares nothing of temperature beside top_p: unchecked.
+        assert_eq!(
+            refused_at_start("h", &sonnet, &shape(), &at("high")),
+            Ok(vec!["api_temperature_with_top_p"])
+        );
+        // Thinking off sends no effort, so none is checked.
+        assert_eq!(
+            refused_at_start("h", &haiku, &shape(), &Options::default()),
+            Ok(Vec::new())
+        );
+    }
+
+    /// #555: an entry that declares nothing of what its API refuses is
+    /// checked for nothing, and says which keys it left out -- every one.
+    #[test]
+    fn an_entry_declaring_nothing_is_unchecked_and_says_so() {
+        let silent = entry("thinking = \"adaptive\"\n", "");
+        let mut big = pinned(&[(SamplerSetting::TopK, Pin::Integer(20))]);
+        big.limits.max_output_tokens = 900_000;
+        assert_eq!(
+            refused_at_start("h", &silent, &big, &at("max")),
+            Ok(crate::drive::registry::API_DECLARABLE.to_vec())
+        );
+    }
+
     /// #555: the key comes from the file, else the harnesses' variable --
     /// never one the regimen hands the model's commands -- and the request
     /// that goes out is the Messages API's, its key as `x-api-key` and its
@@ -323,7 +564,8 @@ mod tests {
             ),
             &shape(),
         )
-        .expect("a hosted transport");
+        .expect("a hosted transport")
+        .0;
         let mut text = String::new();
         hosted
             .stream(

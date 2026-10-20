@@ -242,6 +242,59 @@ pub struct Identity {
     /// name for each field: every `served_<field>` key, prefix removed
     /// (#509). What the engine reports is compared against these.
     pub served: BTreeMap<String, String>,
+    /// What a hosted API would refuse with a 400, as the entry declares it
+    /// from its provider's docs (#555): read at start, never probed.
+    pub api: ApiDeclared,
+}
+
+/// What an `api` entry declares its API refuses (#555), each from the
+/// provider's docs. A key the entry leaves out is unchecked, and the
+/// session's start says which.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct ApiDeclared {
+    /// `serving_context`: the window, in tokens.
+    pub serving_context: Option<u64>,
+    /// `max_output_tokens`: the largest `max_tokens` the API takes.
+    pub max_output_tokens: Option<u64>,
+    /// `efforts`: the `output_config.effort` levels it takes.
+    pub efforts: Option<Vec<String>>,
+    /// `api_temperature`, `api_top_p`, `api_top_k`, by setting: the one
+    /// value it accepts, or `none` when no value is known to pass.
+    pub sampler: BTreeMap<String, String>,
+    /// `api_temperature_with_top_p = "refused"`: the two together are a 400.
+    pub temperature_with_top_p_refused: Option<bool>,
+}
+
+/// The registry keys an [`ApiDeclared`] is read from, in the order a
+/// session's start names those left out.
+pub const API_DECLARABLE: &[&str] = &[
+    "serving_context",
+    "max_output_tokens",
+    "efforts",
+    "api_temperature",
+    "api_top_p",
+    "api_top_k",
+    "api_temperature_with_top_p",
+];
+
+impl ApiDeclared {
+    /// The [`API_DECLARABLE`] keys the entry leaves out: what nothing checks.
+    #[must_use]
+    pub fn unchecked(&self) -> Vec<&'static str> {
+        API_DECLARABLE
+            .iter()
+            .copied()
+            .filter(|key| match *key {
+                "serving_context" => self.serving_context.is_none(),
+                "max_output_tokens" => self.max_output_tokens.is_none(),
+                "efforts" => self.efforts.is_none(),
+                "api_temperature_with_top_p" => self.temperature_with_top_p_refused.is_none(),
+                sampler => !self
+                    .sampler
+                    .contains_key(sampler.trim_start_matches("api_")),
+            })
+            .collect()
+    }
 }
 
 /// The identity the registry in `document` gives substrate `id`.
@@ -344,6 +397,53 @@ pub fn identity(document: &str, id: &str) -> Result<Identity, String> {
                     .map(|field| (field.to_owned(), value.clone()))
             })
             .collect(),
+        api: api_declared(document, id, table)?,
+    })
+}
+
+/// What `id`'s entry `table` in `document` declares its API refuses (#555).
+///
+/// # Errors
+///
+/// An `efforts` that is not a one-line list of levels, or an
+/// `api_temperature_with_top_p` other than `refused`.
+fn api_declared(document: &str, id: &str, table: &Table) -> Result<ApiDeclared, String> {
+    Ok(ApiDeclared {
+        serving_context: serving_context(document, id),
+        max_output_tokens: substrate_count(document, id, "max_output_tokens"),
+        efforts: match table.lists.get("efforts") {
+            None => None,
+            Some(Some(levels)) if !levels.is_empty() => Some(levels.clone()),
+            Some(_) => {
+                return Err(format!(
+                    "the registry's `efforts` for `{id}` is not a one-line list of levels: \
+                     the entry is malformed"
+                ));
+            }
+        },
+        sampler: ["temperature", "top_p", "top_k"]
+            .into_iter()
+            .filter_map(|setting| {
+                table
+                    .strings
+                    .get(&format!("api_{setting}"))
+                    .map(|value| (setting.to_owned(), value.clone()))
+            })
+            .collect(),
+        temperature_with_top_p_refused: match table
+            .strings
+            .get("api_temperature_with_top_p")
+            .map(String::as_str)
+        {
+            None => None,
+            Some("refused") => Some(true),
+            Some(other) => {
+                return Err(format!(
+                    "the registry's `api_temperature_with_top_p` for `{id}` is \"{other}\", \
+                     not \"refused\": the entry is malformed"
+                ));
+            }
+        },
     })
 }
 

@@ -148,6 +148,18 @@
 //! trunk `request`, and reads in v10 unchanged; a v10 log's is an arrival
 //! fork, and its `at` names an `ask`, never a `request`.
 //!
+//! v11 (#555) adds `api_unchecked` to `session.start`: on a hosted API's
+//! session, the registry keys its entry leaves out of what the API would
+//! refuse with a 400 (`serving_context`, `max_output_tokens`, `efforts`,
+//! `api_temperature`, `api_top_p`, `api_top_k`,
+//! `api_temperature_with_top_p`), which serve therefore did not check at
+//! start. Never empty: a session that checked every one carries none. With
+//! it, `sampler_pins`: `none` when the regimen pinned no sampler setting on
+//! purpose (`[sampler] pins = "none"`), the provider's defaults sampling. A
+//! log that declares 10 or less and carries either is refused. For a reader of v10
+//! logs, the migration is nothing: no v10 log carries it, and a v10 hosted
+//! session's start checked nothing the entry declared.
+//!
 //! # A torn final line
 //!
 //! A writer killed mid-write leaves the start of an event with no line break
@@ -179,10 +191,10 @@ use super::record::vocabulary;
 struct LogParser;
 
 /// The version this module writes, as `session.start` states it.
-pub const VERSION: i64 = 10;
+pub const VERSION: i64 = 11;
 
 /// Every version this module reads.
-pub const READS: &[i64] = &[0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10];
+pub const READS: &[i64] = &[0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11];
 
 /// How recent an input event must be, at the moment a turn settles, for the
 /// person to count as already present: `notice` is then zero (Q4 (a), ruled
@@ -1201,6 +1213,14 @@ pub enum Event {
         /// `pids`, each background shell's pid shown as 0. The real pid
         /// stays the one the job is stopped by. Absent, both were real.
         scenario_fixed: Option<Vec<String>>,
+        /// On a hosted API's session (v11, #555): the registry keys its entry
+        /// leaves out of what the API would refuse with a 400, unchecked at
+        /// start. Never empty.
+        api_unchecked: Option<Vec<String>>,
+        /// `none` when the regimen pinned no sampler setting on purpose (v11,
+        /// #555): `[sampler] pins = "none"`, on a hosted API, whose
+        /// provider's defaults sampled. Absent, the regimen's pins were sent.
+        sampler_pins: Option<String>,
     },
     /// An ask was admitted.
     Ask {
@@ -3563,6 +3583,25 @@ fn from_object(object: &BTreeMap<String, Value>) -> Result<Line, String> {
                 bash_timeout_ms: fields.optional_count("bash_timeout_ms")?,
                 shown_roots: fields.optional_words("shown_roots")?,
                 scenario_fixed: fields.optional_strings("scenario_fixed")?,
+                api_unchecked: match fields.optional_strings("api_unchecked")? {
+                    Some(keys) if keys.is_empty() => {
+                        return Err(
+                            "`api_unchecked` is empty: a session that checked every declaration \
+                             carries none"
+                                .to_owned(),
+                        );
+                    }
+                    keys => keys,
+                },
+                sampler_pins: match fields.optional_string("sampler_pins")? {
+                    Some(word) if word != "none" => {
+                        return Err(format!(
+                            "`sampler_pins` is \"{word}\": its one word is \"none\", a regimen \
+                             that pinned no sampler setting"
+                        ));
+                    }
+                    word => word,
+                },
                 phases: fields.optional_strings("phases")?,
                 phase_transitions: match object.get("phase_transitions") {
                     None => None,
@@ -5174,6 +5213,16 @@ const fn must_v8(key: &'static str, holds: Holds) -> Field {
     }
 }
 
+/// A key that arrived in v11, optional wherever its object is written.
+const fn may_v11(key: &'static str, holds: Holds) -> Field {
+    Field {
+        key,
+        holds,
+        required: false,
+        since: 11,
+    }
+}
+
 const fn may_v7(key: &'static str, holds: Holds) -> Field {
     Field {
         key,
@@ -5520,6 +5569,8 @@ pub fn schema(kind: Kind) -> &'static [Field] {
                 may_v7("bash_timeout_ms", Holds::Count),
                 may_v8("shown_roots", Holds::Words),
                 may_v8("scenario_fixed", Holds::Strings),
+                may_v11("api_unchecked", Holds::Strings),
+                may_v11("sampler_pins", Text),
             ];
             F
         }
@@ -6275,6 +6326,8 @@ fn to_value(line: &Line) -> Value {
             bash_timeout_ms,
             shown_roots,
             scenario_fixed,
+            api_unchecked,
+            sampler_pins,
             phases,
             phase_transitions,
             opening_phase,
@@ -6358,6 +6411,15 @@ fn to_value(line: &Line) -> Value {
                 put(
                     "scenario_fixed",
                     Value::Array(fixed.iter().map(|word| text(word)).collect()),
+                );
+            }
+            if let Some(word) = sampler_pins {
+                put("sampler_pins", text(word));
+            }
+            if let Some(keys) = api_unchecked {
+                put(
+                    "api_unchecked",
+                    Value::Array(keys.iter().map(|key| text(key)).collect()),
                 );
             }
             if let Some(roots) = shown_roots {
@@ -8486,11 +8548,11 @@ mod tests {
         assert!(refused.why.contains("v8"), "{refused}");
     }
 
-    /// #583, #878, #904: this module writes v10.
+    /// #583, #878, #904, #555: this module writes v11.
     #[test]
-    fn this_module_writes_v10_and_reads_every_version_before_it() {
-        assert_eq!(super::VERSION, 10);
-        assert_eq!(super::READS, &[0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10]);
+    fn this_module_writes_v11_and_reads_every_version_before_it() {
+        assert_eq!(super::VERSION, 11);
+        assert_eq!(super::READS, &[0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11]);
     }
 
     fn start() -> Line {
@@ -8504,6 +8566,8 @@ mod tests {
                     "/tmp/a-run/wt".to_owned(),
                 )])),
                 scenario_fixed: Some(vec!["job_ids".to_owned(), "pids".to_owned()]),
+                api_unchecked: Some(vec!["efforts".to_owned()]),
+                sampler_pins: Some("none".to_owned()),
                 version: VERSION,
                 opened: 1_790_000_000_000,
                 model: "a-model".to_owned(),
@@ -9582,6 +9646,11 @@ mod tests {
                     if kind == Kind::PhaseRuled && *absent == "by" {
                         continue;
                     }
+                    // A start row's `sampler_pins` is `none` (v11, #555): the
+                    // reader's value rule.
+                    if kind == Kind::SessionStart && *absent == "sampler_pins" {
+                        continue;
+                    }
                     // A stream's text comes with its byte count: added alone,
                     // it is that pairing's refusal, not an exclusivity -- met
                     // by a call that ran no command (#612's `prune_output`,
@@ -9872,6 +9941,8 @@ mod tests {
             build_dirty,
             shown_roots,
             scenario_fixed,
+            api_unchecked,
+            sampler_pins,
             ..
         } = &mut lines[0].event
         else {
@@ -9889,6 +9960,8 @@ mod tests {
         *build_dirty = None;
         *shown_roots = None;
         *scenario_fixed = None;
+        *api_unchecked = None;
+        *sampler_pins = None;
         // Written as a v0 log spells it (#583).
         let document: String = lines
             .iter()
