@@ -4,6 +4,12 @@
 
 *Lines marked `[unsettled]` are questions, not facts. Who may change which line is in [`AGENTS.md`](AGENTS.md).*
 
+## The North Star
+
+> Exercise is a useful harness that can implement Diet's regimens successfully, and the joint capabilities demonstrate the thesis of ephemeral interview forks producing quantitatively better results than unattended 'native' harness use.
+
+*The maintainer, 2026-10-20. The test that would show it is #932.*
+
 ## 0. The premise
 
 Context is a working set, not a transcript. Locally, prefill is the only cost that scales badly with the working set; decode is flat. So the game is prefix stability and a small, curated working set, with durable artifacts replacing the disposable transcript.
