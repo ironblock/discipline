@@ -1,0 +1,8 @@
+{"head":[{"content":"you are the trunk","role":"system"}],"kind":"session.start","max_api_requests":1,"model":"claude-haiku-5-5","opened":1790000000000,"seq":0,"t":0,"version":12}
+{"kind":"ask","seq":1,"t":5,"text":"say hello","turn":1}
+{"from":"awaiting","kind":"settlement","seq":2,"t":10,"to":"turn"}
+{"kind":"request","lane":"trunk","seq":3,"t":15,"turn":1}
+{"kind":"request.failed","message":"not sent: the session's max_api_requests (1) is reached","reason":"api_cap","request":3,"seq":4,"t":20}
+{"kind":"turn.settled","reason":"api_cap","seq":5,"t":25,"turn":1}
+{"from":"turn","kind":"settlement","seq":6,"t":30,"to":"awaiting"}
+{"because":"api-cap","command":"ask","during":"awaiting","kind":"refused","seq":7,"t":35}

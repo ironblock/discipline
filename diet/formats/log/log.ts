@@ -4,8 +4,8 @@
 // i64, and a JavaScript number is exact only to 2^53. A `timings`
 // millisecond may carry a fraction, written as the server wrote it.
 
-export const VERSION = 11;
-export const READS = [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11] as const;
+export const VERSION = 12;
+export const READS = [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12] as const;
 export const PRESENCE_WINDOW_MS = 2000;
 
 export type Kind =
@@ -62,6 +62,7 @@ export type Lane =
   | "trunk"
   | "interview"
   | "audit"
+  | "warm"
 ;
 
 export type Command =
@@ -108,6 +109,7 @@ export type Refusal =
   | "already-asked"
   | "proposal-pending"
   | "no-vision"
+  | "api-cap"
 ;
 
 export type FailReason =
@@ -117,6 +119,7 @@ export type FailReason =
   | "crashed"
   | "context_overflow"
   | "refusal"
+  | "api_cap"
 ;
 
 export type SettleReason =
@@ -126,6 +129,7 @@ export type SettleReason =
   | "timeout"
   | "failed"
   | "capped"
+  | "api_cap"
 ;
 
 export type GapEnd =
@@ -389,7 +393,7 @@ export type SessionStartLine = {
   seq: number;
   t: number;
   kind: "session.start";
-  version: 0 | 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9 | 10 | 11;
+  version: 0 | 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9 | 10 | 11 | 12;
   opened: number;
   model: string;
   head: HeadMessage[];
@@ -424,6 +428,7 @@ export type SessionStartLine = {
   scenario_fixed?: string[];
   api_unchecked?: string[];
   sampler_pins?: string;
+  max_api_requests?: number;
 } & ({ substrate: string; registry_sha256: string } | { substrate?: never; registry_sha256?: never });
 
 export type AskLine = {

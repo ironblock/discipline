@@ -16,6 +16,14 @@ substrate_reasoning = "on"
 # The registry's hardware_fingerprint for `anthropic-api`, which must agree.
 substrate_hardware = "24a1117b0a8112dbcd56ec38eb21cb44bf8124400d6233af927ecadc1db1b13e"
 
+# Its requests' limits (#555), none with a default: every request the
+# session sends, every lane's and every retry, counts against the cap; a
+# 429 or 529 is retried at most `api_retries` times, and never when its
+# retry-after asks a longer wait than `api_retry_after_max_seconds`.
+max_api_requests = 40
+api_retries = 2
+api_retry_after_max_seconds = 60
+
 # Adaptive thinking, at an effort the entry declares it takes.
 [reasoning]
 effort = "medium"

@@ -1148,7 +1148,7 @@ fn a_drive_server_confirms_a_declared_engines_model_settings_and_draft() {
         ]),
         "{start_line}"
     );
-    assert_eq!(start_line["version"], 11, "{start_line}");
+    assert_eq!(start_line["version"], 12, "{start_line}");
     // And its server speaks TabbyAPI's dialect, by name (#496).
     assert_eq!(start_line["serving"]["dialect"], "tabbyapi", "{start_line}");
 }
@@ -4125,6 +4125,18 @@ fn hosted_regimen() -> HeadFile {
 
 /// The same, with `top` among its top-level keys.
 fn hosted_regimen_with(top: &str) -> HeadFile {
+    hosted_regimen_bare(&format!("{HOSTED_LIMITS}{top}"))
+}
+
+/// What every hosted regimen declares of its requests (#555): a cap, its
+/// retries, and the longest `retry-after` it waits.
+const HOSTED_LIMITS: &str =
+    "max_api_requests = 50\napi_retries = 2\napi_retry_after_max_seconds = 30\n";
+
+/// A regimen on the hosted-API rehearsal substrate, `top` its only
+/// top-level keys beyond the substrate's: no request limits unless `top`
+/// declares them.
+fn hosted_regimen_bare(top: &str) -> HeadFile {
     let hardware =
         diet::drive::registry::identity(diet::drive::registry::REGISTRY, "stub-hosted-api")
             .expect("the rehearsal entry")
@@ -4151,13 +4163,18 @@ fn refusal(said: &str) -> String {
 /// A regimen on hosted rung `id`, at `effort`, with `sampler` its
 /// `[sampler]` table's lines.
 fn rung_regimen(id: &str, effort: &str, sampler: &str) -> HeadFile {
+    rung_regimen_with(HOSTED_LIMITS, id, effort, sampler)
+}
+
+/// [`rung_regimen`], `top` its top-level keys in place of [`HOSTED_LIMITS`].
+fn rung_regimen_with(top: &str, id: &str, effort: &str, sampler: &str) -> HeadFile {
     let hardware = diet::drive::registry::identity(diet::drive::registry::REGISTRY, id)
         .expect("the rung's entry")
         .hardware_fingerprint;
     file_holding(
         "regimen",
         &format!(
-            "arm = \"a\"\ndogma_version = 0\nsubstrate = \"{id}\"\n\
+            "{top}arm = \"a\"\ndogma_version = 0\nsubstrate = \"{id}\"\n\
              substrate_reasoning = \"on\"\nsubstrate_hardware = \"{hardware}\"\n\
              [reasoning]\neffort = \"{effort}\"\nbudget_tokens = \"none\"\n\
              [sampler]\n{sampler}"
@@ -4300,6 +4317,125 @@ fn a_hosted_rung_refuses_a_model_its_entry_does_not_name() {
             && said.contains("`weights_model_id = \"claude-haiku-5-5\"`")
             && !said.contains("listening"),
         "{said}"
+    );
+}
+
+/// #555 step 4: a hosted regimen declares its request limits -- the cap,
+/// the retries, the longest `retry-after` waited -- with no default; one
+/// missing is refused at start, each named, and a cap of 0 sends nothing.
+#[test]
+fn a_hosted_regimen_names_its_request_limits_or_is_refused() {
+    let key = file_holding("key", "sk-rehearsal\n");
+    let key_path = key.0.to_string_lossy().into_owned();
+    for (top, named) in [
+        (
+            "",
+            vec![
+                "max_api_requests",
+                "api_retries",
+                "api_retry_after_max_seconds",
+            ],
+        ),
+        (
+            "max_api_requests = 9\n",
+            vec!["api_retries", "api_retry_after_max_seconds"],
+        ),
+        (
+            "max_api_requests = 0\napi_retries = 0\napi_retry_after_max_seconds = 0\n",
+            vec!["max_api_requests"],
+        ),
+        (
+            "max_api_requests = \"many\"\napi_retries = 0\napi_retry_after_max_seconds = 0\n",
+            vec!["max_api_requests"],
+        ),
+    ] {
+        let regimen = rung_regimen_with(
+            top,
+            "anthropic-claude-haiku-5-5",
+            "low",
+            "temperature = 1\n",
+        );
+        let path = regimen.0.to_string_lossy().into_owned();
+        let (code, printed) = run_briefly_as(
+            "claude-haiku-5-5",
+            "https://127.0.0.1:9/v1/messages",
+            &["--regimen", &path, "--key-file", &key_path],
+        );
+        let said = refusal(&printed);
+        assert_eq!(code, Some(1), "{top}: {said}");
+        for key in named {
+            assert!(said.contains(&format!("`{key}`")), "{top}: {key}: {said}");
+        }
+    }
+}
+
+/// #555 step 4: a hosted session sends no request past `max_api_requests`.
+/// The request that would pass it is never sent: its `request.failed` says
+/// `api_cap`, the turn settles `api_cap`, the start row names the cap, and
+/// every later ask is refused `api-cap`.
+#[test]
+fn a_hosted_session_sends_nothing_past_max_api_requests() {
+    let stub = Stub::serving(vec![
+        Act::Raw(HOSTED_ANSWER.to_vec()),
+        Act::Raw(HOSTED_ANSWER.to_vec()),
+    ])
+    .expect("loopback");
+    let regimen = hosted_regimen_bare(
+        "max_api_requests = 1\napi_retries = 0\napi_retry_after_max_seconds = 0\n",
+    );
+    let path = regimen.0.to_string_lossy().into_owned();
+    let key = file_holding("key", "sk-rehearsal\n");
+    let key_path = key.0.to_string_lossy().into_owned();
+    let log_file = file_holding("log", "");
+    let logged = log_file.0.to_string_lossy().into_owned();
+    let served = start_as(
+        "a-hosted-model",
+        &stub.url(),
+        &[
+            "--regimen",
+            &path,
+            "--key-file",
+            &key_path,
+            "--log",
+            &logged,
+        ],
+    );
+    let address = served.listening.clone();
+    for turn in 1..=2 {
+        let reply = post(&address, &address, r#"{"kind":"ask","text":"hello?"}"#);
+        assert_eq!(status(&reply), 200, "{reply}");
+        exchange(
+            &address,
+            &format!("GET /events?from=0 HTTP/1.1\r\nHost: {address}\r\n\r\n"),
+            |read| read.matches("turn.settled").count() >= turn,
+        );
+    }
+    let reply = post(&address, &address, r#"{"kind":"ask","text":"and again?"}"#);
+    assert_eq!(status(&reply), 409, "{reply}");
+    assert!(reply.contains(r#""refused":"api-cap""#), "{reply}");
+    let reply = post(&address, &address, r#"{"kind":"end"}"#);
+    assert_eq!(status(&reply), 200, "{reply}");
+    assert_eq!(stub.received().len(), 1, "one request was sent");
+    let lines: Vec<serde_json::Value> = std::fs::read_to_string(&log_file.0)
+        .expect("the log")
+        .lines()
+        .map(log_line_object)
+        .collect();
+    assert_eq!(lines[0]["max_api_requests"], 1, "{}", lines[0]);
+    let failed: Vec<_> = lines
+        .iter()
+        .filter(|l| l["kind"] == "request.failed")
+        .collect();
+    assert_eq!(failed.len(), 1, "{failed:?}");
+    assert_eq!(failed[0]["reason"], "api_cap", "{}", failed[0]);
+    let settled: Vec<_> = lines
+        .iter()
+        .filter(|l| l["kind"] == "turn.settled")
+        .collect();
+    assert_eq!(
+        (settled[0]["reason"].as_str(), settled[1]["reason"].as_str()),
+        (Some("final"), Some("api_cap")),
+        "{settled:?}"
     );
 }
 

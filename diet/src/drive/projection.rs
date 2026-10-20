@@ -2316,6 +2316,7 @@ mod tests {
             build_commit: None,
             api_unchecked: None,
             sampler_pins: None,
+            max_api_requests: None,
         }
     }
 

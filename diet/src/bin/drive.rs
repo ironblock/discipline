@@ -698,6 +698,7 @@ fn serve(args: &[String]) -> ExitCode {
     // binds; what the entry leaves unchecked is named in the start row.
     // `Some` on a hosted API, its unchecked keys `None` when there are none.
     let mut api_unchecked = None;
+    let mut max_api_requests = None;
     if let Some((identity, regime)) = hosted.as_ref().zip(regime.as_ref()) {
         let key = if key_file.is_some() {
             diet::drive::hosted::Key::Given
@@ -713,8 +714,9 @@ fn serve(args: &[String]) -> ExitCode {
                 }),
             )
         };
-        // The cache-lifetime lever (#556), from the regimen as written.
-        let ttl = regimen_file
+        // The cache-lifetime lever (#556) and the request limits (#555),
+        // from the regimen as written.
+        let read = regimen_file
             .as_deref()
             .map(|path| {
                 std::fs::read_to_string(path)
@@ -722,11 +724,18 @@ fn serve(args: &[String]) -> ExitCode {
                     .and_then(|text| {
                         regimen::parse(&text).map_err(|why| format!("{path}: {why:?}"))
                     })
-                    .and_then(|read| diet::drive::hosted::cache_ttl(&read))
+                    .and_then(|read| {
+                        Ok((
+                            diet::drive::hosted::cache_ttl(&read)?,
+                            diet::drive::hosted::request_limits(&read)
+                                .map_err(|why| format!("{path}: {why}"))?,
+                        ))
+                    })
             })
             .transpose();
-        let ttl = match ttl {
-            Ok(ttl) => ttl.unwrap_or_default(),
+        let (ttl, limits) = match read {
+            Ok(Some(read)) => read,
+            Ok(None) => return fail(EXIT_INPUT, "a hosted API is served under a regimen file"),
             Err(why) => return fail(EXIT_INPUT, &why),
         };
         match diet::drive::hosted::transport(
@@ -736,7 +745,11 @@ fn serve(args: &[String]) -> ExitCode {
             &shape,
         ) {
             Ok((hosted, unchecked)) => {
-                transport = hosted;
+                // Every lane's requests, and every retry, are one count.
+                transport = hosted.with_budget(std::sync::Arc::new(
+                    diet::client::stream::RequestBudget::new(limits.max_api_requests),
+                ));
+                max_api_requests = Some(limits.max_api_requests);
                 api_unchecked = Some(
                     (!unchecked.is_empty())
                         .then(|| unchecked.iter().map(|key| (*key).to_owned()).collect()),
@@ -889,6 +902,7 @@ fn serve(args: &[String]) -> ExitCode {
                 diet::build::build(),
                 api_unchecked.map(|unchecked| diet::drive::session::HostedStart {
                     unchecked,
+                    max_api_requests,
                     pins_nothing: regime.as_ref().is_some_and(|regime| {
                         diet::drive::regimen::pins_nothing(&regime.substrates[0].sampler_card)
                     }),

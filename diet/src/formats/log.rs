@@ -160,6 +160,18 @@
 //! logs, the migration is nothing: no v10 log carries it, and a v10 hosted
 //! session's start checked nothing the entry declared.
 //!
+//! v12 (#555) adds a hosted API's request cap. `session.start` carries
+//! `max_api_requests`, the requests the session may send, every lane's and
+//! every retry. The request that would pass it is never sent: its
+//! `request.failed` says `api_cap`, without a `status`, and its turn settles
+//! `api_cap`; every later ask is refused `api-cap`. A meditation's
+//! pre-warm, sent before v12 with no line of its own, is a `request` on lane
+//! `warm`, `max_tokens` 1 and no `fork`, answered like any other. A log that
+//! declares 11 or less and carries any of them is refused. For a reader of
+//! v11 logs, the migration is this: a v11 meditation's `warm` timings were
+//! a request the log does not show; from v12 the request is shown, and the
+//! meditation's `warm` still carries its timings.
+//!
 //! # A torn final line
 //!
 //! A writer killed mid-write leaves the start of an event with no line break
@@ -191,10 +203,10 @@ use super::record::vocabulary;
 struct LogParser;
 
 /// The version this module writes, as `session.start` states it.
-pub const VERSION: i64 = 11;
+pub const VERSION: i64 = 12;
 
 /// Every version this module reads.
-pub const READS: &[i64] = &[0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11];
+pub const READS: &[i64] = &[0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12];
 
 /// How recent an input event must be, at the moment a turn settles, for the
 /// person to count as already present: `notice` is then zero (Q4 (a), ruled
@@ -585,6 +597,9 @@ vocabulary! {
         /// An ask carrying an image to a substrate served without vision
         /// (v8, #815).
         NoVision => "no-vision",
+        /// An ask after the session's `max_api_requests` was reached (v12,
+        /// #555): nothing more is sent.
+        ApiCap => "api-cap",
     }
 }
 
@@ -599,6 +614,9 @@ vocabulary! {
         /// A meditation's audit (v7, #504): a fork's call, put the dogma's audit
         /// ask over working memory before the refill.
         Audit => "audit",
+        /// A meditation's pre-warm (v12, #555): the refilled trunk sent once
+        /// with an output cap of one, so its forks read a cache it wrote.
+        Warm => "warm",
     }
 }
 
@@ -693,6 +711,9 @@ vocabulary! {
         /// The model refused to answer: a hosted API's `stop_reason`
         /// `refusal` (v7, #555).
         Refusal => "refusal",
+        /// Never sent: the session's `max_api_requests` was reached (v12,
+        /// #555).
+        ApiCap => "api_cap",
     }
 }
 
@@ -726,6 +747,9 @@ vocabulary! {
         Failed => "failed",
         /// Its trunk call stopped at its output cap (v3, #290).
         Capped => "capped",
+        /// Its trunk's next request was never sent: the session's
+        /// `max_api_requests` was reached (v12, #555).
+        ApiCap => "api_cap",
     }
 }
 
@@ -1221,6 +1245,9 @@ pub enum Event {
         /// #555): `[sampler] pins = "none"`, on a hosted API, whose
         /// provider's defaults sampled. Absent, the regimen's pins were sent.
         sampler_pins: Option<String>,
+        /// On a hosted API's session (v12, #555): the requests it may send,
+        /// every lane's and every retry.
+        max_api_requests: Option<u64>,
     },
     /// An ask was admitted.
     Ask {
@@ -2940,20 +2967,22 @@ impl Forks {
     }
 
     /// A `request`'s `fork` (#374): an `interview` request names an earlier
-    /// fork not yet settled; a trunk request names none.
+    /// fork not yet settled; a trunk request names none, and a meditation's
+    /// pre-warm none (v12, #555).
     fn request(&self, lane: Lane, fork: Option<u64>) -> Result<(), String> {
         let Some(fork) = fork else {
-            if lane != Lane::Trunk {
+            if lane != Lane::Trunk && lane != Lane::Warm {
                 return Err(format!(
-                    "an `{}` request carries no `fork`: it names the fork it is the call of",
+                    "a `{}` request carries no `fork`: it names the fork it is the call of",
                     lane.tag()
                 ));
             }
             return Ok(());
         };
-        if lane == Lane::Trunk {
+        if lane == Lane::Trunk || lane == Lane::Warm {
             return Err(format!(
-                "a trunk request carries `fork` {fork}: only an `interview` request is a fork's"
+                "a {} request carries `fork` {fork}: only an `interview` request is a fork's",
+                lane.tag()
             ));
         }
         if !self.of_turn.contains_key(&fork) {
@@ -3602,6 +3631,7 @@ fn from_object(object: &BTreeMap<String, Value>) -> Result<Line, String> {
                     }
                     word => word,
                 },
+                max_api_requests: fields.optional_count("max_api_requests")?,
                 phases: fields.optional_strings("phases")?,
                 phase_transitions: match object.get("phase_transitions") {
                     None => None,
@@ -5213,6 +5243,16 @@ const fn must_v8(key: &'static str, holds: Holds) -> Field {
     }
 }
 
+/// A key that arrived in v12, optional wherever its object is written.
+const fn may_v12(key: &'static str, holds: Holds) -> Field {
+    Field {
+        key,
+        holds,
+        required: false,
+        since: 12,
+    }
+}
+
 /// A key that arrived in v11, optional wherever its object is written.
 const fn may_v11(key: &'static str, holds: Holds) -> Field {
     Field {
@@ -5400,6 +5440,14 @@ fn two_keys(tags: Tags, tag: &str) -> bool {
 #[must_use]
 #[allow(clippy::too_many_lines)] // one table of arrivals, written out
 pub fn tag_introduced(tags: Tags, tag: &str) -> i64 {
+    let api_cap = (tags == Tags::Lane && Lane::from_tag(tag) == Some(Lane::Warm))
+        || (tags == Tags::FailReason && FailReason::from_tag(tag) == Some(FailReason::ApiCap))
+        || (tags == Tags::SettleReason
+            && SettleReason::from_tag(tag) == Some(SettleReason::ApiCap))
+        || (tags == Tags::Refusal && Refusal::from_tag(tag) == Some(Refusal::ApiCap));
+    if api_cap {
+        return 12;
+    }
     if tags == Tags::Warrant && Warrant::from_tag(tag) == Some(Warrant::Refutation) {
         return 9;
     }
@@ -5571,6 +5619,7 @@ pub fn schema(kind: Kind) -> &'static [Field] {
                 may_v8("scenario_fixed", Holds::Strings),
                 may_v11("api_unchecked", Holds::Strings),
                 may_v11("sampler_pins", Text),
+                may_v12("max_api_requests", Count),
             ];
             F
         }
@@ -6328,6 +6377,7 @@ fn to_value(line: &Line) -> Value {
             scenario_fixed,
             api_unchecked,
             sampler_pins,
+            max_api_requests,
             phases,
             phase_transitions,
             opening_phase,
@@ -6415,6 +6465,9 @@ fn to_value(line: &Line) -> Value {
             }
             if let Some(word) = sampler_pins {
                 put("sampler_pins", text(word));
+            }
+            if let Some(cap) = max_api_requests {
+                put("max_api_requests", count(*cap));
             }
             if let Some(keys) = api_unchecked {
                 put(
@@ -8548,11 +8601,11 @@ mod tests {
         assert!(refused.why.contains("v8"), "{refused}");
     }
 
-    /// #583, #878, #904, #555: this module writes v11.
+    /// #583, #878, #904, #555: this module writes v12.
     #[test]
-    fn this_module_writes_v11_and_reads_every_version_before_it() {
-        assert_eq!(super::VERSION, 11);
-        assert_eq!(super::READS, &[0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11]);
+    fn this_module_writes_v12_and_reads_every_version_before_it() {
+        assert_eq!(super::VERSION, 12);
+        assert_eq!(super::READS, &[0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12]);
     }
 
     fn start() -> Line {
@@ -8568,6 +8621,7 @@ mod tests {
                 scenario_fixed: Some(vec!["job_ids".to_owned(), "pids".to_owned()]),
                 api_unchecked: Some(vec!["efforts".to_owned()]),
                 sampler_pins: Some("none".to_owned()),
+                max_api_requests: Some(40),
                 version: VERSION,
                 opened: 1_790_000_000_000,
                 model: "a-model".to_owned(),
@@ -9943,6 +9997,7 @@ mod tests {
             scenario_fixed,
             api_unchecked,
             sampler_pins,
+            max_api_requests,
             ..
         } = &mut lines[0].event
         else {
@@ -9962,6 +10017,7 @@ mod tests {
         *scenario_fixed = None;
         *api_unchecked = None;
         *sampler_pins = None;
+        *max_api_requests = None;
         // Written as a v0 log spells it (#583).
         let document: String = lines
             .iter()
@@ -10529,16 +10585,16 @@ mod tests {
         );
         assert_eq!(
             tags(FailReason::ALL.iter().map(|it| it.tag()).collect()),
-            "server timeout transport crashed context_overflow refusal"
+            "server timeout transport crashed context_overflow refusal api_cap"
         );
         assert_eq!(
             tags(Refusal::ALL.iter().map(|it| it.tag()).collect()),
             "in-flight ended nothing-in-flight meditation-not-built nothing-to-meditate no-phase-graph not-a-phase \
-             already-in-phase no-phase-edge stale tangent-open no-tangent bad-tangent not-the-scope nothing-running no-proposal unknown-entry not-live empty meditation-held nothing-held restates not-unilateral already-asked proposal-pending no-vision"
+             already-in-phase no-phase-edge stale tangent-open no-tangent bad-tangent not-the-scope nothing-running no-proposal unknown-entry not-live empty meditation-held nothing-held restates not-unilateral already-asked proposal-pending no-vision api-cap"
         );
         assert_eq!(
             tags(SettleReason::ALL.iter().map(|it| it.tag()).collect()),
-            "final cancelled max_steps timeout failed capped"
+            "final cancelled max_steps timeout failed capped api_cap"
         );
         assert_eq!(
             tags(ToolOutcome::ALL.iter().map(|it| it.tag()).collect()),
@@ -10558,7 +10614,7 @@ mod tests {
         );
         assert_eq!(
             tags(Lane::ALL.iter().map(|it| it.tag()).collect()),
-            "trunk interview audit"
+            "trunk interview audit warm"
         );
         assert_eq!(
             tags(Warrant::ALL.iter().map(|it| it.tag()).collect()),
