@@ -4,8 +4,8 @@
 //! it; the operator can move a running call to the background.
 //!
 //! The shape is Qwen Code's, whole (Dispatch's ruling, #614): the only
-//! compared harness whose shell runs in the background (`OpenCode` 2's
-//! background jobs are its subagents', and Pi has none). Its words are
+//! compared harness whose shell ran in the background (`OpenCode` 2's
+//! background jobs were its subagents' at `055d95bb`, and Pi has none). Its words are
 //! adapted as #557's were: no rule this harness does not enforce, and no
 //! other harness's tool or dialog names (`tools/shell.ts`,
 //! `tools/task-stop.ts`, `services/backgroundShellRegistry.ts`).

@@ -1423,7 +1423,7 @@ recommended_absent = "this crate's stub playing constructed events, never a prov
 
 [substrate.anthropic-claude-haiku-5-5]
 equipment = "anthropic-api"
-description = "Claude Haiku 5.5 over Anthropic's Messages API (#555): the hosted rung nearest the 27B floor, the maintainer's choice. Its thinking is adaptive, as Pi (42a3497d, packages/ai/scripts/generate-models.ts:622-641, forceAdaptiveThinking for sonnet-5/haiku-5 ids) and OpenCode 2 (055d95bb, packages/opencode/src/provider/transform.ts:657-684, adaptive for claude ids at 4.7 and after) both declare it; no budget_tokens. Its window, output cap, effort levels and sampler are declared from Anthropic's docs, each value's `_is` citing the page it was read from (2026-10-19), and never probed. No live call has been made against it"
+description = "Claude Haiku 5.5 over Anthropic's Messages API (#555): the hosted rung nearest the 27B floor, the maintainer's choice. Its thinking is adaptive, as Pi (42a3497d, packages/ai/scripts/generate-models.ts:622-641, forceAdaptiveThinking for sonnet-5/haiku-5 ids) and OpenCode 2 (v2.0.32, packages/core/src/variant.ts:68-82,325-355, adaptive for claude ids but 3.7 and 4.0 to 4.5) both declare it; no budget_tokens. Its window, output cap, effort levels and sampler are declared from Anthropic's docs, each value's `_is` citing the page it was read from (2026-10-19), and never probed. No live call has been made against it"
 pinned = true
 server_kind = "api"
 dialect = "anthropic-messages"
@@ -1451,7 +1451,7 @@ recommended_absent = "the provider publishes no recommended sampling for Claude 
 
 [substrate.anthropic-claude-sonnet-5-5]
 equipment = "anthropic-api"
-description = "Claude Sonnet 5.5 over Anthropic's Messages API (#555): the hosted rung near Qwen3.8-Flash-Next, the maintainer's choice over Sonnet 5, which sits closer and costs more. Its thinking is adaptive, as Pi (42a3497d, packages/ai/scripts/generate-models.ts:622-641, forceAdaptiveThinking for sonnet-5/haiku-5 ids) and OpenCode 2 (055d95bb, packages/opencode/src/provider/transform.ts:657-684, adaptive for claude ids at 4.7 and after) both declare it; no budget_tokens. Its window, output cap, effort levels and sampler are declared from Anthropic's docs, each value's `_is` citing the page it was read from (2026-10-19), and never probed. No live call has been made against it"
+description = "Claude Sonnet 5.5 over Anthropic's Messages API (#555): the hosted rung near Qwen3.8-Flash-Next, the maintainer's choice over Sonnet 5, which sits closer and costs more. Its thinking is adaptive, as Pi (42a3497d, packages/ai/scripts/generate-models.ts:622-641, forceAdaptiveThinking for sonnet-5/haiku-5 ids) and OpenCode 2 (v2.0.32, packages/core/src/variant.ts:68-82,325-355, adaptive for claude ids but 3.7 and 4.0 to 4.5) both declare it; no budget_tokens. Its window, output cap, effort levels and sampler are declared from Anthropic's docs, each value's `_is` citing the page it was read from (2026-10-19), and never probed. No live call has been made against it"
 pinned = true
 server_kind = "api"
 dialect = "anthropic-messages"

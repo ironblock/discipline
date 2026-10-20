@@ -8,10 +8,11 @@
 //!
 //! * **The limit** -- Pi and `OpenCode` 2 agree: 2000 lines or 50 KiB,
 //!   whichever comes first (`pi:packages/coding-agent/src/core/tools/truncate.ts`
-//!   11-12; `oc:packages/core/src/tool-output-store.ts` 13-14), and both cap
+//!   11-12; `oc:packages/core/src/tool-output.ts` 13-14), and both cap
 //!   every tool output, so the cap is on unless a regimen turns it off.
 //! * **What is kept** -- they differ (Pi the tail, `OpenCode` 2 head and
-//!   tail), so Qwen Code's: the head a fifth of the budget, the tail four
+//!   tail at `055d95bb`, `oc:packages/core/src/tool-output-store.ts` 76-103
+//!   there), so Qwen Code's: the head a fifth of the budget, the tail four
 //!   fifths, with its separator (`qc:packages/core/src/tools/truncation.ts`
 //!   113-116, 130-137).
 //! * **The notice** -- they differ, so Qwen Code's, before the output

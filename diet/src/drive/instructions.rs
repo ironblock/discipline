@@ -4,25 +4,27 @@
 //!
 //! Where Pi and `OpenCode` 2 agree, this follows them; where they differ,
 //! Qwen Code decides. Each source is read at the baseline's commits, Pi
-//! `42a3497d`, `OpenCode` `055d95bb`, Qwen Code `c0c697c8`:
+//! `42a3497d`, `OpenCode` 2 `v2.0.32` (`843a6c51`), Qwen Code `c0c697c8`; a
+//! line naming `OpenCode`'s `055d95bb` is the commit that choice was made on:
 //!
 //! * **Which files: `AGENTS.md` only.** Both Pi and `OpenCode` 2 read
 //!   `AGENTS.md`, and neither reads `QWEN.md`. Pi also takes
 //!   `AGENTS.override.md`, `AGENTS.MD`, `CLAUDE.md` and `CLAUDE.MD`, the first
 //!   found per directory (`pi:packages/coding-agent/src/core/resource-loader.ts:185`).
 //!   `OpenCode` 2 takes `AGENTS.md` alone
-//!   (`oc:packages/core/src/instruction-context.ts:51`). Qwen Code, which
+//!   (`oc:packages/core/src/config/plugin/instruction.ts:41,55,79`). Qwen Code, which
 //!   decides the fallbacks, reads `QWEN.md` and `AGENTS.md` and no `CLAUDE.md`
 //!   (`qc:packages/core/src/utils/memory-constants.ts:34-36`); `QWEN.md` is
 //!   left out because Pi and `OpenCode` 2 agree on not reading it.
 //! * **Where the walk stops: the git root.** Pi walks to the filesystem
-//!   root (`resource-loader.ts:253-268`). `OpenCode` 2 stops at the project
-//!   directory (`instruction-context.ts:40-58`, `oc:packages/core/src/fs-util.ts:168-181`). Qwen
+//!   root (`resource-loader.ts:253-268`). `OpenCode` 2 stopped at the project
+//!   directory at `055d95bb` (`oc:packages/core/src/instruction-context.ts:40-58`,
+//!   `packages/core/src/fs-util.ts:168-181` there). Qwen
 //!   Code stops at the nearest ancestor holding `.git`, as a directory or a
 //!   file (`qc:…/utils/projectRoot.ts:29-37`, `memory/memoryDiscovery.ts:168-193`).
 //! * **Order: outermost first.** Pi puts the outermost file first
 //!   (`unshift`, `resource-loader.ts:262`). `OpenCode` 2 puts the nearest
-//!   first (`fs-util.ts:174`). Qwen Code puts the outermost first
+//!   first (`oc:packages/util/src/fs-util.ts:178`). Qwen Code puts the outermost first
 //!   (`unshift`, `memoryDiscovery.ts:187`).
 //! * **Wrapper:** Qwen Code's `--- Context from: <path> ---` …
 //!   `--- End of Context from: <path> ---`, the content trimmed, the path
@@ -30,7 +32,7 @@
 //!   (`memoryDiscovery.ts:405-407`). Pi wraps each file in
 //!   `<project_instructions path=…>` (`pi:…/core/system-prompt.ts:79-86`);
 //!   `OpenCode` 2 prefixes `Instructions from: <path>`
-//!   (`instruction-context.ts:99-100`).
+//!   (`oc:packages/core/src/instruction-discovery.ts:123-125`).
 //! * **Placement:** at the end of the system prompt, after `\n\n---\n\n`
 //!   (`qc:…/core/prompts.ts:840-843,884-888`). All three put them in the
 //!   system prompt.
