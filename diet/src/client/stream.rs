@@ -714,10 +714,9 @@ impl HttpStream {
     }
 
     /// This transport as a fork on the same server makes its calls, when that
-    /// differs (#556): a hosted API's fork never writes its own tail to the
-    /// cache for an hour, since nothing reuses it; its system and tools ask
-    /// as the trunk's do, so they read the trunk's entries. `None` when a
-    /// fork's calls are the trunk's.
+    /// differs (#556). `None` when a fork's calls are the trunk's, as a
+    /// hosted API's are since #555 step 4d: its fork asks the cache as the
+    /// trunk does and writes nothing ([`super::anthropic::Ttls::for_a_fork`]).
     #[must_use]
     pub fn for_forks(&self) -> Option<Self> {
         let Wire::Anthropic(options) = &self.wire else {

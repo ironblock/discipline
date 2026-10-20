@@ -4152,14 +4152,15 @@ fn hosted_regimen_bare(top: &str) -> HeadFile {
     )
 }
 
-/// A hosted session whose forks ask the cache differently from its trunk
-/// (`cache_ttl = "1h"`, a separate fork transport) and whose regimen runs
-/// commands -- so background commands are on, and their reaper starts with
-/// the session -- starts: its forks' transport is set whatever else holds
-/// the session. It panicked at start ("a session's forks are set before it
-/// is shared") while the reaper held the session weakly.
+/// A hosted session at `cache_ttl = "1h"` whose regimen runs commands -- so
+/// background commands are on, and their reaper starts with the session --
+/// starts. Before #555 step 4d its forks had a transport of their own, and
+/// taking it panicked while the reaper held the session (#927); a fork now
+/// asks as the trunk does, and the session's own test
+/// (`a_session_with_background_commands_takes_its_forks_and_its_seat`)
+/// keeps that guard.
 #[test]
-fn a_hosted_session_with_background_commands_and_a_fork_transport_starts() {
+fn a_hosted_session_at_an_hour_with_background_commands_starts() {
     let regimen = hosted_regimen_with(
         "cache_ttl = \"1h\"\nisolation = \"none\"\napproval = \"none\"\n\
          approval_policy = \"approvals are off: every command runs without a gate decision \

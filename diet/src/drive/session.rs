@@ -3186,8 +3186,8 @@ struct Shared<S> {
     /// the reaper holds it from the start.
     seat: std::sync::OnceLock<Offboard<S>>,
     /// A fork's own transport on the trunk's server, when it asks the cache
-    /// differently (#556): a hosted API's, whose fork never writes its tail
-    /// for an hour. Set once, as `seat` is.
+    /// differently (#556); unset when a fork's calls are the trunk's. Set
+    /// once, as `seat` is.
     forks: std::sync::OnceLock<S>,
 }
 
@@ -3420,8 +3420,7 @@ impl<S: Streaming + 'static> Session<S> {
     ///
     /// # Panics
     ///
-    /// When the session is already shared: a seat is chosen before a
-    /// session serves anything.
+    /// When the session is already seated.
     #[must_use]
     pub fn seated(self, seat: Offboard<S>) -> Self {
         assert!(
@@ -3437,7 +3436,7 @@ impl<S: Streaming + 'static> Session<S> {
     ///
     /// # Panics
     ///
-    /// When the session is already shared.
+    /// When the session's forks are already set.
     #[must_use]
     pub fn forking_through(self, forks: S) -> Self {
         assert!(
@@ -23020,6 +23019,48 @@ pub(in crate::drive) mod tests {
             }),
         )
         .forking_through(Canned::new(forks))
+    }
+
+    /// A session whose regimen runs background commands is held by its
+    /// reaper from the start (#614), and still takes a fork transport and a
+    /// seat: each is set once, whatever else holds the session. Taking one
+    /// panicked while the reaper held the session (#927).
+    #[test]
+    fn a_session_with_background_commands_takes_its_forks_and_its_seat() {
+        let tree = scratch("background-setters");
+        let mut tools = tools(
+            Confinement::Unconfined,
+            &tree,
+            &["cat"],
+            None,
+            Decider::Decline,
+        );
+        tools.background = true;
+        let session = Session::open_with(
+            Canned::new(Vec::<Vec<Step>>::new()),
+            looping(),
+            None,
+            Some(tools),
+            None,
+            None,
+        );
+        assert!(
+            session
+                .shared
+                .reap
+                .lock()
+                .unwrap_or_else(PoisonError::into_inner)
+                .is_some(),
+            "the reaper started"
+        );
+        let _session = session
+            .forking_through(Canned::new(Vec::<Vec<Step>>::new()))
+            .seated(Offboard {
+                transport: Canned::new(Vec::<Vec<Step>>::new()),
+                substrate: "cpu-seat".to_owned(),
+                model: "small".to_owned(),
+                context_window: None,
+            });
     }
 
     /// Each fork's line: its seq, its `cut` and its `timing`.
