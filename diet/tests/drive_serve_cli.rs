@@ -4152,6 +4152,52 @@ fn hosted_regimen_bare(top: &str) -> HeadFile {
     )
 }
 
+/// A hosted regimen with reasoning off starts against an entry that declares
+/// the interleaved-thinking beta, and its request carries neither the beta
+/// nor thinking: the beta goes with thinking.
+#[test]
+fn a_hosted_session_with_reasoning_off_is_sent_no_thinking_beta() {
+    let hardware =
+        diet::drive::registry::identity(diet::drive::registry::REGISTRY, "stub-hosted-api")
+            .expect("the rehearsal entry")
+            .hardware_fingerprint;
+    let regimen = file_holding(
+        "regimen",
+        &format!(
+            "{HOSTED_LIMITS}arm = \"a\"\ndogma_version = 0\nsubstrate = \"stub-hosted-api\"\n\
+             substrate_reasoning = \"off\"\nsubstrate_hardware = \"{hardware}\"\n\
+             [sampler]\ntemperature = 1\n"
+        ),
+    );
+    let path = regimen.0.to_string_lossy().into_owned();
+    let key = file_holding("key", "sk-rehearsal\n");
+    let key_path = key.0.to_string_lossy().into_owned();
+    let stub = Stub::serving(vec![Act::Raw(HOSTED_ANSWER.to_vec())]).expect("loopback");
+    let served = start_as(
+        "a-hosted-model",
+        &stub.url(),
+        &["--regimen", &path, "--key-file", &key_path],
+    );
+    assert_eq!(served.substrate.as_deref(), Some("stub-hosted-api"));
+    let address = served.listening.clone();
+    let reply = post(&address, &address, r#"{"kind":"ask","text":"hello?"}"#);
+    assert_eq!(status(&reply), 200, "{reply}");
+    exchange(
+        &address,
+        &format!("GET /events?from=0 HTTP/1.1\r\nHost: {address}\r\n\r\n"),
+        |read| read.contains("turn.settled") && read.contains(r#""to":"awaiting""#),
+    );
+    let reply = post(&address, &address, r#"{"kind":"end"}"#);
+    assert_eq!(status(&reply), 200, "{reply}");
+
+    let heads = stub.heads();
+    assert_eq!(heads.len(), 1, "{heads:#?}");
+    let head = heads[0].to_ascii_lowercase();
+    assert!(!head.contains("anthropic-beta:"), "{head}");
+    let body = log_line_object(&stub.received()[0]);
+    assert!(body.get("thinking").is_none(), "{body}");
+}
+
 /// What a refused start said: its `error`, else everything it printed.
 fn refusal(said: &str) -> String {
     serde_json::from_str::<serde_json::Value>(said.trim())
