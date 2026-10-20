@@ -62,6 +62,14 @@ Only the surface's own tests (`npx --yes pnpm@11.20.0 -C exercise verify`) also 
     | `retry-after` | the agent's retry ignores it; the provider's, off by default, honours it to 60 s and fails past it | honoured, uncapped | honoured on 429 and 503 |
 
     Pi and OpenCode 2 agree that retries are on by default and start at 2 s, doubling: that is the backoff here. They disagree on the count and on `retry-after`. Qwen Code honours `retry-after`, which settles that tie. Nobody settles the count, so the regimen declares it, with no default.
+  - **A dry run before a live one** (#555): `diet-drive scenario FILE --dry-run [--regimen R] --out DIR` rehearses the script on `canned-scenario-hosted` under the regimen the live run would take, `--regimen` or the scenario's `live_regimen`. Only its `substrate` and `substrate_hardware` are swapped, so its limits, sampler, effort and levers run as written. The script's own replies answer, nothing leaves loopback, and no key but the rehearsal's is read. The report's `plan` names:
+    - the rung, its `weights_model_id`, and the regimen's limits;
+    - the rehearsal's requests by lane, and within `interview` and `audit` by fork kind, with its retries and attempts;
+    - its requests' `sized_tokens` summed, and their `max_tokens` summed, an upper bound on their output;
+    - whether the rehearsal met the cap, and the rung's unchecked keys;
+    - `bound`: `max_api_requests` × (the rung's window + its output cap), labelled a bound, not an estimate.
+
+    A regimen on a substrate that is not an `api` entry is refused. Expectations are checked as in any run, so a script the live regimen would run differently fails here first. Prices are not in the tree; the counts are what a cap is set from.
   - **The drive needs it:** `--record` refuses to start without `--regimen`, because a record's `start` names the regime it ran under. Only a rehearsal, with `--log` alone, can leave it out; then `serve` runs against any server and claims no substrate.
   - **On your own server,** `floor.toml` refuses to start unless your server reports what the floor's entry declares. Leave `--regimen` out for a rehearsal, or register your own machine and model and name them in a regimen of your own: [`substrates/README.md`](../../substrates/README.md), section **Registering your own box**. The registry is compiled into `diet-drive`, so registering means rebuilding.
 

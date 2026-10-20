@@ -183,6 +183,13 @@
 //! declares 12 or less and carries any of them is refused. For a reader of v12 logs, the migration is nothing: no
 //! v12 session retried.
 //!
+//! v14 (#555) adds `sized_tokens` to `request`: the session's own estimate
+//! of the request's prompt, in tokens, its messages' text estimated as the
+//! session sizes them, with no pad and nothing measured, on every lane. A
+//! dry run sums it; a live run's `usage.prompt_tokens` can be read against
+//! it. A log that declares 13 or less and carries it is refused. For a
+//! reader of v13 logs, the migration is nothing: no v13 request carried it.
+//!
 //! # A torn final line
 //!
 //! A writer killed mid-write leaves the start of an event with no line break
@@ -214,10 +221,10 @@ use super::record::vocabulary;
 struct LogParser;
 
 /// The version this module writes, as `session.start` states it.
-pub const VERSION: i64 = 13;
+pub const VERSION: i64 = 14;
 
 /// Every version this module reads.
-pub const READS: &[i64] = &[0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13];
+pub const READS: &[i64] = &[0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14];
 
 /// How recent an input event must be, at the moment a turn settles, for the
 /// person to count as already present: `notice` is then zero (Q4 (a), ruled
@@ -1309,6 +1316,11 @@ pub enum Event {
         /// session whose forks run during the turn (v8, #782): what its
         /// `timings` are read against for the decode penalty.
         beside: Option<u64>,
+        /// The session's own estimate of its prompt, in tokens (v14, #555):
+        /// its messages' text estimated as the session sizes them, with no
+        /// pad and nothing measured. What a dry run sums, and what a live
+        /// run's `usage.prompt_tokens` can be read against.
+        sized_tokens: Option<u64>,
     },
     /// A command was refused.
     Refused {
@@ -3722,6 +3734,7 @@ fn from_object(object: &BTreeMap<String, Value>) -> Result<Line, String> {
             fork: fields.optional_count("fork")?,
             max_tokens: fields.optional_count("max_tokens")?,
             beside: fields.optional_count("beside")?,
+            sized_tokens: fields.optional_count("sized_tokens")?,
         },
         Kind::Refused => Event::Refused {
             command: fields.tag("command", Command::from_tag)?,
@@ -5291,6 +5304,16 @@ const fn must_v8(key: &'static str, holds: Holds) -> Field {
     }
 }
 
+/// A key that arrived in v14, optional wherever its object is written.
+const fn may_v14(key: &'static str, holds: Holds) -> Field {
+    Field {
+        key,
+        holds,
+        required: false,
+        since: 14,
+    }
+}
+
 /// A key that arrived in v13, required wherever its object is written.
 const fn must_v13(key: &'static str, holds: Holds) -> Field {
     Field {
@@ -5715,6 +5738,7 @@ pub fn schema(kind: Kind) -> &'static [Field] {
                 may_v5("fork", Count),
                 may_v7("max_tokens", Count),
                 may_v8("beside", Count),
+                may_v14("sized_tokens", Count),
             ];
             F
         }
@@ -6681,10 +6705,14 @@ fn to_value(line: &Line) -> Value {
             fork,
             max_tokens,
             beside,
+            sized_tokens,
         } => {
             put("turn", count(u64::from(*turn)));
             if let Some(beside) = beside {
                 put("beside", count(*beside));
+            }
+            if let Some(sized) = sized_tokens {
+                put("sized_tokens", count(*sized));
             }
             put("lane", text(lane.tag()));
             if let Some(digest) = head_sha256 {
@@ -8706,13 +8734,13 @@ mod tests {
         assert!(refused.why.contains("v8"), "{refused}");
     }
 
-    /// #583, #878, #904, #555: this module writes v13.
+    /// #583, #878, #904, #555: this module writes v14.
     #[test]
-    fn this_module_writes_v13_and_reads_every_version_before_it() {
-        assert_eq!(super::VERSION, 13);
+    fn this_module_writes_v14_and_reads_every_version_before_it() {
+        assert_eq!(super::VERSION, 14);
         assert_eq!(
             super::READS,
-            &[0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13]
+            &[0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14]
         );
     }
 
@@ -8796,6 +8824,7 @@ mod tests {
                 fork: None,
                 max_tokens: None,
                 beside: None,
+                sized_tokens: Some(812),
             },
             Event::Delta {
                 request: 3,
@@ -8841,6 +8870,7 @@ mod tests {
                 fork: None,
                 max_tokens: None,
                 beside: None,
+                sized_tokens: None,
             },
             Event::RequestFailed {
                 request: 13,
@@ -8884,6 +8914,7 @@ mod tests {
                 fork: None,
                 max_tokens: None,
                 beside: None,
+                sized_tokens: None,
             },
             Event::Progress {
                 request: 20,
@@ -8947,6 +8978,7 @@ mod tests {
                 fork: None,
                 max_tokens: None,
                 beside: None,
+                sized_tokens: None,
             },
             Event::RequestFailed {
                 request: 29,
@@ -9031,6 +9063,7 @@ mod tests {
                 fork: None,
                 max_tokens: None,
                 beside: None,
+                sized_tokens: None,
             },
             Event::Response {
                 reasoning_signature: None,
@@ -9083,6 +9116,7 @@ mod tests {
                 fork: Some(fork),
                 max_tokens: Some(4000),
                 beside: None,
+                sized_tokens: None,
             },
             Event::Response {
                 reasoning_signature: None,
@@ -9363,6 +9397,7 @@ mod tests {
             fork: None,
             max_tokens: Some(1),
             beside: None,
+            sized_tokens: None,
         });
         events.push(Event::RequestRetried {
             request: warm,

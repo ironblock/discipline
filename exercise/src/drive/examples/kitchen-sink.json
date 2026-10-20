@@ -15,7 +15,7 @@
     {
       "approvals_off": true,
       "bash_timeout_ms": 120000,
-      "build_commit": "f958c80c830944a3b097b9e195c248a333a2e5a8",
+      "build_commit": "4340c983188728b25d6b483ec4d5db225b3625bd",
       "build_dirty": false,
       "compaction_persists": true,
       "fork_asks": "v4",
@@ -82,7 +82,7 @@
       },
       "model": "scenario",
       "notes_in_the_ask": true,
-      "opened": 1792473295420,
+      "opened": 1792478778875,
       "opening_phase": "plan",
       "phase_document": {
         "digest": "c3c3afe17657994b1403ed749e7352bdf4ad1eb47c688b6e60bb0e122db95e8e",
@@ -174,7 +174,7 @@
         "propose_phase_transition",
         "refute_beliefs"
       ],
-      "version": 13
+      "version": 14
     },
     {
       "kind": "phase.started",
@@ -222,6 +222,7 @@
       "lane": "trunk",
       "max_tokens": 512,
       "seq": 5,
+      "sized_tokens": 249,
       "t": 7510,
       "turn": 1
     },
@@ -367,6 +368,7 @@
       "lane": "trunk",
       "max_tokens": 512,
       "seq": 16,
+      "sized_tokens": 297,
       "t": 9184,
       "turn": 1
     },
@@ -394,6 +396,7 @@
       "lane": "interview",
       "max_tokens": 512,
       "seq": 18,
+      "sized_tokens": 349,
       "t": 9249,
       "turn": 1
     },
@@ -561,6 +564,7 @@
       "lane": "interview",
       "max_tokens": 512,
       "seq": 32,
+      "sized_tokens": 433,
       "t": 10054,
       "turn": 1
     },
@@ -645,6 +649,7 @@
       "lane": "trunk",
       "max_tokens": 512,
       "seq": 41,
+      "sized_tokens": 320,
       "t": 15889,
       "turn": 2
     },
@@ -795,6 +800,7 @@
       "lane": "interview",
       "max_tokens": 512,
       "seq": 52,
+      "sized_tokens": 420,
       "t": 17201,
       "turn": 2
     },
@@ -805,6 +811,7 @@
       "lane": "trunk",
       "max_tokens": 512,
       "seq": 53,
+      "sized_tokens": 359,
       "t": 17261,
       "turn": 2
     },
@@ -1008,6 +1015,7 @@
       "lane": "interview",
       "max_tokens": 512,
       "seq": 69,
+      "sized_tokens": 486,
       "t": 19017,
       "turn": 2
     },
@@ -1018,6 +1026,7 @@
       "lane": "trunk",
       "max_tokens": 512,
       "seq": 70,
+      "sized_tokens": 425,
       "t": 19077,
       "turn": 2
     },
@@ -1199,6 +1208,7 @@
       "lane": "interview",
       "max_tokens": 512,
       "seq": 84,
+      "sized_tokens": 512,
       "t": 19973,
       "turn": 2
     },
@@ -1209,6 +1219,7 @@
       "lane": "trunk",
       "max_tokens": 512,
       "seq": 85,
+      "sized_tokens": 445,
       "t": 20033,
       "turn": 2
     },
@@ -1397,6 +1408,7 @@
       "lane": "trunk",
       "max_tokens": 512,
       "seq": 102,
+      "sized_tokens": 463,
       "t": 24458,
       "turn": 3
     },
@@ -1562,6 +1574,7 @@
       "lane": "trunk",
       "max_tokens": 512,
       "seq": 113,
+      "sized_tokens": 491,
       "t": 25738,
       "turn": 3
     },
@@ -1744,6 +1757,7 @@
       "lane": "trunk",
       "max_tokens": 512,
       "seq": 124,
+      "sized_tokens": 17123,
       "t": 26657,
       "turn": 3
     },
@@ -1954,6 +1968,7 @@
       "lane": "trunk",
       "max_tokens": 1,
       "seq": 139,
+      "sized_tokens": 17045,
       "t": 30942,
       "turn": 4
     },
@@ -2079,6 +2094,7 @@
       "lane": "warm",
       "max_tokens": 1,
       "seq": 150,
+      "sized_tokens": 392,
       "t": 31965,
       "turn": 4
     },
@@ -2173,6 +2189,7 @@
       "lane": "trunk",
       "max_tokens": 512,
       "seq": 157,
+      "sized_tokens": 410,
       "t": 36063,
       "turn": 5
     },
@@ -2295,6 +2312,7 @@
       "lane": "trunk",
       "max_tokens": 512,
       "seq": 166,
+      "sized_tokens": 454,
       "t": 37009,
       "turn": 5
     },
@@ -2417,6 +2435,7 @@
       "lane": "trunk",
       "max_tokens": 512,
       "seq": 175,
+      "sized_tokens": 508,
       "t": 37955,
       "turn": 5
     },
@@ -2573,6 +2592,7 @@
       "lane": "interview",
       "max_tokens": 512,
       "seq": 188,
+      "sized_tokens": 782,
       "t": 41354,
       "turn": 6
     },
@@ -2630,6 +2650,7 @@
       "lane": "trunk",
       "max_tokens": 512,
       "seq": 193,
+      "sized_tokens": 526,
       "t": 41679,
       "turn": 6
     },
@@ -2801,6 +2822,7 @@
       "lane": "interview",
       "max_tokens": 512,
       "seq": 204,
+      "sized_tokens": 616,
       "t": 42574,
       "turn": 6
     },
@@ -2811,6 +2833,7 @@
       "lane": "trunk",
       "max_tokens": 512,
       "seq": 205,
+      "sized_tokens": 549,
       "t": 42634,
       "turn": 6
     },
@@ -2869,6 +2892,7 @@
       "lane": "interview",
       "max_tokens": 512,
       "seq": 210,
+      "sized_tokens": 639,
       "t": 43074,
       "turn": 6
     },
@@ -2938,6 +2962,7 @@
       "lane": "interview",
       "max_tokens": 512,
       "seq": 216,
+      "sized_tokens": 650,
       "t": 43829,
       "turn": 6
     },
@@ -2996,6 +3021,7 @@
       "lane": "interview",
       "max_tokens": 512,
       "seq": 221,
+      "sized_tokens": 631,
       "t": 44104,
       "turn": 6
     },
@@ -3163,6 +3189,7 @@
       "lane": "interview",
       "max_tokens": 512,
       "seq": 234,
+      "sized_tokens": 550,
       "t": 44404,
       "turn": 6
     },
@@ -3241,6 +3268,7 @@
       "lane": "trunk",
       "max_tokens": 512,
       "seq": 242,
+      "sized_tokens": 575,
       "t": 49189,
       "turn": 7
     },
@@ -3401,6 +3429,7 @@
       "lane": "interview",
       "max_tokens": 512,
       "seq": 252,
+      "sized_tokens": 844,
       "t": 50335,
       "turn": 7
     },
@@ -3411,6 +3440,7 @@
       "lane": "trunk",
       "max_tokens": 512,
       "seq": 253,
+      "sized_tokens": 744,
       "t": 50395,
       "turn": 7
     },
@@ -3607,6 +3637,7 @@
       "lane": "trunk",
       "max_tokens": 512,
       "seq": 267,
+      "sized_tokens": 911,
       "t": 51576,
       "turn": 7
     },
@@ -3746,6 +3777,7 @@
       "lane": "interview",
       "max_tokens": 512,
       "seq": 277,
+      "sized_tokens": 1017,
       "t": 52472,
       "turn": 7
     },
@@ -3756,6 +3788,7 @@
       "lane": "trunk",
       "max_tokens": 512,
       "seq": 278,
+      "sized_tokens": 965,
       "t": 52532,
       "turn": 7
     },
@@ -3965,6 +3998,7 @@
       "lane": "trunk",
       "max_tokens": 512,
       "seq": 297,
+      "sized_tokens": 1186,
       "t": 57460,
       "turn": 8
     },
@@ -4125,6 +4159,7 @@
       "lane": "interview",
       "max_tokens": 512,
       "seq": 307,
+      "sized_tokens": 6341,
       "t": 58522,
       "turn": 8
     },
@@ -4177,6 +4212,7 @@
       "lane": "trunk",
       "max_tokens": 512,
       "seq": 309,
+      "sized_tokens": 5944,
       "t": 58582,
       "turn": 8
     },
@@ -4398,6 +4434,7 @@
       "lane": "interview",
       "max_tokens": 512,
       "seq": 324,
+      "sized_tokens": 6150,
       "t": 59651,
       "turn": 8
     },
@@ -4408,6 +4445,7 @@
       "lane": "trunk",
       "max_tokens": 512,
       "seq": 325,
+      "sized_tokens": 6098,
       "t": 59711,
       "turn": 8
     },
@@ -4597,6 +4635,7 @@
       "lane": "trunk",
       "max_tokens": 512,
       "seq": 341,
+      "sized_tokens": 6294,
       "t": 63539,
       "turn": 9
     },
@@ -4730,6 +4769,7 @@
       "lane": "trunk",
       "max_tokens": 512,
       "seq": 353,
+      "sized_tokens": 6312,
       "t": 67452,
       "turn": 10
     },
@@ -4881,6 +4921,7 @@
       "lane": "trunk",
       "max_tokens": 512,
       "seq": 363,
+      "sized_tokens": 6351,
       "t": 84281,
       "turn": 10
     },
@@ -5017,6 +5058,7 @@
       "lane": "interview",
       "max_tokens": 512,
       "seq": 373,
+      "sized_tokens": 589,
       "t": 85110,
       "turn": 10
     },
@@ -5133,6 +5175,7 @@
       "lane": "trunk",
       "max_tokens": 512,
       "seq": 384,
+      "sized_tokens": 6381,
       "t": 90065,
       "turn": 11
     },
@@ -5276,6 +5319,7 @@
       "lane": "trunk",
       "max_tokens": 512,
       "seq": 393,
+      "sized_tokens": 6394,
       "t": 90928,
       "turn": 11
     },
@@ -5419,6 +5463,7 @@
       "lane": "trunk",
       "max_tokens": 512,
       "seq": 402,
+      "sized_tokens": 6407,
       "t": 91791,
       "turn": 11
     },
@@ -5562,6 +5607,7 @@
       "lane": "trunk",
       "max_tokens": 512,
       "seq": 411,
+      "sized_tokens": 6421,
       "t": 92682,
       "turn": 11
     },
@@ -5718,6 +5764,7 @@
       "lane": "trunk",
       "max_tokens": 512,
       "seq": 424,
+      "sized_tokens": 6427,
       "t": 96300,
       "turn": 12
     },
@@ -5861,6 +5908,7 @@
       "lane": "trunk",
       "max_tokens": 512,
       "seq": 433,
+      "sized_tokens": 6443,
       "t": 97218,
       "turn": 12
     },
@@ -6011,6 +6059,7 @@
       "lane": "trunk",
       "max_tokens": 512,
       "seq": 446,
+      "sized_tokens": 6448,
       "t": 100562,
       "turn": 13
     },
@@ -6173,6 +6222,7 @@
       "lane": "interview",
       "max_tokens": 512,
       "seq": 458,
+      "sized_tokens": 6526,
       "t": 101602,
       "turn": 13
     },
@@ -6183,6 +6233,7 @@
       "lane": "trunk",
       "max_tokens": 512,
       "seq": 459,
+      "sized_tokens": 6474,
       "t": 101662,
       "turn": 13
     },
@@ -6380,6 +6431,7 @@
       "lane": "trunk",
       "max_tokens": 512,
       "seq": 476,
+      "sized_tokens": 6683,
       "t": 107004,
       "turn": 14
     },
@@ -6506,6 +6558,7 @@
       "lane": "interview",
       "max_tokens": 512,
       "seq": 486,
+      "sized_tokens": 760,
       "t": 107833,
       "turn": 14
     },
@@ -6585,6 +6638,7 @@
       "lane": "audit",
       "max_tokens": 512,
       "seq": 494,
+      "sized_tokens": 6909,
       "t": 108793,
       "turn": 14
     },
@@ -6607,6 +6661,7 @@
       "lane": "audit",
       "max_tokens": 512,
       "seq": 496,
+      "sized_tokens": 6887,
       "t": 108858,
       "turn": 14
     },
@@ -6678,6 +6733,7 @@
       "lane": "warm",
       "max_tokens": 1,
       "seq": 503,
+      "sized_tokens": 1079,
       "t": 109453,
       "turn": 14
     },
@@ -6782,6 +6838,7 @@
       "lane": "trunk",
       "max_tokens": 512,
       "seq": 510,
+      "sized_tokens": 1132,
       "t": 113596,
       "turn": 15
     },
@@ -6949,6 +7006,7 @@
       "lane": "interview",
       "max_tokens": 512,
       "seq": 523,
+      "sized_tokens": 1234,
       "t": 114751,
       "turn": 15
     },
@@ -7040,6 +7098,7 @@
       "lane": "audit",
       "max_tokens": 512,
       "seq": 531,
+      "sized_tokens": 1376,
       "t": 115261,
       "turn": 15
     },
@@ -7062,6 +7121,7 @@
       "lane": "audit",
       "max_tokens": 512,
       "seq": 533,
+      "sized_tokens": 1354,
       "t": 115326,
       "turn": 15
     },
@@ -7133,6 +7193,7 @@
       "lane": "warm",
       "max_tokens": 1,
       "seq": 540,
+      "sized_tokens": 1190,
       "t": 115921,
       "turn": 15
     },
@@ -7250,6 +7311,7 @@
       "lane": "trunk",
       "max_tokens": 512,
       "seq": 548,
+      "sized_tokens": 1203,
       "t": 122014,
       "turn": 16
     },
@@ -7384,6 +7446,7 @@
       "lane": "trunk",
       "max_tokens": 512,
       "seq": 558,
+      "sized_tokens": 1240,
       "t": 123266,
       "turn": 16
     },
@@ -7411,6 +7474,7 @@
       "lane": "interview",
       "max_tokens": 512,
       "seq": 560,
+      "sized_tokens": 1301,
       "t": 123331,
       "turn": 16
     },
@@ -7596,6 +7660,7 @@
       "lane": "trunk",
       "max_tokens": 512,
       "seq": 577,
+      "sized_tokens": 1202,
       "t": 127926,
       "turn": 17
     },
@@ -7729,6 +7794,7 @@
       "lane": "trunk",
       "max_tokens": 512,
       "seq": 589,
+      "sized_tokens": 1222,
       "t": 132261,
       "turn": 18
     },
@@ -7868,6 +7934,7 @@
       "lane": "interview",
       "max_tokens": 512,
       "seq": 599,
+      "sized_tokens": 1325,
       "t": 133434,
       "turn": 18
     },
@@ -7967,6 +8034,7 @@
       "lane": "trunk",
       "max_tokens": 512,
       "seq": 610,
+      "sized_tokens": 1282,
       "t": 137359,
       "turn": 19
     },
@@ -8106,6 +8174,7 @@
       "lane": "interview",
       "max_tokens": 512,
       "seq": 620,
+      "sized_tokens": 1387,
       "t": 138616,
       "turn": 19
     },
@@ -8259,6 +8328,7 @@
       "lane": "trunk",
       "max_tokens": 512,
       "seq": 634,
+      "sized_tokens": 1582,
       "t": 142151,
       "turn": 20
     },
@@ -8412,6 +8482,7 @@
       "lane": "trunk",
       "max_tokens": 512,
       "seq": 648,
+      "sized_tokens": 1642,
       "t": 146665,
       "turn": 21
     },
@@ -8580,6 +8651,7 @@
       "lane": "interview",
       "max_tokens": 512,
       "seq": 660,
+      "sized_tokens": 1719,
       "t": 147783,
       "turn": 21
     },
@@ -8590,6 +8662,7 @@
       "lane": "trunk",
       "max_tokens": 512,
       "seq": 661,
+      "sized_tokens": 1667,
       "t": 147843,
       "turn": 21
     },
@@ -8759,6 +8832,7 @@
       "lane": "audit",
       "max_tokens": 512,
       "seq": 676,
+      "sized_tokens": 1990,
       "t": 148399,
       "turn": 21
     },
@@ -8781,6 +8855,7 @@
       "lane": "audit",
       "max_tokens": 512,
       "seq": 678,
+      "sized_tokens": 1866,
       "t": 148464,
       "turn": 21
     },
@@ -8852,6 +8927,7 @@
       "lane": "warm",
       "max_tokens": 1,
       "seq": 685,
+      "sized_tokens": 1243,
       "t": 149109,
       "turn": 21
     },
@@ -8968,6 +9044,7 @@
       "lane": "trunk",
       "max_tokens": 512,
       "seq": 693,
+      "sized_tokens": 1300,
       "t": 153672,
       "turn": 22
     },
@@ -9098,6 +9175,7 @@
       "lane": "trunk",
       "max_tokens": 512,
       "seq": 703,
+      "sized_tokens": 1328,
       "t": 154868,
       "turn": 22
     },
@@ -9125,6 +9203,7 @@
       "lane": "interview",
       "max_tokens": 512,
       "seq": 705,
+      "sized_tokens": 1380,
       "t": 154933,
       "turn": 22
     },
@@ -9326,6 +9405,7 @@
       "lane": "audit",
       "max_tokens": 512,
       "seq": 722,
+      "sized_tokens": 1647,
       "t": 158619,
       "turn": 22
     },
@@ -9348,6 +9428,7 @@
       "lane": "audit",
       "max_tokens": 512,
       "seq": 724,
+      "sized_tokens": 1523,
       "t": 158684,
       "turn": 22
     },
@@ -9431,6 +9512,7 @@
       "lane": "audit",
       "max_tokens": 512,
       "seq": 732,
+      "sized_tokens": 1576,
       "t": 159334,
       "turn": 22
     },
@@ -9503,6 +9585,7 @@
       "lane": "warm",
       "max_tokens": 1,
       "seq": 740,
+      "sized_tokens": 846,
       "t": 159644,
       "turn": 22
     },
