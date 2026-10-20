@@ -392,6 +392,7 @@ mod native {
         fn shape() -> RequestShape {
             RequestShape {
                 model: "a-model".to_owned(),
+                cache_prefix: None,
                 messages: vec![Message::new(Role::User, "an ask")],
                 sampler: SamplerCard::empty(),
                 limits: Limits {

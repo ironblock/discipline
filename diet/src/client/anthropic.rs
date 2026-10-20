@@ -130,15 +130,12 @@ impl Ttls {
         }
     }
 
-    /// These, a fork's: its tools and system read the trunk's entries at
-    /// the trunk's lifetimes, and its own tail is never written for an
-    /// hour -- nothing reuses it.
+    /// These, a fork's: the trunk's own (#555 step 4d). A fork writes
+    /// nothing: its last mark is the block the trunk marked, at the
+    /// trunk's lifetime, so it reads the entry the trunk wrote.
     #[must_use]
     pub fn for_a_fork(self) -> Self {
-        Self {
-            tail: Ttl::FiveMinutes,
-            ..self
-        }
+        self
     }
 }
 
@@ -200,7 +197,11 @@ pub fn body(shape: &RequestShape, options: &Options) -> Result<String, String> {
     }
     out.insert(
         "messages".to_owned(),
-        Value::Array(messages(&shape.messages[head..], ttl.tail)?),
+        Value::Array(messages(
+            &shape.messages[head..],
+            ttl.tail,
+            shape.cache_prefix.map(|shared| shared.saturating_sub(head)),
+        )?),
     );
     let mut tools: Vec<Value> = shape
         .tools
@@ -262,21 +263,38 @@ pub fn body(shape: &RequestShape, options: &Options) -> Result<String, String> {
 /// The turns after the head as Anthropic's messages: a tool result joins
 /// the user message its neighbours make, and the last block of the final
 /// user message carries the third breakpoint.
-fn messages(turns: &[Message], tail: Ttl) -> Result<Vec<Value>, String> {
+fn messages(turns: &[Message], tail: Ttl, prefix: Option<usize>) -> Result<Vec<Value>, String> {
     let mut out: Vec<(&'static str, Vec<Value>)> = Vec::new();
+    // Where each turn's last block went on the wire: its message and block.
+    let mut ends: Vec<Option<(usize, usize)>> = Vec::with_capacity(turns.len());
     for message in turns {
         let (role, blocks) = match message.role {
             Role::User | Role::System | Role::Developer => ("user", user_blocks(message)),
             Role::Tool => ("user", vec![tool_result(message)]),
             Role::Assistant => ("assistant", assistant_blocks(message)?),
         };
+        let added = blocks.len();
         match out.last_mut() {
             Some((last, held)) if *last == role => held.extend(blocks),
             _ => out.push((role, blocks)),
         }
+        let at = out.len() - 1;
+        ends.push((added > 0).then(|| (at, out[at].1.len() - 1)));
     }
-    if let Some(("user", blocks)) = out.last_mut()
-        && let Some(Value::Object(block)) = blocks.last_mut()
+    // A fork's tail (#555 step 4d): the last block of the prefix the
+    // trunk or the pre-warm wrote, so the fork reads that entry and writes
+    // nothing; a prefix that is the head alone leaves the head's mark.
+    // Every other request marks its final user turn.
+    let marked = match prefix {
+        Some(0) => None,
+        Some(shared) => ends.get(shared - 1).copied().flatten(),
+        None => match out.last() {
+            Some(("user", blocks)) if !blocks.is_empty() => Some((out.len() - 1, blocks.len() - 1)),
+            _ => None,
+        },
+    };
+    if let Some((message, block)) = marked
+        && let Some(Value::Object(block)) = out[message].1.get_mut(block)
     {
         block.insert("cache_control".to_owned(), breakpoint(tail));
     }
@@ -595,6 +613,7 @@ pub(crate) mod tests {
     fn shape(messages: Vec<Message>) -> RequestShape {
         RequestShape {
             model: "a-hosted-model".to_owned(),
+            cache_prefix: None,
             messages,
             sampler: SamplerCard::empty(),
             limits: Limits {
@@ -717,10 +736,106 @@ pub(crate) mod tests {
         assert_eq!(Options::default().beta(), None);
     }
 
+    /// #555 step 4d: a fork reads the cache the trunk (or the pre-warm)
+    /// wrote and writes nothing. Its tail breakpoint marks the last block of
+    /// the prefix it shares with that request -- where the trunk's own tail
+    /// breakpoint sat -- never its settled reply or its ask; its tools and
+    /// system breakpoints are the trunk's. A request with no shared prefix
+    /// marks its final user turn, as before.
+    #[test]
+    fn a_forks_tail_breakpoint_marks_the_prefix_the_trunk_wrote() {
+        let five = json!({"type": "ephemeral"});
+        let marked = |value: &Value| -> Vec<(usize, usize)> {
+            let mut at = Vec::new();
+            for (m, message) in value["messages"]
+                .as_array()
+                .expect("messages")
+                .iter()
+                .enumerate()
+            {
+                for (b, block) in message["content"]
+                    .as_array()
+                    .expect("blocks")
+                    .iter()
+                    .enumerate()
+                {
+                    if block.get("cache_control").is_some() {
+                        at.push((m, b));
+                    }
+                }
+            }
+            at
+        };
+        let mut request = shape(vec![
+            Message::new(Role::System, "you are a coder"),
+            Message::new(Role::User, "read a.rs"),
+        ]);
+        request.tools = vec![ToolDefinition {
+            name: "read".to_owned(),
+            description: None,
+            schema: crate::formats::record::json::Value::Object(
+                crate::formats::record::json::line(r#"{"type":"object"}"#).expect("a schema"),
+            ),
+        }];
+        let trunk = parsed(&body(&request, &Options::default()).expect("a body"));
+        assert_eq!(
+            marked(&trunk),
+            [(0, 0)],
+            "the trunk marks its final user turn"
+        );
+
+        // An interview fork: the trunk's turn, its settled reply, the ask.
+        let mut fork = request.clone();
+        fork.messages
+            .push(Message::new(Role::Assistant, "a.rs holds fn a"));
+        fork.messages
+            .push(Message::new(Role::User, "what did you decide?"));
+        fork.cache_prefix = Some(2);
+        let sent = parsed(&body(&fork, &Options::default()).expect("a body"));
+        assert_eq!(marked(&sent), [(0, 0)], "{sent}");
+        assert_eq!(sent["messages"][0]["content"][0]["cache_control"], five);
+        assert_eq!(
+            sent["tools"][0]["cache_control"],
+            trunk["tools"][0]["cache_control"]
+        );
+        assert_eq!(
+            sent["system"][0]["cache_control"],
+            trunk["system"][0]["cache_control"]
+        );
+
+        // An audit fork: the pre-warm's prefix, the ask merged into its last
+        // user turn on the wire.
+        let mut audit = request.clone();
+        audit.messages.push(Message::new(Role::User, "audit these"));
+        audit.cache_prefix = Some(2);
+        let sent = parsed(&body(&audit, &Options::default()).expect("a body"));
+        assert_eq!(
+            marked(&sent),
+            [(0, 0)],
+            "the warm's block, not the ask's: {sent}"
+        );
+        assert_eq!(
+            sent["messages"][0]["content"].as_array().map(Vec::len),
+            Some(2)
+        );
+
+        // At an hour, the fork's mark is the trunk's: it reads that entry.
+        let hour = Options {
+            ttl: Ttls::all(Ttl::Hour),
+            ..Options::default()
+        };
+        let trunk = parsed(&body(&request, &hour).expect("a body"));
+        let sent = parsed(&body(&fork, &hour).expect("a body"));
+        assert_eq!(
+            sent["messages"][0]["content"][0]["cache_control"],
+            trunk["messages"][0]["content"][0]["cache_control"]
+        );
+    }
+
     /// #556: each breakpoint at its lifetime, longer before shorter in the
     /// cache's tools, system, messages order -- an anchor promoted to an hour
     /// when one after it asks for an hour, as Qwen Code resolves it -- and a
-    /// fork's tail never written for an hour.
+    /// fork's the trunk's own (#555 step 4d): it marks the trunk's blocks.
     #[test]
     fn breakpoints_carry_their_lifetimes_longer_before_shorter() {
         let hour = json!({"type": "ephemeral", "ttl": "1h"});
@@ -779,10 +894,10 @@ pub(crate) mod tests {
             sent(system_only),
             (hour.clone(), hour.clone(), five.clone())
         );
-        // A fork reads the trunk's system and tools, its tail five minutes.
+        // A fork marks as the trunk does: the trunk's blocks, at its lifetimes.
         assert_eq!(
             sent(Ttls::all(Ttl::Hour).for_a_fork()),
-            (hour.clone(), hour, five)
+            (hour.clone(), hour.clone(), hour)
         );
     }
 

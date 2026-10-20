@@ -594,6 +594,7 @@ mod tests {
     fn shape(messages: Vec<Message>) -> RequestShape {
         RequestShape {
             model: "a-model".to_owned(),
+            cache_prefix: None,
             tools: Vec::new(),
             messages,
             sampler: SamplerCard::empty(),

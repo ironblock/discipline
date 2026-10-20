@@ -441,6 +441,7 @@ mod tests {
     fn shape() -> RequestShape {
         RequestShape {
             model: "a-hosted-model".to_owned(),
+            cache_prefix: None,
             messages: vec![crate::client::shape::Message::new(
                 crate::client::shape::Role::User,
                 "hi",

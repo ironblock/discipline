@@ -676,6 +676,12 @@ pub struct ToolDefinition {
 pub struct RequestShape {
     /// The model, as the serving stack names it.
     pub model: String,
+    /// How many of `messages` a hosted API's cache already holds, written by
+    /// the request this one extends (#555 step 4d): a fork's, the trunk's or
+    /// the pre-warm's prefix it was cut from. Its tail breakpoint marks that
+    /// prefix's last block, so the fork reads the entry and writes nothing.
+    /// `None` marks the final user turn, as every other request does.
+    pub cache_prefix: Option<usize>,
     /// The tools this request declares, in the order it declares them.
     ///
     /// Empty is the ordinary case here and renders no key at all: a request
@@ -879,6 +885,7 @@ mod tests {
 
         let base = RequestShape {
             model: "a-model".to_owned(),
+            cache_prefix: None,
             tools: Vec::new(),
             messages: vec![
                 Message::new(Role::System, "the regimen"),
