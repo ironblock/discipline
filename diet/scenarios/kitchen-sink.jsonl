@@ -15,7 +15,7 @@
 {"reply":{"when":"Found 2 file(s) matching","text":"Two Markdown files; notes.md holds the one decision.","delay_ms":300}}
 {"reply":{"when":"Show missing.txt","text":"Showing it.","calls":[{"id":"call-b4","name":"bash","arguments":"{\"command\": \"cat missing.txt\"}"}],"delay_ms":400}}
 {"reply":{"when":"No such file","text":"missing.txt does not exist; nothing to show.","delay_ms":300}}
-{"reply":{"when":"Build in the background","text":"Starting the build.","calls":[{"id":"call-b5","name":"bash","arguments":"{\"command\": \"sleep 1; echo built\", \"is_background\": true}"}],"delay_ms":400}}
+{"reply":{"when":"Build in the background","text":"Starting the build.","calls":[{"id":"call-b5","name":"bash","arguments":"{\"command\": \"sleep 5; echo built\", \"is_background\": true}"}],"delay_ms":400}}
 {"reply":{"when":"Background shell started","text":"And a long watcher.","calls":[{"id":"call-b6","name":"bash","arguments":"{\"command\": \"sleep 60\", \"is_background\": true}"}],"delay_ms":300}}
 {"reply":{"when":"Background shell started","text":"Stopping the watcher.","calls":[{"id":"call-s1","name":"task_stop","arguments":"{\"task_id\": \"$job\"}"}],"delay_ms":300}}
 {"reply":{"when":"Cancellation requested","text":"The build runs on; the watcher is stopped.","delay_ms":300}}
@@ -96,6 +96,7 @@
 {"step":"ask","text":"Find the decisions in the Markdown files."}
 {"step":"ask","text":"Show missing.txt."}
 {"step":"ask","text":"Build in the background, and start a watcher you then stop."}
+{"step":"wait","until":"background.ended","where":{"status":"completed"},"timeout":60}
 {"step":"ask","text":"Print a long line with python3, then a long listing."}
 {"step":"ask","text":"Is notes.md still as written?"}
 {"step":"ask","text":"Wait for the server to come up."}
