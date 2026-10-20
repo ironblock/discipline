@@ -2390,6 +2390,7 @@ mod tests {
                 fork: None,
                 max_tokens: None,
                 beside: None,
+                sized_tokens: None,
             },
             Line::Delta {
                 request,
@@ -2786,6 +2787,7 @@ mod tests {
                     fork: None,
                     max_tokens: None,
                     beside: None,
+                    sized_tokens: None,
                 },
                 outcome,
             ]);
@@ -2797,6 +2799,7 @@ mod tests {
             fork: None,
             max_tokens: None,
             beside: None,
+            sized_tokens: None,
         });
         let events_len = events.len();
         let projection = project(
@@ -2855,6 +2858,7 @@ mod tests {
             fork: None,
             max_tokens: None,
             beside: None,
+            sized_tokens: None,
         };
         events.extend(turn);
         let refused = project(
@@ -3426,6 +3430,7 @@ mod tests {
                     fork: Some(fork),
                     max_tokens: None,
                     beside: None,
+                    sized_tokens: None,
                 },
                 Line::Response {
                     reasoning_signature: None,

@@ -393,6 +393,10 @@ pub enum Event {
         /// How many forks were in flight beside a trunk request, when the
         /// session's forks run during the turn (#782); `None` otherwise.
         beside: Option<u32>,
+        /// The session's own estimate of the request's prompt, in tokens
+        /// (#555): its messages' text estimated, as it sizes them, no pad
+        /// and nothing measured.
+        sized_tokens: u64,
     },
     /// A hosted API's 429 or 529, retried (#555): the next attempt of
     /// `request` goes after `wait_ms`.
@@ -5006,8 +5010,10 @@ pub fn line_of(logged: &Logged) -> log::Line {
             fork,
             max_tokens,
             beside,
+            sized_tokens,
         } => log::Event::Request {
             beside: beside.map(u64::from),
+            sized_tokens: Some(*sized_tokens),
             turn: *turn,
             lane: match lane {
                 Lane::Trunk => log::Lane::Trunk,
@@ -6410,6 +6416,7 @@ fn run_calls<S: Streaming + 'static>(
         turn,
         lane: Lane::Trunk,
         head_sha256: crate::client::head::Head::of(shape).digest().to_owned(),
+        sized_tokens: estimate_of(shape),
         fork: None,
         max_tokens,
         beside,
@@ -7181,6 +7188,7 @@ fn trunk_opening(
         turn,
         lane: Lane::Trunk,
         head_sha256: crate::client::head::Head::of(shape).digest().to_owned(),
+        sized_tokens: estimate_of(shape),
         fork: None,
         max_tokens,
         beside,
@@ -8681,6 +8689,7 @@ fn prewarm<'a, S: Streaming>(
         turn,
         lane: Lane::Warm,
         head_sha256: crate::client::head::Head::of(&shape).digest().to_owned(),
+        sized_tokens: estimate_of(&shape),
         fork: None,
         max_tokens: 1,
         beside: None,
@@ -9188,6 +9197,7 @@ fn audit_sent(
         turn,
         lane: Lane::Audit,
         head_sha256: crate::client::head::Head::of(&shape).digest().to_owned(),
+        sized_tokens: estimate_of(&shape),
         fork: Some(fork),
         max_tokens,
         beside: None,
@@ -9740,6 +9750,7 @@ fn retried(
         turn,
         lane: Lane::Trunk,
         head_sha256: crate::client::head::Head::of(shape).digest().to_owned(),
+        sized_tokens: estimate_of(shape),
         fork: None,
         max_tokens,
         beside,
@@ -11063,6 +11074,7 @@ fn fire_on<S>(
         turn,
         lane: Lane::Interview,
         head_sha256: crate::client::head::Head::of(&shape).digest().to_owned(),
+        sized_tokens: estimate_of(&shape),
         fork: Some(fork),
         max_tokens,
         beside: None,
@@ -12339,6 +12351,7 @@ fn fire_cut<S>(shared: &Shared<S>, state: &mut State, cut: Cut) -> Launched {
         turn,
         lane: Lane::Interview,
         head_sha256: crate::client::head::Head::of(&shape).digest().to_owned(),
+        sized_tokens: estimate_of(&shape),
         fork: Some(fork),
         max_tokens,
         beside: None,
@@ -13748,6 +13761,9 @@ pub(in crate::drive) mod tests {
             Ok(Admitted { seq: 1, turn: 1 })
         );
         let log = wait_until(&session, "the turn to settle", settled);
+        // #555: the request's size is the session's estimate of what it sent.
+        let sized = estimate_of(&session.shared.transport.sent()[0]);
+        assert!(sized > 0);
         assert_eq!(
             events(&log[1..]),
             [
@@ -13768,6 +13784,7 @@ pub(in crate::drive) mod tests {
                     fork: None,
                     max_tokens: 64,
                     beside: None,
+                    sized_tokens: sized,
                 },
                 Event::Delta {
                     request: 3,
@@ -16342,6 +16359,7 @@ pub(in crate::drive) mod tests {
                 fork: None,
                 max_tokens: 8192,
                 beside: None,
+                sized_tokens: 120,
             },
             Event::Refused {
                 command: CommandKind::Cancel,
@@ -16515,6 +16533,7 @@ pub(in crate::drive) mod tests {
                 fork: Some(20),
                 max_tokens: 8192,
                 beside: None,
+                sized_tokens: 120,
             },
             Event::ForkSettled {
                 trailer: None,
@@ -16894,6 +16913,7 @@ pub(in crate::drive) mod tests {
                 fork: None,
                 max_tokens: Some(8192),
                 beside: None,
+                sized_tokens: Some(120),
             },
             log::Event::Refused {
                 command: log::Command::Cancel,
@@ -17085,6 +17105,7 @@ pub(in crate::drive) mod tests {
                 fork: Some(20),
                 max_tokens: Some(8192),
                 beside: None,
+                sized_tokens: Some(120),
             },
             log::Event::ForkSettled {
                 trailer: None,

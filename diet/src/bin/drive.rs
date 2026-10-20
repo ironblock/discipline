@@ -2559,7 +2559,7 @@ fn usage() -> String {
     out.push_str("       (MCP over stdio, driving a running serve; `diet-drive mcp --help`)\n");
     out.push_str("       diet-drive scenario FILE --out DIR [--endpoint URL --model NAME\n");
     out.push_str(
-        "           [--key-file FILE]] [--regimen FILE] [--worktree DIR] [--no-assemble]\n",
+        "           [--key-file FILE]] [--regimen FILE] [--worktree DIR] [--no-assemble] [--dry-run]\n",
     );
     out.push_str("       (a scenario, #760: on the canned scenario substrate, or re-fired on\n");
     out.push_str("       an endpoint; diet/scenarios/README.md)\n");
@@ -2590,7 +2590,7 @@ fn usage() -> String {
 }
 
 /// `diet-drive scenario FILE --out DIR [--endpoint URL --model NAME
-/// [--key-file FILE]] [--regimen FILE] [--worktree DIR] [--no-assemble]`
+/// [--key-file FILE]] [--regimen FILE] [--worktree DIR] [--no-assemble] [--dry-run]`
 /// (#760): a scenario run on the canned substrate, or re-fired on a named
 /// endpoint under the scenario's live regimen; one JSON line on stdout says
 /// how it went, and it exits 0 when every step went as written, every
@@ -2601,7 +2601,7 @@ fn scenario(args: &[String]) -> ExitCode {
         fail(
             EXIT_USAGE,
             "usage: diet-drive scenario FILE --out DIR [--endpoint URL --model NAME \
-             [--key-file FILE]] [--regimen FILE] [--worktree DIR] [--no-assemble]",
+             [--key-file FILE]] [--regimen FILE] [--worktree DIR] [--no-assemble] [--dry-run]",
         )
     };
     let Some((file, rest)) = args.split_first() else {
@@ -2617,6 +2617,10 @@ fn scenario(args: &[String]) -> ExitCode {
     while let Some(flag) = flags.next() {
         if flag == "--no-assemble" {
             options.assemble = false;
+            continue;
+        }
+        if flag == "--dry-run" {
+            options.dry_run = true;
             continue;
         }
         let Some(value) = flags.next() else {
@@ -2636,6 +2640,12 @@ fn scenario(args: &[String]) -> ExitCode {
         return usage();
     };
     options.out = out;
+    if options.dry_run && options.endpoint.is_some() {
+        return fail(
+            EXIT_USAGE,
+            "--dry-run rehearses on the canned hosted substrate: it takes no --endpoint",
+        );
+    }
     if options.endpoint.is_some() != options.model.is_some() {
         return fail(EXIT_USAGE, "--endpoint and --model go together");
     }

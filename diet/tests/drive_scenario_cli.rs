@@ -367,6 +367,139 @@ fn run_of(out: &Path) -> (Vec<String>, std::collections::BTreeMap<String, Vec<u8
     (lines, kept)
 }
 
+/// #555 step 4c: a dry run rehearses a script on the canned hosted
+/// substrate under the regimen the live run would take -- its substrate
+/// alone swapped -- and prints the plan: the rung and its model, the
+/// regimen's limits, the requests by lane and by fork kind, their sized
+/// prompts summed, their output at `max_tokens`, the retries, whether the
+/// cap was met, and the worst case, labelled a bound. Nothing leaves
+/// loopback.
+#[test]
+fn a_dry_run_prints_the_plan_a_live_run_would_spend() {
+    let dir = scratch("dry-run");
+    std::fs::create_dir_all(&dir).expect("a scratch directory");
+    // The tree's Sonnet 5.5 regimen, its model's commands run as the script's
+    // turn needs: what a live run of hosted.jsonl would take.
+    let live = dir.join("live.toml");
+    let sonnet = std::fs::read_to_string(root().join("diet/drive/sonnet-5-5.toml"))
+        .expect("the Sonnet regimen");
+    let runs = "isolation = \"none\"\napproval = \"none\"\napproval_policy = \"approvals are \
+                off: every command runs without a gate decision or a prompt\"\n\n\
+                [limits]\nmax_steps = 4\n\n";
+    let at = sonnet.find("[reasoning]").expect("a reasoning table");
+    std::fs::write(&live, format!("{}{runs}{}", &sonnet[..at], &sonnet[at..]))
+        .expect("the live regimen");
+    let ran = Command::new(DRIVE)
+        .current_dir(root())
+        .arg("scenario")
+        .arg(root().join("diet/scenarios/hosted.jsonl"))
+        .arg("--dry-run")
+        .arg("--regimen")
+        .arg(&live)
+        .arg("--out")
+        .arg(dir.join("out"))
+        .arg("--no-assemble")
+        .env_remove("ANTHROPIC_API_KEY")
+        .output()
+        .expect("diet-drive runs");
+    let said: serde_json::Value = serde_json::from_slice(&ran.stdout).expect("the report");
+    assert_eq!(ran.status.code(), Some(0), "{said}");
+    let plan = &said["plan"];
+    assert_eq!(plan["rung"], "anthropic-claude-sonnet-5-5", "{plan}");
+    assert_eq!(plan["model"], "claude-sonnet-5-5", "{plan}");
+    assert_eq!(plan["rehearsed_on"], "canned-scenario-hosted", "{plan}");
+    assert_eq!(
+        (
+            &plan["limits"]["max_api_requests"],
+            &plan["limits"]["api_retries"]
+        ),
+        (&serde_json::json!(40), &serde_json::json!(2)),
+        "{plan}"
+    );
+    let rehearsal = &plan["rehearsal"];
+    // hosted.jsonl: turn 1 asks twice (the call, then its answer), turn 2
+    // once and retries once, turn 3 once and is refused.
+    assert_eq!(rehearsal["requests"], 4, "{plan}");
+    assert_eq!(rehearsal["retries"], 1, "{plan}");
+    assert_eq!(rehearsal["attempts"], 5, "{plan}");
+    assert_eq!(rehearsal["by_lane"]["trunk"]["requests"], 4, "{plan}");
+    assert_eq!(
+        rehearsal["by_lane"]["trunk"]["input_sized"], rehearsal["sized_tokens"],
+        "{plan}"
+    );
+    assert_eq!(
+        rehearsal["input_split"]["uncached"],
+        serde_json::Value::Null,
+        "{plan}"
+    );
+    assert_eq!(rehearsal["api_cap_met"], false, "{plan}");
+    assert!(
+        rehearsal["sized_tokens"].as_u64().is_some_and(|n| n > 0),
+        "{plan}"
+    );
+    assert_eq!(
+        rehearsal["output_tokens_at_max_tokens"]
+            .as_u64()
+            .map(|n| n % 4),
+        Some(0)
+    );
+    let bound = &plan["bound"];
+    assert_eq!(bound["tokens"], 40 * (1_000_000 + 128_000), "{plan}");
+    assert!(
+        bound["is"]
+            .as_str()
+            .is_some_and(|text| text.contains("bound")),
+        "{plan}"
+    );
+    assert_eq!(
+        plan["api_unchecked"],
+        serde_json::json!(["api_temperature_with_top_p"])
+    );
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// #555 step 4c: a dry run plans a hosted rung's spend, so a regimen on any
+/// other substrate is refused; and no rehearsal's copy of its regimen is
+/// left in the temporary directory, however a run ended.
+#[test]
+fn a_dry_run_refuses_a_rung_that_is_not_hosted_and_leaves_no_copy() {
+    let dir = scratch("dry-run-refused");
+    // A dry run plans a hosted rung's spend: another regimen is refused.
+    let refused = Command::new(DRIVE)
+        .current_dir(root())
+        .arg("scenario")
+        .arg(root().join("diet/scenarios/hosted.jsonl"))
+        .arg("--dry-run")
+        .arg("--regimen")
+        .arg(root().join("diet/scenarios/canned.toml"))
+        .arg("--out")
+        .arg(dir.join("refused"))
+        .arg("--no-assemble")
+        .output()
+        .expect("diet-drive runs");
+    let said: serde_json::Value = serde_json::from_slice(&refused.stdout).expect("the report");
+    assert_eq!(refused.status.code(), Some(1), "{said}");
+    assert!(
+        said["failure"]
+            .as_str()
+            .is_some_and(|why| why.contains("server_kind")),
+        "{said}"
+    );
+    // And no rehearsal's regimen copy is left, however the run ended.
+    let left = std::fs::read_dir(std::env::temp_dir())
+        .expect("the temporary directory")
+        .filter_map(Result::ok)
+        .filter(|entry| {
+            entry
+                .file_name()
+                .to_string_lossy()
+                .starts_with("diet-dry-run-")
+        })
+        .count();
+    assert_eq!(left, 0, "a rehearsal's regimen was left behind");
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
 /// A background job that outlasts its turn ends at one place in the log
 /// only if the next ask waits for it: `wait` with `where` waits past the
 /// lines of its kind that do not match. With the wait, the next ask's

@@ -461,6 +461,214 @@ impl Scenario {
     }
 }
 
+/// The rung a dry run plans for (#555), as its regimen and registry entry
+/// declare it.
+#[derive(Debug, Clone)]
+struct Intended {
+    /// Its substrate id.
+    rung: String,
+    /// The model its requests would be billed as: `weights_model_id`.
+    model: Option<String>,
+    /// The regimen's request limits.
+    limits: crate::drive::hosted::RequestLimits,
+    /// What the entry declares its API refuses.
+    api: crate::drive::registry::ApiDeclared,
+}
+
+/// A dry run's copy of its regimen, removed when the run is done, however
+/// it ends.
+struct Rehearsal(std::path::PathBuf);
+
+impl Drop for Rehearsal {
+    fn drop(&mut self) {
+        let _ = std::fs::remove_file(&self.0);
+    }
+}
+
+/// The canned hosted substrate a dry run rehearses on.
+const REHEARSED_ON: &str = "canned-scenario-hosted";
+
+/// `regimen`, the one a live run would take, as a dry run rehearses it: a
+/// copy in the temporary directory with its `substrate` and
+/// `substrate_hardware` the canned hosted substrate's and every other line
+/// as written, and what the plan reads of the rung it names.
+///
+/// # Errors
+///
+/// A regimen that does not read, names a substrate that is not an `api`
+/// entry, or declares no request limits.
+fn rehearsing(regimen: &std::path::Path) -> Result<(Rehearsal, Intended), Failure> {
+    use crate::drive::registry::{REGISTRY, identity};
+    let text = std::fs::read_to_string(regimen)
+        .map_err(|why| Failure(format!("{} cannot be read: {why}", regimen.display())))?;
+    let read = crate::formats::regimen::parse(&text)
+        .map_err(|why| Failure(format!("{}: {why:?}", regimen.display())))?;
+    let Some(crate::formats::regimen::Value::String(rung)) = read.get("substrate") else {
+        return Err(Failure(format!("{} names no substrate", regimen.display())));
+    };
+    let entry = identity(REGISTRY, rung).map_err(Failure)?;
+    if entry.server_kind.as_deref() != Some("api") {
+        return Err(Failure(format!(
+            "a dry run plans a hosted API's spend, and `{rung}`'s entry is not \
+             `server_kind = \"api\"`"
+        )));
+    }
+    let limits = crate::drive::hosted::request_limits(&read)
+        .map_err(|why| Failure(format!("{}: {why}", regimen.display())))?;
+    let canned = identity(REGISTRY, REHEARSED_ON).map_err(Failure)?;
+    let mut top = true;
+    let swapped: String = text
+        .lines()
+        .map(|line| {
+            top &= !line.trim_start().starts_with('[');
+            let key = line.split('=').next().map(str::trim);
+            match key {
+                Some("substrate") if top => format!("substrate = \"{REHEARSED_ON}\""),
+                Some("substrate_hardware") if top => {
+                    format!("substrate_hardware = \"{}\"", canned.hardware_fingerprint)
+                }
+                _ => line.to_owned(),
+            }
+        })
+        .map(|line| line + "\n")
+        .collect();
+    let copy = std::env::temp_dir().join(format!(
+        "diet-dry-run-{}-{}.toml",
+        std::process::id(),
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map_or(0, |since| since.as_nanos())
+    ));
+    std::fs::write(&copy, swapped)
+        .map_err(|why| Failure(format!("the rehearsal's regimen cannot be written: {why}")))?;
+    Ok((
+        Rehearsal(copy),
+        Intended {
+            rung: rung.clone(),
+            model: entry.model_id.clone(),
+            limits,
+            api: entry.api,
+        },
+    ))
+}
+
+impl Intended {
+    /// The plan the rehearsal's log `written` says a live run on this rung
+    /// would spend (#555): its requests by lane and by fork kind, their
+    /// sized prompts summed, their output at `max_tokens`, the retries,
+    /// whether the cap was met; and the worst case the limits allow,
+    /// labelled a bound.
+    ///
+    /// # Errors
+    ///
+    /// A log that does not read.
+    fn plan(&self, written: &str) -> Result<serde_json::Value, Failure> {
+        use crate::formats::log::{Event, FailReason};
+        let lines = crate::formats::log::parse(written)
+            .map_err(|why| Failure(format!("the rehearsal's log does not read: {why}")))?;
+        let forks: BTreeMap<u64, &str> = lines
+            .iter()
+            .filter_map(|line| match &line.event {
+                Event::Fork { why, .. } => Some((line.seq, why.tag())),
+                _ => None,
+            })
+            .collect();
+        let (mut requests, mut retries, mut sized, mut output) = (0_u64, 0_u64, 0_u64, 0_u64);
+        let mut by_lane: BTreeMap<String, (u64, u64, u64)> = BTreeMap::new();
+        let mut by_fork_kind: BTreeMap<String, BTreeMap<String, u64>> = BTreeMap::new();
+        let mut capped = false;
+        for line in &lines {
+            match &line.event {
+                Event::Request {
+                    lane,
+                    fork,
+                    max_tokens,
+                    sized_tokens,
+                    ..
+                } => {
+                    requests += 1;
+                    sized += sized_tokens.unwrap_or(0);
+                    output += max_tokens.unwrap_or(0);
+                    let lane_total = by_lane.entry(lane.tag().to_owned()).or_default();
+                    lane_total.0 += 1;
+                    lane_total.1 += sized_tokens.unwrap_or(0);
+                    lane_total.2 += max_tokens.unwrap_or(0);
+                    if let Some(kind) = fork.and_then(|fork| forks.get(&fork)) {
+                        *by_fork_kind
+                            .entry(lane.tag().to_owned())
+                            .or_default()
+                            .entry((*kind).to_owned())
+                            .or_default() += 1;
+                    }
+                }
+                Event::RequestRetried { .. } => retries += 1,
+                Event::RequestFailed { reason, .. } if *reason == FailReason::ApiCap => {
+                    capped = true;
+                }
+                _ => {}
+            }
+        }
+        let bound = match (self.api.serving_context, self.api.max_output_tokens) {
+            (Some(window), Some(cap)) => serde_json::json!({
+                "tokens": self.limits.max_api_requests.saturating_mul(window + cap),
+                "is": "a bound, not an estimate: max_api_requests x (the rung's window + its \
+                       output cap), every request at its fullest",
+            }),
+            _ => serde_json::json!({
+                "tokens": null,
+                "is": "no bound: the rung declares no window or no output cap",
+            }),
+        };
+        Ok(serde_json::json!({
+            "rung": self.rung,
+            "model": self.model,
+            "rehearsed_on": REHEARSED_ON,
+            "limits": {
+                "max_api_requests": self.limits.max_api_requests,
+                "api_retries": self.limits.api_retries,
+                "api_retry_after_max_seconds": self.limits.api_retry_after_max_seconds,
+            },
+            "rehearsal": {
+                "requests": requests,
+                "retries": retries,
+                "attempts": requests + retries,
+                "by_lane": by_lane
+                    .iter()
+                    .map(|(lane, (count, sized, output))| {
+                        (
+                            lane.clone(),
+                            serde_json::json!({
+                                "requests": count,
+                                "input_sized": sized,
+                                "output_at_max_tokens": output,
+                            }),
+                        )
+                    })
+                    .collect::<serde_json::Map<_, _>>(),
+                // Where the cache would place each request's input is not
+                // estimated: the session keeps no account of what an
+                // earlier request wrote, and modelling the cache here would
+                // be a second estimator.
+                "input_split": {
+                    "of_which_cache_read": null,
+                    "cache_write_5m": null,
+                    "cache_write_1h": null,
+                    "uncached": null,
+                    "is": "unestimated: the session keeps no account of the prefix an earlier \
+                           request wrote to the cache, so `input_sized` is not split by where the \
+                           cache would place it; price it as uncached for the upper bound",
+                },
+                "by_fork_kind": by_fork_kind,
+                "sized_tokens": sized,
+                "output_tokens_at_max_tokens": output,
+                "api_cap_met": capped,
+            },
+            "bound": bound,
+            "api_unchecked": self.api.unchecked(),
+        }))
+    }
+}
+
 /// The key a canned hosted run sends (#555): a rehearsal's, never a
 /// provider's.
 pub const REHEARSAL_KEY: &str = "sk-rehearsal";
@@ -1379,6 +1587,11 @@ pub struct RunOptions {
     /// Whether the outputs go to `scripts/assemble-run.py` once the
     /// expectations pass.
     pub assemble: bool,
+    /// A dry run (#555): the scenario rehearsed on `canned-scenario-hosted`
+    /// under the regimen the live run would take -- `regimen`, else the
+    /// scenario's `live_regimen` -- its substrate alone swapped, and the
+    /// plan it would spend reported. Nothing leaves loopback.
+    pub dry_run: bool,
 }
 
 /// Run a scenario (#760): `serve` started as a child of `drive` -- this
@@ -1490,16 +1703,29 @@ fn running(
     let scenario = parse(&text).map_err(|why| Failure(why.to_string()))?;
     said["scenario"] = serde_json::Value::String(scenario.name.clone());
     let live = options.endpoint.is_some();
-    let regimen = match (&options.regimen, live, &scenario.live_regimen) {
+    let regimen = match (
+        &options.regimen,
+        live || options.dry_run,
+        &scenario.live_regimen,
+    ) {
         (Some(regimen), _, _) => regimen.clone(),
         (None, false, _) => beside(&options.file, &scenario.regimen),
         (None, true, Some(live_regimen)) => beside(&options.file, live_regimen),
         (None, true, None) => {
             return Err(Failure(
-                "a re-fire on an endpoint needs the scenario's `live_regimen` or --regimen"
+                "a re-fire on an endpoint, or a dry run, needs the scenario's `live_regimen` \
+                 or --regimen"
                     .to_owned(),
             ));
         }
+    };
+    // A dry run (#555): the regimen the live run would take, rehearsed on the
+    // canned hosted substrate -- a copy with its substrate alone swapped.
+    let (regimen, intended) = if options.dry_run {
+        let (copy, intended) = rehearsing(&regimen)?;
+        (copy.0.clone(), Some((intended, copy)))
+    } else {
+        (regimen, None)
     };
     let read = std::fs::read_to_string(&regimen)
         .map_err(|why| Failure(format!("{} cannot be read: {why}", regimen.display())))
@@ -1704,6 +1930,9 @@ fn running(
     }
     let written = std::fs::read_to_string(&log)
         .map_err(|why| Failure(format!("the log cannot be read: {why}")))?;
+    if let Some((intended, _)) = &intended {
+        said["plan"] = intended.plan(&written)?;
+    }
     let missed = unmet(&scenario, &written, &bound);
     said["unmet"] = serde_json::json!(missed);
     if !missed.is_empty() || !unmatched.is_empty() {
@@ -1947,6 +2176,105 @@ mod tests {
         rescored.classified[0].score = "0.5".to_owned();
         assert_ne!(rescored.replies_digest(), digest);
         assert_eq!(read.routes().len(), 3);
+    }
+
+    /// #555 step 4c: a dry run's plan counts every request of the log by
+    /// its lane and, for a fork's, by the fork's warrant; sums their sized
+    /// prompts and their `max_tokens`; and counts the retries -- each count
+    /// what the log's own lines say, read here a second way. The kitchen
+    /// sink's example carries every lane: trunk, interview, audit, warm.
+    #[test]
+    fn a_dry_runs_plan_counts_every_lane_and_fork_kind_its_log_holds() {
+        let example: serde_json::Value = serde_json::from_str(include_str!(
+            "../../../exercise/src/drive/examples/kitchen-sink.json"
+        ))
+        .expect("the example");
+        let lines = example["log"].as_array().expect("its log");
+        let written = lines
+            .iter()
+            .map(serde_json::Value::to_string)
+            .collect::<Vec<_>>()
+            .join("\n")
+            + "\n";
+        let intended = Intended {
+            rung: "a-rung".to_owned(),
+            model: Some("a-model".to_owned()),
+            limits: crate::drive::hosted::RequestLimits {
+                max_api_requests: 9,
+                api_retries: 1,
+                api_retry_after_max_seconds: 5,
+            },
+            api: crate::drive::registry::ApiDeclared {
+                serving_context: Some(1_000),
+                max_output_tokens: Some(100),
+                ..crate::drive::registry::ApiDeclared::default()
+            },
+        };
+        let plan = intended.plan(&written).expect("a plan");
+        let rehearsal = &plan["rehearsal"];
+        let requests: Vec<&serde_json::Value> = lines
+            .iter()
+            .filter(|line| line["kind"] == "request")
+            .collect();
+        let mut by_lane: BTreeMap<String, u64> = BTreeMap::new();
+        for request in &requests {
+            *by_lane
+                .entry(request["lane"].as_str().expect("a lane").to_owned())
+                .or_default() += 1;
+        }
+        for lane in ["trunk", "interview", "audit", "warm"] {
+            assert!(
+                by_lane.contains_key(lane),
+                "the example has no {lane}: {by_lane:?}"
+            );
+        }
+        for (lane, count) in &by_lane {
+            assert_eq!(rehearsal["by_lane"][lane]["requests"], *count, "{lane}");
+            let of = |key: &str| -> u64 {
+                requests
+                    .iter()
+                    .filter(|request| request["lane"] == lane.as_str())
+                    .filter_map(|request| request[key].as_u64())
+                    .sum()
+            };
+            assert_eq!(
+                rehearsal["by_lane"][lane]["input_sized"],
+                of("sized_tokens")
+            );
+            assert_eq!(
+                rehearsal["by_lane"][lane]["output_at_max_tokens"],
+                of("max_tokens")
+            );
+        }
+        assert_eq!(
+            rehearsal["input_split"]["of_which_cache_read"],
+            serde_json::Value::Null
+        );
+        assert!(
+            rehearsal["input_split"]["is"]
+                .as_str()
+                .is_some_and(|text| text.starts_with("unestimated"))
+        );
+        assert_eq!(rehearsal["requests"], requests.len());
+        for lane in ["interview", "audit"] {
+            let kinds = rehearsal["by_fork_kind"][lane]
+                .as_object()
+                .unwrap_or_else(|| panic!("{lane}'s kinds: {plan}"));
+            let summed: u64 = kinds.values().filter_map(serde_json::Value::as_u64).sum();
+            assert_eq!(
+                summed, by_lane[lane],
+                "{lane}: every request names its fork"
+            );
+        }
+        let sum = |key: &str| -> u64 {
+            requests
+                .iter()
+                .filter_map(|request| request[key].as_u64())
+                .sum()
+        };
+        assert_eq!(rehearsal["sized_tokens"], sum("sized_tokens"));
+        assert_eq!(rehearsal["output_tokens_at_max_tokens"], sum("max_tokens"));
+        assert_eq!(plan["bound"]["tokens"], 9 * 1_100);
     }
 
     /// A hosted reply's fields (#555): an error status takes its
