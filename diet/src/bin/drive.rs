@@ -465,6 +465,27 @@ fn serve(args: &[String]) -> ExitCode {
     // The regimen's `[sampler]`, pinned on every request (#486): derived from
     // the regime's own `sampler_card`, so the record's claim and the wire's
     // pins are one value. Without a regimen, nothing is pinned, as before.
+    // `pins = "none"` (#555) is a hosted API's word alone: a server we run
+    // would sample at defaults nobody recorded.
+    if let Some(regime) = regime.as_ref().filter(|regime| {
+        diet::drive::regimen::pins_nothing(&regime.substrates[0].sampler_card)
+            && !diet::drive::registry::identity(
+                diet::drive::registry::REGISTRY,
+                &regime.substrates[0].id,
+            )
+            .is_ok_and(|identity| identity.server_kind.as_deref() == Some("api"))
+    }) {
+        let path = regimen_file.as_deref().unwrap_or_default();
+        return fail(
+            EXIT_USAGE,
+            &format!(
+                "{path}: `pins = \"none\"` sends no sampler setting, and `{}`'s entry is not \
+                 `server_kind = \"api\"`: on a server we run the engine's defaults would \
+                 sample, and they would go unrecorded, so its regimen pins each setting",
+                regime.substrates[0].id
+            ),
+        );
+    }
     let sampler = match regime
         .as_ref()
         .map(|regime| diet::drive::regimen::sampler_pins(&regime.substrates[0].sampler_card))
@@ -674,7 +695,9 @@ fn serve(args: &[String]) -> ExitCode {
     }
     // A hosted API (#555): its key, from the file or the harnesses' own
     // variable, and its wire, checked against its entry before anything
-    // binds.
+    // binds; what the entry leaves unchecked is named in the start row.
+    // `Some` on a hosted API, its unchecked keys `None` when there are none.
+    let mut api_unchecked = None;
     if let Some((identity, regime)) = hosted.as_ref().zip(regime.as_ref()) {
         let key = if key_file.is_some() {
             diet::drive::hosted::Key::Given
@@ -712,7 +735,13 @@ fn serve(args: &[String]) -> ExitCode {
             (key, ttl),
             &shape,
         ) {
-            Ok(hosted) => transport = hosted,
+            Ok((hosted, unchecked)) => {
+                transport = hosted;
+                api_unchecked = Some(
+                    (!unchecked.is_empty())
+                        .then(|| unchecked.iter().map(|key| (*key).to_owned()).collect()),
+                );
+            }
             Err(why) => return fail(EXIT_INPUT, &why),
         }
     }
@@ -858,6 +887,12 @@ fn serve(args: &[String]) -> ExitCode {
                 read_at_start.as_ref().map(|read| read.levers.clone()),
                 // #757: the build serving it, as the build script read it.
                 diet::build::build(),
+                api_unchecked.map(|unchecked| diet::drive::session::HostedStart {
+                    unchecked,
+                    pins_nothing: regime.as_ref().is_some_and(|regime| {
+                        diet::drive::regimen::pins_nothing(&regime.substrates[0].sampler_card)
+                    }),
+                }),
             ),
         ),
     );

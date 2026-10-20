@@ -1,0 +1,27 @@
+# A regimen on Claude Sonnet 5.5 over Anthropic's Messages API (#555), registry
+# entry `anthropic-claude-sonnet-5-5`: the hosted rung near Qwen3.8-Flash-Next.
+# It passes `serve`'s start, which checks it against what the entry declares
+# its API refuses, and sends no sampler setting: the entry declares each of
+# `temperature`, `top_p` and `top_k` `none`, a non-default value being a 400
+# and the default unpublished.
+#
+# The endpoint, the head, the key file and the output cap are `serve`'s
+# command line, not this file. No live call is made without the maintainer's
+# approval and cap.
+arm = "hosted-rung"
+dogma_version = 0
+
+substrate = "anthropic-claude-sonnet-5-5"
+substrate_reasoning = "on"
+# The registry's hardware_fingerprint for `anthropic-api`, which must agree.
+substrate_hardware = "24a1117b0a8112dbcd56ec38eb21cb44bf8124400d6233af927ecadc1db1b13e"
+
+# Adaptive thinking, at an effort the entry declares it takes.
+[reasoning]
+effort = "medium"
+budget_tokens = "none"
+
+# The declared word for a request that pins no sampler setting: the provider's
+# defaults sample, and the record says so rather than nothing.
+[sampler]
+pins = "none"

@@ -2314,6 +2314,8 @@ mod tests {
             compaction_persists: None,
             build_dirty: None,
             build_commit: None,
+            api_unchecked: None,
+            sampler_pins: None,
         }
     }
 

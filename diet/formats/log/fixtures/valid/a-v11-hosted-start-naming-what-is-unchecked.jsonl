@@ -1,0 +1,1 @@
+{"api_unchecked":["api_temperature_with_top_p"],"head":[{"content":"you are the trunk","role":"system"}],"kind":"session.start","model":"claude-sonnet-5-5","opened":1790000000000,"sampler_pins":"none","seq":0,"t":0,"version":11}

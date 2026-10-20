@@ -397,6 +397,19 @@ fn reasoning_kwargs(
 /// the disagreement this function exists to rule out, so it is refused rather
 /// than dropped.
 pub fn sampler_pins(card: &BTreeMap<String, Value>) -> Result<SamplerCard, String> {
+    if let Some(word) = card.get(PINS) {
+        return match word {
+            _ if card.len() > 1 => Err(format!(
+                "`{PINS} = \"{NO_CACHE}\"` stands alone in `[sampler]`: a pin beside it would \
+                 contradict it"
+            )),
+            Value::String(word) if word == NO_CACHE => Ok(SamplerCard::empty()),
+            _ => Err(format!(
+                "`[sampler] {PINS}` has one word, \"{NO_CACHE}\": a request that pins no \
+                 setting"
+            )),
+        };
+    }
     let accepted = || {
         SamplerSetting::ALL
             .iter()
@@ -427,6 +440,18 @@ pub fn sampler_pins(card: &BTreeMap<String, Value>) -> Result<SamplerCard, Strin
                 )),
             }
         })
+}
+
+/// The `[sampler]` key whose `"none"` declares a request that pins no
+/// setting (#555): on a hosted API, whose provider's defaults then sample,
+/// and whose entry may declare that no value is known to pass. The record's
+/// card says `pins = "none"`, never nothing.
+pub const PINS: &str = "pins";
+
+/// Whether `card` is `pins = "none"`: the regimen pins nothing.
+#[must_use]
+pub fn pins_nothing(card: &BTreeMap<String, Value>) -> bool {
+    card.len() == 1 && card.get(PINS) == Some(&Value::String(NO_CACHE.to_owned()))
 }
 
 /// The regimen's word for a path that caches nothing.

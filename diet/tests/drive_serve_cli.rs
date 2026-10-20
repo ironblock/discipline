@@ -1139,7 +1139,7 @@ fn a_drive_server_confirms_a_declared_engines_model_settings_and_draft() {
         ]),
         "{start_line}"
     );
-    assert_eq!(start_line["version"], 10, "{start_line}");
+    assert_eq!(start_line["version"], 11, "{start_line}");
     // And its server speaks TabbyAPI's dialect, by name (#496).
     assert_eq!(start_line["serving"]["dialect"], "tabbyapi", "{start_line}");
 }
@@ -3417,6 +3417,18 @@ fn replay_regimen() -> String {
     format!("{}/drive/replay.toml", env!("CARGO_MANIFEST_DIR"))
 }
 
+/// The rehearsal regimen, a local substrate's, its `[sampler]` table's lines
+/// `sampler` instead.
+fn canned_regimen_with_sampler(sampler: &str) -> HeadFile {
+    let tools = std::fs::read_to_string(replay_regimen()).expect("the rehearsal regimen");
+    let written = "[sampler]\ntemperature = 0.6\ntop_p = 0.95\nseed = 7\n";
+    assert!(tools.contains(written), "replay.toml's [sampler] moved");
+    file_holding(
+        "regimen",
+        &tools.replace(written, &format!("[sampler]\n{sampler}")),
+    )
+}
+
 /// The rehearsal regimen, naming the answer-only replay instead.
 fn answers_regimen() -> HeadFile {
     let tools = std::fs::read_to_string(replay_regimen()).expect("the rehearsal regimen");
@@ -4119,6 +4131,189 @@ fn hosted_regimen_with(top: &str) -> HeadFile {
     )
 }
 
+/// What a refused start said: its `error`, else everything it printed.
+fn refusal(said: &str) -> String {
+    serde_json::from_str::<serde_json::Value>(said.trim())
+        .ok()
+        .and_then(|value| value["error"].as_str().map(str::to_owned))
+        .unwrap_or_else(|| said.to_owned())
+}
+
+/// A regimen on hosted rung `id`, at `effort`, with `sampler` its
+/// `[sampler]` table's lines.
+fn rung_regimen(id: &str, effort: &str, sampler: &str) -> HeadFile {
+    let hardware = diet::drive::registry::identity(diet::drive::registry::REGISTRY, id)
+        .expect("the rung's entry")
+        .hardware_fingerprint;
+    file_holding(
+        "regimen",
+        &format!(
+            "arm = \"a\"\ndogma_version = 0\nsubstrate = \"{id}\"\n\
+             substrate_reasoning = \"on\"\nsubstrate_hardware = \"{hardware}\"\n\
+             [reasoning]\neffort = \"{effort}\"\nbudget_tokens = \"none\"\n\
+             [sampler]\n{sampler}"
+        ),
+    )
+}
+
+/// #555: the tree's Sonnet 5.5 regimen passes start -- its entry declares
+/// every sampler setting `none`, and `pins = "none"` sends none -- and the
+/// start row names what the entry leaves unchecked. No request is made: the
+/// endpoint is a closed loopback port, never contacted at start.
+#[test]
+fn the_trees_sonnet_5_5_regimen_passes_start_and_names_what_is_unchecked() {
+    let regimen = concat!(env!("CARGO_MANIFEST_DIR"), "/drive/sonnet-5-5.toml");
+    let key = file_holding("key", "sk-rehearsal\n");
+    let key_path = key.0.to_string_lossy().into_owned();
+    let log_file = file_holding("log", "");
+    let logged = log_file.0.to_string_lossy().into_owned();
+    // This crate's loopback stub, playing a constructed answer: no provider.
+    let stub = Stub::serving(vec![Act::Raw(HOSTED_ANSWER.to_vec())]).expect("loopback");
+    let record = file_holding("record", "");
+    let recorded = record.0.to_string_lossy().into_owned();
+    let served = start(
+        &stub.url(),
+        &[
+            "--regimen",
+            regimen,
+            "--key-file",
+            &key_path,
+            "--log",
+            &logged,
+            "--record",
+            &recorded,
+        ],
+    );
+    assert_eq!(
+        served.substrate.as_deref(),
+        Some("anthropic-claude-sonnet-5-5")
+    );
+    let start_line = first_logged_line(&log_file.0);
+    assert_eq!(
+        start_line["api_unchecked"],
+        serde_json::json!(["api_temperature_with_top_p"]),
+        "{start_line}"
+    );
+    // It pinned nothing on purpose, and says so plainly: in the start row,
+    // and in the record's sampler card.
+    assert_eq!(start_line["sampler_pins"], "none", "{start_line}");
+    let address = served.listening.clone();
+    let reply = post(&address, &address, r#"{"kind":"ask","text":"hello?"}"#);
+    assert_eq!(status(&reply), 200, "{reply}");
+    exchange(
+        &address,
+        &format!("GET /events?from=0 HTTP/1.1\r\nHost: {address}\r\n\r\n"),
+        |read| read.contains("turn.settled"),
+    );
+    let body = log_line_object(&stub.received()[0]);
+    for setting in ["temperature", "top_p", "top_k"] {
+        assert!(body.get(setting).is_none(), "{setting}: {body}");
+    }
+    assert_eq!(body["output_config"]["effort"], "medium", "{body}");
+    let reply = post(&address, &address, r#"{"kind":"end"}"#);
+    assert_eq!(status(&reply), 200, "{reply}");
+    // The record is written whole at the end; its report says when.
+    served
+        .said
+        .recv_timeout(Duration::from_secs(10))
+        .expect("the record's report");
+    let written = std::fs::read_to_string(&record.0).expect("the record");
+    let start_row = written.lines().next().expect("a start row");
+    assert_eq!(
+        log_line_object(start_row)["regime"]["substrates"][0]["sampler_card"],
+        serde_json::json!({"pins": "none"}),
+        "{start_row}"
+    );
+}
+
+/// #555: what a rung's entry declares its API refuses is refused at start,
+/// before anything binds, naming the declaration -- Haiku 5.5 takes only a
+/// `temperature` of 1, and only the efforts it declares.
+#[test]
+fn a_hosted_rung_refuses_at_start_what_its_entry_declares() {
+    let key = file_holding("key", "sk-rehearsal\n");
+    let key_path = key.0.to_string_lossy().into_owned();
+    for (effort, sampler, named) in [
+        ("low", "temperature = 0.6\n", "api_temperature = \"1\""),
+        ("low", "top_k = 20\n", "api_top_k = \"none\""),
+        (
+            "low",
+            "temperature = 1\ntop_p = 0.99\n",
+            "api_temperature_with_top_p",
+        ),
+    ] {
+        let regimen = rung_regimen("anthropic-claude-haiku-5-5", effort, sampler);
+        let path = regimen.0.to_string_lossy().into_owned();
+        let (code, printed) = run_briefly(
+            "https://127.0.0.1:9/v1/messages",
+            &["--regimen", &path, "--key-file", &key_path],
+        );
+        let said = refusal(&printed);
+        assert_eq!(code, Some(1), "{sampler}: {said}");
+        assert!(
+            said.contains(named) && said.contains("400") && !said.contains("listening"),
+            "{sampler}: {said}"
+        );
+    }
+    let regimen = rung_regimen("anthropic-claude-haiku-5-5", "low", "temperature = 1\n");
+    let path = regimen.0.to_string_lossy().into_owned();
+    let served = start(
+        "https://127.0.0.1:9/v1/messages",
+        &["--regimen", &path, "--key-file", &key_path],
+    );
+    assert_eq!(
+        served.substrate.as_deref(),
+        Some("anthropic-claude-haiku-5-5")
+    );
+}
+
+/// #555: `pins = "none"` is a hosted API's word, and the `[sampler]`
+/// table's only key: a server we run would sample at defaults nobody
+/// recorded, and a pin beside it would contradict it.
+#[test]
+fn pins_none_is_a_hosted_apis_word_and_stands_alone() {
+    let key = file_holding("key", "sk-rehearsal\n");
+    let key_path = key.0.to_string_lossy().into_owned();
+    let beside = rung_regimen(
+        "anthropic-claude-sonnet-5-5",
+        "low",
+        "pins = \"none\"\ntop_k = 1\n",
+    );
+    let path = beside.0.to_string_lossy().into_owned();
+    let (code, printed) = run_briefly(
+        "https://127.0.0.1:9/v1/messages",
+        &["--regimen", &path, "--key-file", &key_path],
+    );
+    let said = refusal(&printed);
+    assert_eq!(code, Some(2), "{said}");
+    assert!(
+        said.contains("`pins = \"none\"`") && said.contains("alone"),
+        "{said}"
+    );
+    let other = rung_regimen("anthropic-claude-sonnet-5-5", "low", "pins = \"all\"\n");
+    let path = other.0.to_string_lossy().into_owned();
+    let (code, printed) = run_briefly(
+        "https://127.0.0.1:9/v1/messages",
+        &["--regimen", &path, "--key-file", &key_path],
+    );
+    let said = refusal(&printed);
+    assert_eq!(code, Some(2), "{said}");
+    assert!(said.contains("pins"), "{said}");
+    let stub = Stub::serving(Vec::new()).expect("loopback");
+    let local = canned_regimen_with_sampler("pins = \"none\"\n");
+    let path = local.0.to_string_lossy().into_owned();
+    let (code, printed) = run_briefly(&stub.url(), &["--regimen", &path]);
+    let said = refusal(&printed);
+    assert_eq!(code, Some(2), "{said}");
+    assert!(
+        said.contains("`pins = \"none\"`")
+            && said.contains("server_kind = \"api\"")
+            && said.contains("the engine's defaults")
+            && said.contains("unrecorded"),
+        "{said}"
+    );
+}
+
 #[test]
 fn a_drive_server_on_a_hosted_api_entry_speaks_its_messages_api_with_the_key() {
     let stub = Stub::serving(vec![Act::Raw(HOSTED_ANSWER.to_vec())]).expect("loopback");
@@ -4184,6 +4379,12 @@ fn a_drive_server_on_a_hosted_api_entry_speaks_its_messages_api_with_the_key() {
     let start_line = first_logged_line(&log_file.0);
     assert_eq!(
         start_line["serving"]["dialect"], "anthropic-messages",
+        "{start_line}"
+    );
+    // The rehearsal entry declares nothing its API refuses: every key unchecked.
+    assert_eq!(
+        start_line["api_unchecked"],
+        serde_json::json!(diet::drive::registry::API_DECLARABLE),
         "{start_line}"
     );
     let response = lines

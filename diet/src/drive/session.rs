@@ -333,6 +333,8 @@ pub enum Event {
         /// The build serving the session (#757): its commit and whether its
         /// tracked files differed; `None` where serve did not say.
         build: Option<(String, bool)>,
+        /// On a hosted API (#555): what its start checked and sent.
+        hosted: Option<HostedStart>,
         /// The cap tool outputs arrive under, for a session that runs tools
         /// (#554).
         tool_output: Option<super::output::OutputCap>,
@@ -1203,8 +1205,20 @@ pub type Declared = (
         Option<BTreeMap<String, String>>,
         // The build serving it (#757): its commit and whether it was dirty.
         Option<(String, bool)>,
+        // On a hosted API (#555): what its start checked and sent.
+        Option<HostedStart>,
     ),
 );
+
+/// What a hosted API's session start says beside its claim (#555).
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct HostedStart {
+    /// The declarations its entry leaves out, unchecked; never empty.
+    pub unchecked: Option<Vec<String>>,
+    /// Whether the regimen pinned no sampler setting on purpose
+    /// (`[sampler] pins = "none"`).
+    pub pins_nothing: bool,
+}
 
 /// The phase graph `interview` runs under, as `session.start` names it
 /// (#563): its phases, its allowed moves and the phase it opens in, the
@@ -3186,7 +3200,7 @@ impl<S: Streaming + 'static> Session<S> {
             template,
             None,
             None,
-            (None, None, (None, None, Vec::new(), None, None)),
+            (None, None, (None, None, Vec::new(), None, None, None)),
         )
     }
 
@@ -3200,7 +3214,7 @@ impl<S: Streaming + 'static> Session<S> {
             template,
             Some(serving),
             None,
-            (None, None, (None, None, Vec::new(), None, None)),
+            (None, None, (None, None, Vec::new(), None, None, None)),
         )
     }
 
@@ -3218,7 +3232,7 @@ impl<S: Streaming + 'static> Session<S> {
             template,
             serving,
             Some(tools),
-            (None, None, (None, None, Vec::new(), None, None)),
+            (None, None, (None, None, Vec::new(), None, None, None)),
         )
     }
 
@@ -3241,7 +3255,7 @@ impl<S: Streaming + 'static> Session<S> {
             template,
             serving,
             tools,
-            (claim, interview, (None, None, Vec::new(), None, None)),
+            (claim, interview, (None, None, Vec::new(), None, None, None)),
         )
     }
 
@@ -3269,7 +3283,11 @@ impl<S: Streaming + 'static> Session<S> {
         template: RequestShape,
         serving: Option<Serving>,
         tools: Option<Tools>,
-        (claim, interview, (unsent, reasoning_effort_default, instruction_files, levers, build)): Declared,
+        (
+            claim,
+            interview,
+            (unsent, reasoning_effort_default, instruction_files, levers, build, hosted),
+        ): Declared,
     ) -> Self {
         a_head(&template.messages);
         let trunk = template.messages.clone();
@@ -3311,6 +3329,7 @@ impl<S: Streaming + 'static> Session<S> {
             instruction_files,
             levers,
             build,
+            hosted,
             notes_in_the_ask: true,
             tool_output: tools.as_ref().map(|tools| tools.output_cap),
             bash_timeout_ms: bash_timeout_of(tools.as_ref(), &template),
@@ -4851,10 +4870,16 @@ pub fn line_of(logged: &Logged) -> log::Line {
             levers,
             notes_in_the_ask,
             build,
+            hosted,
         } => log::Event::SessionStart {
             phase_document: phase_document.clone(),
             build_commit: build.as_ref().map(|(commit, _)| commit.clone()),
             build_dirty: build.as_ref().map(|(_, dirty)| *dirty),
+            api_unchecked: hosted.as_ref().and_then(|hosted| hosted.unchecked.clone()),
+            sampler_pins: hosted
+                .as_ref()
+                .filter(|hosted| hosted.pins_nothing)
+                .map(|_| "none".to_owned()),
             bash_timeout_ms: *bash_timeout_ms,
             shown_roots: shown_roots.clone(),
             // What a scenario shown its placeholders also fixes.
@@ -16082,6 +16107,7 @@ pub(in crate::drive) mod tests {
                 fork_asks: Some(&crate::dogma::asks::V4),
                 notes_in_the_ask: true,
                 build: Some(("a".repeat(40), false)),
+                hosted: None,
             },
             Event::Asked {
                 turn: 1,
@@ -16621,6 +16647,8 @@ pub(in crate::drive) mod tests {
                 compaction_persists: Some(true),
                 build_commit: Some("a".repeat(40)),
                 build_dirty: Some(false),
+                api_unchecked: None,
+                sampler_pins: None,
             },
             log::Event::Ask {
                 turn: 1,
