@@ -203,6 +203,10 @@ pub enum Step {
         until: String,
         /// How long to wait, in seconds.
         timeout: Option<u64>,
+        /// The fields the line must have, as an expectation's `where`
+        /// reads them: a line of the kind that does not match is waited
+        /// past. Empty for `idle`, and for the first line of the kind.
+        matches: Vec<(String, Match)>,
     },
     /// End the session.
     End,
@@ -737,10 +741,18 @@ fn step_of(mut fields: Fields) -> Result<(Step, Option<u64>), ScenarioError> {
             call: fields.text("call")?,
             choice: fields.text("choice")?,
         },
-        "wait" => Step::Wait {
-            until: fields.text("until")?,
-            timeout: fields.maybe_count("timeout")?,
-        },
+        "wait" => {
+            let until = fields.text("until")?;
+            let matches = where_of(&mut fields)?;
+            if until == "idle" && !matches.is_empty() {
+                return Err(fields.wrong("`where` only on a wait for a line's kind"));
+            }
+            Step::Wait {
+                until,
+                timeout: fields.maybe_count("timeout")?,
+                matches,
+            }
+        }
         "end" => Step::End,
         _ => return Err(fields.wrong("a step the runner knows")),
     };
@@ -751,8 +763,9 @@ fn step_of(mut fields: Fields) -> Result<(Step, Option<u64>), ScenarioError> {
     Ok((step, patience))
 }
 
-fn expect_of(mut fields: Fields, names: &[String]) -> Result<Expect, ScenarioError> {
-    let kind = fields.text("expect")?;
+/// A line's `where`: each field and what it must be, `key` equal to the
+/// text and `key~` holding it. Empty when it has none.
+fn where_of(fields: &mut Fields) -> Result<Vec<(String, Match)>, ScenarioError> {
     let mut matches = Vec::new();
     if let Some(wanted) = fields.take("where") {
         let Value::Object(wanted) = wanted else {
@@ -768,6 +781,12 @@ fn expect_of(mut fields: Fields, names: &[String]) -> Result<Expect, ScenarioErr
             });
         }
     }
+    Ok(matches)
+}
+
+fn expect_of(mut fields: Fields, names: &[String]) -> Result<Expect, ScenarioError> {
+    let kind = fields.text("expect")?;
+    let matches = where_of(&mut fields)?;
     let at_least = fields.maybe_count("at_least")?.unwrap_or(1);
     if at_least == 0 {
         return Err(fields.wrong("`at_least` 1 or more"));
@@ -985,6 +1004,49 @@ impl Driver {
         match self.post("/commands", body)? {
             (200, _) => Ok(()),
             (status, reply) => Err(Failure(format!("{body} was answered {status} {reply}"))),
+        }
+    }
+
+    /// Wait for a line of kind `until` after `mark` that has every field
+    /// `matches` names -- one of the kind that does not is waited past --
+    /// or for `idle`; a failure when `seconds` pass first.
+    fn waited(
+        &self,
+        (until, matches): (&str, &[(String, Match)]),
+        mark: u64,
+        seconds: u64,
+    ) -> Result<(), Failure> {
+        use crate::formats::log_query::Filter;
+        let filters: Vec<Filter> = matches
+            .iter()
+            .map(|(key, wanted)| match wanted {
+                Match::Equals(text) => Filter::Is(key.clone(), text.clone()),
+                Match::Contains(text) => Filter::Holds(key.clone(), text.clone()),
+            })
+            .collect();
+        let give_up = std::time::Instant::now() + std::time::Duration::from_secs(seconds);
+        let mut after = mark;
+        loop {
+            let left = give_up
+                .saturating_duration_since(std::time::Instant::now())
+                .as_secs();
+            let state = self.get(&format!("/wait?until={until}&after={after}&timeout={left}"))?;
+            if state["timed_out"] == true || left == 0 {
+                return Err(Failure(format!("no `{until}` within {seconds} s: {state}")));
+            }
+            if filters.is_empty() {
+                return Ok(());
+            }
+            let event = &state["event"];
+            let line = crate::formats::record::json::line(&event.to_string())
+                .map(crate::formats::record::json::Value::Object)
+                .map_err(|why| Failure(format!("/wait's event does not read: {why}")))?;
+            if filters.iter().all(|filter| filter.passes(&line)) {
+                return Ok(());
+            }
+            after = event["seq"]
+                .as_u64()
+                .ok_or_else(|| Failure(format!("/wait's event names no seq: {event}")))?;
         }
     }
 
@@ -1214,18 +1276,14 @@ pub fn drive(scenario: &Scenario, driver: &Driver) -> Result<Bindings, Failure> 
                     .ok_or_else(|| failed(Failure("no tangent is open to close".to_owned())))?;
                 driver.closed(id, each).map_err(failed)?;
             }
-            Step::Wait { until, timeout } => {
-                let seconds = timeout.unwrap_or(300);
-                let state = driver
-                    .get(&format!(
-                        "/wait?until={until}&after={mark}&timeout={seconds}"
-                    ))
+            Step::Wait {
+                until,
+                timeout,
+                matches,
+            } => {
+                driver
+                    .waited((until, matches), mark, timeout.unwrap_or(300))
                     .map_err(failed)?;
-                if state["timed_out"] == true {
-                    return Err(failed(Failure(format!(
-                        "no `{until}` within {seconds} s: {state}"
-                    ))));
-                }
             }
             Step::End => {
                 driver
@@ -1803,6 +1861,7 @@ mod tests {
                 Step::Wait {
                     until: "meditation.held".to_owned(),
                     timeout: Some(60),
+                    matches: Vec::new(),
                 },
                 Step::Ask {
                     text: "go on".to_owned(),

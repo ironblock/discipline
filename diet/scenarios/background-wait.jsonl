@@ -1,0 +1,11 @@
+{"scenario":"background-wait","regimen":"background-wait.toml","head":"../drive/heads/floor.md"}
+{"reply":{"when":"Build in the background","text":"Starting it.","calls":[{"id":"call-f","name":"bash","arguments":"{\"command\": \"false\", \"is_background\": true}"},{"id":"call-b","name":"bash","arguments":"{\"command\": \"sleep 2; echo built\", \"is_background\": true}"}]}}
+{"reply":{"when":"Background shell started","text":"It runs on."}}
+{"reply":{"when":"Is it built","text":"It is."}}
+{"step":"ask","text":"Build in the background."}
+{"step":"wait","until":"background.ended","where":{"status":"completed"},"timeout":30}
+{"step":"ask","text":"Is it built?"}
+{"step":"end"}
+{"expect":"background.ended","name":"failed","where":{"status":"failed"}}
+{"expect":"background.ended","where":{"status":"completed"},"after":"failed"}
+{"expect":"notice","where":{"text~":"<status>completed</status>"}}

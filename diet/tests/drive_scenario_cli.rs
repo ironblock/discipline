@@ -367,6 +367,71 @@ fn run_of(out: &Path) -> (Vec<String>, std::collections::BTreeMap<String, Vec<u8
     (lines, kept)
 }
 
+/// A background job that outlasts its turn ends at one place in the log
+/// only if the next ask waits for it: `wait` with `where` waits past the
+/// lines of its kind that do not match. With the wait, the next ask's
+/// notice reports the job completed; without it, the job has not ended by
+/// then, and the run fails -- every time, not only under load. What made
+/// two kitchen sinks run side by side show their model different notices.
+#[test]
+fn a_wait_with_where_holds_the_next_ask_for_the_job_it_names() {
+    let scenario = root().join("diet/scenarios/background-wait.jsonl");
+    let written = std::fs::read_to_string(&scenario).expect("the scenario");
+    let dir = scratch("background-wait");
+    std::fs::create_dir_all(&dir).expect("a scratch directory");
+    let unwaited = dir.join("unwaited.jsonl");
+    let lines: Vec<&str> = written
+        .lines()
+        .filter(|line| !line.starts_with(r#"{"step":"wait""#))
+        .collect();
+    assert_eq!(lines.len() + 1, written.lines().count(), "one wait step");
+    let head = root().join("diet/drive/heads/floor.md");
+    let regimen = root().join("diet/scenarios/background-wait.toml");
+    std::fs::write(
+        &unwaited,
+        lines
+            .join("\n")
+            .replace(
+                "\"../drive/heads/floor.md\"",
+                &format!("{:?}", head.display().to_string()),
+            )
+            .replace(
+                "\"background-wait.toml\"",
+                &format!("{:?}", regimen.display().to_string()),
+            )
+            + "\n",
+    )
+    .expect("the unwaited copy");
+    let run = |file: &Path, out: &str| {
+        let ran = Command::new(DRIVE)
+            .current_dir(root())
+            .arg("scenario")
+            .arg(file)
+            .arg("--out")
+            .arg(dir.join(out))
+            .arg("--no-assemble")
+            .output()
+            .expect("diet-drive runs");
+        let said: serde_json::Value =
+            serde_json::from_slice(&ran.stdout).expect("the run's report");
+        (ran.status.code(), said)
+    };
+    let (code, said) = run(&scenario, "waited");
+    assert_eq!(
+        (code, &said["ok"]),
+        (Some(0), &serde_json::json!(true)),
+        "{said}"
+    );
+    let (code, said) = run(&unwaited, "unwaited");
+    assert_eq!(code, Some(1), "{said}");
+    let unmet = said["unmet"].to_string();
+    assert!(
+        unmet.contains("kind=notice") && unmet.contains("completed"),
+        "{said}"
+    );
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
 /// A scenario shows its model the same bytes wherever it runs (path-free
 /// scenario outputs): its worktree and recording are shown as fixed
 /// placeholders, its background jobs are named from their count and shown
