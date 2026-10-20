@@ -377,7 +377,8 @@ fn run_of(out: &Path) -> (Vec<String>, std::collections::BTreeMap<String, Vec<u8
 #[test]
 fn a_dry_run_prints_the_plan_a_live_run_would_spend() {
     let dir = scratch("dry-run");
-    std::fs::create_dir_all(&dir).expect("a scratch directory");
+    let temp = dir.join("temp");
+    std::fs::create_dir_all(&temp).expect("a scratch directory");
     // The tree's Sonnet 5.5 regimen, its model's commands run as the script's
     // turn needs: what a live run of hosted.jsonl would take.
     let live = dir.join("live.toml");
@@ -400,10 +401,16 @@ fn a_dry_run_prints_the_plan_a_live_run_would_spend() {
         .arg(dir.join("out"))
         .arg("--no-assemble")
         .env_remove("ANTHROPIC_API_KEY")
+        .env("TMPDIR", &temp)
         .output()
         .expect("diet-drive runs");
     let said: serde_json::Value = serde_json::from_slice(&ran.stdout).expect("the report");
     assert_eq!(ran.status.code(), Some(0), "{said}");
+    assert_eq!(
+        rehearsals_in(&temp),
+        0,
+        "a rehearsal's regimen was left behind"
+    );
     let plan = &said["plan"];
     assert_eq!(plan["rung"], "anthropic-claude-sonnet-5-5", "{plan}");
     assert_eq!(plan["model"], "claude-sonnet-5-5", "{plan}");
@@ -458,12 +465,30 @@ fn a_dry_run_prints_the_plan_a_live_run_would_spend() {
     let _ = std::fs::remove_dir_all(&dir);
 }
 
+/// The rehearsal regimens a dry run left in `temp`, the temporary directory
+/// it was given: its own, so another worktree's dry run, live at the same
+/// moment in the shared one, is not counted.
+fn rehearsals_in(temp: &Path) -> usize {
+    std::fs::read_dir(temp)
+        .expect("the temporary directory")
+        .filter_map(Result::ok)
+        .filter(|entry| {
+            entry
+                .file_name()
+                .to_string_lossy()
+                .starts_with("diet-dry-run-")
+        })
+        .count()
+}
+
 /// #555 step 4c: a dry run plans a hosted rung's spend, so a regimen on any
 /// other substrate is refused; and no rehearsal's copy of its regimen is
 /// left in the temporary directory, however a run ended.
 #[test]
 fn a_dry_run_refuses_a_rung_that_is_not_hosted_and_leaves_no_copy() {
     let dir = scratch("dry-run-refused");
+    let temp = dir.join("temp");
+    std::fs::create_dir_all(&temp).expect("a scratch directory");
     // A dry run plans a hosted rung's spend: another regimen is refused.
     let refused = Command::new(DRIVE)
         .current_dir(root())
@@ -475,6 +500,7 @@ fn a_dry_run_refuses_a_rung_that_is_not_hosted_and_leaves_no_copy() {
         .arg("--out")
         .arg(dir.join("refused"))
         .arg("--no-assemble")
+        .env("TMPDIR", &temp)
         .output()
         .expect("diet-drive runs");
     let said: serde_json::Value = serde_json::from_slice(&refused.stdout).expect("the report");
@@ -486,17 +512,11 @@ fn a_dry_run_refuses_a_rung_that_is_not_hosted_and_leaves_no_copy() {
         "{said}"
     );
     // And no rehearsal's regimen copy is left, however the run ended.
-    let left = std::fs::read_dir(std::env::temp_dir())
-        .expect("the temporary directory")
-        .filter_map(Result::ok)
-        .filter(|entry| {
-            entry
-                .file_name()
-                .to_string_lossy()
-                .starts_with("diet-dry-run-")
-        })
-        .count();
-    assert_eq!(left, 0, "a rehearsal's regimen was left behind");
+    assert_eq!(
+        rehearsals_in(&temp),
+        0,
+        "a rehearsal's regimen was left behind"
+    );
     let _ = std::fs::remove_dir_all(&dir);
 }
 

@@ -3182,12 +3182,13 @@ struct Shared<S> {
     /// the session's reaper, when background commands are on.
     reap: Mutex<Option<std::sync::mpsc::Sender<(String, std::process::Child)>>>,
     /// Where the interview fork runs when it is not the trunk's server
-    /// (#570); `None` is warm.
-    seat: Option<Offboard<S>>,
+    /// (#570); unset is warm. Set once, whatever else holds the session:
+    /// the reaper holds it from the start.
+    seat: std::sync::OnceLock<Offboard<S>>,
     /// A fork's own transport on the trunk's server, when it asks the cache
     /// differently (#556): a hosted API's, whose fork never writes its tail
-    /// for an hour.
-    forks: Option<S>,
+    /// for an hour. Set once, as `seat` is.
+    forks: std::sync::OnceLock<S>,
 }
 
 /// An offboard extraction seat (#570): the second server a fork's call is
@@ -3400,8 +3401,8 @@ impl<S: Streaming + 'static> Session<S> {
             changed: Condvar::new(),
             tools,
             reap: Mutex::new(None),
-            seat: None,
-            forks: None,
+            seat: std::sync::OnceLock::new(),
+            forks: std::sync::OnceLock::new(),
         })
     }
 
@@ -3422,10 +3423,11 @@ impl<S: Streaming + 'static> Session<S> {
     /// When the session is already shared: a seat is chosen before a
     /// session serves anything.
     #[must_use]
-    pub fn seated(mut self, seat: Offboard<S>) -> Self {
-        Arc::get_mut(&mut self.shared)
-            .expect("a session is seated before it is shared")
-            .seat = Some(seat);
+    pub fn seated(self, seat: Offboard<S>) -> Self {
+        assert!(
+            self.shared.seat.set(seat).is_ok(),
+            "a session is seated once"
+        );
         self
     }
 
@@ -3437,10 +3439,11 @@ impl<S: Streaming + 'static> Session<S> {
     ///
     /// When the session is already shared.
     #[must_use]
-    pub fn forking_through(mut self, forks: S) -> Self {
-        Arc::get_mut(&mut self.shared)
-            .expect("a session's forks are set before it is shared")
-            .forks = Some(forks);
+    pub fn forking_through(self, forks: S) -> Self {
+        assert!(
+            self.shared.forks.set(forks).is_ok(),
+            "a session's forks are set once"
+        );
         self
     }
 
@@ -11020,7 +11023,7 @@ fn fire_on<S>(
         .and_then(|interview| interview.view);
     // An offboard seat holds none of the trunk warm, so it is shown the last
     // turn unless the regimen says otherwise (#570).
-    let view = declared.unwrap_or(if shared.seat.is_some() {
+    let view = declared.unwrap_or(if shared.seat.get().is_some() {
         ForkView::Last(1)
     } else {
         ForkView::Trunk
@@ -11033,7 +11036,7 @@ fn fire_on<S>(
     shape.messages =
         prefix.unwrap_or_else(|| viewed(&state.trunk, shared.template.messages.len(), view));
     shape.messages.push(Message::new(role, question.clone()));
-    let seat = shared.seat.as_ref().map(|seat| {
+    let seat = shared.seat.get().map(|seat| {
         shape.model.clone_from(&seat.model);
         shape.limits.context_window = seat.context_window;
         log::ForkSeat {
@@ -12278,7 +12281,7 @@ fn seated<S>(
     state: &State,
     shape: &mut RequestShape,
 ) -> (Option<log::ForkSeat>, u64, (u64, u64)) {
-    match shared.seat.as_ref() {
+    match shared.seat.get() {
         Some(seat) => {
             shape.model.clone_from(&seat.model);
             shape.limits.context_window = seat.context_window;
@@ -12547,8 +12550,8 @@ fn stream_fork<S: Streaming>(shared: &Shared<S>, forked: &Fired) -> ForkRun {
         .map(|interview| interview.capture)
         == Some(crate::dogma::asks::Modality::Tools);
     let mut calls = Calls::default();
-    let transport = shared.seat.as_ref().map_or_else(
-        || shared.forks.as_ref().unwrap_or(&shared.transport),
+    let transport = shared.seat.get().map_or_else(
+        || shared.forks.get().unwrap_or(&shared.transport),
         |seat| &seat.transport,
     );
     let began = Instant::now();
@@ -12758,7 +12761,7 @@ fn settle_fork<S>(
         }
     };
     // An offboard fork's cost, for the seat's prefill rate (#570).
-    let (prompt_tokens, wall_ms) = if shared.seat.is_some() {
+    let (prompt_tokens, wall_ms) = if shared.seat.get().is_some() {
         (
             prompt_tokens,
             Some(u64::try_from(began.elapsed().as_millis()).unwrap_or(u64::MAX)),
@@ -25214,7 +25217,7 @@ pub(in crate::drive) mod tests {
             "the trunk's server saw the two turns only"
         );
         assert!(trunk_sent.iter().all(|shape| shape.model == "a-model"));
-        let seat = &session.shared.seat.as_ref().expect("seated").transport;
+        let seat = &session.shared.seat.get().expect("seated").transport;
         let [fork] = seat
             .sent()
             .try_into()

@@ -4152,6 +4152,46 @@ fn hosted_regimen_bare(top: &str) -> HeadFile {
     )
 }
 
+/// A hosted session whose forks ask the cache differently from its trunk
+/// (`cache_ttl = "1h"`, a separate fork transport) and whose regimen runs
+/// commands -- so background commands are on, and their reaper starts with
+/// the session -- starts: its forks' transport is set whatever else holds
+/// the session. It panicked at start ("a session's forks are set before it
+/// is shared") while the reaper held the session weakly.
+#[test]
+fn a_hosted_session_with_background_commands_and_a_fork_transport_starts() {
+    let regimen = hosted_regimen_with(
+        "cache_ttl = \"1h\"\nisolation = \"none\"\napproval = \"none\"\n\
+         approval_policy = \"approvals are off: every command runs without a gate decision \
+         or a prompt\"\nmax_steps = 4\n",
+    );
+    let path = regimen.0.to_string_lossy().into_owned();
+    let key = file_holding("key", "sk-rehearsal\n");
+    let key_path = key.0.to_string_lossy().into_owned();
+    let auth = file_holding("auth", "author:s3cret\n");
+    let auth_path = auth.0.to_string_lossy().into_owned();
+    let tree = Dir::new("hosted-fork-transport");
+    let stub = Stub::serving(vec![Act::Raw(HOSTED_ANSWER.to_vec())]).expect("loopback");
+    let served = start_as(
+        "a-hosted-model",
+        &stub.url(),
+        &[
+            "--regimen",
+            &path,
+            "--key-file",
+            &key_path,
+            "--worktree",
+            &tree.path(),
+            "--auth-file",
+            &auth_path,
+        ],
+    );
+    assert_eq!(served.substrate.as_deref(), Some("stub-hosted-api"));
+    let address = served.listening.clone();
+    let reply = post_authed(&address, "/commands", r#"{"kind":"end"}"#);
+    assert_eq!(status(&reply), 200, "{reply}");
+}
+
 /// What a refused start said: its `error`, else everything it printed.
 fn refusal(said: &str) -> String {
     serde_json::from_str::<serde_json::Value>(said.trim())
