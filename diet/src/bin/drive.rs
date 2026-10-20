@@ -698,7 +698,7 @@ fn serve(args: &[String]) -> ExitCode {
     // binds; what the entry leaves unchecked is named in the start row.
     // `Some` on a hosted API, its unchecked keys `None` when there are none.
     let mut api_unchecked = None;
-    let mut max_api_requests = None;
+    let mut request_limits = None;
     if let Some((identity, regime)) = hosted.as_ref().zip(regime.as_ref()) {
         let key = if key_file.is_some() {
             diet::drive::hosted::Key::Given
@@ -746,10 +746,15 @@ fn serve(args: &[String]) -> ExitCode {
         ) {
             Ok((hosted, unchecked)) => {
                 // Every lane's requests, and every retry, are one count.
-                transport = hosted.with_budget(std::sync::Arc::new(
-                    diet::client::stream::RequestBudget::new(limits.max_api_requests),
-                ));
-                max_api_requests = Some(limits.max_api_requests);
+                transport = hosted
+                    .with_budget(std::sync::Arc::new(
+                        diet::client::stream::RequestBudget::new(limits.max_api_requests),
+                    ))
+                    .with_retries(diet::client::stream::RetryPolicy {
+                        retries: limits.api_retries,
+                        max_wait_seconds: limits.api_retry_after_max_seconds,
+                    });
+                request_limits = Some(limits);
                 api_unchecked = Some(
                     (!unchecked.is_empty())
                         .then(|| unchecked.iter().map(|key| (*key).to_owned()).collect()),
@@ -902,7 +907,7 @@ fn serve(args: &[String]) -> ExitCode {
                 diet::build::build(),
                 api_unchecked.map(|unchecked| diet::drive::session::HostedStart {
                     unchecked,
-                    max_api_requests,
+                    limits: request_limits,
                     pins_nothing: regime.as_ref().is_some_and(|regime| {
                         diet::drive::regimen::pins_nothing(&regime.substrates[0].sampler_card)
                     }),

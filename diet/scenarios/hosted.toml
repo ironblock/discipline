@@ -3,7 +3,9 @@
 # entry on canned weights, so serve speaks the Messages wire, sends a key (`diet-drive scenario`'s
 # rehearsal key, never the operator's), and probes no engine. Turn 1
 # thinks, calls `ls`, and answers from the cache it wrote; turn 2 is answered
-# 529 with a retry-after, and the turn fails, retried by nobody.
+# 529 with a retry-after of 1 s, waited and retried, and answered; turn 3 is
+# answered 429 asking 120 s, more than `api_retry_after_max_seconds`, so it is
+# not retried and the turn fails.
 arm = "rehearsal"
 dogma_version = 0
 

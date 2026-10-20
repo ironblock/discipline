@@ -1148,7 +1148,7 @@ fn a_drive_server_confirms_a_declared_engines_model_settings_and_draft() {
         ]),
         "{start_line}"
     );
-    assert_eq!(start_line["version"], 12, "{start_line}");
+    assert_eq!(start_line["version"], 13, "{start_line}");
     // And its server speaks TabbyAPI's dialect, by name (#496).
     assert_eq!(start_line["serving"]["dialect"], "tabbyapi", "{start_line}");
 }
@@ -4437,6 +4437,97 @@ fn a_hosted_session_sends_nothing_past_max_api_requests() {
         (Some("final"), Some("api_cap")),
         "{settled:?}"
     );
+}
+
+/// #555 step 4b: a hosted session retries a 529 as its regimen allows, logs
+/// the retry as its own line before the next attempt goes, and counts that
+/// attempt against `max_api_requests`; the start row names the policy.
+#[test]
+fn a_hosted_session_retries_a_529_and_logs_and_counts_each_attempt() {
+    let stub = Stub::serving(vec![
+        Act::Raw(diet::drive::canned::hosted_error(529, Some(0))),
+        Act::Raw(HOSTED_ANSWER.to_vec()),
+    ])
+    .expect("loopback");
+    let regimen = hosted_regimen_bare(
+        "max_api_requests = 2\napi_retries = 1\napi_retry_after_max_seconds = 5\n",
+    );
+    let path = regimen.0.to_string_lossy().into_owned();
+    let key = file_holding("key", "sk-rehearsal\n");
+    let key_path = key.0.to_string_lossy().into_owned();
+    let log_file = file_holding("log", "");
+    let logged = log_file.0.to_string_lossy().into_owned();
+    let served = start_as(
+        "a-hosted-model",
+        &stub.url(),
+        &[
+            "--regimen",
+            &path,
+            "--key-file",
+            &key_path,
+            "--log",
+            &logged,
+        ],
+    );
+    let address = served.listening.clone();
+    let reply = post(&address, &address, r#"{"kind":"ask","text":"hello?"}"#);
+    assert_eq!(status(&reply), 200, "{reply}");
+    exchange(
+        &address,
+        &format!("GET /events?from=0 HTTP/1.1\r\nHost: {address}\r\n\r\n"),
+        |read| read.contains("turn.settled"),
+    );
+    // The budget is spent: the next ask's request is never sent.
+    let reply = post(&address, &address, r#"{"kind":"ask","text":"again?"}"#);
+    assert_eq!(status(&reply), 200, "{reply}");
+    exchange(
+        &address,
+        &format!("GET /events?from=0 HTTP/1.1\r\nHost: {address}\r\n\r\n"),
+        |read| read.matches("turn.settled").count() >= 2,
+    );
+    let reply = post(&address, &address, r#"{"kind":"end"}"#);
+    assert_eq!(status(&reply), 200, "{reply}");
+    assert_eq!(stub.received().len(), 2, "the first attempt and its retry");
+    let lines: Vec<serde_json::Value> = std::fs::read_to_string(&log_file.0)
+        .expect("the log")
+        .lines()
+        .map(log_line_object)
+        .collect();
+    assert_eq!(
+        (
+            &lines[0]["api_retries"],
+            &lines[0]["api_retry_after_max_seconds"]
+        ),
+        (&serde_json::json!(1), &serde_json::json!(5)),
+        "{}",
+        lines[0]
+    );
+    let kinds: Vec<&str> = lines.iter().filter_map(|l| l["kind"].as_str()).collect();
+    let retried = kinds
+        .iter()
+        .position(|k| *k == "request.retried")
+        .expect("a retry line");
+    let answered = kinds
+        .iter()
+        .position(|k| *k == "response")
+        .expect("the answer");
+    assert!(retried < answered, "{kinds:?}");
+    let line = &lines[retried];
+    assert_eq!(
+        (&line["status"], &line["retry_after"], &line["attempt"]),
+        (
+            &serde_json::json!(529),
+            &serde_json::json!(0),
+            &serde_json::json!(1)
+        ),
+        "{line}"
+    );
+    let settled: Vec<_> = lines
+        .iter()
+        .filter(|l| l["kind"] == "turn.settled")
+        .map(|l| l["reason"].as_str())
+        .collect();
+    assert_eq!(settled, [Some("final"), Some("api_cap")]);
 }
 
 /// #555: `pins = "none"` is a hosted API's word, and the `[sampler]`

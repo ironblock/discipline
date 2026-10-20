@@ -1,0 +1,1 @@
+A `request.retried` cites a request still in flight: once its answer is logged, nothing retries it.

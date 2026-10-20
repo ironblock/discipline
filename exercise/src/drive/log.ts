@@ -354,6 +354,8 @@ export type ForkSkipped = V0.ForkSkippedLine;
 export type WarrantGated = V0.WarrantGatedLine;
 /** A tool result the model pruned, replaced at a later meditation (v7, `prune_output`, #612). */
 export type Pruned = V0.PrunedLine;
+/** A hosted API's 429 or 529, retried before its next attempt (v13, #555). Folded, not yet drawn. */
+export type RequestRetried = V0.RequestRetriedLine;
 
 export type LogLine =
   | SessionStart
@@ -385,6 +387,7 @@ export type LogLine =
   | Notice
   | TimeoutNear
   | ForkSkipped
+  | RequestRetried
   | WarrantGated
   | Flag
   | PatchRefused
