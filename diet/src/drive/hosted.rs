@@ -135,6 +135,7 @@ pub fn transport(
     shape: &RequestShape,
 ) -> Result<(HttpStream, Vec<&'static str>), String> {
     let id = &substrate.id;
+    model_named(identity, id, shape)?;
     let transport = match key {
         Key::Given => transport,
         Key::Environment(_, true) => {
@@ -159,6 +160,27 @@ pub fn transport(
         .map_err(|why| format!("`{id}`'s requests: {why}"))?;
     let unchecked = refused_at_start(id, identity, shape, &options)?;
     Ok((transport.with_anthropic(options), unchecked))
+}
+
+/// Whether `shape` is sent as the model `identity`'s entry names (#555).
+///
+/// # Errors
+///
+/// Another model, naming both; an entry that names none.
+pub fn model_named(identity: &Identity, id: &str, shape: &RequestShape) -> Result<(), String> {
+    match identity.model_id.as_deref() {
+        Some(named) if named == shape.model => Ok(()),
+        Some(named) => Err(format!(
+            "`{id}` declares `weights_model_id = \"{named}\"`, and this session's requests \
+             would be sent as \"{}\" (--model): the provider bills the model a request names, \
+             and the record names the entry's, so the two are one",
+            shape.model
+        )),
+        None => Err(format!(
+            "`{id}` is a hosted API and names no `weights_model_id`: a paid rung names the \
+             model it bills, and its requests are sent as that model"
+        )),
+    }
 }
 
 /// What the entry declares its API would refuse with a 400 (#555), checked
@@ -284,7 +306,7 @@ mod tests {
             "[equipment.api]\nhardware_fingerprint = \"{}\"\n\
              [substrate.h]\nequipment = \"api\"\nengine_name = \"anthropic-messages\"\n\
              engine_identity = \"2023-06-01\"\nserver_kind = \"api\"\n\
-             weights_kind = \"hosted\"\nweights_provider = \"p\"\nweights_model_id = \"m\"\n\
+             weights_kind = \"hosted\"\nweights_provider = \"p\"\nweights_model_id = \"a-hosted-model\"\n\
              weights_version_or_date_observed = \"d\"\n{thinking}{betas}",
             "a".repeat(64)
         );
@@ -509,6 +531,37 @@ mod tests {
             refused_at_start("h", &haiku, &shape(), &Options::default()),
             Ok(Vec::new())
         );
+    }
+
+    /// #555: an `api` entry's requests go as the model it names: another
+    /// `--model` is refused, naming both, and an entry naming none is
+    /// refused rather than passed -- a paid rung names what it bills.
+    #[test]
+    fn a_hosted_session_sends_the_model_its_entry_names_or_nothing() {
+        let identity = entry("thinking = \"adaptive\"\n", "");
+        let mut asked = shape();
+        assert_eq!(model_named(&identity, "h", &asked), Ok(()));
+        asked.model = "claude-opus-5-5".to_owned();
+        let refused = model_named(&identity, "h", &asked).expect_err("another model");
+        assert!(
+            refused.contains("claude-opus-5-5")
+                && refused.contains("`weights_model_id = \"a-hosted-model\"`"),
+            "{refused}"
+        );
+        let canned = crate::drive::registry::identity(
+            &format!(
+                "[equipment.api]\nhardware_fingerprint = \"{}\"\n\
+                 [substrate.c]\nequipment = \"api\"\nengine_name = \"e\"\n\
+                 engine_identity = \"2023-06-01\"\nserver_kind = \"api\"\n\
+                 weights_kind = \"canned\"\nweights_acts_sha256 = \"{}\"\n",
+                "a".repeat(64),
+                "b".repeat(64)
+            ),
+            "c",
+        )
+        .expect("a canned api entry");
+        let refused = model_named(&canned, "c", &asked).expect_err("no model named");
+        assert!(refused.contains("names no `weights_model_id`"), "{refused}");
     }
 
     /// #555: an entry that declares nothing of what its API refuses is
