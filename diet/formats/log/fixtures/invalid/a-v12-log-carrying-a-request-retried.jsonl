@@ -1,0 +1,5 @@
+{"head":[{"content":"you are the trunk","role":"system"}],"kind":"session.start","max_api_requests":2,"model":"claude-haiku-5-5","opened":1790000000000,"seq":0,"t":0,"version":12}
+{"kind":"ask","seq":1,"t":5,"text":"say hello","turn":1}
+{"from":"awaiting","kind":"settlement","seq":2,"t":10,"to":"turn"}
+{"kind":"request","lane":"trunk","seq":3,"t":15,"turn":1}
+{"attempt":1,"kind":"request.retried","request":3,"retry_after":0,"seq":4,"status":529,"t":20,"wait_ms":0}

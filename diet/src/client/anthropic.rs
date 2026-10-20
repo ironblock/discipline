@@ -856,6 +856,112 @@ pub(crate) mod tests {
         );
     }
 
+    /// #555 step 4b: a 429 or 529 is retried under the regimen's policy --
+    /// at most `retries` times, after its `retry-after` when that is at most
+    /// the cap, else not at all; with no header, after a backoff the cap
+    /// bounds -- each retry announced before it goes, and taken from the
+    /// session's request budget first, so a retry never passes the cap.
+    #[test]
+    fn a_429_or_529_is_retried_as_the_policy_says_and_never_past_the_cap() {
+        use crate::client::stream::{RequestBudget, RetryPolicy};
+        use crate::drive::canned::{HostedReply, hosted_error, hosted_streamed};
+        let answer = || {
+            Act::Raw(hosted_streamed(&HostedReply {
+                thinking: None,
+                text: "answered",
+                calls: &[],
+                prompt_tokens: 10,
+                cache_read: 0,
+                cache_write: 0,
+            }))
+        };
+        let refused = |status, after| Act::Raw(hosted_error(status, after));
+        let policy = |retries, max_wait_seconds| {
+            move |transport: HttpStream| {
+                transport.with_retries(RetryPolicy {
+                    retries,
+                    max_wait_seconds,
+                })
+            }
+        };
+        let finished =
+            |ended: &Result<Ended, TransportFailure>| matches!(ended, Ok(Ended::Finished { .. }));
+        let rejected = |ended: &Result<Ended, TransportFailure>| match ended {
+            Ok(Ended::Rejected { status, class, .. }) => Some((*status, *class)),
+            _ => None,
+        };
+
+        // A 529 with a retry-after inside the cap: waited, retried, answered.
+        let stub = Stub::serving(vec![refused(529, Some(0)), answer()]).expect("loopback");
+        let (pieces, ended) = played_through(&stub, Options::default(), policy(2, 5));
+        assert!(finished(&ended), "{ended:?}");
+        assert!(
+            pieces.contains(&"retried 529 Some(0) 1 0".to_owned()),
+            "{pieces:?}"
+        );
+        assert_eq!(stub.received().len(), 2);
+
+        // A 429 asking a longer wait than the cap: not retried.
+        let stub = Stub::serving(vec![refused(429, Some(7)), answer()]).expect("loopback");
+        let (pieces, ended) = played_through(&stub, Options::default(), policy(2, 5));
+        assert_eq!(rejected(&ended), Some((429, None)), "{ended:?}");
+        assert!(!pieces.iter().any(|piece| piece.starts_with("retried")));
+        assert_eq!(stub.received().len(), 1);
+
+        // Any other status: not retried.
+        let stub = Stub::serving(vec![refused(500, Some(0)), answer()]).expect("loopback");
+        let (_, ended) = played_through(&stub, Options::default(), policy(2, 5));
+        assert_eq!(rejected(&ended), Some((500, None)), "{ended:?}");
+        assert_eq!(stub.received().len(), 1);
+
+        // Retries spent: the last refusal ends it.
+        let stub =
+            Stub::serving(vec![refused(529, Some(0)), refused(529, Some(0))]).expect("loopback");
+        let (pieces, ended) = played_through(&stub, Options::default(), policy(1, 5));
+        assert_eq!(rejected(&ended), Some((529, None)), "{ended:?}");
+        assert_eq!(
+            pieces
+                .iter()
+                .filter(|piece| piece.starts_with("retried"))
+                .count(),
+            1
+        );
+        assert_eq!(stub.received().len(), 2);
+
+        // No header: the backoff, bounded by the cap -- here 0, so at once.
+        let stub = Stub::serving(vec![refused(529, None), answer()]).expect("loopback");
+        let (pieces, ended) = played_through(&stub, Options::default(), policy(1, 0));
+        assert!(finished(&ended), "{ended:?}");
+        assert!(
+            pieces.contains(&"retried 529 None 1 0".to_owned()),
+            "{pieces:?}"
+        );
+
+        // The budget holds one request: the retry is never sent, nor
+        // announced, and the request ends at the cap.
+        let stub = Stub::serving(vec![refused(529, Some(0)), answer()]).expect("loopback");
+        let budget = std::sync::Arc::new(RequestBudget::new(1));
+        let (pieces, ended) = played_through(&stub, Options::default(), |transport| {
+            policy(2, 5)(transport).with_budget(std::sync::Arc::clone(&budget))
+        });
+        assert_eq!(
+            rejected(&ended),
+            Some((0, Some(super::super::stream::Rejection::ApiCap))),
+            "{ended:?}"
+        );
+        assert!(!pieces.iter().any(|piece| piece.starts_with("retried")));
+        assert_eq!((stub.received().len(), budget.sent()), (1, 1));
+
+        // Two allowed: the retry takes the second, and is counted.
+        let stub = Stub::serving(vec![refused(529, Some(0)), answer()]).expect("loopback");
+        let budget = std::sync::Arc::new(RequestBudget::new(2));
+        let (_, ended) = played_through(&stub, Options::default(), |transport| {
+            policy(2, 5)(transport).with_budget(std::sync::Arc::clone(&budget))
+        });
+        assert!(finished(&ended), "{ended:?}");
+        assert_eq!(budget.sent(), 2);
+    }
+
     /// What has no Anthropic parameter is refused, never dropped; reasoning
     /// with no signature goes back as text; a budget is `enabled`.
     #[test]
@@ -1004,11 +1110,22 @@ pub(crate) mod tests {
 
     /// What a stream delivered, piece by piece, in words.
     fn played(stub: &Stub, options: Options) -> (Vec<String>, Result<Ended, TransportFailure>) {
+        played_through(stub, options, |transport| transport)
+    }
+
+    /// [`played`], the transport made by `made` from the plain one.
+    fn played_through(
+        stub: &Stub,
+        options: Options,
+        made: impl FnOnce(HttpStream) -> HttpStream,
+    ) -> (Vec<String>, Result<Ended, TransportFailure>) {
         let mut endpoint = Endpoint::parse(&stub.url()).expect("an endpoint");
         "/v1/messages".clone_into(&mut endpoint.path);
-        let transport = HttpStream::new(endpoint)
-            .with_bearer(crate::client::stream::Bearer::new("sk-test-key").expect("a key"))
-            .with_anthropic(options);
+        let transport = made(
+            HttpStream::new(endpoint)
+                .with_bearer(crate::client::stream::Bearer::new("sk-test-key").expect("a key"))
+                .with_anthropic(options),
+        );
         let mut pieces = Vec::new();
         let ended = transport.stream(
             &shape(vec![Message::new(Role::User, "read a.rs")]),
@@ -1030,6 +1147,12 @@ pub(crate) mod tests {
                     }
                     Piece::Usage(usage) => format!("usage {usage:?}"),
                     Piece::Progress(_) => "progress".to_owned(),
+                    Piece::Retried {
+                        status,
+                        retry_after,
+                        attempt,
+                        wait_ms,
+                    } => format!("retried {status} {retry_after:?} {attempt} {wait_ms}"),
                 });
             },
         );

@@ -172,6 +172,17 @@
 //! a request the log does not show; from v12 the request is shown, and the
 //! meditation's `warm` still carries its timings.
 //!
+//! v13 (#555) adds `request.retried`: a hosted API's 429 or 529, retried
+//! under the regimen's `api_retries` and `api_retry_after_max_seconds`. It
+//! names its `request`, the refused attempt's `status`, its `retry_after`
+//! when it sent one, which retry it is (`attempt`, from 1), and `wait_ms`,
+//! the wait before the next attempt, which counts against
+//! `max_api_requests` as the first did. It comes after its `request` and
+//! before that request's answer. `session.start` names the policy beside
+//! the cap: `api_retries` and `api_retry_after_max_seconds`. A log that
+//! declares 12 or less and carries any of them is refused. For a reader of v12 logs, the migration is nothing: no
+//! v12 session retried.
+//!
 //! # A torn final line
 //!
 //! A writer killed mid-write leaves the start of an event with no line break
@@ -203,10 +214,10 @@ use super::record::vocabulary;
 struct LogParser;
 
 /// The version this module writes, as `session.start` states it.
-pub const VERSION: i64 = 12;
+pub const VERSION: i64 = 13;
 
 /// Every version this module reads.
-pub const READS: &[i64] = &[0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12];
+pub const READS: &[i64] = &[0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13];
 
 /// How recent an input event must be, at the moment a turn settles, for the
 /// person to count as already present: `notice` is then zero (Q4 (a), ruled
@@ -313,6 +324,9 @@ vocabulary! {
         /// decision, the step's fallback to the patterns, or a stale
         /// decision dropped (v8).
         WarrantGated => "warrant.gated",
+        /// A hosted API's 429 or 529, retried (v13, #555): the next attempt
+        /// of the same request, after a wait.
+        RequestRetried => "request.retried",
     }
 }
 
@@ -1248,6 +1262,12 @@ pub enum Event {
         /// On a hosted API's session (v12, #555): the requests it may send,
         /// every lane's and every retry.
         max_api_requests: Option<u64>,
+        /// On a hosted API's session (v13, #555): the retries a 429 or 529
+        /// is given after its first attempt.
+        api_retries: Option<u64>,
+        /// On a hosted API's session (v13, #555): the longest `retry-after`
+        /// waited, in seconds, and the backoff's ceiling.
+        api_retry_after_max_seconds: Option<u64>,
     },
     /// An ask was admitted.
     Ask {
@@ -1792,6 +1812,21 @@ pub enum Event {
         cap: u64,
         /// The forks in flight beside it, `f/<seq>`.
         forks: Vec<String>,
+    },
+    /// A hosted API's 429 or 529, retried (v13, #555): logged before the
+    /// next attempt of `request` is sent, which counts against the session's
+    /// `max_api_requests` as the first did.
+    RequestRetried {
+        /// The `request` retried.
+        request: u64,
+        /// The refused attempt's HTTP status: 429 or 529.
+        status: u16,
+        /// Its `retry-after`, in seconds, when it sent one.
+        retry_after: Option<u64>,
+        /// Which retry: 1 for the second attempt.
+        attempt: u64,
+        /// How long the next attempt waits, in milliseconds.
+        wait_ms: u64,
     },
     /// A trunk request held until the forks in flight settled (v8): its
     /// prompt and the clamp's floor did not fit beside them. Logged before
@@ -3038,13 +3073,14 @@ fn ends_once(event: &Event, request: u64, ended: &mut BTreeSet<u64>) -> Result<(
     ))
 }
 
-/// A line about a call cites an earlier `request`. A `delta` or a
-/// `progress` cites one still in flight; a `response`, `cancelled` or
-/// `request.failed` ends it, once.
+/// A line about a call cites an earlier `request`. A `delta`, a
+/// `progress` or a `request.retried` cites one still in flight; a
+/// `response`, `cancelled` or `request.failed` ends it, once.
 fn cites(event: &Event, requests: &BTreeSet<u64>, ended: &mut BTreeSet<u64>) -> Result<(), String> {
     let request = match event {
         Event::Delta { request, .. }
         | Event::Progress { request, .. }
+        | Event::RequestRetried { request, .. }
         | Event::Cancelled { request, .. }
         | Event::RequestFailed { request, .. } => *request,
         Event::Response { to_request, .. } => *to_request,
@@ -3054,12 +3090,12 @@ fn cites(event: &Event, requests: &BTreeSet<u64>, ended: &mut BTreeSet<u64>) -> 
         return Err(format!("seq {request} is not an earlier `request`"));
     }
     match event {
-        Event::Delta { .. } | Event::Progress { .. } => {
+        Event::Delta { .. } | Event::Progress { .. } | Event::RequestRetried { .. } => {
             if ended.contains(&request) {
-                let kind = if matches!(event, Event::Delta { .. }) {
-                    Kind::Delta
-                } else {
-                    Kind::Progress
+                let kind = match event {
+                    Event::Delta { .. } => Kind::Delta,
+                    Event::Progress { .. } => Kind::Progress,
+                    _ => Kind::RequestRetried,
                 };
                 return Err(format!(
                     "a `{}` for request {request}, which has already ended",
@@ -3364,6 +3400,7 @@ fn check(lines: &[Line]) -> Result<(), LogError> {
             }
             event @ (Event::Delta { .. }
             | Event::Progress { .. }
+            | Event::RequestRetried { .. }
             | Event::Response { .. }
             | Event::Cancelled { .. }
             | Event::RequestFailed { .. }) => {
@@ -3632,6 +3669,9 @@ fn from_object(object: &BTreeMap<String, Value>) -> Result<Line, String> {
                     word => word,
                 },
                 max_api_requests: fields.optional_count("max_api_requests")?,
+                api_retries: fields.optional_count("api_retries")?,
+                api_retry_after_max_seconds: fields
+                    .optional_count("api_retry_after_max_seconds")?,
                 phases: fields.optional_strings("phases")?,
                 phase_transitions: match object.get("phase_transitions") {
                     None => None,
@@ -4176,6 +4216,14 @@ fn from_object(object: &BTreeMap<String, Value>) -> Result<Line, String> {
             forks: fields
                 .optional_strings("forks")?
                 .ok_or_else(|| "no `forks`".to_owned())?,
+        },
+        Kind::RequestRetried => Event::RequestRetried {
+            request: fields.count("request")?,
+            status: u16::try_from(fields.count("status")?)
+                .map_err(|_| "`status` is not an HTTP status".to_owned())?,
+            retry_after: fields.optional_count("retry_after")?,
+            attempt: fields.count("attempt")?,
+            wait_ms: fields.count("wait_ms")?,
         },
         Kind::TrunkWaited => Event::TrunkWaited {
             turn: fields.turn("turn")?,
@@ -5243,6 +5291,26 @@ const fn must_v8(key: &'static str, holds: Holds) -> Field {
     }
 }
 
+/// A key that arrived in v13, required wherever its object is written.
+const fn must_v13(key: &'static str, holds: Holds) -> Field {
+    Field {
+        key,
+        holds,
+        required: true,
+        since: 13,
+    }
+}
+
+/// A key that arrived in v13, optional wherever its object is written.
+const fn may_v13(key: &'static str, holds: Holds) -> Field {
+    Field {
+        key,
+        holds,
+        required: false,
+        since: 13,
+    }
+}
+
 /// A key that arrived in v12, optional wherever its object is written.
 const fn may_v12(key: &'static str, holds: Holds) -> Field {
     Field {
@@ -5413,6 +5481,7 @@ pub fn introduced(kind: Kind) -> i64 {
         | Kind::TrunkClamped
         | Kind::TrunkWaited
         | Kind::WarrantGated => 8,
+        Kind::RequestRetried => 13,
         _ => 0,
     }
 }
@@ -5620,6 +5689,8 @@ pub fn schema(kind: Kind) -> &'static [Field] {
                 may_v11("api_unchecked", Holds::Strings),
                 may_v11("sampler_pins", Text),
                 may_v12("max_api_requests", Count),
+                may_v13("api_retries", Count),
+                may_v13("api_retry_after_max_seconds", Count),
             ];
             F
         }
@@ -5973,6 +6044,16 @@ pub fn schema(kind: Kind) -> &'static [Field] {
                 must_v8("window_cap", Count),
                 must_v8("cap", Count),
                 must_v8("forks", Holds::Strings),
+            ];
+            F
+        }
+        Kind::RequestRetried => {
+            const F: &[Field] = &[
+                must_v13("request", Count),
+                must_v13("status", Count),
+                may_v13("retry_after", Count),
+                must_v13("attempt", Count),
+                must_v13("wait_ms", Count),
             ];
             F
         }
@@ -6378,6 +6459,8 @@ fn to_value(line: &Line) -> Value {
             api_unchecked,
             sampler_pins,
             max_api_requests,
+            api_retries,
+            api_retry_after_max_seconds,
             phases,
             phase_transitions,
             opening_phase,
@@ -6468,6 +6551,12 @@ fn to_value(line: &Line) -> Value {
             }
             if let Some(cap) = max_api_requests {
                 put("max_api_requests", count(*cap));
+            }
+            if let Some(retries) = api_retries {
+                put("api_retries", count(*retries));
+            }
+            if let Some(seconds) = api_retry_after_max_seconds {
+                put("api_retry_after_max_seconds", count(*seconds));
             }
             if let Some(keys) = api_unchecked {
                 put(
@@ -7490,6 +7579,22 @@ fn to_value(line: &Line) -> Value {
                 Value::Array(forks.iter().map(|fork| text(fork)).collect()),
             );
             Kind::TrunkClamped
+        }
+        Event::RequestRetried {
+            request,
+            status,
+            retry_after,
+            attempt,
+            wait_ms,
+        } => {
+            put("request", count(*request));
+            put("status", count(u64::from(*status)));
+            if let Some(seconds) = retry_after {
+                put("retry_after", count(*seconds));
+            }
+            put("attempt", count(*attempt));
+            put("wait_ms", count(*wait_ms));
+            Kind::RequestRetried
         }
         Event::TrunkWaited {
             turn,
@@ -8601,11 +8706,14 @@ mod tests {
         assert!(refused.why.contains("v8"), "{refused}");
     }
 
-    /// #583, #878, #904, #555: this module writes v12.
+    /// #583, #878, #904, #555: this module writes v13.
     #[test]
-    fn this_module_writes_v12_and_reads_every_version_before_it() {
-        assert_eq!(super::VERSION, 12);
-        assert_eq!(super::READS, &[0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12]);
+    fn this_module_writes_v13_and_reads_every_version_before_it() {
+        assert_eq!(super::VERSION, 13);
+        assert_eq!(
+            super::READS,
+            &[0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13]
+        );
     }
 
     fn start() -> Line {
@@ -8622,6 +8730,8 @@ mod tests {
                 api_unchecked: Some(vec!["efforts".to_owned()]),
                 sampler_pins: Some("none".to_owned()),
                 max_api_requests: Some(40),
+                api_retries: Some(2),
+                api_retry_after_max_seconds: Some(60),
                 version: VERSION,
                 opened: 1_790_000_000_000,
                 model: "a-model".to_owned(),
@@ -9243,6 +9353,31 @@ mod tests {
                 text: "The session is now in the build phase.".to_owned(),
             },
         ]);
+        // A request in flight, retried twice (v13, #555): with a
+        // `retry-after`, and without.
+        let warm = events.len() as u64;
+        events.push(Event::Request {
+            turn: 5,
+            lane: Lane::Warm,
+            head_sha256: None,
+            fork: None,
+            max_tokens: Some(1),
+            beside: None,
+        });
+        events.push(Event::RequestRetried {
+            request: warm,
+            status: 529,
+            retry_after: Some(7),
+            attempt: 1,
+            wait_ms: 7_000,
+        });
+        events.push(Event::RequestRetried {
+            request: warm,
+            status: 429,
+            retry_after: None,
+            attempt: 2,
+            wait_ms: 4_000,
+        });
         events
             .into_iter()
             .enumerate()
@@ -9998,6 +10133,8 @@ mod tests {
             api_unchecked,
             sampler_pins,
             max_api_requests,
+            api_retries,
+            api_retry_after_max_seconds,
             ..
         } = &mut lines[0].event
         else {
@@ -10018,6 +10155,8 @@ mod tests {
         *api_unchecked = None;
         *sampler_pins = None;
         *max_api_requests = None;
+        *api_retries = None;
+        *api_retry_after_max_seconds = None;
         // Written as a v0 log spells it (#583).
         let document: String = lines
             .iter()
@@ -10581,7 +10720,7 @@ mod tests {
             tags(Kind::ALL.iter().map(|it| it.tag()).collect()),
             "session.start ask settlement request refused delta stop.asked response \
              cancelled request.failed turn.settled idle.gap progress tool_call fork \
-             fork.settled patch meditation delivered recalled flag meditation.held patch.refused pruned phase.ruled phase.proposed phase.answered phase.started tangent.open tangent.close capture reminded background.ended notice timeout.near fork.skipped phase.noted trunk.clamped trunk.waited warrant.gated"
+             fork.settled patch meditation delivered recalled flag meditation.held patch.refused pruned phase.ruled phase.proposed phase.answered phase.started tangent.open tangent.close capture reminded background.ended notice timeout.near fork.skipped phase.noted trunk.clamped trunk.waited warrant.gated request.retried"
         );
         assert_eq!(
             tags(FailReason::ALL.iter().map(|it| it.tag()).collect()),

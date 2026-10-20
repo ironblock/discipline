@@ -314,6 +314,18 @@ pub enum Piece<'a> {
     /// What a hosted API counted of the request, cache reads and writes
     /// included (#555): delivered once, as the stream ends.
     Usage(&'a super::anthropic::Usage),
+    /// A hosted API's 429 or 529, retried (#555): the next attempt goes
+    /// after `wait_ms`, taking from the session's request budget first.
+    Retried {
+        /// The refused attempt's HTTP status.
+        status: u16,
+        /// Its `retry-after`, in seconds, when it sent one.
+        retry_after: Option<u64>,
+        /// Which retry this is: 1 for the second attempt.
+        attempt: u64,
+        /// How long the next attempt waits, in milliseconds.
+        wait_ms: u64,
+    },
     /// One fragment of a call the model is making: `delta.tool_calls[i]`,
     /// exactly as the server sent it (#298 T11). Never answer text: the
     /// arguments are the call's, and they go back as the call.
@@ -385,6 +397,18 @@ pub struct HttpStream {
     trust: super::tls::Trust,
     wire: Wire,
     budget: Option<Arc<RequestBudget>>,
+    retry: Option<RetryPolicy>,
+}
+
+/// How a hosted session retries a 429 or 529 (#555), as its regimen
+/// declares: `api_retries` and `api_retry_after_max_seconds`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct RetryPolicy {
+    /// The attempts after a request's first.
+    pub retries: u64,
+    /// The longest `retry-after` waited, and the backoff's ceiling, in
+    /// seconds.
+    pub max_wait_seconds: u64,
 }
 
 /// The requests a hosted session may send (#555): `max_api_requests`,
@@ -476,6 +500,7 @@ impl HttpStream {
             trust: super::tls::Trust::default(),
             wire: Wire::OpenAi,
             budget: None,
+            retry: None,
         }
     }
 
@@ -500,6 +525,183 @@ impl HttpStream {
             ),
             class: Some(Rejection::ApiCap),
         })
+    }
+
+    /// One attempt of `shape`: [`Streaming::stream`]'s, without its
+    /// retries. `taken` when the budget was taken for it already; `seen`
+    /// is set to the reply's `retry-after`, in seconds, when it sent one.
+    #[allow(clippy::too_many_lines)]
+    fn attempt(
+        &self,
+        (shape, deadline, cancel): (&RequestShape, Instant, &Cancel),
+        on_delta: &mut dyn FnMut(Piece<'_>),
+        (taken, seen): (bool, &mut Option<u64>),
+    ) -> Result<Ended, TransportFailure> {
+        let started = Instant::now();
+        let timeout = || TransportFailure::Timeout {
+            after: started.elapsed(),
+        };
+        // Each wait -- the connect, the write, every read -- is given the
+        // idle budget, re-armed by whatever arrives, and never past the
+        // call's deadline (#569).
+        let remaining = || {
+            let now = Instant::now();
+            let deadline = shape
+                .limits
+                .idle
+                .and_then(|idle| now.checked_add(idle))
+                .map_or(deadline, |idle| idle.min(deadline));
+            left_before(deadline, now)
+        };
+
+        // A stop already asked for is honoured before anything is opened.
+        // One asked for DURING the connect is not: `std` offers no way to
+        // interrupt a `connect_timeout` from another thread, so it lands
+        // when the connect returns -- immediate on loopback, up to the
+        // budget against a host that drops SYNs. Disclosed on #120.
+        if cancel.is_asked() {
+            return Ok(Ended::Cancelled);
+        }
+        // The session's cap (#555): the request that would pass it is never
+        // sent, and nothing is opened for it.
+        if !taken && let Some(refused) = self.over_budget() {
+            return Ok(refused);
+        }
+        // Over TLS for an `https` endpoint (#555): the handshake is part
+        // of the connect, and the stopper below shuts the socket under it.
+        let connect_by = Instant::now() + remaining().ok_or_else(timeout)?;
+        let mut socket = super::tls::connect(&self.endpoint, &self.trust, connect_by, started)?;
+
+        // The stopper: a second handle on the same socket, shut from
+        // whichever thread asks. Shutting it is what makes a read blocked
+        // below return, and what the server sees as the client leaving.
+        //
+        // The same handle is shut when this call returns, WHATEVER it
+        // returns with -- a cap passed, a framing failure, an `error` event.
+        // Otherwise the stopper's handle kept the connection open for as
+        // long as the `Cancel` lived, and against llama-server an open
+        // connection is a slot still generating (measured; see above).
+        // Taken out of its slot either way, so the socket closes once and a
+        // reused `Cancel` holds no open connection per call.
+        let handle = Arc::new(Mutex::new(Some(socket.socket().try_clone().map_err(
+            |why| TransportFailure::Connect(format!("no second handle to cancel through: {why}")),
+        )?)));
+        let waker = Arc::clone(&handle);
+        cancel.on_cancel(move || close(&waker));
+        let _closing = Closing(handle);
+
+        let (body, authorization) = match &self.wire {
+            Wire::OpenAi => (wire::streaming_body(shape), self.authorization()),
+            Wire::Anthropic(options) => (
+                super::anthropic::body(shape, options).map_err(TransportFailure::Write)?,
+                self.anthropic_headers(options),
+            ),
+        };
+        let request = format!(
+            "POST {} HTTP/1.1\r\nHost: {}:{}\r\nContent-Type: application/json\r\n\
+             Accept: text/event-stream\r\n{authorization}Content-Length: {}\r\n\
+             Connection: close\r\n\r\n{}",
+            self.endpoint.path,
+            self.endpoint.host,
+            self.endpoint.port,
+            body.len(),
+            body
+        );
+        let budget = remaining().ok_or_else(timeout)?;
+        socket
+            .socket()
+            .set_write_timeout(Some(budget))
+            .map_err(|why| TransportFailure::Connect(why.to_string()))?;
+        if let Err(why) = socket
+            .write_all(request.as_bytes())
+            .and_then(|()| socket.flush())
+        {
+            return if cancel.is_asked() {
+                Ok(Ended::Cancelled)
+            } else if is_timeout(&why) {
+                Err(timeout())
+            } else {
+                Err(TransportFailure::Write(why.to_string()))
+            };
+        }
+
+        let mut reading = Reading {
+            anthropic: matches!(self.wire, Wire::Anthropic(_))
+                .then(super::anthropic::Decoder::default),
+            ..Reading::default()
+        };
+        let mut buffer = [0_u8; 16 * 1024];
+        loop {
+            // NO flag check here, before the read. A check here only races
+            // the stopper -- it wins when a stop lands between two reads and
+            // loses when the read is already blocked -- so a test cancelling
+            // right after a piece passed whether or not the stopper worked
+            // (#120's review, and the fault that left the socket open). The
+            // stopper is what ends a blocked read; the check below, after a
+            // read returns, is what stops pieces that were already buffered
+            // from being delivered after the stop.
+            //
+            // Re-armed on every pass, as the unstreamed transport does: one
+            // timeout bounds one read, not the call.
+            let budget = remaining().ok_or_else(timeout)?;
+            if let Err(why) = socket.socket().set_read_timeout(Some(budget)) {
+                // A stop that landed since the last read has shut the socket,
+                // and on macOS an option set on a shut socket fails (`EINVAL`).
+                // That is the stop landing too.
+                return if cancel.is_asked() {
+                    Ok(Ended::Cancelled)
+                } else {
+                    Err(TransportFailure::Read(why.to_string()))
+                };
+            }
+            let count = match socket.read(&mut buffer) {
+                Ok(count) => count,
+                Err(why) if why.kind() == io::ErrorKind::Interrupted => continue,
+                // A timeout is a timeout, even after a stop. A stop that WORKED
+                // ends the read by shutting the socket, not by the clock; a
+                // read that ran to its deadline after a stop is the stopper
+                // failing, and calling it `Cancelled` hid exactly that (#120's
+                // second review: the session test passed with no stopper).
+                Err(why) if is_timeout(&why) => return Err(timeout()),
+                // A read that fails because the socket was shut under it is
+                // the stop landing, not the transport failing.
+                Err(_) if cancel.is_asked() => return Ok(Ended::Cancelled),
+                Err(why) => return Err(TransportFailure::Read(why.to_string())),
+            };
+            if cancel.is_asked() {
+                return Ok(Ended::Cancelled);
+            }
+            if count == 0 {
+                *seen = reading.retry_after;
+                return reading.closed(on_delta);
+            }
+            if let Some(ended) = reading.feed(&buffer[..count], self.reply_cap, on_delta)? {
+                *seen = reading.retry_after;
+                return Ok(ended);
+            }
+        }
+    }
+
+    /// The wait before retry `attempt` (from 1) of a refusal whose
+    /// `retry-after` was `after` seconds, under `policy` (#555): that wait
+    /// when it is at most the cap, else none (`None`: not retried); with no
+    /// header, 2 s doubling each retry, as Pi's and `OpenCode` 2's backoffs
+    /// both start, bounded by the cap.
+    fn retry_wait(policy: RetryPolicy, attempt: u64, after: Option<u64>) -> Option<Duration> {
+        let cap = Duration::from_secs(policy.max_wait_seconds);
+        if let Some(seconds) = after {
+            let asked = Duration::from_secs(seconds);
+            return (asked <= cap).then_some(asked);
+        }
+        let doubled = 2_u64.saturating_pow(u32::try_from(attempt).unwrap_or(u32::MAX));
+        Some(Duration::from_secs(doubled).min(cap))
+    }
+
+    /// The same, retrying a hosted API's 429 or 529 under `policy` (#555).
+    #[must_use]
+    pub fn with_retries(mut self, policy: RetryPolicy) -> Self {
+        self.retry = Some(policy);
+        self
     }
 
     /// The same, sending no request past `budget` (#555): one more than it
@@ -621,11 +823,16 @@ impl HttpStream {
             trust: super::tls::Trust::default(),
             wire: Wire::OpenAi,
             budget: None,
+            retry: None,
         }
     }
 }
 
 impl Streaming for HttpStream {
+    /// One attempt, and on a hosted API's 429 or 529 the retries its policy
+    /// allows (#555): each announced as [`Piece::Retried`], taken from the
+    /// request budget before it is sent, and waited for, a stop ending the
+    /// wait; a wait that would pass the call's deadline is not waited.
     fn stream(
         &self,
         shape: &RequestShape,
@@ -633,145 +840,48 @@ impl Streaming for HttpStream {
         cancel: &Cancel,
         on_delta: &mut dyn FnMut(Piece<'_>),
     ) -> Result<Ended, TransportFailure> {
-        let started = Instant::now();
-        let timeout = || TransportFailure::Timeout {
-            after: started.elapsed(),
-        };
-        // Each wait -- the connect, the write, every read -- is given the
-        // idle budget, re-armed by whatever arrives, and never past the
-        // call's deadline (#569).
-        let remaining = || {
-            let now = Instant::now();
-            let deadline = shape
-                .limits
-                .idle
-                .and_then(|idle| now.checked_add(idle))
-                .map_or(deadline, |idle| idle.min(deadline));
-            left_before(deadline, now)
-        };
-
-        // A stop already asked for is honoured before anything is opened.
-        // One asked for DURING the connect is not: `std` offers no way to
-        // interrupt a `connect_timeout` from another thread, so it lands
-        // when the connect returns -- immediate on loopback, up to the
-        // budget against a host that drops SYNs. Disclosed on #120.
-        if cancel.is_asked() {
-            return Ok(Ended::Cancelled);
-        }
-        // The session's cap (#555): the request that would pass it is never
-        // sent, and nothing is opened for it.
-        if let Some(refused) = self.over_budget() {
-            return Ok(refused);
-        }
-        // Over TLS for an `https` endpoint (#555): the handshake is part
-        // of the connect, and the stopper below shuts the socket under it.
-        let connect_by = Instant::now() + remaining().ok_or_else(timeout)?;
-        let mut socket = super::tls::connect(&self.endpoint, &self.trust, connect_by, started)?;
-
-        // The stopper: a second handle on the same socket, shut from
-        // whichever thread asks. Shutting it is what makes a read blocked
-        // below return, and what the server sees as the client leaving.
-        //
-        // The same handle is shut when this call returns, WHATEVER it
-        // returns with -- a cap passed, a framing failure, an `error` event.
-        // Otherwise the stopper's handle kept the connection open for as
-        // long as the `Cancel` lived, and against llama-server an open
-        // connection is a slot still generating (measured; see above).
-        // Taken out of its slot either way, so the socket closes once and a
-        // reused `Cancel` holds no open connection per call.
-        let handle = Arc::new(Mutex::new(Some(socket.socket().try_clone().map_err(
-            |why| TransportFailure::Connect(format!("no second handle to cancel through: {why}")),
-        )?)));
-        let waker = Arc::clone(&handle);
-        cancel.on_cancel(move || close(&waker));
-        let _closing = Closing(handle);
-
-        let (body, authorization) = match &self.wire {
-            Wire::OpenAi => (wire::streaming_body(shape), self.authorization()),
-            Wire::Anthropic(options) => (
-                super::anthropic::body(shape, options).map_err(TransportFailure::Write)?,
-                self.anthropic_headers(options),
-            ),
-        };
-        let request = format!(
-            "POST {} HTTP/1.1\r\nHost: {}:{}\r\nContent-Type: application/json\r\n\
-             Accept: text/event-stream\r\n{authorization}Content-Length: {}\r\n\
-             Connection: close\r\n\r\n{}",
-            self.endpoint.path,
-            self.endpoint.host,
-            self.endpoint.port,
-            body.len(),
-            body
-        );
-        let budget = remaining().ok_or_else(timeout)?;
-        socket
-            .socket()
-            .set_write_timeout(Some(budget))
-            .map_err(|why| TransportFailure::Connect(why.to_string()))?;
-        if let Err(why) = socket
-            .write_all(request.as_bytes())
-            .and_then(|()| socket.flush())
-        {
-            return if cancel.is_asked() {
-                Ok(Ended::Cancelled)
-            } else if is_timeout(&why) {
-                Err(timeout())
-            } else {
-                Err(TransportFailure::Write(why.to_string()))
-            };
-        }
-
-        let mut reading = Reading {
-            anthropic: matches!(self.wire, Wire::Anthropic(_))
-                .then(super::anthropic::Decoder::default),
-            ..Reading::default()
-        };
-        let mut buffer = [0_u8; 16 * 1024];
+        let mut taken = false;
+        let mut attempt = 0;
         loop {
-            // NO flag check here, before the read. A check here only races
-            // the stopper -- it wins when a stop lands between two reads and
-            // loses when the read is already blocked -- so a test cancelling
-            // right after a piece passed whether or not the stopper worked
-            // (#120's review, and the fault that left the socket open). The
-            // stopper is what ends a blocked read; the check below, after a
-            // read returns, is what stops pieces that were already buffered
-            // from being delivered after the stop.
-            //
-            // Re-armed on every pass, as the unstreamed transport does: one
-            // timeout bounds one read, not the call.
-            let budget = remaining().ok_or_else(timeout)?;
-            if let Err(why) = socket.socket().set_read_timeout(Some(budget)) {
-                // A stop that landed since the last read has shut the socket,
-                // and on macOS an option set on a shut socket fails (`EINVAL`).
-                // That is the stop landing too.
-                return if cancel.is_asked() {
-                    Ok(Ended::Cancelled)
-                } else {
-                    Err(TransportFailure::Read(why.to_string()))
-                };
-            }
-            let count = match socket.read(&mut buffer) {
-                Ok(count) => count,
-                Err(why) if why.kind() == io::ErrorKind::Interrupted => continue,
-                // A timeout is a timeout, even after a stop. A stop that WORKED
-                // ends the read by shutting the socket, not by the clock; a
-                // read that ran to its deadline after a stop is the stopper
-                // failing, and calling it `Cancelled` hid exactly that (#120's
-                // second review: the session test passed with no stopper).
-                Err(why) if is_timeout(&why) => return Err(timeout()),
-                // A read that fails because the socket was shut under it is
-                // the stop landing, not the transport failing.
-                Err(_) if cancel.is_asked() => return Ok(Ended::Cancelled),
-                Err(why) => return Err(TransportFailure::Read(why.to_string())),
-            };
-            if cancel.is_asked() {
-                return Ok(Ended::Cancelled);
-            }
-            if count == 0 {
-                return reading.closed(on_delta);
-            }
-            if let Some(ended) = reading.feed(&buffer[..count], self.reply_cap, on_delta)? {
+            let mut seen = None;
+            let ended = self.attempt((shape, deadline, cancel), on_delta, (taken, &mut seen))?;
+            let Some(policy) = self.retry else {
                 return Ok(ended);
+            };
+            let Ended::Rejected {
+                status: status @ (429 | 529),
+                ..
+            } = &ended
+            else {
+                return Ok(ended);
+            };
+            let status = *status;
+            if attempt >= policy.retries {
+                return Ok(ended);
+            }
+            let Some(wait) = Self::retry_wait(policy, attempt + 1, seen) else {
+                return Ok(ended);
+            };
+            if Instant::now() + wait > deadline {
+                return Ok(ended);
+            }
+            if let Some(refused) = self.over_budget() {
+                return Ok(refused);
+            }
+            taken = true;
+            attempt += 1;
+            on_delta(Piece::Retried {
+                status,
+                retry_after: seen,
+                attempt,
+                wait_ms: u64::try_from(wait.as_millis()).unwrap_or(u64::MAX),
+            });
+            let until = Instant::now() + wait;
+            while Instant::now() < until {
+                if cancel.is_asked() {
+                    return Ok(Ended::Cancelled);
+                }
+                std::thread::sleep((until - Instant::now()).min(Duration::from_millis(50)));
             }
         }
     }
@@ -789,6 +899,18 @@ impl Streaming for HttpStream {
             }
         )
     }
+}
+
+/// A reply head's `retry-after`, as whole seconds (#555): Anthropic's form.
+/// An HTTP-date, or anything else, is `None`, and the backoff applies.
+fn retry_after_of(headers: &str) -> Option<u64> {
+    headers.lines().skip(1).find_map(|line| {
+        let (name, value) = line.split_once(':')?;
+        name.trim()
+            .eq_ignore_ascii_case("retry-after")
+            .then(|| value.trim().parse().ok())
+            .flatten()
+    })
 }
 
 /// Shut the connection behind `handle` and release the handle, once.
@@ -829,6 +951,8 @@ struct Reading {
     total: usize,
     /// The status and framing, once the headers are whole.
     head: Option<(u16, Framing)>,
+    /// The reply's `retry-after`, in whole seconds, when it sent one (#555).
+    retry_after: Option<u64>,
     /// Body bytes received under `Framing::Length`.
     received: usize,
     chunks: Dechunker,
@@ -865,6 +989,7 @@ impl Reading {
             };
             let headers = String::from_utf8_lossy(&self.raw[..end]).into_owned();
             self.head = Some((status_of(&headers)?, framing(&headers)));
+            self.retry_after = retry_after_of(&headers);
             let rest = self.raw[end + 4..].to_vec();
             self.raw.clear();
             rest
@@ -1544,7 +1669,10 @@ mod tests {
             pieces.push(match piece {
                 Piece::Reasoning(reasoning) => (true, reasoning.to_owned()),
                 Piece::Text(text) => (false, text.to_owned()),
-                Piece::Signature(_) | Piece::Redacted(_) | Piece::Usage(_) => {
+                Piece::Signature(_)
+                | Piece::Redacted(_)
+                | Piece::Usage(_)
+                | Piece::Retried { .. } => {
                     panic!("a hosted piece from an OpenAI stream")
                 }
                 Piece::Progress(progress) => panic!("progress where none was sent: {progress:?}"),
@@ -1667,7 +1795,7 @@ mod tests {
                 panic!("reasoning where only text was sent: {reasoning:?}")
             }
             // The server's counts (#645): no text.
-            Piece::Usage(_) => String::new(),
+            Piece::Usage(_) | Piece::Retried { .. } => String::new(),
             Piece::Signature(_) | Piece::Redacted(_) => {
                 panic!("a hosted piece from an OpenAI stream")
             }
@@ -1702,7 +1830,7 @@ mod tests {
                     Piece::Reasoning(reasoning) => (true, reasoning.to_owned()),
                     Piece::Text(text) => (false, text.to_owned()),
                     // The server's counts (#645), read apart.
-                    Piece::Usage(_) => return,
+                    Piece::Usage(_) | Piece::Retried { .. } => return,
                     Piece::Signature(_) | Piece::Redacted(_) => {
                         panic!("a hosted piece from an OpenAI stream")
                     }
@@ -2007,7 +2135,10 @@ mod tests {
         let mut frame_after_answer = false;
         for piece in pieces {
             match piece {
-                Piece::Signature(_) | Piece::Redacted(_) | Piece::Usage(_) => {}
+                Piece::Signature(_)
+                | Piece::Redacted(_)
+                | Piece::Usage(_)
+                | Piece::Retried { .. } => {}
                 Piece::Progress(progress) => {
                     frame_after_answer |= answer_seen;
                     frames.push(*progress);
@@ -2063,7 +2194,7 @@ mod tests {
                     Piece::Text(text) => (0, text.to_owned(), None),
                     Piece::Reasoning(text) => (1, text.to_owned(), None),
                     // The server's counts (#645), read apart.
-                    Piece::Usage(_) => return,
+                    Piece::Usage(_) | Piece::Retried { .. } => return,
                     Piece::Signature(_) | Piece::Redacted(_) => {
                         panic!("a hosted piece from an OpenAI stream")
                     }
@@ -2149,7 +2280,7 @@ mod tests {
             .feed(raw.as_bytes(), usize::MAX, &mut |piece| {
                 pieces.push(match piece {
                     // The server's counts (#645), read apart.
-                    Piece::Usage(_) => return,
+                    Piece::Usage(_) | Piece::Retried { .. } => return,
                     Piece::Signature(_) | Piece::Redacted(_) => {
                         panic!("a hosted piece from an OpenAI stream")
                     }
@@ -2258,7 +2389,10 @@ mod tests {
         let mut seen = Vec::new();
         let ended = canned.stream(&shape(), deadline(), &Cancel::new(), &mut |piece| {
             seen.push(match piece {
-                Piece::Signature(_) | Piece::Redacted(_) | Piece::Usage(_) => {
+                Piece::Signature(_)
+                | Piece::Redacted(_)
+                | Piece::Usage(_)
+                | Piece::Retried { .. } => {
                     panic!("a hosted piece from an OpenAI stream")
                 }
                 Piece::Progress(progress) => format!("{progress:?}"),
@@ -2416,8 +2550,11 @@ mod tests {
                     arguments.to_owned(),
                 )),
                 Piece::Text(text) | Piece::Reasoning(text) => texts.push(text.to_owned()),
-                Piece::Signature(_) | Piece::Redacted(_) | Piece::Usage(_) | Piece::Progress(_) => {
-                }
+                Piece::Signature(_)
+                | Piece::Redacted(_)
+                | Piece::Usage(_)
+                | Piece::Retried { .. }
+                | Piece::Progress(_) => {}
             },
         );
         (calls, texts, ended)
@@ -2491,7 +2628,7 @@ mod tests {
         for byte in CAPTURED {
             if let Some(done) = reading
                 .feed(std::slice::from_ref(byte), usize::MAX, &mut |piece| {
-                    if !matches!(piece, Piece::Usage(_)) {
+                    if !matches!(piece, Piece::Usage(_) | Piece::Retried { .. }) {
                         pieces.push(text(piece));
                     }
                 })

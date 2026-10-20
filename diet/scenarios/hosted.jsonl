@@ -1,9 +1,12 @@
 {"scenario":"hosted","regimen":"hosted.toml","head":"../drive/heads/floor.md"}
 {"reply":{"when":"List the files","thinking":"The directory is small; one ls will do.","text":"Listing.","calls":[{"id":"toolu_ls","name":"bash","arguments":"{\"command\": \"ls\"}"}],"cache_write_tokens":512}}
 {"reply":{"text":"The directory holds the files ls showed.","cache_read_tokens":512}}
-{"reply":{"when":"List them again","status":529,"retry_after":7}}
+{"reply":{"when":"List them again","status":529,"retry_after":1}}
+{"reply":{"when":"List them again","text":"The same files as before."}}
+{"reply":{"when":"Count them","status":429,"retry_after":120}}
 {"step":"ask","text":"List the files here."}
 {"step":"ask","text":"List them again."}
+{"step":"ask","text":"Count them."}
 {"step":"end"}
 {"expect":"session.start","where":{"serving.dialect":"anthropic-messages"}}
 {"expect":"response","where":{"reasoning_signature":"canned-signature"}}
@@ -11,5 +14,7 @@
 {"expect":"response","where":{"usage.cache_creation_5m_tokens":"512"}}
 {"expect":"response","where":{"usage.cached_tokens":"512"},"after":"listed"}
 {"expect":"turn.settled","where":{"turn":"1","reason":"final"}}
-{"expect":"request.failed","where":{"status":"529"}}
-{"expect":"turn.settled","where":{"turn":"2","reason":"failed"}}
+{"expect":"request.retried","where":{"status":"529","retry_after":"1","attempt":"1","wait_ms":"1000"}}
+{"expect":"turn.settled","where":{"turn":"2","reason":"final"}}
+{"expect":"request.failed","where":{"status":"429"}}
+{"expect":"turn.settled","where":{"turn":"3","reason":"failed"}}

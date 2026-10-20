@@ -1130,6 +1130,7 @@ impl<'a> Walk<'a> {
             // row names its cap.
             | Line::TrunkClamped { .. }
             | Line::TrunkWaited { .. }
+            | Line::RequestRetried { .. }
             // The step warrants' gate: its forks' rows name what fired.
             | Line::WarrantGated { .. }
             // The operator's flag, and a model patch refused over the
@@ -2317,6 +2318,8 @@ mod tests {
             api_unchecked: None,
             sampler_pins: None,
             max_api_requests: None,
+            api_retries: None,
+            api_retry_after_max_seconds: None,
         }
     }
 

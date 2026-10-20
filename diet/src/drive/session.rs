@@ -394,6 +394,20 @@ pub enum Event {
         /// session's forks run during the turn (#782); `None` otherwise.
         beside: Option<u32>,
     },
+    /// A hosted API's 429 or 529, retried (#555): the next attempt of
+    /// `request` goes after `wait_ms`.
+    Retried {
+        /// The request retried.
+        request: u64,
+        /// The refused attempt's status.
+        status: u16,
+        /// Its `retry-after`, in seconds, when it sent one.
+        retry_after: Option<u64>,
+        /// Which retry: 1 for the second attempt.
+        attempt: u64,
+        /// The wait before the next attempt, in milliseconds.
+        wait_ms: u64,
+    },
     /// The settlement moved.
     Settled {
         /// Where it was.
@@ -1227,9 +1241,9 @@ pub struct HostedStart {
     /// Whether the regimen pinned no sampler setting on purpose
     /// (`[sampler] pins = "none"`).
     pub pins_nothing: bool,
-    /// The requests it may send, every lane's and every retry
-    /// (`max_api_requests`).
-    pub max_api_requests: Option<u64>,
+    /// What it limits its requests to: the cap, the retries, the longest
+    /// `retry-after` waited.
+    pub limits: Option<super::hosted::RequestLimits>,
 }
 
 /// The phase graph `interview` runs under, as `session.start` names it
@@ -4902,7 +4916,18 @@ pub fn line_of(logged: &Logged) -> log::Line {
                 .as_ref()
                 .filter(|hosted| hosted.pins_nothing)
                 .map(|_| "none".to_owned()),
-            max_api_requests: hosted.as_ref().and_then(|hosted| hosted.max_api_requests),
+            max_api_requests: hosted
+                .as_ref()
+                .and_then(|hosted| hosted.limits)
+                .map(|limits| limits.max_api_requests),
+            api_retries: hosted
+                .as_ref()
+                .and_then(|hosted| hosted.limits)
+                .map(|limits| limits.api_retries),
+            api_retry_after_max_seconds: hosted
+                .as_ref()
+                .and_then(|hosted| hosted.limits)
+                .map(|limits| limits.api_retry_after_max_seconds),
             bash_timeout_ms: *bash_timeout_ms,
             shown_roots: shown_roots.clone(),
             // What a scenario shown its placeholders also fixes.
@@ -4993,6 +5018,19 @@ pub fn line_of(logged: &Logged) -> log::Line {
             head_sha256: Some(head_sha256.clone()),
             fork: *fork,
             max_tokens: Some(u64::from(*max_tokens)),
+        },
+        Event::Retried {
+            request,
+            status,
+            retry_after,
+            attempt,
+            wait_ms,
+        } => log::Event::RequestRetried {
+            request: *request,
+            status: *status,
+            retry_after: *retry_after,
+            attempt: *attempt,
+            wait_ms: *wait_ms,
         },
         Event::Settled { from, to } => log::Event::Settlement {
             from: state_of(*from),
@@ -5910,6 +5948,18 @@ fn step<S: Streaming + 'static>(
                     }
                 }
                 Piece::Progress(progress) => Event::Progress { request, progress },
+                Piece::Retried {
+                    status,
+                    retry_after,
+                    attempt,
+                    wait_ms,
+                } => Event::Retried {
+                    request,
+                    status,
+                    retry_after,
+                    attempt,
+                    wait_ms,
+                },
                 Piece::Signature(_) | Piece::Redacted(_) | Piece::Usage(_) => return,
                 // Each fragment as the server sent it, and assembled beside
                 // the log: never answer text (#298 T11).
@@ -8592,40 +8642,7 @@ fn meditation_work<S: Streaming>(shared: &Shared<S>) {
         .is_some_and(|interview| interview.meditations.warm)
         && reason != crate::meditation::Reason::Window;
     if warm {
-        let mut shape = shared.template.clone();
-        shape.messages.clone_from(&state.trunk);
-        shape.limits.max_output_tokens = 1;
-        let cancel = Cancel::new();
-        state.warming = Some(cancel.clone());
-        // A request like any other, on its own lane (#555): every request
-        // the session sends has its line.
-        let turn = state.turns;
-        let request = state.push(Event::Requested {
-            turn,
-            lane: Lane::Warm,
-            head_sha256: crate::client::head::Head::of(&shape).digest().to_owned(),
-            fork: None,
-            max_tokens: 1,
-            beside: None,
-        });
-        drop(state);
-        shared.changed.notify_all();
-        let deadline = Instant::now() + shared.template.limits.call;
-        let mut text = String::new();
-        let mut hosted = Hosted::default();
-        let ended = shared
-            .transport
-            .stream(&shape, deadline, &cancel, &mut |piece: Piece<'_>| {
-                if hosted.took(&piece) {
-                    return;
-                }
-                if let Piece::Text(piece) = piece {
-                    text.push_str(piece);
-                }
-            });
-        state = shared.lock();
-        state.warming = None;
-        warm_ended(&mut state, request, (ended, text, hosted), &mut meditated);
+        state = prewarm(shared, state, &mut meditated);
     }
     // Back to `awaiting`, then the meditation's line, under one lock: a meditation is
     // logged while the session awaits, and nothing comes between.
@@ -8643,6 +8660,68 @@ fn meditation_work<S: Streaming>(shared: &Shared<S>) {
 /// A meditation's audit, made and folded (#504); then, under `reconcile_gate =
 /// "refuse"` with an operator change still unaddressed (#150), the same
 /// reconciling ask once more over only the notes whose changes are left.
+/// The meditation's pre-warm (#504): the refilled trunk sent once, its
+/// output capped at one, logged as a request on its own lane (#555), its
+/// timings on `meditated` when it finished. The lock is let go while it is
+/// in flight, and taken back.
+fn prewarm<'a, S: Streaming>(
+    shared: &'a Shared<S>,
+    mut state: MutexGuard<'a, State>,
+    meditated: &mut Event,
+) -> MutexGuard<'a, State> {
+    let mut shape = shared.template.clone();
+    shape.messages.clone_from(&state.trunk);
+    shape.limits.max_output_tokens = 1;
+    let cancel = Cancel::new();
+    state.warming = Some(cancel.clone());
+    // A request like any other, on its own lane (#555): every request
+    // the session sends has its line.
+    let turn = state.turns;
+    let request = state.push(Event::Requested {
+        turn,
+        lane: Lane::Warm,
+        head_sha256: crate::client::head::Head::of(&shape).digest().to_owned(),
+        fork: None,
+        max_tokens: 1,
+        beside: None,
+    });
+    drop(state);
+    shared.changed.notify_all();
+    let deadline = Instant::now() + shared.template.limits.call;
+    let mut text = String::new();
+    let mut hosted = Hosted::default();
+    let ended = shared
+        .transport
+        .stream(&shape, deadline, &cancel, &mut |piece: Piece<'_>| {
+            if hosted.took(&piece) {
+                return;
+            }
+            match piece {
+                Piece::Text(piece) => text.push_str(piece),
+                Piece::Retried {
+                    status,
+                    retry_after,
+                    attempt,
+                    wait_ms,
+                } => {
+                    shared.lock().push(Event::Retried {
+                        request,
+                        status,
+                        retry_after,
+                        attempt,
+                        wait_ms,
+                    });
+                    shared.changed.notify_all();
+                }
+                _ => {}
+            }
+        });
+    state = shared.lock();
+    state.warming = None;
+    warm_ended(&mut state, request, (ended, text, hosted), meditated);
+    state
+}
+
 /// The pre-warm's outcome, logged against its `request` (#555), its
 /// timings on the meditation's line when it finished (#504).
 fn warm_ended(
@@ -9172,6 +9251,18 @@ fn aside<S: Streaming>(
                 Piece::Progress(frame) => Event::Progress {
                     request,
                     progress: frame,
+                },
+                Piece::Retried {
+                    status,
+                    retry_after,
+                    attempt,
+                    wait_ms,
+                } => Event::Retried {
+                    request,
+                    status,
+                    retry_after,
+                    attempt,
+                    wait_ms,
                 },
                 Piece::ToolCall {
                     index,
@@ -12441,6 +12532,18 @@ fn stream_fork<S: Streaming>(shared: &Shared<S>, forked: &Fired) -> ForkRun {
             Piece::Progress(frame) => Event::Progress {
                 request,
                 progress: frame,
+            },
+            Piece::Retried {
+                status,
+                retry_after,
+                attempt,
+                wait_ms,
+            } => Event::Retried {
+                request,
+                status,
+                retry_after,
+                attempt,
+                wait_ms,
             },
             // Every call is logged on either route (#806): a fork cut from
             // the trunk carries the trunk's tools, and its answer may be a
@@ -16637,6 +16740,13 @@ pub(in crate::drive) mod tests {
                 latency_ms: 48,
                 replayed: false,
             },
+            Event::Retried {
+                request: 3,
+                status: 529,
+                retry_after: Some(7),
+                attempt: 1,
+                wait_ms: 7_000,
+            },
         ];
         let mut kinds = std::collections::BTreeSet::new();
         for event in &events {
@@ -16689,9 +16799,10 @@ pub(in crate::drive) mod tests {
                 Event::TrunkClamped { .. } => 45,
                 Event::TrunkWaited { .. } => 46,
                 Event::WarrantGated { .. } => 47,
+                Event::Retried { .. } => 48,
             });
         }
-        assert_eq!(kinds.len(), 48, "a variant has no sample");
+        assert_eq!(kinds.len(), 49, "a variant has no sample");
         events
             .into_iter()
             .enumerate()
@@ -16763,6 +16874,8 @@ pub(in crate::drive) mod tests {
                 api_unchecked: None,
                 sampler_pins: None,
                 max_api_requests: None,
+                api_retries: None,
+                api_retry_after_max_seconds: None,
             },
             log::Event::Ask {
                 turn: 1,
@@ -17218,6 +17331,13 @@ pub(in crate::drive) mod tests {
                 compute_units: "cpu_and_gpu".to_owned(),
                 latency_ms: 48,
                 replayed: None,
+            },
+            log::Event::RequestRetried {
+                request: 3,
+                status: 529,
+                retry_after: Some(7),
+                attempt: 1,
+                wait_ms: 7_000,
             },
         ]
     }

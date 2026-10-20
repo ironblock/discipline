@@ -4,8 +4,8 @@
 // i64, and a JavaScript number is exact only to 2^53. A `timings`
 // millisecond may carry a fraction, written as the server wrote it.
 
-export const VERSION = 12;
-export const READS = [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12] as const;
+export const VERSION = 13;
+export const READS = [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13] as const;
 export const PRESENCE_WINDOW_MS = 2000;
 
 export type Kind =
@@ -49,6 +49,7 @@ export type Kind =
   | "trunk.clamped"
   | "trunk.waited"
   | "warrant.gated"
+  | "request.retried"
 ;
 
 export type State =
@@ -393,7 +394,7 @@ export type SessionStartLine = {
   seq: number;
   t: number;
   kind: "session.start";
-  version: 0 | 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9 | 10 | 11 | 12;
+  version: 0 | 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9 | 10 | 11 | 12 | 13;
   opened: number;
   model: string;
   head: HeadMessage[];
@@ -429,6 +430,8 @@ export type SessionStartLine = {
   api_unchecked?: string[];
   sampler_pins?: string;
   max_api_requests?: number;
+  api_retries?: number;
+  api_retry_after_max_seconds?: number;
 } & ({ substrate: string; registry_sha256: string } | { substrate?: never; registry_sha256?: never });
 
 export type AskLine = {
@@ -910,6 +913,17 @@ export type WarrantGatedLine = {
   replayed?: boolean;
 };
 
+export type RequestRetriedLine = {
+  seq: number;
+  t: number;
+  kind: "request.retried";
+  request: number;
+  status: number;
+  retry_after?: number;
+  attempt: number;
+  wait_ms: number;
+};
+
 export type LogLine =
   | SessionStartLine
   | AskLine
@@ -951,4 +965,5 @@ export type LogLine =
   | TrunkClampedLine
   | TrunkWaitedLine
   | WarrantGatedLine
+  | RequestRetriedLine
 ;
