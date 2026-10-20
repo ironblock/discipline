@@ -87,18 +87,22 @@ fn start(endpoint: &str, extra: &[&str]) -> Served {
 
 /// [`start`], with `env` set in the program's environment.
 fn start_with(endpoint: &str, extra: &[&str], env: &[(&str, &str)]) -> Served {
+    start_as_with("a-model", endpoint, extra, env)
+}
+
+/// [`start`], its requests sent as `model`: a hosted entry's own
+/// `weights_model_id`, which serve requires (#555).
+fn start_as(model: &str, endpoint: &str, extra: &[&str]) -> Served {
+    start_as_with(model, endpoint, extra, &[])
+}
+
+/// [`start_with`], its requests sent as `model`.
+fn start_as_with(model: &str, endpoint: &str, extra: &[&str], env: &[(&str, &str)]) -> Served {
     let head = file_holding("head", HEAD);
     let mut child = Command::new(DRIVE)
         .env_remove("ANTHROPIC_API_KEY")
         .envs(env.iter().copied())
-        .args([
-            "serve",
-            "--endpoint",
-            endpoint,
-            "--model",
-            "a-model",
-            "--head",
-        ])
+        .args(["serve", "--endpoint", endpoint, "--model", model, "--head"])
         .arg(&head.0)
         .args(extra)
         .stdout(Stdio::piped())
@@ -365,12 +369,17 @@ fn a_drive_server_binds_loopback_by_default_and_listen_takes_an_ip() {
 /// printed -- or `None` if it was still running after ten seconds, when it is
 /// killed rather than left serving.
 fn run_briefly(endpoint: &str, extra: &[&str]) -> (Option<i32>, String) {
+    run_briefly_as("m", endpoint, extra)
+}
+
+/// [`run_briefly`], its requests sent as `model`.
+fn run_briefly_as(model: &str, endpoint: &str, extra: &[&str]) -> (Option<i32>, String) {
     let head = file_holding("head", HEAD);
     // A hosted entry reads its key from here when no file is given (#555):
     // the machine's own must never decide a test.
     let mut child = Command::new(DRIVE)
         .env_remove("ANTHROPIC_API_KEY")
-        .args(["serve", "--endpoint", endpoint, "--model", "m", "--head"])
+        .args(["serve", "--endpoint", endpoint, "--model", model, "--head"])
         .arg(&head.0)
         .args(extra)
         .stdout(Stdio::piped())
@@ -4171,7 +4180,8 @@ fn the_trees_sonnet_5_5_regimen_passes_start_and_names_what_is_unchecked() {
     let stub = Stub::serving(vec![Act::Raw(HOSTED_ANSWER.to_vec())]).expect("loopback");
     let record = file_holding("record", "");
     let recorded = record.0.to_string_lossy().into_owned();
-    let served = start(
+    let served = start_as(
+        "claude-sonnet-5-5",
         &stub.url(),
         &[
             "--regimen",
@@ -4244,7 +4254,8 @@ fn a_hosted_rung_refuses_at_start_what_its_entry_declares() {
     ] {
         let regimen = rung_regimen("anthropic-claude-haiku-5-5", effort, sampler);
         let path = regimen.0.to_string_lossy().into_owned();
-        let (code, printed) = run_briefly(
+        let (code, printed) = run_briefly_as(
+            "claude-haiku-5-5",
             "https://127.0.0.1:9/v1/messages",
             &["--regimen", &path, "--key-file", &key_path],
         );
@@ -4257,13 +4268,38 @@ fn a_hosted_rung_refuses_at_start_what_its_entry_declares() {
     }
     let regimen = rung_regimen("anthropic-claude-haiku-5-5", "low", "temperature = 1\n");
     let path = regimen.0.to_string_lossy().into_owned();
-    let served = start(
+    let served = start_as(
+        "claude-haiku-5-5",
         "https://127.0.0.1:9/v1/messages",
         &["--regimen", &path, "--key-file", &key_path],
     );
     assert_eq!(
         served.substrate.as_deref(),
         Some("anthropic-claude-haiku-5-5")
+    );
+}
+
+/// #555: a hosted rung's requests are sent as the model its entry names,
+/// or not at all -- `--model` is what the provider bills, and the record
+/// names the entry's model, so the two must be one.
+#[test]
+fn a_hosted_rung_refuses_a_model_its_entry_does_not_name() {
+    let key = file_holding("key", "sk-rehearsal\n");
+    let key_path = key.0.to_string_lossy().into_owned();
+    let regimen = rung_regimen("anthropic-claude-haiku-5-5", "low", "temperature = 1\n");
+    let path = regimen.0.to_string_lossy().into_owned();
+    let (code, printed) = run_briefly_as(
+        "claude-opus-5-5",
+        "https://127.0.0.1:9/v1/messages",
+        &["--regimen", &path, "--key-file", &key_path],
+    );
+    let said = refusal(&printed);
+    assert_eq!(code, Some(1), "{said}");
+    assert!(
+        said.contains("claude-opus-5-5")
+            && said.contains("`weights_model_id = \"claude-haiku-5-5\"`")
+            && !said.contains("listening"),
+        "{said}"
     );
 }
 
@@ -4280,7 +4316,8 @@ fn pins_none_is_a_hosted_apis_word_and_stands_alone() {
         "pins = \"none\"\ntop_k = 1\n",
     );
     let path = beside.0.to_string_lossy().into_owned();
-    let (code, printed) = run_briefly(
+    let (code, printed) = run_briefly_as(
+        "claude-sonnet-5-5",
         "https://127.0.0.1:9/v1/messages",
         &["--regimen", &path, "--key-file", &key_path],
     );
@@ -4292,7 +4329,8 @@ fn pins_none_is_a_hosted_apis_word_and_stands_alone() {
     );
     let other = rung_regimen("anthropic-claude-sonnet-5-5", "low", "pins = \"all\"\n");
     let path = other.0.to_string_lossy().into_owned();
-    let (code, printed) = run_briefly(
+    let (code, printed) = run_briefly_as(
+        "claude-sonnet-5-5",
         "https://127.0.0.1:9/v1/messages",
         &["--regimen", &path, "--key-file", &key_path],
     );
@@ -4302,7 +4340,7 @@ fn pins_none_is_a_hosted_apis_word_and_stands_alone() {
     let stub = Stub::serving(Vec::new()).expect("loopback");
     let local = canned_regimen_with_sampler("pins = \"none\"\n");
     let path = local.0.to_string_lossy().into_owned();
-    let (code, printed) = run_briefly(&stub.url(), &["--regimen", &path]);
+    let (code, printed) = run_briefly_as("claude-sonnet-5-5", &stub.url(), &["--regimen", &path]);
     let said = refusal(&printed);
     assert_eq!(code, Some(2), "{said}");
     assert!(
@@ -4323,7 +4361,8 @@ fn a_drive_server_on_a_hosted_api_entry_speaks_its_messages_api_with_the_key() {
     let key_path = key.0.to_string_lossy().into_owned();
     let log_file = file_holding("log", "");
     let logged = log_file.0.to_string_lossy().into_owned();
-    let served = start(
+    let served = start_as(
+        "a-hosted-model",
         &stub.url(),
         &[
             "--regimen",
@@ -4408,7 +4447,7 @@ fn a_drive_server_on_a_hosted_api_entry_needs_its_key() {
     let stub = Stub::serving(Vec::new()).expect("loopback");
     let regimen = hosted_regimen();
     let path = regimen.0.to_string_lossy().into_owned();
-    let (code, said) = run_briefly(&stub.url(), &["--regimen", &path]);
+    let (code, said) = run_briefly_as("a-hosted-model", &stub.url(), &["--regimen", &path]);
     assert_eq!(code, Some(1), "{said}");
     assert!(
         said.contains("neither --key-file nor ANTHROPIC_API_KEY") && !said.contains("listening"),
@@ -4429,7 +4468,8 @@ fn a_drive_server_on_a_hosted_api_entry_asks_the_cache_for_the_lifetimes_declare
     let key_path = key.0.to_string_lossy().into_owned();
     let log_file = file_holding("log", "");
     let logged = log_file.0.to_string_lossy().into_owned();
-    let served = start(
+    let served = start_as(
+        "a-hosted-model",
         &stub.url(),
         &[
             "--regimen",
@@ -4471,7 +4511,11 @@ fn a_drive_server_on_a_hosted_api_entry_asks_the_cache_for_the_lifetimes_declare
     let refused = hosted_regimen_with("cache_ttl = \"10m\"\n");
     let path = refused.0.to_string_lossy().into_owned();
     let stub = Stub::serving(Vec::new()).expect("loopback");
-    let (code, said) = run_briefly(&stub.url(), &["--regimen", &path, "--key-file", &key_path]);
+    let (code, said) = run_briefly_as(
+        "a-hosted-model",
+        &stub.url(),
+        &["--regimen", &path, "--key-file", &key_path],
+    );
     assert_eq!(code, Some(1), "{said}");
     assert!(said.contains("cache_ttl"), "{said}");
 }
@@ -4506,7 +4550,11 @@ fn review_net_a_hosted_base_url_is_completed_to_its_messages_path() {
     let key = file_holding("key", "sk-rehearsal\n");
     let key_path = key.0.to_string_lossy().into_owned();
     let base = format!("http://{}/v1", stub.address());
-    let served = start(&base, &["--regimen", &path, "--key-file", &key_path]);
+    let served = start_as(
+        "a-hosted-model",
+        &base,
+        &["--regimen", &path, "--key-file", &key_path],
+    );
     let address = served.listening.clone();
     let reply = post(&address, &address, r#"{"kind":"ask","text":"hello?"}"#);
     assert_eq!(status(&reply), 200, "{reply}");

@@ -245,6 +245,9 @@ pub struct Identity {
     /// What a hosted API would refuse with a 400, as the entry declares it
     /// from its provider's docs (#555): read at start, never probed.
     pub api: ApiDeclared,
+    /// The entry's `weights_model_id`, whatever its weights' kind (#555):
+    /// the model a hosted API's requests must be sent as, and are billed as.
+    pub model_id: Option<String>,
 }
 
 /// What an `api` entry declares its API refuses (#555), each from the
@@ -398,6 +401,7 @@ pub fn identity(document: &str, id: &str) -> Result<Identity, String> {
             })
             .collect(),
         api: api_declared(document, id, table)?,
+        model_id: table.strings.get("weights_model_id").cloned(),
     })
 }
 
