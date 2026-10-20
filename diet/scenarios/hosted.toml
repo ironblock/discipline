@@ -13,6 +13,14 @@ substrate_reasoning = "on"
 # `substrates/registry.toml`.
 substrate_hardware = "b6bc80e9e8e4bc2342219f064dab89a8d17c02535600b32b84895fc0b9ba6513"
 
+# Its requests' limits (#555), none with a default: every request the
+# session sends, every lane's and every retry, counts against the cap; a
+# 429 or 529 is retried at most `api_retries` times, and never when its
+# retry-after asks a longer wait than `api_retry_after_max_seconds`.
+max_api_requests = 8
+api_retries = 2
+api_retry_after_max_seconds = 60
+
 isolation = "none"
 approval = "none"
 approval_policy = "approvals are off: every command runs without a gate decision or a prompt"

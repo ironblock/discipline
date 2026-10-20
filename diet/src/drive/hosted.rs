@@ -71,6 +71,64 @@ pub fn options(substrate: &Substrate, identity: &Identity, ttl: Ttls) -> Result<
 /// The regimen key for the cache-lifetime lever (#556).
 pub const CACHE_TTL: &str = "cache_ttl";
 
+/// The regimen keys a hosted session's requests are limited by (#555), in
+/// the order a refusal names them missing: the cap, the retries after a
+/// first attempt, and the longest `retry-after` waited, in seconds.
+pub const REQUEST_LIMITS: [&str; 3] = [
+    "max_api_requests",
+    "api_retries",
+    "api_retry_after_max_seconds",
+];
+
+/// What a hosted session's regimen limits its requests to (#555). Every one
+/// is declared: none has a default, since each spends money.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct RequestLimits {
+    /// `max_api_requests`: every request the session sends, every lane's
+    /// and every retry, counted against it; at least 1.
+    pub max_api_requests: u64,
+    /// `api_retries`: the attempts after a request's first.
+    pub api_retries: u64,
+    /// `api_retry_after_max_seconds`: the longest `retry-after` waited.
+    pub api_retry_after_max_seconds: u64,
+}
+
+/// The request limits `regimen` declares (#555).
+///
+/// # Errors
+///
+/// Every key missing, named together; a value that is not a whole number,
+/// or a `max_api_requests` of 0, which would send nothing.
+pub fn request_limits(regimen: &crate::formats::regimen::Regimen) -> Result<RequestLimits, String> {
+    let missing: Vec<&str> = REQUEST_LIMITS
+        .into_iter()
+        .filter(|key| regimen.get(key).is_none())
+        .collect();
+    if !missing.is_empty() {
+        return Err(format!(
+            "a hosted API's regimen declares its request limits, and this one declares no {}: \
+             each spends money, so none has a default",
+            missing
+                .iter()
+                .map(|key| format!("`{key}`"))
+                .collect::<Vec<_>>()
+                .join(", ")
+        ));
+    }
+    let count = |key: &str, least: u64| match regimen.get(key) {
+        Some(crate::formats::regimen::Value::Integer(n)) => u64::try_from(*n)
+            .ok()
+            .filter(|n| *n >= least)
+            .ok_or_else(|| format!("`{key}` is {n}, not a whole number of at least {least}")),
+        _ => Err(format!("`{key}` is a whole number of at least {least}")),
+    };
+    Ok(RequestLimits {
+        max_api_requests: count(REQUEST_LIMITS[0], 1)?,
+        api_retries: count(REQUEST_LIMITS[1], 0)?,
+        api_retry_after_max_seconds: count(REQUEST_LIMITS[2], 0)?,
+    })
+}
+
 /// The lifetimes `regimen`'s `cache_ttl` asks of each breakpoint (#556):
 /// `5m` (the default, all three harnesses'), `1h`, or `per-breakpoint` --
 /// Qwen Code's shape, the system and tools for an hour and the final user

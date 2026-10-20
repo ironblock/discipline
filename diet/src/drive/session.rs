@@ -191,6 +191,9 @@ vocabulary! {
         /// configuration takes none (#815): the engine would drop it
         /// silently.
         NoVision => "no-vision",
+        /// An ask after the session's `max_api_requests` was reached (#555):
+        /// nothing more is sent.
+        ApiCap => "api-cap",
     }
 }
 
@@ -208,6 +211,9 @@ vocabulary! {
         Timeout => "timeout",
         /// The call failed, was refused by the server, or its thread crashed.
         Failed => "failed",
+        /// The trunk's next request was never sent: the session's
+        /// `max_api_requests` was reached (#555).
+        ApiCap => "api_cap",
     }
 }
 
@@ -278,6 +284,9 @@ vocabulary! {
         Interview => "interview",
         /// A meditation's audit (#504): a fork's call, before the refill.
         Audit => "audit",
+        /// A meditation's pre-warm (#555): the refilled trunk once, its output
+        /// capped at one.
+        Warm => "warm",
     }
 }
 
@@ -1218,6 +1227,9 @@ pub struct HostedStart {
     /// Whether the regimen pinned no sampler setting on purpose
     /// (`[sampler] pins = "none"`).
     pub pins_nothing: bool,
+    /// The requests it may send, every lane's and every retry
+    /// (`max_api_requests`).
+    pub max_api_requests: Option<u64>,
 }
 
 /// The phase graph `interview` runs under, as `session.start` names it
@@ -2358,6 +2370,9 @@ struct State {
     /// The substrate an ask's images cannot reach (#815): its served
     /// configuration takes none. `None` sends them.
     blind: Option<String>,
+    /// The request never sent because the session's `max_api_requests` was
+    /// reached (#555): every later ask is refused, and nothing more is sent.
+    api_capped: Option<u64>,
     /// A phase's ground rules due as a note at the next ask (#787): the
     /// session opened in the phase, or moved to it with no meditation.
     phase_note_due: Option<String>,
@@ -2615,6 +2630,7 @@ impl State {
             captures_this_turn: 0,
             reminder_due: None,
             blind: None,
+            api_capped: None,
             phase_note_due: None,
             undelivered: Vec::new(),
             archive: super::archive::Archive::default(),
@@ -3475,6 +3491,12 @@ impl<S: Streaming + 'static> Session<S> {
             // The trunk a held meditation did not refill (#150's gate).
             Settlement::Awaiting if state.held.is_some() => {
                 let refused = state.refuse(CommandKind::Ask, Refusal::MeditationHeld);
+                self.shared.changed.notify_all();
+                return Err(Rejected::Refused(refused));
+            }
+            // The session's request cap, reached (#555).
+            Settlement::Awaiting if state.api_capped.is_some() => {
+                let refused = state.refuse(CommandKind::Ask, Refusal::ApiCap);
                 self.shared.changed.notify_all();
                 return Err(Rejected::Refused(refused));
             }
@@ -4880,6 +4902,7 @@ pub fn line_of(logged: &Logged) -> log::Line {
                 .as_ref()
                 .filter(|hosted| hosted.pins_nothing)
                 .map(|_| "none".to_owned()),
+            max_api_requests: hosted.as_ref().and_then(|hosted| hosted.max_api_requests),
             bash_timeout_ms: *bash_timeout_ms,
             shown_roots: shown_roots.clone(),
             // What a scenario shown its placeholders also fixes.
@@ -4965,6 +4988,7 @@ pub fn line_of(logged: &Logged) -> log::Line {
                 Lane::Trunk => log::Lane::Trunk,
                 Lane::Interview => log::Lane::Interview,
                 Lane::Audit => log::Lane::Audit,
+                Lane::Warm => log::Lane::Warm,
             },
             head_sha256: Some(head_sha256.clone()),
             fork: *fork,
@@ -5064,6 +5088,7 @@ pub fn line_of(logged: &Logged) -> log::Line {
         } => log::Event::RequestFailed {
             request: *request,
             reason: match (class, overflow) {
+                (Some(Rejection::ApiCap), _) => log::FailReason::ApiCap,
                 (Some(Rejection::Refusal), _) => log::FailReason::Refusal,
                 (Some(Rejection::ContextOverflow), _) | (None, Some(_)) => {
                     log::FailReason::ContextOverflow
@@ -5071,7 +5096,8 @@ pub fn line_of(logged: &Logged) -> log::Line {
                 (None, None) => log::FailReason::Server,
             },
             message: body.clone(),
-            status: Some(*status),
+            // Never sent, so no server answered (#555).
+            status: (*class != Some(Rejection::ApiCap)).then_some(*status),
             partial: arrived(partial),
             overflow: *overflow,
         },
@@ -5781,6 +5807,7 @@ fn refusal_of(refusal: Refusal) -> log::Refusal {
         Refusal::NothingHeld => log::Refusal::NothingHeld,
         Refusal::Restates => log::Refusal::Restates,
         Refusal::NoVision => log::Refusal::NoVision,
+        Refusal::ApiCap => log::Refusal::ApiCap,
         Refusal::NotUnilateral => log::Refusal::NotUnilateral,
         Refusal::AlreadyAsked => log::Refusal::AlreadyAsked,
         Refusal::ProposalPending => log::Refusal::ProposalPending,
@@ -5794,6 +5821,7 @@ fn settle_reason_in_the_log(reason: SettleReason) -> log::SettleReason {
         SettleReason::MaxSteps => log::SettleReason::MaxSteps,
         SettleReason::Timeout => log::SettleReason::Timeout,
         SettleReason::Failed => log::SettleReason::Failed,
+        SettleReason::ApiCap => log::SettleReason::ApiCap,
     }
 }
 
@@ -6072,6 +6100,19 @@ fn step<S: Streaming + 'static>(
                 class,
                 partial,
             });
+            // The session's request cap (#555): nothing more is sent.
+            if class == Some(Rejection::ApiCap) {
+                state.api_capped = Some(request);
+                state.keep_ran_steps();
+                state.push(Event::TurnSettled {
+                    turn,
+                    reason: SettleReason::ApiCap,
+                });
+                state.move_to(Settlement::Awaiting);
+                drop(state);
+                shared.changed.notify_all();
+                return None;
+            }
             // #617: an overflow meditates once and goes again.
             if overflow.is_some()
                 && let Some(next) = retried(&shared.template, &mut state, shape, (turn, cancel))
@@ -8556,19 +8597,35 @@ fn meditation_work<S: Streaming>(shared: &Shared<S>) {
         shape.limits.max_output_tokens = 1;
         let cancel = Cancel::new();
         state.warming = Some(cancel.clone());
+        // A request like any other, on its own lane (#555): every request
+        // the session sends has its line.
+        let turn = state.turns;
+        let request = state.push(Event::Requested {
+            turn,
+            lane: Lane::Warm,
+            head_sha256: crate::client::head::Head::of(&shape).digest().to_owned(),
+            fork: None,
+            max_tokens: 1,
+            beside: None,
+        });
         drop(state);
         shared.changed.notify_all();
         let deadline = Instant::now() + shared.template.limits.call;
+        let mut text = String::new();
+        let mut hosted = Hosted::default();
         let ended = shared
             .transport
-            .stream(&shape, deadline, &cancel, &mut |_: Piece<'_>| {});
+            .stream(&shape, deadline, &cancel, &mut |piece: Piece<'_>| {
+                if hosted.took(&piece) {
+                    return;
+                }
+                if let Piece::Text(piece) = piece {
+                    text.push_str(piece);
+                }
+            });
         state = shared.lock();
         state.warming = None;
-        if let (Ok(StreamEnded::Finished { timings, .. }), Event::Meditated { warm, .. }) =
-            (ended, &mut meditated)
-        {
-            *warm = timings;
-        }
+        warm_ended(&mut state, request, (ended, text, hosted), &mut meditated);
     }
     // Back to `awaiting`, then the meditation's line, under one lock: a meditation is
     // logged while the session awaits, and nothing comes between.
@@ -8586,6 +8643,62 @@ fn meditation_work<S: Streaming>(shared: &Shared<S>) {
 /// A meditation's audit, made and folded (#504); then, under `reconcile_gate =
 /// "refuse"` with an operator change still unaddressed (#150), the same
 /// reconciling ask once more over only the notes whose changes are left.
+/// The pre-warm's outcome, logged against its `request` (#555), its
+/// timings on the meditation's line when it finished (#504).
+fn warm_ended(
+    state: &mut State,
+    request: u64,
+    (ended, text, hosted): (Result<StreamEnded, TransportFailure>, String, Hosted),
+    meditated: &mut Event,
+) {
+    match ended {
+        Ok(StreamEnded::Finished {
+            finish_reason,
+            timings,
+        }) => {
+            state.push(Event::Answered {
+                request,
+                text,
+                finish_reason,
+                reasoning: None,
+                timings: timings.clone(),
+                hosted,
+            });
+            if let Event::Meditated { warm, .. } = meditated {
+                *warm = timings;
+            }
+        }
+        Ok(StreamEnded::Cancelled) => {
+            state.push(Event::Cancelled {
+                request,
+                partial: text,
+            });
+        }
+        Ok(StreamEnded::Rejected {
+            status,
+            body,
+            class,
+        }) => {
+            state.push(Event::Rejected {
+                request,
+                status,
+                body,
+                overflow: None,
+                class,
+                partial: text,
+            });
+        }
+        Err(failure) => {
+            state.push(Event::Failed {
+                request,
+                overflow: None,
+                failure,
+                partial: text,
+            });
+        }
+    }
+}
+
 fn audit_and_gate<'a, S: Streaming>(
     shared: &'a Shared<S>,
     mut state: std::sync::MutexGuard<'a, State>,
@@ -16649,6 +16762,7 @@ pub(in crate::drive) mod tests {
                 build_dirty: Some(false),
                 api_unchecked: None,
                 sampler_pins: None,
+                max_api_requests: None,
             },
             log::Event::Ask {
                 turn: 1,
@@ -17576,7 +17690,7 @@ pub(in crate::drive) mod tests {
         assert_eq!(
             tags(&Refusal::ALL.iter().map(|it| it.tag()).collect::<Vec<_>>()),
             "in-flight ended nothing-in-flight nothing-to-meditate no-phase-graph not-a-phase \
-             already-in-phase no-phase-edge stale tangent-open no-tangent bad-tangent not-the-scope nothing-running no-proposal unknown-entry not-live empty meditation-held nothing-held restates not-unilateral already-asked proposal-pending no-vision"
+             already-in-phase no-phase-edge stale tangent-open no-tangent bad-tangent not-the-scope nothing-running no-proposal unknown-entry not-live empty meditation-held nothing-held restates not-unilateral already-asked proposal-pending no-vision api-cap"
         );
         assert_eq!(
             tags(
@@ -17585,11 +17699,11 @@ pub(in crate::drive) mod tests {
                     .map(|it| it.tag())
                     .collect::<Vec<_>>()
             ),
-            "final cancelled max_steps timeout failed"
+            "final cancelled max_steps timeout failed api_cap"
         );
         assert_eq!(
             tags(&Lane::ALL.iter().map(|it| it.tag()).collect::<Vec<_>>()),
-            "trunk interview audit"
+            "trunk interview audit warm"
         );
     }
 
@@ -22398,7 +22512,8 @@ pub(in crate::drive) mod tests {
     }
 
     /// #504: with the pre-warm on, a meditation sends its refilled trunk once with
-    /// an output cap of one, and its line carries the warm's timings.
+    /// an output cap of one, and its line carries the warm's timings. #555:
+    /// the warm is a request like any other, on its own lane, and answered.
     #[test]
     fn a_warmed_meditation_sends_the_refilled_trunk_once_and_logs_its_timings() {
         let session = three_decisions_then(
@@ -22425,6 +22540,25 @@ pub(in crate::drive) mod tests {
         let warmed = sent.last().expect("the warm");
         assert_eq!(warmed.limits.max_output_tokens, 1);
         assert_eq!(warmed.messages, session.trunk());
+        let warm_request = log
+            .iter()
+            .find(|logged| {
+                matches!(
+                    logged.event,
+                    Event::Requested {
+                        lane: Lane::Warm,
+                        max_tokens: 1,
+                        fork: None,
+                        ..
+                    }
+                )
+            })
+            .expect("the warm's request line")
+            .seq;
+        assert!(log.iter().any(|logged| matches!(
+            logged.event,
+            Event::Answered { request, .. } if request == warm_request
+        )));
         reads_whole(&session);
     }
 
@@ -22452,6 +22586,24 @@ pub(in crate::drive) mod tests {
             log.iter()
                 .any(|logged| matches!(logged.event, Event::Meditated { warm: None, .. }))
         );
+        // #555: the cancelled warm is a request, and logged cancelled.
+        let warm_request = log
+            .iter()
+            .find(|logged| {
+                matches!(
+                    logged.event,
+                    Event::Requested {
+                        lane: Lane::Warm,
+                        ..
+                    }
+                )
+            })
+            .expect("the warm's request line")
+            .seq;
+        assert!(log.iter().any(|logged| matches!(
+            logged.event,
+            Event::Cancelled { request, .. } if request == warm_request
+        )));
         reads_whole(&session);
     }
 

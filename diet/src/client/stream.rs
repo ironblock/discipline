@@ -240,6 +240,9 @@ pub enum Rejection {
     /// The model declined to answer: a hosted API's `stop_reason`
     /// `refusal` (#555). Never read from a body; the stream says it.
     Refusal,
+    /// Not sent: the session's `max_api_requests` is reached (#555), so
+    /// the request that would pass it never left. Never a server's word.
+    ApiCap,
 }
 
 impl Rejection {
@@ -381,6 +384,50 @@ pub struct HttpStream {
     bearer: Option<Bearer>,
     trust: super::tls::Trust,
     wire: Wire,
+    budget: Option<Arc<RequestBudget>>,
+}
+
+/// The requests a hosted session may send (#555): `max_api_requests`,
+/// counted across every lane. Every clone of a transport carries the same
+/// one, so the trunk's, a fork's and an audit's requests are one count.
+#[derive(Debug)]
+pub struct RequestBudget {
+    cap: u64,
+    sent: std::sync::atomic::AtomicU64,
+}
+
+impl RequestBudget {
+    /// A budget of `cap` requests, none sent.
+    #[must_use]
+    pub fn new(cap: u64) -> Self {
+        Self {
+            cap,
+            sent: std::sync::atomic::AtomicU64::new(0),
+        }
+    }
+
+    /// Takes one request from the budget: `true` when it may be sent, and
+    /// is then counted; `false` when the cap is reached, and nothing is.
+    pub fn take(&self) -> bool {
+        use std::sync::atomic::Ordering;
+        self.sent
+            .fetch_update(Ordering::SeqCst, Ordering::SeqCst, |sent| {
+                (sent < self.cap).then_some(sent + 1)
+            })
+            .is_ok()
+    }
+
+    /// The cap.
+    #[must_use]
+    pub fn cap(&self) -> u64 {
+        self.cap
+    }
+
+    /// The requests taken so far.
+    #[must_use]
+    pub fn sent(&self) -> u64 {
+        self.sent.load(std::sync::atomic::Ordering::SeqCst)
+    }
 }
 
 /// Which API a streamed call speaks: the shapes differ, so the kind is
@@ -428,6 +475,7 @@ impl HttpStream {
             bearer: None,
             trust: super::tls::Trust::default(),
             wire: Wire::OpenAi,
+            budget: None,
         }
     }
 
@@ -437,6 +485,29 @@ impl HttpStream {
     #[must_use]
     pub fn with_anthropic(mut self, options: super::anthropic::Options) -> Self {
         self.wire = Wire::Anthropic(options);
+        self
+    }
+
+    /// [`Ended::Rejected`] [`Rejection::ApiCap`] when this transport's budget
+    /// holds no more requests; else `None`, one taken.
+    fn over_budget(&self) -> Option<Ended> {
+        let budget = self.budget.as_ref()?;
+        (!budget.take()).then(|| Ended::Rejected {
+            status: 0,
+            body: format!(
+                "not sent: the session's max_api_requests ({}) is reached",
+                budget.cap()
+            ),
+            class: Some(Rejection::ApiCap),
+        })
+    }
+
+    /// The same, sending no request past `budget` (#555): one more than it
+    /// holds is never sent, and ends [`Rejection::ApiCap`]. Its clones --
+    /// [`Self::for_forks`] among them -- share it.
+    #[must_use]
+    pub fn with_budget(mut self, budget: Arc<RequestBudget>) -> Self {
+        self.budget = Some(budget);
         self
     }
 
@@ -549,6 +620,7 @@ impl HttpStream {
             bearer: None,
             trust: super::tls::Trust::default(),
             wire: Wire::OpenAi,
+            budget: None,
         }
     }
 }
@@ -585,6 +657,11 @@ impl Streaming for HttpStream {
         // budget against a host that drops SYNs. Disclosed on #120.
         if cancel.is_asked() {
             return Ok(Ended::Cancelled);
+        }
+        // The session's cap (#555): the request that would pass it is never
+        // sent, and nothing is opened for it.
+        if let Some(refused) = self.over_budget() {
+            return Ok(refused);
         }
         // Over TLS for an `https` endpoint (#555): the handshake is part
         // of the connect, and the stopper below shuts the socket under it.
