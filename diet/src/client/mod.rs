@@ -834,6 +834,7 @@ mod tests {
     fn shaped(sampler: SamplerCard, attempt_ms: u64, call_ms: u64, retries: u8) -> RequestShape {
         RequestShape {
             model: "a-model".to_owned(),
+            cache_prefix: None,
             messages: vec![
                 Message::new(Role::System, "the regimen"),
                 Message::new(Role::User, "the turn"),

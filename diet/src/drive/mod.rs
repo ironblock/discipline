@@ -1537,6 +1537,7 @@ mod tests {
     fn shape() -> RequestShape {
         RequestShape {
             model: "a-model".to_owned(),
+            cache_prefix: None,
             messages: vec![Message::new(Role::User, "replaced per call")],
             sampler: SamplerCard::empty(),
             limits: Limits {
