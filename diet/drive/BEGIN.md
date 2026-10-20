@@ -146,6 +146,8 @@ Open `http://localhost:5173/?drive` in the browser. From another machine, open i
 - **A tool call:** ask the model to list the files in its directory. Its `bash` call runs in the worktree under the sandbox, and the answer comes back.
 - **An interview fork:** mark an ask as scoping in the page, or have the model read a file. When the turn settles, one fork asks it what it decided, and the patch it records lands in working memory.
 - **A meditation:** declare one from the page, or post `{"kind":"declare-meditation"}` to `/commands`. Working memory replaces the conversation, and the next ask runs on the refill.
+  - One fires by itself when the window fills (#617, #931). That happens when the next request would leave less than its reserve: the window less min(0.85 × window, window − 33,000), Qwen Code's, plus a fork's room while interview forks are on.
+  - Under a running turn, only the turn's ask and its last step ride after the refill: the pending call and its result.
 
 ## One process: `serve` serves the page
 

@@ -190,6 +190,14 @@
 //! it. A log that declares 13 or less and carries it is refused. For a
 //! reader of v13 logs, the migration is nothing: no v13 request carried it.
 //!
+//! v15 (#931) adds `native_reserve` and `fork_room` to a `window`
+//! meditation: the two parts of the reserve its line was drawn at, the
+//! native reserve and, with interview forks on, a fork's room on top. A log
+//! that declares 14 or less and carries either is refused, and no other
+//! meditation carries them. For a reader of v14 logs, the migration is
+//! nothing: a v14 window meditation's reserve was the larger of 20,000 and
+//! the output cap, and it named neither part.
+//!
 //! # A torn final line
 //!
 //! A writer killed mid-write leaves the start of an event with no line break
@@ -221,10 +229,10 @@ use super::record::vocabulary;
 struct LogParser;
 
 /// The version this module writes, as `session.start` states it.
-pub const VERSION: i64 = 14;
+pub const VERSION: i64 = 15;
 
 /// Every version this module reads.
-pub const READS: &[i64] = &[0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14];
+pub const READS: &[i64] = &[0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15];
 
 /// How recent an input event must be, at the moment a turn settles, for the
 /// person to count as already present: `notice` is then zero (Q4 (a), ruled
@@ -2108,6 +2116,11 @@ pub struct MeditationFired {
     pub prompt_tokens: u64,
     /// The engine's context window, in tokens.
     pub window: u64,
+    /// The native reserve its line was drawn at (v15, #931).
+    pub native_reserve: Option<u64>,
+    /// The room kept on top of it for an interview fork (v15, #931): its
+    /// longest ask and its output cap; `None` with interview forks off.
+    pub fork_room: Option<u64>,
 }
 
 /// A meditation's render budget and what it did (v7, #565): `render_budget_tokens`,
@@ -4391,12 +4404,27 @@ fn from_object(object: &BTreeMap<String, Value>) -> Result<Line, String> {
                     fields.optional_count("prompt_tokens")?,
                     fields.optional_count("window")?,
                 ) {
-                    (None, None) if reason != MeditationReason::Window => None,
+                    (None, None)
+                        if reason != MeditationReason::Window
+                            && !object.contains_key("native_reserve")
+                            && !object.contains_key("fork_room") =>
+                    {
+                        None
+                    }
                     (Some(prompt_tokens), Some(window)) if reason == MeditationReason::Window => {
                         Some(MeditationFired {
                             prompt_tokens,
                             window,
+                            native_reserve: fields.optional_count("native_reserve")?,
+                            fork_room: fields.optional_count("fork_room")?,
                         })
+                    }
+                    (None, None) => {
+                        return Err(format!(
+                            "a meditation whose reason is `{}` carries its reserve: only a \
+                             `window` meditation names `native_reserve` and `fork_room`",
+                            reason.tag()
+                        ));
                     }
                     _ => {
                         return Err(format!(
@@ -5304,6 +5332,16 @@ const fn must_v8(key: &'static str, holds: Holds) -> Field {
     }
 }
 
+/// A key that arrived in v15, optional wherever its object is written.
+const fn may_v15(key: &'static str, holds: Holds) -> Field {
+    Field {
+        key,
+        holds,
+        required: false,
+        since: 15,
+    }
+}
+
 /// A key that arrived in v14, optional wherever its object is written.
 const fn may_v14(key: &'static str, holds: Holds) -> Field {
     Field {
@@ -5997,6 +6035,8 @@ pub fn schema(kind: Kind) -> &'static [Field] {
                 may_v8("render_window_line", Count),
                 may_v7("prompt_tokens", Count),
                 may_v7("window", Count),
+                may_v15("native_reserve", Count),
+                may_v15("fork_room", Count),
                 may_v7("pruned", Holds::Strings),
                 may_v7("operator_changes", Holds::OperatorChanges),
                 may_v7("unaddressed", Holds::Strings),
@@ -7290,6 +7330,12 @@ fn to_value(line: &Line) -> Value {
             if let Some(fired) = fired {
                 put("prompt_tokens", count(fired.prompt_tokens));
                 put("window", count(fired.window));
+                if let Some(native) = fired.native_reserve {
+                    put("native_reserve", count(native));
+                }
+                if let Some(room) = fired.fork_room {
+                    put("fork_room", count(room));
+                }
             }
             if let Some(moved) = phase {
                 put("phase", phase_move_value(moved));
@@ -8734,13 +8780,13 @@ mod tests {
         assert!(refused.why.contains("v8"), "{refused}");
     }
 
-    /// #583, #878, #904, #555: this module writes v14.
+    /// #583, #878, #904, #555, #931: this module writes v15.
     #[test]
-    fn this_module_writes_v14_and_reads_every_version_before_it() {
-        assert_eq!(super::VERSION, 14);
+    fn this_module_writes_v15_and_reads_every_version_before_it() {
+        assert_eq!(super::VERSION, 15);
         assert_eq!(
             super::READS,
-            &[0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14]
+            &[0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15]
         );
     }
 

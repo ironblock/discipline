@@ -7,6 +7,6 @@
 {"step":"ask","text":"Build the parser, one piece per step."}
 {"step":"ask","text":"Now print a sample."}
 {"step":"end"}
-{"expect":"meditation","name":"split","where":{"reason":"window","window":"24000","turn_steps_kept":"1","turn_steps_compacted":"1"},"at_least":2}
+{"expect":"meditation","name":"split","where":{"reason":"window","window":"37615","turn_steps_kept":"1","turn_steps_compacted":"1"},"at_least":2}
 {"expect":"turn.settled","where":{"turn":"1","reason":"final"},"after":"split"}
 {"expect":"turn.settled","where":{"turn":"2","reason":"final"}}

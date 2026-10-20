@@ -4,8 +4,8 @@
 // i64, and a JavaScript number is exact only to 2^53. A `timings`
 // millisecond may carry a fraction, written as the server wrote it.
 
-export const VERSION = 14;
-export const READS = [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14] as const;
+export const VERSION = 15;
+export const READS = [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15] as const;
 export const PRESENCE_WINDOW_MS = 2000;
 
 export type Kind =
@@ -394,7 +394,7 @@ export type SessionStartLine = {
   seq: number;
   t: number;
   kind: "session.start";
-  version: 0 | 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9 | 10 | 11 | 12 | 13 | 14;
+  version: 0 | 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9 | 10 | 11 | 12 | 13 | 14 | 15;
   opened: number;
   model: string;
   head: HeadMessage[];
@@ -664,6 +664,8 @@ export type MeditationLine = {
   render_window_line?: number;
   prompt_tokens?: number;
   window?: number;
+  native_reserve?: number;
+  fork_room?: number;
   pruned?: string[];
   operator_changes?: OperatorChange[];
   unaddressed?: string[];

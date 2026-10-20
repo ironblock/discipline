@@ -1,9 +1,9 @@
 # A turn whose own steps outgrow the window (#813), on the canned scenario
-# substrate's 24000-token window: three long steps, each recording a fact,
+# substrate's 37615-token window: three long steps, each recording a fact,
 # then the answer. Before each of the last two requests the window
-# meditation splits the running turn: the refill, the ask, then only its most
-# recent step within the budget (2000 tokens here, OpenCode 2's floor); the
-# step before it is compacted, its fact in working memory. The turn settles.
+# meditation splits the running turn: the refill, the ask, then only its last
+# step, the pending call and its result (#931, Qwen Code's); the step before
+# it is compacted, its fact in working memory. The turn settles.
 arm = "rehearsal"
 dogma_version = 0
 
