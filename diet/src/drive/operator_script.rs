@@ -207,6 +207,14 @@ fn derived(lines: &[Map<String, Value>], priming: Option<&str>) -> Result<Derive
             .to_owned(),
         _ => return Err(refused(start, "its head is not one system message")),
     };
+    // The run's own nonce (#932), which the replay's start puts again.
+    let head = match text(start, "head_nonce") {
+        Some(nonce) => head
+            .strip_prefix(&crate::drive::regimen::nonce_line(nonce))
+            .map(str::to_owned)
+            .ok_or_else(|| refused(start, "it names a head nonce its head does not open with"))?,
+        None => head,
+    };
     let instruction_files: Vec<String> = start
         .get("instruction_files")
         .and_then(Value::as_array)

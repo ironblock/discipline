@@ -54,6 +54,51 @@ pub struct Receipts {
     /// Each graded task (#942): the attempt its first right grade came at,
     /// or none when no grade of it was right.
     pub tasks: BTreeMap<String, Option<u64>>,
+    /// Each lane's prefill (#932): cached and new tokens, over the
+    /// responses that reported them, and how many did of how many.
+    pub lanes: BTreeMap<String, Prefill>,
+    /// Whether the run's head carried its own nonce (#932): `session.start`
+    /// names one.
+    pub nonced: bool,
+}
+
+/// One lane's prefill in one run (#932).
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct Prefill {
+    /// Prompt tokens a cache supplied.
+    pub cached: u64,
+    /// Prompt tokens prefilled anew.
+    pub new: u64,
+    /// Responses that reported both.
+    pub reported: u64,
+    /// Responses on the lane.
+    pub responses: u64,
+}
+
+impl Prefill {
+    /// `of`, when every response on the lane reported it; none otherwise,
+    /// never 0 for a count nobody gave.
+    fn whole(&self, of: u64) -> f64 {
+        if self.responses > 0 && self.reported == self.responses {
+            count(of)
+        } else {
+            f64::NAN
+        }
+    }
+}
+
+/// A response's cached and new prefill, where its server reported them:
+/// llama.cpp's and `TabbyAPI`'s `timings` (`cache_n`, `prompt_n`), else a
+/// hosted API's `usage` (`cached_tokens`, and the rest of `prompt_tokens`,
+/// cache writes counted new).
+fn prefill_of(timings: Option<&log::Timings>, usage: Option<&log::Usage>) -> Option<(u64, u64)> {
+    match (timings.and_then(|t| t.cache_n.zip(t.prompt_n)), usage) {
+        (Some(both), _) => Some(both),
+        (None, Some(usage)) => usage
+            .cached_tokens
+            .map(|cached| (cached, usage.prompt_tokens.saturating_sub(cached))),
+        (None, None) => None,
+    }
 }
 
 impl Receipts {
@@ -65,6 +110,7 @@ impl Receipts {
             ..Self::default()
         };
         let mut asked: BTreeMap<u32, u64> = BTreeMap::new();
+        let mut lane_of: BTreeMap<u64, String> = BTreeMap::new();
         for line in lines {
             receipts.wall_ms = receipts.wall_ms.max(line.t);
             match &line.event {
@@ -82,11 +128,31 @@ impl Receipts {
                 Event::BackgroundEnded {
                     exit: Some(exit), ..
                 } if *exit != 0 => receipts.failed_commands += 1,
+                Event::SessionStart { head_nonce, .. } => {
+                    receipts.nonced = head_nonce.is_some();
+                }
+                Event::Request { lane, .. } => {
+                    lane_of.insert(line.seq, lane.tag().to_owned());
+                }
                 Event::Response {
-                    usage: Some(usage), ..
+                    to_request,
+                    usage,
+                    timings,
+                    ..
                 } => {
-                    receipts.prompt_tokens += usage.prompt_tokens;
-                    receipts.output_tokens += usage.completion_tokens;
+                    if let Some(usage) = usage {
+                        receipts.prompt_tokens += usage.prompt_tokens;
+                        receipts.output_tokens += usage.completion_tokens;
+                    }
+                    if let Some(lane) = lane_of.get(to_request) {
+                        let prefill = receipts.lanes.entry(lane.clone()).or_default();
+                        prefill.responses += 1;
+                        if let Some((cached, new)) = prefill_of(timings.as_ref(), usage.as_ref()) {
+                            prefill.cached += cached;
+                            prefill.new += new;
+                            prefill.reported += 1;
+                        }
+                    }
                 }
                 Event::Ask { turn, .. } => {
                     asked.insert(*turn, line.t);
@@ -122,9 +188,19 @@ impl Receipts {
 /// One row: its name, its source, and its value for each run.
 struct Row {
     name: String,
-    source: &'static str,
-    value: Box<dyn Fn(&Receipts) -> f64>,
+    source: String,
+    value: Valued,
+    /// What a run with no value prints: `—`, or `not reported` (#932).
+    missing: &'static str,
+    /// Each run's note, when the row keeps one beside its value.
+    note: Option<Noted>,
 }
+
+/// A row's value for a run.
+type Valued = Box<dyn Fn(&Receipts) -> f64>;
+
+/// A row's note for a run.
+type Noted = Box<dyn Fn(&Receipts) -> String>;
 
 /// A per-turn value: the run's total over its settled turns, or none.
 fn per_turn(total: u64, turns: u64) -> f64 {
@@ -141,11 +217,17 @@ fn count(n: u64) -> f64 {
     n as f64
 }
 
-fn rows(reasons: &BTreeSet<String>, tasks: &BTreeSet<String>) -> Vec<Row> {
+fn rows(
+    reasons: &BTreeSet<String>,
+    tasks: &BTreeSet<String>,
+    (lanes, nonced): (&BTreeSet<String>, bool),
+) -> Vec<Row> {
     let row = |name: &str, source: &'static str, value: Box<dyn Fn(&Receipts) -> f64>| Row {
         name: name.to_owned(),
-        source,
+        source: source.to_owned(),
         value,
+        missing: "—",
+        note: None,
     };
     let mut rows = vec![
         row(
@@ -210,15 +292,34 @@ fn rows(reasons: &BTreeSet<String>, tasks: &BTreeSet<String>) -> Vec<Row> {
         let reason = reason.clone();
         rows.push(Row {
             name: format!("settles: {reason}"),
-            source: "`turn.settled` lines, by `reason`",
+            source: "`turn.settled` lines, by `reason`".to_owned(),
+            missing: "—",
+            note: None,
             value: Box::new(move |r| count(r.settles.get(&reason).copied().unwrap_or(0))),
         });
     }
+    rows.extend(prefill_rows(lanes, nonced));
+    rows.extend(task_rows(tasks));
+    rows.push(row(
+        "unmet expectations",
+        "`runs.jsonl`'s `unmet`, the batch's line for the run",
+        Box::new(|r| count(r.unmet)),
+    ));
+    rows
+}
+
+/// Each graded task's rows (#942): attempts to right, and never right.
+fn task_rows(tasks: &BTreeSet<String>) -> Vec<Row> {
+    let mut rows = Vec::new();
     for task in tasks {
         let (first, never) = (task.clone(), task.clone());
         rows.push(Row {
             name: format!("attempts to right: {task}"),
-            source: "`grade` lines of the task: the first `right: true`'s `attempt`; none when none is",
+            source:
+                "`grade` lines of the task: the first `right: true`'s `attempt`; none when none is"
+                    .to_owned(),
+            missing: "—",
+            note: None,
             value: Box::new(move |r| match r.tasks.get(&first) {
                 Some(Some(attempt)) => count(*attempt),
                 _ => f64::NAN,
@@ -226,7 +327,9 @@ fn rows(reasons: &BTreeSet<String>, tasks: &BTreeSet<String>) -> Vec<Row> {
         });
         rows.push(Row {
             name: format!("never right: {task}"),
-            source: "`grade` lines of the task: 1 when none is `right: true`, 0 when one is; none when it was not graded",
+            source: "`grade` lines of the task: 1 when none is `right: true`, 0 when one is; none when it was not graded".to_owned(),
+            missing: "—",
+            note: None,
             value: Box::new(move |r| match r.tasks.get(&never) {
                 Some(Some(_)) => 0.0,
                 Some(None) => 1.0,
@@ -234,11 +337,43 @@ fn rows(reasons: &BTreeSet<String>, tasks: &BTreeSet<String>) -> Vec<Row> {
             }),
         });
     }
-    rows.push(row(
-        "unmet expectations",
-        "`runs.jsonl`'s `unmet`, the batch's line for the run",
-        Box::new(|r| count(r.unmet)),
-    ));
+    rows
+}
+
+/// Each lane's prefill rows (#932), cached and new.
+fn prefill_rows(lanes: &BTreeSet<String>, nonced: bool) -> Vec<Row> {
+    let mut rows = Vec::new();
+    // Each lane's prefill (#932), cached and new, never 0 for a count no
+    // response gave; carryover-free only when every run's head was its own.
+    let carryover = if nonced {
+        "carryover-free: every run's head carried its own nonce"
+    } else {
+        "may include carryover from the run before: no head nonce"
+    };
+    let source = format!(
+        "each `response`'s `timings` `cache_n` and `prompt_n` (llama.cpp, TabbyAPI), else its \
+         `usage` `cached_tokens` and the rest of `prompt_tokens` (a hosted API), by its \
+         `request`'s lane; not reported unless every response on the lane reported; {carryover}"
+    );
+    for lane in lanes {
+        for (kind, cached) in [("cached", true), ("new", false)] {
+            let (of, noted) = (lane.clone(), lane.clone());
+            rows.push(Row {
+                name: format!("{kind} prefill: {lane}"),
+                source: source.clone(),
+                value: Box::new(move |r| {
+                    r.lanes.get(&of).map_or(f64::NAN, |prefill| {
+                        prefill.whole(if cached { prefill.cached } else { prefill.new })
+                    })
+                }),
+                missing: "not reported",
+                note: Some(Box::new(move |r| {
+                    let prefill = r.lanes.get(&noted).copied().unwrap_or_default();
+                    format!("reported {} of {}", prefill.reported, prefill.responses)
+                })),
+            });
+        }
+    }
     rows
 }
 
@@ -392,12 +527,19 @@ fn laid_out(
         (draws.resample(&under_a), draws.resample(&under_b))
     });
     let (of_a, of_b) = (Spread::of(&under_a), Spread::of(&under_b));
+    let or_missing = |value: f64| {
+        if value.is_nan() {
+            row.missing.to_owned()
+        } else {
+            shown(value)
+        }
+    };
     let arm = |spread: &Spread| {
         format!(
             "{} [{}, {}]",
-            shown(spread.median),
-            shown(spread.min),
-            shown(spread.max)
+            or_missing(spread.median),
+            or_missing(spread.min),
+            or_missing(spread.max)
         )
     };
     let interval = |delta: &Delta| {
@@ -427,7 +569,7 @@ fn laid_out(
         })
     };
     let delta = |delta: &Delta| serde_json::json!({"value": number(delta.value), "low": number(delta.low), "high": number(delta.high)});
-    let json = serde_json::json!({
+    let mut json = serde_json::json!({
         "row": row.name,
         "source": row.source,
         "a": held(&under_a, &of_a),
@@ -435,6 +577,10 @@ fn laid_out(
         "delta_median": delta(&by_median),
         "delta_mean": delta(&by_mean),
     });
+    if let Some(note) = &row.note {
+        json["a"]["notes"] = serde_json::json!(a.iter().map(note).collect::<Vec<_>>());
+        json["b"]["notes"] = serde_json::json!(b.iter().map(note).collect::<Vec<_>>());
+    }
     (json, line)
 }
 
@@ -544,7 +690,13 @@ pub fn table(dir: &Path, seed: u64) -> Result<(serde_json::Value, String), Strin
     );
     let _ = writeln!(markdown, "| --- | --- | --- | --- | --- | --- |");
     let _ = writeln!(markdown, "| {PRIMARY_MEASURE} | | | | | |");
-    for row in rows(&reasons, &tasks) {
+    let lanes: BTreeSet<String> = a
+        .iter()
+        .chain(&b)
+        .flat_map(|r| r.lanes.keys().cloned())
+        .collect();
+    let nonced = a.iter().chain(&b).all(|r| r.nonced);
+    for row in rows(&reasons, &tasks, (&lanes, nonced)) {
         let (json, line) = laid_out(&row, (&a, &b), &mut draws);
         json_rows.push(json);
         markdown.push_str(&line);
@@ -574,6 +726,53 @@ pub fn table(dir: &Path, seed: u64) -> Result<(serde_json::Value, String), Strin
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// #932: a lane's prefill comes from the responses that report it --
+    /// `timings` first, then a hosted `usage` -- and a lane where any
+    /// response did not report is none, never 0, its note saying how many
+    /// did of how many.
+    #[test]
+    fn a_lanes_prefill_is_what_its_responses_reported_and_none_otherwise() {
+        const AUDITED: &str = include_str!(
+            "../../formats/log/fixtures/valid/a-v8-meditation-audited-on-its-lane-and-warmed.jsonl"
+        );
+        let text = AUDITED
+            .replace(
+                r#""text":"a tracker for the team's bugs","to_request":3"#,
+                r#""text":"a tracker for the team's bugs","timings":{"cache_n":100,"prompt_n":20},"to_request":3"#,
+            );
+        assert_ne!(text, AUDITED, "the trunk's response reports its prefill");
+        let receipts = Receipts::of(&log::parse(&text).expect("a log"), 0);
+        assert_eq!(
+            receipts.lanes["trunk"],
+            Prefill {
+                cached: 100,
+                new: 20,
+                reported: 1,
+                responses: 1
+            }
+        );
+        assert!((receipts.lanes["trunk"].whole(100) - 100.0).abs() < f64::EPSILON);
+        let audit = receipts.lanes["audit"];
+        assert_eq!((audit.reported, audit.responses), (0, 1));
+        assert!(audit.whole(audit.cached).is_nan(), "not reported, never 0");
+        assert!(!receipts.nonced);
+        // A hosted API's usage: the rest of the prompt is new.
+        let hosted = log::Usage {
+            prompt_tokens: 1000,
+            completion_tokens: 7,
+            cached_tokens: Some(900),
+            cache_creation_tokens: Some(60),
+            cache_creation_5m_tokens: None,
+            cache_creation_1h_tokens: None,
+        };
+        assert_eq!(prefill_of(None, Some(&hosted)), Some((900, 100)));
+        let unreported = log::Usage {
+            cached_tokens: None,
+            ..hosted
+        };
+        assert_eq!(prefill_of(None, Some(&unreported)), None);
+    }
 
     /// The median and the mean, by hand.
     #[test]

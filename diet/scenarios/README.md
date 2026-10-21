@@ -255,3 +255,6 @@ This reads a `pair` batch and writes `DIR/table.md` and `DIR/table.json`. It is 
   - wall ms per turn: each `turn.settled`'s `t` less its `ask`'s, the run's median;
   - turns (`turn.settled`), forks (`fork`), captures (`patch`), refusals (`refused`), and settles, one row per `reason`;
   - unmet expectations: `runs.jsonl`'s `unmet`.
+  - **cached and new prefill, per lane** (#932): each `response`'s `timings` `cache_n` and `prompt_n` (llama.cpp, TabbyAPI), else its `usage` `cached_tokens` and the rest of `prompt_tokens` (a hosted API, cache writes counted new), summed by its `request`'s lane.
+    - A run's lane value counts only when every response on the lane reported it. Otherwise it prints `not reported`, never 0, and the JSON's `notes` say `reported k of n`.
+    - The rows are labelled carryover-free only when every run's head carried its own nonce (`head_nonce = "per_run"`). Otherwise they say the cached prefill may include the server's cache of the run before.

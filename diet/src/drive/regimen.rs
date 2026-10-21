@@ -809,6 +809,8 @@ pub fn serve_levers(regimen: &Regimen, output_cap: (u32, &str)) -> BTreeMap<Stri
         ),
         // #822: the forks cut during the turn that may wait for a slot.
         ("fork_backlog".to_owned(), fork_backlog_lever(regimen)),
+        // #932: a per-run nonce on the head's first line.
+        ("head_nonce".to_owned(), head_nonce_lever(regimen)),
         ("render_budget".to_owned(), render_budget_lever(regimen)),
         (
             "fork_memory_share".to_owned(),
@@ -824,6 +826,51 @@ pub fn serve_levers(regimen: &Regimen, output_cap: (u32, &str)) -> BTreeMap<Stri
         ("subagent".to_owned(), "harness".to_owned()),
         ("model_pruning".to_owned(), pruning),
     ])
+}
+
+/// The regimen key of the head nonce lever (#932).
+pub const HEAD_NONCE: &str = "head_nonce";
+
+/// Whether a session's head carries a nonce on its first line (#932):
+/// `per_run`, or `off`, the default.
+///
+/// # Errors
+///
+/// When the key holds anything else.
+pub fn head_nonce(regimen: Option<&Regimen>) -> Result<bool, String> {
+    match regimen.and_then(|regimen| regimen.get(HEAD_NONCE)) {
+        None => Ok(false),
+        Some(regimen::Value::String(word)) if word == "off" => Ok(false),
+        Some(regimen::Value::String(word)) if word == "per_run" => Ok(true),
+        Some(other) => Err(format!(
+            "`{HEAD_NONCE}` is {other:?}: it is `per_run`, or `off`"
+        )),
+    }
+}
+
+/// The head nonce lever's word (#932): `per_run` or `off`; undeclared for
+/// a value serve refuses.
+fn head_nonce_lever(regimen: &Regimen) -> String {
+    match head_nonce(Some(regimen)) {
+        Ok(true) => "per_run".to_owned(),
+        Ok(false) => "off".to_owned(),
+        Err(_) => UNDECLARED.to_owned(),
+    }
+}
+
+/// The line a nonce puts first in a session's head (#932): what `script`
+/// takes off again.
+#[must_use]
+pub fn nonce_line(nonce: &str) -> String {
+    format!("Session nonce: {nonce}\n")
+}
+
+/// A session's head nonce (#932): sixteen hex digits of the sha256 of
+/// `seed`, which a repeating runner gives as the run's own JSON, so no two
+/// runs of a batch share one.
+#[must_use]
+pub fn nonce_of(seed: &str) -> String {
+    crate::digest::sha256_hex(seed.as_bytes())[..16].to_owned()
 }
 
 /// The fork backlog lever's word (#822): `queued:<bound>`, with `:default`

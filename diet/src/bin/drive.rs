@@ -521,6 +521,35 @@ fn serve(args: &[String]) -> ExitCode {
         Ok(system) => system,
         Err(why) => return fail(EXIT_INPUT, &format!("{head} cannot be read: {why}")),
     };
+    // A per-run nonce first in the head (#932), drawn from the run a
+    // repeating runner names, else from this process and the clock, so no
+    // two sessions share a prefix a server could carry its cache across.
+    let nonced = match regimen_file
+        .as_deref()
+        .map(|path| {
+            std::fs::read_to_string(path)
+                .map_err(|why| format!("{path} cannot be read: {why}"))
+                .and_then(|text| {
+                    diet::formats::regimen::parse(&text)
+                        .map_err(|why| format!("{path} is not a regimen: {why:?}"))
+                })
+                .and_then(|read| diet::drive::regimen::head_nonce(Some(&read)))
+        })
+        .transpose()
+    {
+        Ok(on) => on.unwrap_or(false),
+        Err(why) => return fail(EXIT_INPUT, &why),
+    };
+    let head_nonce = nonced.then(|| {
+        diet::drive::regimen::nonce_of(&run.as_ref().map_or_else(
+            || format!("{}-{:?}", std::process::id(), std::time::SystemTime::now()),
+            diet::formats::log::run_text,
+        ))
+    });
+    let system = match &head_nonce {
+        Some(nonce) => format!("{}{system}", diet::drive::regimen::nonce_line(nonce)),
+        None => system,
+    };
     let (regime, mut read_at_start) = match regimen_file
         .as_deref()
         .map(|path| registered_regime(path, max_output_tokens))
@@ -971,7 +1000,7 @@ fn serve(args: &[String]) -> ExitCode {
     let session = served_session(
         (transport, seat),
         (shape, dialect, blind),
-        (tools, run, rehearse_as),
+        (tools, run, rehearse_as, head_nonce),
         (
             claim,
             interview,
@@ -1190,9 +1219,10 @@ fn outputs(
 fn served_session(
     (transport, seat): (HttpStream, Option<session::Offboard<HttpStream>>),
     (mut shape, dialect, blind): (RequestShape, Dialect, Option<String>),
-    (tools, run, rehearse_as): (
+    (tools, run, rehearse_as, head_nonce): (
         Option<Tools>,
         Option<diet::formats::log::Run>,
+        Option<String>,
         Option<String>,
     ),
     declared: session::Declared,
@@ -1241,6 +1271,10 @@ fn served_session(
     };
     let session = match rehearse_as {
         Some(rung) => session.rehearsing_as(&rung),
+        None => session,
+    };
+    let session = match head_nonce {
+        Some(nonce) => session.with_head_nonce(&nonce),
         None => session,
     };
     std::sync::Arc::new(match seat {

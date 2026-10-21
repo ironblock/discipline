@@ -231,6 +231,12 @@
 //! it is refused. For a reader of v18 logs, the migration is nothing: every
 //! v18 session ran under its own substrate's declarations.
 //!
+//! v20 (#932) adds `head_nonce` on `session.start`: the nonce the
+//! `head_nonce` lever put on the head's first line, so no two runs share a
+//! prefix a server could carry its cache across. A log that declares 19 or
+//! less and carries it is refused. For a reader of v19 logs, the migration
+//! is nothing: no v19 head carried one.
+//!
 //! # A torn final line
 //!
 //! A writer killed mid-write leaves the start of an event with no line break
@@ -262,11 +268,11 @@ use super::record::vocabulary;
 struct LogParser;
 
 /// The version this module writes, as `session.start` states it.
-pub const VERSION: i64 = 19;
+pub const VERSION: i64 = 20;
 
 /// Every version this module reads.
 pub const READS: &[i64] = &[
-    0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19,
+    0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20,
 ];
 
 /// How recent an input event must be, at the moment a turn settles, for the
@@ -1364,6 +1370,9 @@ pub enum Event {
         /// The rung whose declarations a rehearsal on a canned substrate
         /// ran under (v19, #926); the claim stays the canned one.
         rehearsing_as: Option<String>,
+        /// The nonce the head's first line carries (v20, #932), under the
+        /// `head_nonce` lever.
+        head_nonce: Option<String>,
     },
     /// An ask was admitted.
     Ask {
@@ -3874,6 +3883,7 @@ fn from_object(object: &BTreeMap<String, Value>) -> Result<Line, String> {
                     None
                 },
                 rehearsing_as: fields.optional_string("rehearsing_as")?,
+                head_nonce: fields.optional_string("head_nonce")?,
                 phases: fields.optional_strings("phases")?,
                 phase_transitions: match object.get("phase_transitions") {
                     None => None,
@@ -5553,6 +5563,16 @@ const fn must_v8(key: &'static str, holds: Holds) -> Field {
     }
 }
 
+/// A key that arrived in v20, optional wherever its object is written.
+const fn may_v20(key: &'static str, holds: Holds) -> Field {
+    Field {
+        key,
+        holds,
+        required: false,
+        since: 20,
+    }
+}
+
 /// A key that arrived in v19, optional wherever its object is written.
 const fn may_v19(key: &'static str, holds: Holds) -> Field {
     Field {
@@ -6056,6 +6076,7 @@ pub fn schema(kind: Kind) -> &'static [Field] {
                 may_v13("api_retry_after_max_seconds", Count),
                 may_v17("run", Holds::Run),
                 may_v19("rehearsing_as", Text),
+                may_v20("head_nonce", Text),
             ];
             F
         }
@@ -6848,6 +6869,7 @@ fn to_value(line: &Line) -> Value {
             api_retry_after_max_seconds,
             run,
             rehearsing_as,
+            head_nonce,
             phases,
             phase_transitions,
             opening_phase,
@@ -6950,6 +6972,9 @@ fn to_value(line: &Line) -> Value {
             }
             if let Some(rung) = rehearsing_as {
                 put("rehearsing_as", text(rung));
+            }
+            if let Some(nonce) = head_nonce {
+                put("head_nonce", text(nonce));
             }
             if let Some(keys) = api_unchecked {
                 put(
@@ -9177,14 +9202,14 @@ mod tests {
         assert!(refused.why.contains("v8"), "{refused}");
     }
 
-    /// #583, #878, #904, #555, #931, #936, #910, #942, #926: this module writes v19.
+    /// #583, #878, #904, #555, #931, #936, #910, #942, #926, #932: this module writes v20.
     #[test]
-    fn this_module_writes_v19_and_reads_every_version_before_it() {
-        assert_eq!(super::VERSION, 19);
+    fn this_module_writes_v20_and_reads_every_version_before_it() {
+        assert_eq!(super::VERSION, 20);
         assert_eq!(
             super::READS,
             &[
-                0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19
+                0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20
             ]
         );
     }
@@ -9206,6 +9231,7 @@ mod tests {
                 api_retries: Some(2),
                 api_retry_after_max_seconds: Some(60),
                 rehearsing_as: Some("a-hosted-rung".to_owned()),
+                head_nonce: Some("0123456789abcdef".to_owned()),
                 run: Some(Run {
                     script_sha256: "a".repeat(64),
                     repeat: 2,
@@ -10640,6 +10666,7 @@ mod tests {
             api_retry_after_max_seconds,
             run,
             rehearsing_as,
+            head_nonce,
             ..
         } = &mut lines[0].event
         else {
@@ -10648,6 +10675,7 @@ mod tests {
         *version = 0;
         *run = None;
         *rehearsing_as = None;
+        *head_nonce = None;
         // A v7 key on the first line would be the one named; the check is of
         // what arrived in v1, further down.
         *tool_output = None;
