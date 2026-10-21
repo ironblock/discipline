@@ -966,6 +966,13 @@ fn repeats_run_one_after_another_each_naming_its_repeat() {
     }
     assert_eq!(lines[3]["ok"], true, "{}", lines[3]);
     assert_eq!(lines[3]["ran"], 3, "{}", lines[3]);
+    // #914: the batch keeps its per-repeat lines beside its runs.
+    let kept = std::fs::read_to_string(out.join("runs.jsonl")).expect("runs.jsonl");
+    let kept: Vec<serde_json::Value> = kept
+        .lines()
+        .map(|line| serde_json::from_str(line).expect("a JSON line"))
+        .collect();
+    assert_eq!(kept, lines[..3], "runs.jsonl holds the repeat lines");
     assert_eq!(lines[3]["script_sha256"], digest, "{}", lines[3]);
     let _ = std::fs::remove_dir_all(&dir);
 }
@@ -1342,5 +1349,125 @@ fn a_declared_contrast_runs_when_exact_and_is_refused_naming_a_missing_or_extra_
         assert_eq!(lines[0]["extra"], extra, "{contrast}: {}", lines[0]);
         assert!(!out.join("a").exists(), "{contrast}: nothing ran");
     }
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// #914: `table` over a canned `pair` batch whose numbers the scenario
+/// sets. Arm A (`max_steps = 4`) asks, runs `exit 3` and is answered: two
+/// responses reporting 1000 and 1500 prompt tokens, 7 output tokens each
+/// (the canned server's count), one failed command, settled `final`. Arm B
+/// (`max_steps = 1`) stops before the call runs: one response, no failed
+/// command, settled `max_steps`, its `final` expectation unmet. Runs alike
+/// within an arm leave nothing to resample, so every interval is its delta.
+#[test]
+#[allow(clippy::too_many_lines)]
+fn a_pair_batchs_table_holds_the_numbers_its_scenario_set() {
+    let dir = scratch("table");
+    let regimen = |name: &str, max_steps: u32| {
+        let path = dir.join(name);
+        std::fs::write(
+            &path,
+            format!(
+                "arm = \"table\"\ndogma_version = 0\nsubstrate = \"canned-scenario\"\n\
+                 substrate_reasoning = \"off\"\n\
+                 substrate_hardware = \"b6bc80e9e8e4bc2342219f064dab89a8d17c02535600b32b84895fc0b9ba6513\"\n\
+                 isolation = \"none\"\napproval = \"none\"\n\
+                 approval_policy = \"approvals are off: every command runs without a gate decision or a prompt\"\n\
+                 tool_surface = \"standard\"\n[limits]\nmax_steps = {max_steps}\n\
+                 [sampler]\ntemperature = 0.6\nseed = 7\n"
+            ),
+        )
+        .expect("the regimen");
+        path
+    };
+    let (a, b) = (regimen("a.toml", 4), regimen("b.toml", 1));
+    let header = serde_json::json!({
+        "scenario": "table",
+        "regimen": "a.toml",
+        "head": root().join("diet/drive/heads/floor.md"),
+    });
+    let file = dir.join("table.jsonl");
+    std::fs::write(
+        &file,
+        format!(
+            "{header}\n{}",
+            concat!(
+                r#"{"reply":{"when":"Check the build","text":"Running it.","prompt_tokens":1000,"calls":[{"id":"call-x","name":"bash","arguments":"{\"command\": \"exit 3\"}"}]}}"#,
+                "\n",
+                r#"{"reply":{"text":"It failed with 3.","prompt_tokens":1500}}"#,
+                "\n",
+                r#"{"step":"ask","text":"Check the build."}"#,
+                "\n",
+                r#"{"step":"end"}"#,
+                "\n",
+                r#"{"expect":"turn.settled","where":{"reason":"final"}}"#,
+                "\n",
+            )
+        ),
+    )
+    .expect("the scenario");
+    let out = dir.join("out");
+    let (code, lines) = paired(&file, (&a, &b), &out, &["--repeat", "2"]);
+    assert_eq!(code, Some(0), "{lines:?}");
+    let kept = std::fs::read_to_string(out.join("runs.jsonl")).expect("runs.jsonl");
+    assert_eq!(kept.lines().count(), 4, "one line per run: {kept}");
+    let ran = Command::new(DRIVE)
+        .arg("table")
+        .arg(&out)
+        .output()
+        .expect("diet-drive runs");
+    let said = String::from_utf8_lossy(&ran.stdout);
+    assert_eq!(
+        ran.status.code(),
+        Some(0),
+        "{said}{}",
+        String::from_utf8_lossy(&ran.stderr)
+    );
+    assert!(said.contains(r#""seed":0"#), "{said}");
+    let table: serde_json::Value =
+        serde_json::from_str(&std::fs::read_to_string(out.join("table.json")).expect("table.json"))
+            .expect("JSON");
+    assert_eq!(
+        table["runs"],
+        serde_json::json!({"a": 2, "b": 2}),
+        "{table}"
+    );
+    assert_eq!(
+        table["primary_measure"],
+        "primary measure (#932): not declared"
+    );
+    let row = |name: &str| {
+        table["rows"]
+            .as_array()
+            .and_then(|rows| rows.iter().find(|row| row["row"] == name))
+            .cloned()
+            .unwrap_or_else(|| panic!("no row {name}: {table}"))
+    };
+    for (name, a, b) in [
+        ("failed commands", 1.0, 0.0),
+        ("prompt tokens per run", 2500.0, 1000.0),
+        ("prompt tokens per turn", 2500.0, 1000.0),
+        ("output tokens per run", 14.0, 7.0),
+        ("turns", 1.0, 1.0),
+        ("forks", 0.0, 0.0),
+        ("captures", 0.0, 0.0),
+        ("refusals", 0.0, 0.0),
+        ("settles: final", 1.0, 0.0),
+        ("settles: max_steps", 0.0, 1.0),
+        ("unmet expectations", 0.0, 1.0),
+    ] {
+        let row = row(name);
+        assert_eq!(row["a"]["runs"], serde_json::json!([a, a]), "{row}");
+        assert_eq!(row["b"]["runs"], serde_json::json!([b, b]), "{row}");
+        let delta = serde_json::json!({"value": b - a, "low": b - a, "high": b - a});
+        assert_eq!(row["delta_median"], delta, "{row}");
+        assert_eq!(row["delta_mean"], delta, "{row}");
+    }
+    let markdown = std::fs::read_to_string(out.join("table.md")).expect("table.md");
+    assert!(
+        markdown.contains("| primary measure (#932): not declared |"),
+        "{markdown}"
+    );
+    assert!(markdown.contains("seed 0"), "{markdown}");
     let _ = std::fs::remove_dir_all(&dir);
 }

@@ -7,7 +7,7 @@
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::Path;
 
-use crate::drive::scenario::{Repeats, RunOptions, Slot, script_digest, slot};
+use crate::drive::scenario::{Repeats, RunOptions, Runs, Slot, script_digest, slot};
 use crate::formats::log::{Run, RunArm};
 use crate::formats::regimen::{self, Regimen, Value};
 
@@ -322,6 +322,24 @@ fn checked(
     })
 }
 
+/// What a pair is read from: the script's digest, and each regimen read
+/// with its bytes' digest.
+type Read = (String, Regimen, String, Regimen, String);
+
+fn read_pair(file: &Path, a: &Path, b: &Path) -> Result<Read, String> {
+    let read = |path: &Path| -> Result<(Regimen, String), String> {
+        let text = std::fs::read_to_string(path)
+            .map_err(|why| format!("{} cannot be read: {why}", path.display()))?;
+        let regimen = regimen::parse(&text)
+            .map_err(|why| format!("{} is not a regimen: {why:?}", path.display()))?;
+        Ok((regimen, crate::digest::sha256_hex(text.as_bytes())))
+    };
+    let script = script_digest(file)?;
+    let (a_read, a_sha256) = read(a)?;
+    let (b_read, b_sha256) = read(b)?;
+    Ok((script, a_read, a_sha256, b_read, b_sha256))
+}
+
 /// Run `options.file` under `a` and under `b`, `repeats.count` times each
 /// (#912), interleaved ABBA ABBA, each arm's repeats in `--out/a/` and
 /// `--out/b/`, and each run's `run` naming its arm, the pair, the script's
@@ -343,18 +361,7 @@ pub fn pair(
         "of": repeats.count,
         "ok": false,
     });
-    let read = |path: &Path| -> Result<(Regimen, String), String> {
-        let text = std::fs::read_to_string(path)
-            .map_err(|why| format!("{} cannot be read: {why}", path.display()))?;
-        let regimen = regimen::parse(&text)
-            .map_err(|why| format!("{} is not a regimen: {why:?}", path.display()))?;
-        Ok((regimen, crate::digest::sha256_hex(text.as_bytes())))
-    };
-    let read = script_digest(&options.file).and_then(|script| {
-        let (a_read, a_sha256) = read(a)?;
-        let (b_read, b_sha256) = read(b)?;
-        Ok((script, a_read, a_sha256, b_read, b_sha256))
-    });
+    let read = read_pair(&options.file, a, b);
     let (script_sha256, a_read, a_sha256, b_read, b_sha256) = match read {
         Ok(read) => read,
         Err(why) => {
@@ -390,6 +397,17 @@ pub fn pair(
         .stop_file
         .clone()
         .unwrap_or_else(|| options.out.join("STOP"));
+    let mut runs = match Runs::create(&options.out) {
+        Ok(runs) => runs,
+        Err(why) => {
+            said["failure"] = serde_json::Value::String(why);
+            return (said, false);
+        }
+    };
+    let mut kept = |line: &serde_json::Value| {
+        runs.keep(line);
+        emit(line);
+    };
     let mut ran: BTreeMap<&str, u64> = BTreeMap::from([("a", 0), ("b", 0)]);
     let mut ok = true;
     for index in 0..repeats.count * 2 {
@@ -414,7 +432,7 @@ pub fn pair(
             &arm_options,
             &run,
             (&stop_file, repeats.void_cap),
-            emit,
+            &mut kept,
         ) {
             Slot::Ran => *ran.entry(tag).or_default() += 1,
             Slot::Stopped => {
@@ -430,6 +448,7 @@ pub fn pair(
             }
         }
     }
+    let ok = runs.report(&mut said) && ok;
     said["ran"] = serde_json::json!(ran);
     said["ok"] = serde_json::Value::Bool(ok);
     (said, ok)

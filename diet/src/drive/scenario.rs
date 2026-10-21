@@ -1700,6 +1700,18 @@ pub fn repeat(
         .stop_file
         .clone()
         .unwrap_or_else(|| options.out.join("STOP"));
+    let mut runs = match Runs::create(&options.out) {
+        Ok(runs) => runs,
+        Err(why) => {
+            said["failure"] = serde_json::Value::String(why);
+            said["ok"] = serde_json::Value::Bool(false);
+            return (said, false);
+        }
+    };
+    let mut kept = |line: &serde_json::Value| {
+        runs.keep(line);
+        emit(line);
+    };
     let mut ran = 0;
     let mut ok = true;
     for repeat in 1..=repeats.count {
@@ -1709,7 +1721,13 @@ pub fn repeat(
             of: repeats.count,
             paired: None,
         };
-        match slot(drive, options, &run, (&stop_file, repeats.void_cap), emit) {
+        match slot(
+            drive,
+            options,
+            &run,
+            (&stop_file, repeats.void_cap),
+            &mut kept,
+        ) {
             Slot::Ran => ran += 1,
             Slot::Stopped => {
                 said["stopped_at"] = serde_json::json!(repeat);
@@ -1723,6 +1741,7 @@ pub fn repeat(
             }
         }
     }
+    let ok = runs.report(&mut said) && ok;
     said["ran"] = serde_json::json!(ran);
     said["ok"] = serde_json::Value::Bool(ok);
     (said, ok)
@@ -1742,6 +1761,54 @@ pub fn script_digest(file: &std::path::Path) -> Result<String, String> {
                 .map_err(|why| why.to_string())
         })
 }
+
+/// A batch's `runs.jsonl` (#914): every line it emits, one per attempt,
+/// kept beside its runs, where `diet-drive table` reads each run's unmet
+/// expectations and whether it was void.
+pub(crate) struct Runs {
+    path: std::path::PathBuf,
+    file: std::fs::File,
+    failed: Option<String>,
+}
+
+impl Runs {
+    /// `runs.jsonl` in `out`, emptied.
+    pub(crate) fn create(out: &std::path::Path) -> Result<Self, String> {
+        let path = out.join(RUNS);
+        let file = std::fs::File::create(&path)
+            .map_err(|why| format!("{} cannot be made: {why}", path.display()))?;
+        Ok(Self {
+            path,
+            file,
+            failed: None,
+        })
+    }
+
+    /// Keep `line`; the first write that fails is reported, never skipped.
+    pub(crate) fn keep(&mut self, line: &serde_json::Value) {
+        use std::io::Write as _;
+        if self.failed.is_none()
+            && let Err(why) = writeln!(self.file, "{line}")
+        {
+            self.failed = Some(format!("{} cannot be written: {why}", self.path.display()));
+        }
+    }
+
+    /// Name the file on the batch's line, and whether every line was kept.
+    pub(crate) fn report(self, said: &mut serde_json::Value) -> bool {
+        said["runs"] = serde_json::Value::String(self.path.display().to_string());
+        match self.failed {
+            None => true,
+            Some(why) => {
+                said["runs_failed"] = serde_json::Value::String(why);
+                false
+            }
+        }
+    }
+}
+
+/// The file a batch keeps its lines in, under its `--out` (#914).
+pub const RUNS: &str = "runs.jsonl";
 
 /// How one repeat's slot ended.
 pub(crate) enum Slot {
