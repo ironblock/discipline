@@ -948,10 +948,14 @@ fn repeats_run_one_after_another_each_naming_its_repeat() {
         );
         let run = serde_json::json!({"script_sha256": digest, "repeat": k, "of": 3});
         let start = first_line(&repeat.join("session.log"));
-        assert_eq!(start["version"], 17, "{start}");
+        assert_eq!(start["version"], diet::formats::log::VERSION, "{start}");
         assert_eq!(start["run"], run, "{start}");
         let record = first_line(&repeat.join("session.record.jsonl"));
-        assert_eq!(record["version"], 3, "{record}");
+        assert_eq!(
+            record["version"],
+            diet::formats::record::VERSION,
+            "{record}"
+        );
         assert_eq!(record["run"], run, "{record}");
         // Repeat k ended before repeat k+1 opened.
         let log = std::fs::read_to_string(repeat.join("session.log")).expect("the log");
