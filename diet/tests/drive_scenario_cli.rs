@@ -1471,3 +1471,283 @@ fn a_pair_batchs_table_holds_the_numbers_its_scenario_set() {
     assert!(markdown.contains("seed 0"), "{markdown}");
     let _ = std::fs::remove_dir_all(&dir);
 }
+
+/// A canned regimen that runs commands, with at most `max_steps` steps a
+/// turn, written as `name` in `dir`.
+fn commanding(dir: &Path, name: &str, max_steps: u32) -> PathBuf {
+    let path = dir.join(name);
+    std::fs::write(
+        &path,
+        format!(
+            "arm = \"grade\"\ndogma_version = 0\nsubstrate = \"canned-scenario\"\n\
+             substrate_reasoning = \"off\"\n\
+             substrate_hardware = \"b6bc80e9e8e4bc2342219f064dab89a8d17c02535600b32b84895fc0b9ba6513\"\n\
+             isolation = \"none\"\napproval = \"none\"\n\
+             approval_policy = \"approvals are off: every command runs without a gate decision or a prompt\"\n\
+             tool_surface = \"standard\"\n[limits]\nmax_steps = {max_steps}\n\
+             [sampler]\ntemperature = 0.6\nseed = 7\n"
+        ),
+    )
+    .expect("the regimen");
+    path
+}
+
+/// The reference stdout check, expecting `main`.
+fn stdout_check() -> String {
+    format!(
+        "python3 -I \"{}\" main",
+        root()
+            .join("diet/scenarios/checks/stdout-equals.py")
+            .display()
+    )
+}
+
+/// A graded task (#942): its ask prints `main` and exits 1, which the
+/// reference check grades wrong, as a stdout task is right only from a call
+/// that exited 0; the first `Graded: wrong` feedback's turn prints `main`
+/// and exits 0, so a check expecting `main` is wrong once and then right.
+/// `grade` is the step's extra keys.
+fn graded(dir: &Path, name: &str, grade: &serde_json::Value) -> PathBuf {
+    let call = |id: &str, command: &str| serde_json::json!([{"id": id, "name": "bash", "arguments": serde_json::json!({"command": command}).to_string()}]);
+    let mut step = serde_json::json!({
+        "step": "grade",
+        "task": "T1",
+        "attempts": 3,
+        "wrong": "Graded: wrong. Expected: {expected}. Got: {got}. Try again in ./{task}.",
+        "last": "Graded: wrong. Expected: {expected}. Got: {got}. No attempts left; moving on.",
+    });
+    for (key, value) in grade.as_object().into_iter().flatten() {
+        step[key] = value.clone();
+    }
+    let lines = [
+        serde_json::json!({"scenario": name, "regimen": "a.toml", "head": root().join("diet/drive/heads/floor.md")}),
+        serde_json::json!({"reply": {"when": "Print the branch name", "text": "On it.", "calls": call("c1", "echo main; exit 1")}}),
+        serde_json::json!({"reply": {"text": "Printed it."}}),
+        serde_json::json!({"reply": {"when": "Graded: wrong", "text": "Again.", "calls": call("c2", "echo main")}}),
+        serde_json::json!({"reply": {"text": "Printed it again."}}),
+        serde_json::json!({"reply": {"when": "Graded: wrong", "text": "Again.", "calls": call("c3", "echo main")}}),
+        serde_json::json!({"reply": {"when": "Graded: wrong", "text": "Moving on."}}),
+        serde_json::json!({"reply": {"when": "Graded: right", "text": "Thanks."}}),
+        serde_json::json!({"step": "ask", "text": "Print the branch name."}),
+        step,
+        serde_json::json!({"step": "end"}),
+    ];
+    let path = dir.join(format!("{name}.jsonl"));
+    let text: String = lines.iter().map(|line| line.to_string() + "\n").collect();
+    std::fs::write(&path, text).expect("the scenario");
+    path
+}
+
+/// The log's lines of `kind`, as JSON.
+fn logged(log: &Path, kind: &str) -> Vec<serde_json::Value> {
+    std::fs::read_to_string(log)
+        .expect("the log")
+        .lines()
+        .map(|line| serde_json::from_str::<serde_json::Value>(line).expect("a JSON line"))
+        .filter(|line| line["kind"] == kind)
+        .collect()
+}
+
+/// #942: a check that fails once and then passes logs two `grade` lines,
+/// sends the `wrong` ask and then the `right` one, then moves on; with
+/// `right` omitted, only the `wrong` ask. Every ask names its task.
+#[test]
+fn a_check_wrong_once_then_right_logs_two_grades_and_sends_its_feedback() {
+    let dir = scratch("grade");
+    commanding(&dir, "a.toml", 4);
+    for (name, right, asks) in [
+        ("with-right", Some("Graded: right."), 3),
+        ("without-right", None, 2),
+    ] {
+        let mut grade = serde_json::json!({"check": stdout_check()});
+        if let Some(right) = right {
+            grade["right"] = serde_json::json!(right);
+        }
+        let file = graded(&dir, name, &grade);
+        let out = dir.join(name);
+        let (code, said) = run(&file, &out);
+        assert_eq!(code, Some(0), "{name}: {said}");
+        let grades = logged(&out.join("session.log"), "grade");
+        let verdicts: Vec<_> = grades
+            .iter()
+            .map(|grade| {
+                (
+                    grade["attempt"].clone(),
+                    grade["right"].clone(),
+                    grade["attempts"].clone(),
+                )
+            })
+            .collect();
+        assert_eq!(
+            verdicts,
+            [
+                (
+                    serde_json::json!(1),
+                    serde_json::json!(false),
+                    serde_json::json!(3)
+                ),
+                (
+                    serde_json::json!(2),
+                    serde_json::json!(true),
+                    serde_json::json!(3)
+                ),
+            ],
+            "{name}"
+        );
+        let digest = diet::digest::sha256_hex(stdout_check().as_bytes());
+        assert!(
+            grades
+                .iter()
+                .all(|grade| grade["check_sha256"] == digest.as_str() && grade["task"] == "T1")
+        );
+        let asked = logged(&out.join("session.log"), "ask");
+        assert_eq!(asked.len(), asks, "{name}: {asked:?}");
+        assert!(
+            asked.iter().all(|ask| ask["task"] == "T1"),
+            "{name}: {asked:?}"
+        );
+        assert_eq!(
+            asked[1]["text"], "Graded: wrong. Expected: main. Got: main. Try again in ./T1.",
+            "{name}"
+        );
+        if let Some(right) = right {
+            assert_eq!(asked[2]["text"], right, "{name}");
+        }
+    }
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// #942: a check that prints no verdict, or changes the worktree, fails
+/// the run void as `grader`, the second naming the path it changed.
+#[test]
+fn a_check_that_crashes_or_changes_the_worktree_voids_the_run() {
+    let dir = scratch("grade-void");
+    commanding(&dir, "a.toml", 4);
+    for (name, check, names) in [
+        ("crashes", "echo not-a-verdict", "no JSON object"),
+        (
+            "writes",
+            r#"touch marker; echo '{"right": true, "expected": "x", "got": "x"}'"#,
+            "marker",
+        ),
+    ] {
+        let file = graded(&dir, name, &serde_json::json!({"check": check}));
+        let (code, said) = run(&file, &dir.join(name));
+        assert_eq!(code, Some(1), "{name}: {said}");
+        assert_eq!(said["void"], "grader", "{name}: {said}");
+        assert!(
+            said["failure"].to_string().contains(names),
+            "{name}: {said}"
+        );
+    }
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// #942: a graded `pair`'s table gains each task's rows. Arm A (four steps)
+/// runs its commands and is right at attempt 2; arm B (one step) never runs
+/// one, so it is never right in its 3 attempts.
+#[test]
+fn a_graded_pairs_table_shows_attempts_to_right_and_never_right() {
+    let dir = scratch("grade-table");
+    let a = commanding(&dir, "a.toml", 4);
+    let b = commanding(&dir, "b.toml", 1);
+    let file = graded(
+        &dir,
+        "graded",
+        &serde_json::json!({"check": stdout_check(), "right": "Graded: right."}),
+    );
+    let out = dir.join("out");
+    let (code, lines) = paired(&file, (&a, &b), &out, &[]);
+    assert_eq!(code, Some(0), "{lines:?}");
+    let ran = Command::new(DRIVE)
+        .arg("table")
+        .arg(&out)
+        .output()
+        .expect("diet-drive runs");
+    assert_eq!(
+        ran.status.code(),
+        Some(0),
+        "{}",
+        String::from_utf8_lossy(&ran.stderr)
+    );
+    let table: serde_json::Value =
+        serde_json::from_str(&std::fs::read_to_string(out.join("table.json")).expect("table.json"))
+            .expect("JSON");
+    let row = |name: &str| {
+        table["rows"]
+            .as_array()
+            .and_then(|rows| rows.iter().find(|row| row["row"] == name))
+            .cloned()
+            .unwrap_or_else(|| panic!("no row {name}: {table}"))
+    };
+    let to_right = row("attempts to right: T1");
+    assert_eq!(
+        to_right["a"]["runs"],
+        serde_json::json!([2.0]),
+        "{to_right}"
+    );
+    assert_eq!(
+        to_right["b"]["runs"],
+        serde_json::json!([null]),
+        "{to_right}"
+    );
+    let never = row("never right: T1");
+    assert_eq!(never["a"]["runs"], serde_json::json!([0.0]), "{never}");
+    assert_eq!(never["b"]["runs"], serde_json::json!([1.0]), "{never}");
+    assert_eq!(
+        never["delta_median"]["value"],
+        serde_json::json!(1.0),
+        "{never}"
+    );
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// #942: `script` derives a graded run's grade step back -- its task, its
+/// attempts and the feedback texts the run sent -- and no ask step of the
+/// feedback asks, which the step sends; the check, which the log keeps
+/// only the digest of, is written to fail until it is supplied.
+#[test]
+fn a_graded_runs_script_derives_its_grade_step() {
+    let dir = scratch("grade-script");
+    commanding(&dir, "a.toml", 4);
+    let file = graded(
+        &dir,
+        "graded",
+        &serde_json::json!({"check": stdout_check(), "right": "Graded: right."}),
+    );
+    let out = dir.join("run");
+    let (code, said) = run(&file, &out);
+    assert_eq!(code, Some(0), "{said}");
+    let derived = dir.join("derived");
+    let (code, stdout, stderr) = script(&out.join("session.log"), &derived, None);
+    assert_eq!(code, Some(0), "{stdout}{stderr}");
+    let steps: Vec<serde_json::Value> = std::fs::read_to_string(derived.join("script.jsonl"))
+        .expect("the script")
+        .lines()
+        .skip(1)
+        .map(|line| serde_json::from_str(line).expect("a JSON line"))
+        .filter(|line: &serde_json::Value| line.get("step").is_some())
+        .collect();
+    let kinds: Vec<_> = steps
+        .iter()
+        .map(|step| step["step"].as_str().unwrap_or(""))
+        .collect();
+    assert_eq!(kinds, ["ask", "grade", "end"], "{steps:?}");
+    assert_eq!(steps[0]["task"], "T1");
+    let grade = &steps[1];
+    assert_eq!(grade["task"], "T1");
+    assert_eq!(grade["attempts"], 3);
+    assert_eq!(
+        grade["wrong"],
+        "Graded: wrong. Expected: main. Got: main. Try again in ./T1."
+    );
+    assert_eq!(grade["right"], "Graded: right.");
+    let digest = diet::digest::sha256_hex(stdout_check().as_bytes());
+    assert!(
+        grade["check"]
+            .as_str()
+            .is_some_and(|check| check.contains(&digest) && check.ends_with("exit 1")),
+        "{grade}"
+    );
+    let _ = std::fs::remove_dir_all(&dir);
+}

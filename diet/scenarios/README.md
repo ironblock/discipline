@@ -75,7 +75,8 @@ The format has no grammar of its own, so it has no directory under `diet/formats
 
 | step | keys | |
 |---|---|---|
-| `ask` | `text`, `scoping`?, `refused`?, `attach`? | posted; with `refused`, it must be refused with that tag; each `attach` path, a PNG in the worktree, is uploaded through `POST /files` and attached by its digest |
+| `ask` | `text`, `scoping`?, `refused`?, `attach`?, `task`? | posted; with `refused`, it must be refused with that tag; each `attach` path, a PNG in the worktree, is uploaded through `POST /files` and attached by its digest; `task` names the task it asks on its `ask` line |
+| `grade` | `task`, `check`, `wrong`, `attempts`?, `last`?, `right`?, `before`?, `timeout_s`? | grades the turn the `ask` right before it settled; see "Grading a task" below |
 | `flag` | `pick`, `note`, `as`? | flags the entry `pick` names and binds it to the name `as` |
 | `edit` | `pick`, `text`, `as`? | edits it; the operator's new entry is bound |
 | `declare-meditation` | | |
@@ -93,6 +94,50 @@ The format has no grammar of its own, so it has no directory under `diet/formats
 - `patience` (optional) on a step it waits after -- an ask to be admitted, `declare-meditation`, `refill-anyway`, `rule-phase`, `start-phase`, `propose-phase` or `move-phase` -- is how long, in whole seconds above 0, that wait may take before the drive fails; absent, 900. A live re-fire whose turns run long names one, and always a number: a hung run still ends. Any other step refuses it.
 - `pick` names a live entry, read from `GET /memory`: a number is its place in id order, and text is the first entry whose content holds it.
 - `place` (optional, an object) on any step is for a reader. The runner never reads it. An operator script writes it (below).
+
+## Grading a task (#942)
+
+A `grade` step comes right after the admitted `ask` of its task. That ask asks the task: its own `task`, or the step's. The step gives the task `attempts` tries (3 unless given), the first being the ask's.
+- **After each attempt settles,** the runner runs `check` and logs its verdict as a `grade` line (log v18): the turn, `task`, `attempt` of `attempts`, `right`, `timed_out` when the check ran out of time, and the check's `check_sha256`. Serve logs the line and never sends it to the model.
+  - **Right:** the runner sends `right` as an ask, when it is given, and moves on.
+  - **Wrong, with attempts left:** it sends `wrong` as the next attempt's ask.
+  - **Wrong on the last attempt:** it sends `last`, when it is given, and moves on.
+  - Every feedback ask names the task.
+  - The templates take `{expected}`, `{got}` (clipped at 1,500 characters, `(nothing)` when blank), `{task}`, `{attempt}` and `{attempts}`.
+- **The check** is the operator's command.
+  - **Who runs it:** the runner, not serve, so it runs outside the model's sandbox, as `bash -c` in the session's worktree, in its own process group.
+  - **Its environment:** the runner's, plus:
+    - `DIET_GRADE_TASK`;
+    - `DIET_GRADE_ATTEMPT`;
+    - `DIET_GRADE_SCENARIO_DIR`, the scenario file's directory;
+    - `DIET_GRADE_TURN`;
+    - `DIET_GRADE_BEFORE`, when the step has a `before`.
+  - **Its output:** one JSON line, `{"right": bool, "expected": str, "got": str}`, the last it prints.
+  - **When it fails:**
+    - A check past `timeout_s` (30 unless given) is killed, its process group with it. The attempt is wrong, with `got` "(the check timed out)".
+    - A check that prints no such line fails the run, void as `grader`.
+- **`DIET_GRADE_TURN`** is a file, outside the worktree and gone once the check has run. It is written from the session's log once the log holds every line, and holds the latest turn:
+  - `task`, `attempt`, `turn`;
+  - `answer`, its last trunk response's text;
+  - `calls`, each `tool_call` with its `seq`, `name`, `outcome`, `exit`, and its `stdout` and `stderr` as `{text, bytes}`.
+
+  A stream past what a call holds in memory (#734) is in the log as its head and tail alone. Its `bytes` then exceed its text's: it is not whole. Its whole in the recording is joined with its other stream, as the model saw them, so the file can't carry it apart.
+- **The check never changes what the model sees.**
+  - The runner lists the worktree's entries before and after each check, by path, mode, size and modification time in nanoseconds. A check that added, removed or changed one fails the run, void as `grader`, naming the paths.
+  - **What it costs:** one `lstat` per entry, twice per attempt, and no bytes read, so a worktree holding a dependency tree stays cheap.
+  - **What it can't do:** with no bytes from before, it can't tell a write that left the bytes as they were from one that changed them. A changed modification time alone, a `touch`, counts as a change, which the model could see.
+- **`before`** (optional) runs before each attempt's ask, under the same guard. Its stdout reaches the check as the file `DIET_GRADE_BEFORE`: for a task that must change nothing, compare the state before and after.
+- **[`checks/stdout-equals.py`](checks/stdout-equals.py)** is a reference check for a stdout task, `python3 -I stdout-equals.py EXPECTED`. The task is right when a `bash` call in the turn ran, exited 0, and printed the expected text as its whole stdout (CRLF read as LF, trailing whitespace stripped).
+- **The record** has no row for a `grade` line. The projection names it in `unspellable`, as graded by the runner. A results check that needs grades reads the log.
+- **`script`** derives a graded run's grade step back:
+  - its task and its `attempts`;
+  - for `wrong`, `last` and `right`, the texts the run sent, filled, not their templates;
+  - no ask step of the feedback asks, which the step sends.
+
+  The log keeps the check's digest, not the check, so the derived `check` fails, naming the digest, until it is written.
+- **`table`** gains two rows per task:
+  - attempts to right: the first right grade's `attempt`, none when none is;
+  - never right: 1 when no grade is right, 0 when one is.
 
 ## `expect`: what the log must show
 

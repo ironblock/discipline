@@ -359,6 +359,9 @@ export type RequestRetried = V0.RequestRetriedLine;
 /** A trunk request held until the forks in flight settled, its prompt and the clamp's floor not fitting beside them
  * (v8, #782). Folded, not yet drawn: the kitchen sink writes one since its window grew (#931). */
 export type TrunkWaited = V0.TrunkWaitedLine;
+/** A scenario runner's grade of an attempt, at the operator's word and never sent to the model (v18, #942). Folded,
+ * not yet drawn. */
+export type Grade = V0.GradeLine;
 
 export type LogLine =
   | SessionStart
@@ -391,6 +394,7 @@ export type LogLine =
   | TimeoutNear
   | ForkSkipped
   | RequestRetried
+  | Grade
   | TrunkWaited
   | WarrantGated
   | Flag

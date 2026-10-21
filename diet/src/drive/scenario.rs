@@ -138,7 +138,14 @@ pub enum Step {
         /// Worktree files uploaded through `POST /files` and attached to
         /// the ask by their digests (#372).
         attach: Vec<String>,
+        /// The task it asks (#942): its own `task`, or the `grade` step's
+        /// after it.
+        task: Option<String>,
     },
+    /// The turn just settled, graded by the operator's check, its verdict
+    /// sent as the next ask until it is right or its attempts run out
+    /// (#942).
+    Grade(Box<Grading>),
     /// The operator picks the phase the session starts in, before the first
     /// ask (#788).
     StartPhase {
@@ -217,6 +224,35 @@ pub enum Step {
     End,
 }
 
+/// A `grade` step (#942).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Grading {
+    /// The task graded.
+    pub task: String,
+    /// The check: a command the runner runs in the worktree, printing
+    /// `{"right", "expected", "got"}`.
+    pub check: String,
+    /// How many attempts the task is given, the first the `ask`'s.
+    pub attempts: u64,
+    /// The ask a wrong attempt with attempts left sends.
+    pub wrong: String,
+    /// The ask a wrong last attempt sends, when given.
+    pub last: Option<String>,
+    /// The ask a right attempt sends, when given.
+    pub right: Option<String>,
+    /// A command run before each attempt's ask, its stdout handed to the
+    /// check, when given.
+    pub before: Option<String>,
+    /// How long the check, or `before`, may run.
+    pub timeout: std::time::Duration,
+}
+
+/// A grade step's attempts unless it names its own.
+pub const GRADE_ATTEMPTS: u64 = 3;
+
+/// How long a check may run unless its step names its own `timeout_s`.
+pub const GRADE_TIMEOUT_S: u64 = 30;
+
 impl Scenario {
     /// How long step `at` may take to settle: its `patience`, or
     /// [`STEP_PATIENCE`].
@@ -234,7 +270,8 @@ impl Step {
     fn settles(&self) -> bool {
         match self {
             Self::Ask { refused, .. } => refused.is_none(),
-            Self::DeclareMeditation
+            Self::Grade(_)
+            | Self::DeclareMeditation
             | Self::RefillAnyway
             | Self::RulePhase { .. }
             | Self::StartPhase { .. }
@@ -746,6 +783,28 @@ pub fn parse(text: &str) -> Result<Scenario, ScenarioError> {
             if let Some(seconds) = patience {
                 scenario.patience.insert(scenario.steps.len(), seconds);
             }
+            // A grade grades the ask just before it, which asks its task.
+            if let Step::Grade(grading) = &step {
+                match scenario.steps.last_mut() {
+                    Some(Step::Ask {
+                        refused: None,
+                        task: task @ None,
+                        ..
+                    }) => *task = Some(grading.task.clone()),
+                    Some(Step::Ask {
+                        refused: None,
+                        task: Some(asked),
+                        ..
+                    }) if *asked == grading.task => {}
+                    _ => {
+                        return Err(ScenarioError::Line(
+                            at,
+                            "wanted a `grade` right after the admitted `ask` of its task"
+                                .to_owned(),
+                        ));
+                    }
+                }
+            }
             scenario.steps.push(step);
         } else if fields.has("expect") {
             let expect = expect_of(fields, &names)?;
@@ -935,7 +994,9 @@ fn step_of(mut fields: Fields) -> Result<(Step, Option<u64>), ScenarioError> {
                     .collect::<Result<_, _>>()?,
                 Some(_) => return Err(fields.wrong("`attach` a list")),
             },
+            task: fields.maybe_text("task")?,
         },
+        "grade" => Step::Grade(Box::new(grading_of(&mut fields)?)),
         "start-phase" => Step::StartPhase {
             phase: fields.text("phase")?,
         },
@@ -992,6 +1053,32 @@ fn step_of(mut fields: Fields) -> Result<(Step, Option<u64>), ScenarioError> {
     }
     fields.done()?;
     Ok((step, patience))
+}
+
+/// A `grade` step's fields (#942).
+fn grading_of(fields: &mut Fields) -> Result<Grading, ScenarioError> {
+    let attempts = fields.maybe_count("attempts")?.unwrap_or(GRADE_ATTEMPTS);
+    if attempts == 0 {
+        return Err(fields.wrong("`attempts` 1 or more"));
+    }
+    let timeout = fields.maybe_count("timeout_s")?.unwrap_or(GRADE_TIMEOUT_S);
+    if timeout == 0 {
+        return Err(fields.wrong("`timeout_s` whole seconds above 0"));
+    }
+    let task = fields.text("task")?;
+    if task.trim().is_empty() {
+        return Err(fields.wrong("`task` a name"));
+    }
+    Ok(Grading {
+        task,
+        check: fields.text("check")?,
+        attempts,
+        wrong: fields.text("wrong")?,
+        last: fields.maybe_text("last")?,
+        right: fields.maybe_text("right")?,
+        before: fields.maybe_text("before")?,
+        timeout: std::time::Duration::from_secs(timeout),
+    })
 }
 
 /// A line's `where`: each field and what it must be, `key` equal to the
@@ -1128,6 +1215,13 @@ pub struct Driver {
     authorization: Option<String>,
     /// Where the model's commands run: what an ask's `attach` reads from.
     worktree: Option<std::path::PathBuf>,
+    /// The session's log, which a `grade` step reads its turn from (#942).
+    log: Option<std::path::PathBuf>,
+    /// The scenario's directory, named to a grade's commands (#942).
+    scenario_dir: Option<std::path::PathBuf>,
+    /// Why the drive failed void, when it did for a reason outside the
+    /// model (#910, #942): a check that crashed.
+    voided: std::cell::Cell<Option<&'static str>>,
 }
 
 /// Why a drive stopped short of its last step, or a run failed.
@@ -1157,7 +1251,192 @@ impl Driver {
             authorization: user_password
                 .map(|pair| format!("Basic {}", crate::drive::serve::base64(pair.as_bytes()))),
             worktree: None,
+            log: None,
+            scenario_dir: None,
+            voided: std::cell::Cell::new(None),
         }
+    }
+
+    /// This driver, a `grade` step reading its turn from the log at `log`.
+    #[must_use]
+    pub fn logging_to(mut self, log: std::path::PathBuf) -> Self {
+        self.log = Some(log);
+        self
+    }
+
+    /// This driver, naming `dir` to a grade's commands as
+    /// `DIET_GRADE_SCENARIO_DIR` (#942).
+    #[must_use]
+    pub fn for_scenario_in(mut self, dir: std::path::PathBuf) -> Self {
+        self.scenario_dir = Some(dir);
+        self
+    }
+
+    /// What every grade command is told: the scenario's directory.
+    fn grade_env(&self) -> Vec<(&'static str, String)> {
+        self.scenario_dir
+            .iter()
+            .map(|dir| ("DIET_GRADE_SCENARIO_DIR", dir.display().to_string()))
+            .collect()
+    }
+
+    /// Why the drive failed void, when it did (#942).
+    #[must_use]
+    pub fn voided(&self) -> Option<&'static str> {
+        self.voided.get()
+    }
+
+    /// `why`, the drive marked void for `cause`.
+    fn void(&self, cause: &'static str, why: String) -> Failure {
+        self.voided.set(Some(cause));
+        Failure(why)
+    }
+
+    /// The log's lines, once it holds every line `/state` names.
+    fn logged(&self) -> Result<Vec<crate::formats::log::Line>, Failure> {
+        let path = self.log.as_ref().ok_or_else(|| {
+            Failure("a grade step reads the session's log, and none is kept".to_owned())
+        })?;
+        let last = self.last_seq()?;
+        let give_up = std::time::Instant::now() + std::time::Duration::from_secs(10);
+        loop {
+            let text = std::fs::read_to_string(path)
+                .map_err(|why| Failure(format!("{} cannot be read: {why}", path.display())))?;
+            let read = crate::formats::log::read(&text)
+                .map_err(|why| Failure(format!("{}: {why}", path.display())))?;
+            if read.lines.last().is_some_and(|line| line.seq >= last) {
+                return Ok(read.lines);
+            }
+            if std::time::Instant::now() >= give_up {
+                return Err(Failure(format!(
+                    "{} did not reach seq {last} in 10 s",
+                    path.display()
+                )));
+            }
+            std::thread::sleep(std::time::Duration::from_millis(50));
+        }
+    }
+
+    /// The worktree a grade's commands run in.
+    fn grading_in(&self) -> Result<&std::path::Path, Failure> {
+        self.worktree.as_deref().ok_or_else(|| {
+            Failure(
+                "a grade step runs in the worktree, and the regimen runs no commands".to_owned(),
+            )
+        })
+    }
+
+    /// A grade's `before` command's stdout, run guarded in the worktree.
+    fn before(&self, grading: &Grading) -> Result<Option<String>, Failure> {
+        let Some(command) = &grading.before else {
+            return Ok(None);
+        };
+        let ran = crate::drive::grade::guarded(
+            command,
+            self.grading_in()?,
+            &self.grade_env(),
+            grading.timeout,
+        )
+        .map_err(|why| self.void("grader", why))?;
+        if ran.timed_out {
+            return Err(self.void(
+                "grader",
+                format!("the grade's `before` ran out of time: {command}"),
+            ));
+        }
+        Ok(Some(ran.stdout))
+    }
+
+    /// Grade the turn just settled (#942): run the check, log its verdict,
+    /// and send the feedback ask its template names, each wrong attempt
+    /// with attempts left asked again, until it is right or the attempts
+    /// run out.
+    fn graded(
+        &self,
+        grading: &Grading,
+        mut before: Option<String>,
+        (approvals, patience): (Option<&str>, std::time::Duration),
+    ) -> Result<(), Failure> {
+        use crate::drive::grade::{Verdict, feedback, guarded, turn_of};
+        let worktree = self.grading_in()?.to_path_buf();
+        let check_sha256 = crate::digest::sha256_hex(grading.check.as_bytes());
+        for attempt in 1..=grading.attempts {
+            let turn = turn_of(&self.logged()?, (&grading.task, attempt));
+            // The check's inputs, outside the worktree, gone once it ran.
+            let inputs = fresh("grade")?;
+            let turn_file = inputs.join("turn.json");
+            std::fs::write(&turn_file, format!("{turn:#}\n"))
+                .map_err(|why| Failure(format!("the turn file cannot be written: {why}")))?;
+            let mut env = self.grade_env();
+            env.extend([
+                ("DIET_GRADE_TASK", grading.task.clone()),
+                ("DIET_GRADE_ATTEMPT", attempt.to_string()),
+                ("DIET_GRADE_TURN", turn_file.display().to_string()),
+            ]);
+            if let Some(text) = &before {
+                let file = inputs.join("before.txt");
+                std::fs::write(&file, text)
+                    .map_err(|why| Failure(format!("the before file cannot be written: {why}")))?;
+                env.push(("DIET_GRADE_BEFORE", file.display().to_string()));
+            }
+            let ran = guarded(&grading.check, &worktree, &env, grading.timeout);
+            let _ = std::fs::remove_dir_all(&inputs);
+            let ran = ran.map_err(|why| self.void("grader", why))?;
+            let verdict = if ran.timed_out {
+                Verdict {
+                    right: false,
+                    expected: String::new(),
+                    got: "(the check timed out)".to_owned(),
+                }
+            } else {
+                Verdict::read(&ran.stdout).map_err(|why| {
+                    self.void(
+                        "grader",
+                        format!("{why}; its stderr: {}", ran.stderr.trim()),
+                    )
+                })?
+            };
+            let mut grade = serde_json::json!({
+                "kind": "grade",
+                "task": grading.task,
+                "attempt": attempt,
+                "attempts": grading.attempts,
+                "right": verdict.right,
+                "check_sha256": check_sha256,
+            });
+            if ran.timed_out {
+                grade["timed_out"] = serde_json::Value::Bool(true);
+            }
+            self.command(&grade)?;
+            let again = !verdict.right && attempt < grading.attempts;
+            let template = if verdict.right {
+                grading.right.as_ref()
+            } else if again {
+                Some(&grading.wrong)
+            } else {
+                grading.last.as_ref()
+            };
+            if again {
+                before = self.before(grading)?;
+            }
+            if let Some(template) = template {
+                let text = feedback(
+                    template,
+                    &verdict,
+                    &grading.task,
+                    (attempt, grading.attempts),
+                );
+                self.asked(
+                    (&text, false, &[], Some(&grading.task)),
+                    None,
+                    (approvals, patience),
+                )?;
+            }
+            if !again {
+                break;
+            }
+        }
+        Ok(())
     }
 
     /// This driver, reading an ask's attachments from `worktree`.
@@ -1368,13 +1647,16 @@ impl Driver {
     /// see it refused with that tag.
     fn asked(
         &self,
-        (text, scoping, attach): (&str, bool, &[String]),
+        (text, scoping, attach, task): (&str, bool, &[String], Option<&str>),
         refused: Option<&str>,
         (approvals, patience): (Option<&str>, std::time::Duration),
     ) -> Result<(), Failure> {
         let mut ask = serde_json::json!({"kind": "ask", "text": text});
         if scoping {
             ask["scoping"] = serde_json::Value::Bool(true);
+        }
+        if let Some(task) = task {
+            ask["task"] = serde_json::Value::String(task.to_owned());
         }
         if !attach.is_empty() {
             let files = attach
@@ -1446,6 +1728,7 @@ pub fn drive(scenario: &Scenario, driver: &Driver) -> Result<Bindings, Failure> 
     let mut bound = Bindings::new();
     let mut mark = driver.last_seq()?;
     let mut tangent: Option<&str> = None;
+    let mut before: Option<String> = None;
     for (at, step) in scenario.steps.iter().enumerate() {
         let failed = |why: Failure| Failure(format!("step {}: {why}", at + 1));
         match step {
@@ -1454,14 +1737,26 @@ pub fn drive(scenario: &Scenario, driver: &Driver) -> Result<Bindings, Failure> 
                 scoping,
                 refused,
                 attach,
+                task,
             } => {
+                // A grade's `before` runs before its task's first ask (#942).
+                before = match scenario.steps.get(at + 1) {
+                    Some(Step::Grade(grading)) => driver.before(grading).map_err(failed)?,
+                    _ => None,
+                };
                 mark = driver.last_seq().map_err(failed)?;
                 driver
                     .asked(
-                        (text, *scoping, attach),
+                        (text, *scoping, attach, task.as_deref()),
                         refused.as_deref(),
                         (approvals, scenario.patience(at)),
                     )
+                    .map_err(failed)?;
+            }
+            Step::Grade(grading) => {
+                mark = driver.last_seq().map_err(failed)?;
+                driver
+                    .graded(grading, before.take(), (approvals, scenario.patience(at)))
                     .map_err(failed)?;
             }
             Step::Flag { pick, note, bind } => {
@@ -2251,11 +2546,21 @@ fn running(
             Failure(format!("serve did not start: {first}")),
         ));
     };
-    let mut driver = Driver::new(listening, Some(&user_password));
+    let mut driver = Driver::new(listening, Some(&user_password)).logging_to(log.clone());
+    if let Some(dir) = std::path::absolute(&options.file)
+        .ok()
+        .and_then(|file| file.parent().map(std::path::Path::to_path_buf))
+    {
+        driver = driver.for_scenario_in(dir);
+    }
     if let Some(worktree) = worktree {
         driver = driver.in_worktree(worktree);
     }
     let outcome = self::drive(&scenario, &driver);
+    // A check that crashed (#942): void, whatever else the run says.
+    if let Some(cause) = driver.voided() {
+        said["void"] = serde_json::Value::String(cause.to_owned());
+    }
     if outcome.is_err() {
         let _ = driver.command(&serde_json::json!({"kind": "end"}));
     }
@@ -2437,12 +2742,14 @@ mod tests {
                     scoping: true,
                     refused: None,
                     attach: Vec::new(),
+                    task: None,
                 },
                 Step::Ask {
                     text: "what is in shot.png".to_owned(),
                     scoping: false,
                     refused: None,
                     attach: vec!["shot.png".to_owned()],
+                    task: None,
                 },
                 Step::OpenTangent {
                     id: "t/1".to_owned(),
@@ -2471,6 +2778,7 @@ mod tests {
                     scoping: false,
                     refused: Some("meditation-held".to_owned()),
                     attach: Vec::new(),
+                    task: None,
                 },
                 Step::RefillAnyway,
                 Step::RulePhase {
@@ -2853,5 +3161,66 @@ mod tests {
         assert_eq!(line["void"], "serve", "{line}");
         assert_eq!(line["failure"], "serve did not start", "{line}");
         assert_eq!(line["log"], "none", "{line}");
+    }
+
+    /// #942: a grade grades the admitted ask just before it, which then
+    /// asks its task; anywhere else, or after an ask of another task, it is
+    /// refused, naming its line.
+    #[test]
+    fn a_grade_step_follows_the_ask_of_its_task() {
+        let header = r#"{"scenario":"g","regimen":"r.toml","head":"h.md"}"#;
+        let grade = r#"{"step":"grade","task":"T1","check":"true","wrong":"no"}"#;
+        let read = parse(&format!(
+            "{header}\n{{\"step\":\"ask\",\"text\":\"go\"}}\n{grade}\n"
+        ))
+        .expect("a grade after its ask");
+        assert!(matches!(&read.steps[0], Step::Ask { task: Some(task), .. } if task == "T1"));
+        let Step::Grade(grading) = &read.steps[1] else {
+            panic!("a grade step: {:?}", read.steps[1]);
+        };
+        assert_eq!(
+            (grading.attempts, grading.timeout.as_secs()),
+            (GRADE_ATTEMPTS, GRADE_TIMEOUT_S)
+        );
+        for (before, why) in [
+            ("", "first"),
+            (r#"{"step":"end"}"#, "after an end"),
+            (
+                r#"{"step":"ask","text":"go","task":"T2"}"#,
+                "after another task's ask",
+            ),
+            (
+                r#"{"step":"ask","text":"go","refused":"in-flight"}"#,
+                "after a refused ask",
+            ),
+        ] {
+            let refused = parse(&format!("{header}\n{before}\n{grade}\n").replace("\n\n", "\n"))
+                .expect_err(why);
+            assert!(
+                refused
+                    .to_string()
+                    .contains("right after the admitted `ask`"),
+                "{why}: {refused}"
+            );
+        }
+        for (bad, why) in [
+            (
+                r#"{"step":"grade","task":"T1","check":"true","wrong":"no","attempts":0}"#,
+                "no attempts",
+            ),
+            (
+                r#"{"step":"grade","task":" ","check":"true","wrong":"no"}"#,
+                "a blank task",
+            ),
+            (r#"{"step":"grade","task":"T1","check":"true"}"#, "no wrong"),
+        ] {
+            assert!(
+                parse(&format!(
+                    "{header}\n{{\"step\":\"ask\",\"text\":\"go\"}}\n{bad}\n"
+                ))
+                .is_err(),
+                "{why}"
+            );
+        }
     }
 }

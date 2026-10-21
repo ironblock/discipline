@@ -4,8 +4,8 @@
 // i64, and a JavaScript number is exact only to 2^53. A `timings`
 // millisecond may carry a fraction, written as the server wrote it.
 
-export const VERSION = 17;
-export const READS = [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17] as const;
+export const VERSION = 18;
+export const READS = [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18] as const;
 export const PRESENCE_WINDOW_MS = 2000;
 
 export type Kind =
@@ -50,6 +50,7 @@ export type Kind =
   | "trunk.waited"
   | "warrant.gated"
   | "request.retried"
+  | "grade"
 ;
 
 export type State =
@@ -82,6 +83,7 @@ export type Command =
   | "start-phase"
   | "propose-phase"
   | "move-phase"
+  | "grade"
 ;
 
 export type Refusal =
@@ -414,7 +416,7 @@ export type SessionStartLine = {
   seq: number;
   t: number;
   kind: "session.start";
-  version: 0 | 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9 | 10 | 11 | 12 | 13 | 14 | 15 | 16 | 17;
+  version: 0 | 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9 | 10 | 11 | 12 | 13 | 14 | 15 | 16 | 17 | 18;
   opened: number;
   model: string;
   head: HeadMessage[];
@@ -463,6 +465,7 @@ export type AskLine = {
   text: string;
   scoping?: boolean;
   files?: RecordedFile[];
+  task?: string;
 };
 
 export type SettlementLine = {
@@ -950,6 +953,19 @@ export type RequestRetriedLine = {
   wait_ms: number;
 };
 
+export type GradeLine = {
+  seq: number;
+  t: number;
+  kind: "grade";
+  turn: number;
+  task: string;
+  attempt: number;
+  attempts: number;
+  right: boolean;
+  timed_out?: boolean;
+  check_sha256: string;
+};
+
 export type LogLine =
   | SessionStartLine
   | AskLine
@@ -992,4 +1008,5 @@ export type LogLine =
   | TrunkWaitedLine
   | WarrantGatedLine
   | RequestRetriedLine
+  | GradeLine
 ;

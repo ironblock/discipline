@@ -215,6 +215,15 @@
 //! reader of v16 logs, the migration is nothing: a v16 session was no
 //! repeat anyone counted.
 //!
+//! v18 (#942) adds the scenario runner's grades: the `grade` line, one per
+//! graded attempt -- its `turn`, `task`, `attempt` of `attempts`, whether it was `right`,
+//! `timed_out` when the check ran out of time, and the check command's
+//! `check_sha256` -- logged from the operator command `grade`, which no
+//! request carries; and an optional `task` on `ask`, the task an ask asks
+//! or answers the grade of. A log that declares 17 or less and carries any
+//! of them is refused. For a reader of v17 logs, the migration is nothing:
+//! no v17 session was graded.
+//!
 //! # A torn final line
 //!
 //! A writer killed mid-write leaves the start of an event with no line break
@@ -246,10 +255,12 @@ use super::record::vocabulary;
 struct LogParser;
 
 /// The version this module writes, as `session.start` states it.
-pub const VERSION: i64 = 17;
+pub const VERSION: i64 = 18;
 
 /// Every version this module reads.
-pub const READS: &[i64] = &[0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17];
+pub const READS: &[i64] = &[
+    0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18,
+];
 
 /// How recent an input event must be, at the moment a turn settles, for the
 /// person to count as already present: `notice` is then zero (Q4 (a), ruled
@@ -359,6 +370,9 @@ vocabulary! {
         /// A hosted API's 429 or 529, retried (v13, #555): the next attempt
         /// of the same request, after a wait.
         RequestRetried => "request.retried",
+        /// A scenario runner's grade of an attempt (v18, #942): logged at the
+        /// operator's word, never sent to the model.
+        Grade => "grade",
     }
 }
 
@@ -605,6 +619,8 @@ vocabulary! {
         ProposePhase => "propose-phase",
         /// The operator moved the phase alone (v8, #788).
         MovePhase => "move-phase",
+        /// A scenario runner graded an attempt (v18, #942).
+        Grade => "grade",
     }
 }
 
@@ -1351,6 +1367,9 @@ pub enum Event {
         /// model as image parts of this message, never inlined here (v5,
         /// #372, ruled at 5989411005).
         files: Option<Vec<RecordedFile>>,
+        /// The task it asks, or answers the grade of (v18, #942), as the
+        /// scenario's `grade` step names it.
+        task: Option<String>,
     },
     /// The state moved.
     Settlement {
@@ -1707,6 +1726,25 @@ pub enum Event {
         /// Each line, in order: the patch it delivers and the template it
         /// was written with.
         lines: Vec<NoteLine>,
+    },
+    /// A scenario runner's grade of an attempt (v18, #942), at the
+    /// operator's word: never sent to the model.
+    Grade {
+        /// The turn graded.
+        turn: u32,
+        /// The task, as the scenario's `grade` step names it.
+        task: String,
+        /// Which attempt, from 1.
+        attempt: u64,
+        /// How many attempts the task is given: `attempt` is at most it.
+        attempts: u64,
+        /// Whether the check found it right.
+        right: bool,
+        /// The check ran out of time, and the attempt is wrong: `true`, or
+        /// absent.
+        timed_out: Option<bool>,
+        /// The sha256 of the check command's text.
+        check_sha256: String,
     },
     /// The operator flagged an entry (v7, #150): a note on it, kept until a
     /// meditation addresses it. The entry is unchanged.
@@ -3857,6 +3895,7 @@ fn from_object(object: &BTreeMap<String, Value>) -> Result<Line, String> {
                 scoping => scoping,
             },
             files: fields.optional_files("files")?,
+            task: fields.optional_string("task")?,
         },
         Kind::Settlement => Event::Settlement {
             from: fields.tag("from", State::from_tag)?,
@@ -4417,6 +4456,34 @@ fn from_object(object: &BTreeMap<String, Value>) -> Result<Line, String> {
             turn: fields.turn("turn")?,
             entry: fields.string("entry")?,
             note: fields.string("note")?,
+        },
+        Kind::Grade => Event::Grade {
+            turn: fields.turn("turn")?,
+            task: fields.string("task")?,
+            attempt: match fields.count("attempt")? {
+                0 => return Err("`attempt` is 0: attempts count from 1".to_owned()),
+                attempt if attempt > fields.count("attempts")? => {
+                    return Err(format!(
+                        "`attempt` {attempt} is past `attempts` {}",
+                        fields.count("attempts")?
+                    ));
+                }
+                attempt => attempt,
+            },
+            attempts: fields.count("attempts")?,
+            right: fields
+                .optional_flag("right")?
+                .ok_or("a `grade` carries no `right`")?,
+            timed_out: match fields.optional_flag("timed_out")? {
+                Some(false) => {
+                    return Err(
+                        "`timed_out` is `false`: only `true` is written, and absent is in time"
+                            .to_owned(),
+                    );
+                }
+                timed_out => timed_out,
+            },
+            check_sha256: fields.digest("check_sha256")?,
         },
         Kind::MeditationHeld => Event::MeditationHeld {
             at_turn: fields.turn("at_turn")?,
@@ -5469,6 +5536,26 @@ const fn must_v8(key: &'static str, holds: Holds) -> Field {
     }
 }
 
+/// A key that arrived in v18, optional wherever its object is written.
+const fn may_v18(key: &'static str, holds: Holds) -> Field {
+    Field {
+        key,
+        holds,
+        required: false,
+        since: 18,
+    }
+}
+
+/// A key that arrived in v18 and is required wherever its object is written.
+const fn must_v18(key: &'static str, holds: Holds) -> Field {
+    Field {
+        key,
+        holds,
+        required: true,
+        since: 18,
+    }
+}
+
 /// A key that arrived in v17, optional wherever its object is written.
 const fn may_v17(key: &'static str, holds: Holds) -> Field {
     Field {
@@ -5721,6 +5808,7 @@ pub fn introduced(kind: Kind) -> i64 {
         | Kind::TrunkWaited
         | Kind::WarrantGated => 8,
         Kind::RequestRetried => 13,
+        Kind::Grade => 18,
         _ => 0,
     }
 }
@@ -5764,6 +5852,9 @@ pub fn tag_introduced(tags: Tags, tag: &str) -> i64 {
     }
     if tags == Tags::Warrant && Warrant::from_tag(tag) == Some(Warrant::Refutation) {
         return 9;
+    }
+    if tags == Tags::Command && Command::from_tag(tag) == Some(Command::Grade) {
+        return 18;
     }
     if tags == Tags::Refusal
         && matches!(
@@ -5946,6 +6037,7 @@ pub fn schema(kind: Kind) -> &'static [Field] {
                 must("text", Text),
                 may_v5("scoping", Holds::Flag),
                 may_v5("files", Holds::Files),
+                may_v18("task", Text),
             ];
             F
         }
@@ -6363,6 +6455,18 @@ pub fn schema(kind: Kind) -> &'static [Field] {
                 must_v7("turn", Count),
                 must_v7("entry", Text),
                 must_v7("note", Text),
+            ];
+            F
+        }
+        Kind::Grade => {
+            const F: &[Field] = &[
+                must_v18("turn", Count),
+                must_v18("task", Text),
+                must_v18("attempt", Count),
+                must_v18("attempts", Count),
+                must_v18("right", Holds::Flag),
+                may_v18("timed_out", Holds::Flag),
+                must_v18("check_sha256", Holds::Digest),
             ];
             F
         }
@@ -6915,9 +7019,13 @@ fn to_value(line: &Line) -> Value {
             text: asked,
             scoping,
             files,
+            task,
         } => {
             put("turn", count(u64::from(*turn)));
             put("text", text(asked));
+            if let Some(task) = task {
+                put("task", text(task));
+            }
             if let Some(scoping) = scoping {
                 put("scoping", Value::Boolean(*scoping));
             }
@@ -7711,6 +7819,26 @@ fn to_value(line: &Line) -> Value {
             put("entry", text(entry));
             put("note", text(note));
             Kind::Flag
+        }
+        Event::Grade {
+            turn,
+            task,
+            attempt,
+            attempts,
+            right,
+            timed_out,
+            check_sha256,
+        } => {
+            put("turn", count(u64::from(*turn)));
+            put("task", text(task));
+            put("attempt", count(*attempt));
+            put("attempts", count(*attempts));
+            put("right", Value::Boolean(*right));
+            if let Some(timed_out) = timed_out {
+                put("timed_out", Value::Boolean(*timed_out));
+            }
+            put("check_sha256", text(check_sha256));
+            Kind::Grade
         }
         Event::MeditationHeld {
             at_turn,
@@ -9017,13 +9145,15 @@ mod tests {
         assert!(refused.why.contains("v8"), "{refused}");
     }
 
-    /// #583, #878, #904, #555, #931, #936, #910: this module writes v17.
+    /// #583, #878, #904, #555, #931, #936, #910, #942: this module writes v18.
     #[test]
-    fn this_module_writes_v17_and_reads_every_version_before_it() {
-        assert_eq!(super::VERSION, 17);
+    fn this_module_writes_v18_and_reads_every_version_before_it() {
+        assert_eq!(super::VERSION, 18);
         assert_eq!(
             super::READS,
-            &[0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17]
+            &[
+                0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18
+            ]
         );
     }
 
@@ -9101,6 +9231,7 @@ mod tests {
                 text: "say hi".to_owned(),
                 scoping: None,
                 files: None,
+                task: Some("t1".to_owned()),
             },
             Event::Settlement {
                 from: State::Awaiting,
@@ -9147,6 +9278,7 @@ mod tests {
                 text: "again".to_owned(),
                 scoping: None,
                 files: None,
+                task: None,
             },
             Event::Settlement {
                 from: State::Awaiting,
@@ -9191,6 +9323,7 @@ mod tests {
                 text: "once more".to_owned(),
                 scoping: None,
                 files: None,
+                task: None,
             },
             Event::Settlement {
                 from: State::Awaiting,
@@ -9255,6 +9388,7 @@ mod tests {
                 text: "a very long one".to_owned(),
                 scoping: None,
                 files: None,
+                task: None,
             },
             Event::Settlement {
                 from: State::Awaiting,
@@ -9340,6 +9474,7 @@ mod tests {
                     media_type: "image/png".to_owned(),
                     bytes: 48_213,
                 }]),
+                task: None,
             },
             Event::Settlement {
                 from: State::Awaiting,
@@ -9701,6 +9836,15 @@ mod tests {
             retry_after: None,
             attempt: 2,
             wait_ms: 4_000,
+        });
+        events.push(Event::Grade {
+            turn: 5,
+            task: "t1".to_owned(),
+            attempt: 2,
+            attempts: 3,
+            right: false,
+            timed_out: Some(true),
+            check_sha256: "c".repeat(64),
         });
         events
             .into_iter()
@@ -11048,7 +11192,7 @@ mod tests {
             tags(Kind::ALL.iter().map(|it| it.tag()).collect()),
             "session.start ask settlement request refused delta stop.asked response \
              cancelled request.failed turn.settled idle.gap progress tool_call fork \
-             fork.settled patch meditation delivered recalled flag meditation.held patch.refused pruned phase.ruled phase.proposed phase.answered phase.started tangent.open tangent.close capture reminded background.ended notice timeout.near fork.skipped phase.noted trunk.clamped trunk.waited warrant.gated request.retried"
+             fork.settled patch meditation delivered recalled flag meditation.held patch.refused pruned phase.ruled phase.proposed phase.answered phase.started tangent.open tangent.close capture reminded background.ended notice timeout.near fork.skipped phase.noted trunk.clamped trunk.waited warrant.gated request.retried grade"
         );
         assert_eq!(
             tags(FailReason::ALL.iter().map(|it| it.tag()).collect()),

@@ -51,6 +51,9 @@ pub struct Receipts {
     pub settles: BTreeMap<String, u64>,
     /// Unmet expectations, from `runs.jsonl`.
     pub unmet: u64,
+    /// Each graded task (#942): the attempt its first right grade came at,
+    /// or none when no grade of it was right.
+    pub tasks: BTreeMap<String, Option<u64>>,
 }
 
 impl Receipts {
@@ -95,6 +98,17 @@ impl Receipts {
                         receipts.turn_ms.push(line.t.saturating_sub(*at));
                     }
                 }
+                Event::Grade {
+                    task,
+                    attempt,
+                    right,
+                    ..
+                } => {
+                    let first = receipts.tasks.entry(task.clone()).or_default();
+                    if *right && first.is_none() {
+                        *first = Some(*attempt);
+                    }
+                }
                 Event::Fork { .. } => receipts.forks += 1,
                 Event::Patch { .. } => receipts.captures += 1,
                 Event::Refused { .. } => receipts.refusals += 1,
@@ -127,7 +141,7 @@ fn count(n: u64) -> f64 {
     n as f64
 }
 
-fn rows(reasons: &BTreeSet<String>) -> Vec<Row> {
+fn rows(reasons: &BTreeSet<String>, tasks: &BTreeSet<String>) -> Vec<Row> {
     let row = |name: &str, source: &'static str, value: Box<dyn Fn(&Receipts) -> f64>| Row {
         name: name.to_owned(),
         source,
@@ -198,6 +212,26 @@ fn rows(reasons: &BTreeSet<String>) -> Vec<Row> {
             name: format!("settles: {reason}"),
             source: "`turn.settled` lines, by `reason`",
             value: Box::new(move |r| count(r.settles.get(&reason).copied().unwrap_or(0))),
+        });
+    }
+    for task in tasks {
+        let (first, never) = (task.clone(), task.clone());
+        rows.push(Row {
+            name: format!("attempts to right: {task}"),
+            source: "`grade` lines of the task: the first `right: true`'s `attempt`; none when none is",
+            value: Box::new(move |r| match r.tasks.get(&first) {
+                Some(Some(attempt)) => count(*attempt),
+                _ => f64::NAN,
+            }),
+        });
+        rows.push(Row {
+            name: format!("never right: {task}"),
+            source: "`grade` lines of the task: 1 when none is `right: true`, 0 when one is; none when it was not graded",
+            value: Box::new(move |r| match r.tasks.get(&never) {
+                Some(Some(_)) => 0.0,
+                Some(None) => 1.0,
+                None => f64::NAN,
+            }),
         });
     }
     rows.push(row(
@@ -496,6 +530,11 @@ pub fn table(dir: &Path, seed: u64) -> Result<(serde_json::Value, String), Strin
         .chain(&b)
         .flat_map(|r| r.settles.keys().cloned())
         .collect();
+    let tasks: BTreeSet<String> = a
+        .iter()
+        .chain(&b)
+        .flat_map(|r| r.tasks.keys().cloned())
+        .collect();
     let mut draws = Draws(seed);
     let mut json_rows = Vec::new();
     let mut markdown = String::new();
@@ -505,7 +544,7 @@ pub fn table(dir: &Path, seed: u64) -> Result<(serde_json::Value, String), Strin
     );
     let _ = writeln!(markdown, "| --- | --- | --- | --- | --- | --- |");
     let _ = writeln!(markdown, "| {PRIMARY_MEASURE} | | | | | |");
-    for row in rows(&reasons) {
+    for row in rows(&reasons, &tasks) {
         let (json, line) = laid_out(&row, (&a, &b), &mut draws);
         json_rows.push(json);
         markdown.push_str(&line);

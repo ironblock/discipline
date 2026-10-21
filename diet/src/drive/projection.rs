@@ -968,6 +968,23 @@ impl<'a> Walk<'a> {
         }
     }
 
+    /// A scenario runner's grade (#942): no row, as the session did not
+    /// grade it; a results check that needs grades reads the log. Named
+    /// once.
+    fn graded(&mut self, line: &log::Line) {
+        let kind = log::Kind::Grade.tag();
+        if self.named_kinds.insert(kind) {
+            self.name(
+                line.seq,
+                kind,
+                "the record has no row for a `grade` line: graded by the runner, not the session; \
+                 a results check reads the log"
+                    .to_owned(),
+                None,
+            );
+        }
+    }
+
     /// A fact the record has no row for at all, named once per kind.
     fn no_row(&mut self, line: &log::Line) {
         let kind = match &line.event {
@@ -1146,6 +1163,7 @@ impl<'a> Walk<'a> {
             // The trunk's own self-capture patch (#609): no fork row to
             // count it on, as its `capture` line has none.
             | Line::Patch { fork: None, .. } => self.no_row(line),
+            Line::Grade { .. } => self.graded(line),
             // A tool call (v3, #302): its row carries how it ran under the
             // log's own words, so the record says what confined it.
             Line::ToolCall { .. }
@@ -2384,6 +2402,7 @@ mod tests {
                 text: "say hello".to_owned(),
                 scoping: None,
                 files: None,
+                task: None,
             },
             Line::Settlement {
                 from: State::Awaiting,
@@ -2785,6 +2804,7 @@ mod tests {
                     text: "say hello".to_owned(),
                     scoping: None,
                     files: None,
+                    task: None,
                 },
                 Line::Settlement {
                     from: State::Awaiting,

@@ -234,7 +234,7 @@ fn derived(lines: &[Map<String, Value>], priming: Option<&str>) -> Result<Derive
         .and_then(|suffix| head.strip_suffix(&suffix).map(str::to_owned))
         .unwrap_or(head);
 
-    let mut steps = Vec::new();
+    let mut steps: Vec<Value> = Vec::new();
     let mut files = BTreeMap::new();
     let mut live = Live::default();
     let mut lane_of: BTreeMap<u64, String> = BTreeMap::new();
@@ -244,6 +244,9 @@ fn derived(lines: &[Map<String, Value>], priming: Option<&str>) -> Result<Derive
     let mut held_open = false;
     let mut approvals: Option<(String, u64)> = None;
     let mut awaiting = false;
+    // The open grade step (#942): its task, its index among the steps, and
+    // the latest grade of it, which the next ask of its task answers.
+    let mut grading: Option<OpenGrade> = None;
 
     for line in lines {
         let kind = text(line, "kind").unwrap_or_default();
@@ -267,9 +270,65 @@ fn derived(lines: &[Map<String, Value>], priming: Option<&str>) -> Result<Derive
                         .unwrap_or_default(),
                 ));
             }
+            // A feedback ask (#942): the grade step sends it, so it is no
+            // step of its own; its text, filled, stands in for its template.
+            "ask" if fed_back(grading.as_ref(), text(line, "task")) => {
+                if let Some((_, at, Some((attempt, attempts, right)))) = grading
+                    .as_mut()
+                    .map(|(task, at, last)| (task, *at, last.take()))
+                {
+                    let key = if right {
+                        "right"
+                    } else if attempt < attempts {
+                        "wrong"
+                    } else {
+                        "last"
+                    };
+                    if steps[at][key].as_str().is_none_or(str::is_empty) {
+                        steps[at][key] = json!(text(line, "text").unwrap_or_default());
+                    }
+                }
+            }
+            "grade" => {
+                let task = text(line, "task").unwrap_or_default().to_owned();
+                let attempt = line.get("attempt").and_then(Value::as_u64).unwrap_or(1);
+                let attempts = line
+                    .get("attempts")
+                    .and_then(Value::as_u64)
+                    .unwrap_or(attempt);
+                let right = line.get("right").and_then(Value::as_bool).unwrap_or(false);
+                let open = grading.as_ref().is_some_and(|(open, _, _)| *open == task);
+                if attempt == 1 || !open {
+                    let sha = text(line, "check_sha256").unwrap_or_default();
+                    steps.push(json!({
+                        "step": "grade",
+                        "task": task,
+                        "check": format!(
+                            "echo 'the run graded with a check its log keeps only the sha256 of \
+                             ({sha}): write the check here' >&2; exit 1"
+                        ),
+                        "attempts": attempts,
+                        "wrong": "",
+                        "place": {
+                            "turn": turn,
+                            "between": true,
+                            "note": "the log keeps the check's sha256, not the check, and the feedback \
+                                     asks filled, not their templates: `check` fails until it is \
+                                     written, and `wrong`, `last` and `right` are the run's texts",
+                        },
+                    }));
+                    grading = Some((task, steps.len() - 1, None));
+                }
+                if let Some((_, _, last)) = grading.as_mut() {
+                    *last = Some((attempt, attempts, right));
+                }
+            }
             "ask" => {
                 let mut step =
                     json!({"step": "ask", "text": text(line, "text").unwrap_or_default()});
+                if let Some(task) = text(line, "task") {
+                    step["task"] = json!(task);
+                }
                 if line.get("scoping").and_then(Value::as_bool) == Some(true) {
                     step["scoping"] = json!(true);
                 }
@@ -529,6 +588,17 @@ fn derived(lines: &[Map<String, Value>], priming: Option<&str>) -> Result<Derive
     })
 }
 
+/// The open grade step (#942): its task, its index among the steps, and
+/// the latest grade of it -- attempt, attempts, right -- until an ask
+/// answers it.
+type OpenGrade = (String, usize, Option<(u64, u64, bool)>);
+
+/// Whether an ask of `task` answers the open grade step's latest grade:
+/// the feedback the step itself sends (#942).
+fn fed_back(grading: Option<&OpenGrade>, task: Option<&str>) -> bool {
+    grading.is_some_and(|(open, _, last)| last.is_some() && Some(open.as_str()) == task)
+}
+
 /// `log`'s operator lines, each with what the operator put in and what it
 /// did, and nothing a run decides on its own -- no `seq`, no `t`, an entry
 /// named by its text rather than its id: what a derived script's replay
@@ -537,6 +607,7 @@ fn derived(lines: &[Map<String, Value>], priming: Option<&str>) -> Result<Derive
 /// # Errors
 ///
 /// A log that does not read.
+#[allow(clippy::too_many_lines)]
 pub fn operator_lines(log: &str) -> Result<Vec<Value>, Refusal> {
     let lines = lines_of(log)?;
     let mut texts: BTreeMap<String, String> = BTreeMap::new();
@@ -562,8 +633,16 @@ pub fn operator_lines(log: &str) -> Result<Vec<Value>, Refusal> {
             Value::Object(object)
         };
         match kind {
+            "grade" => out.push(pick(&[
+                "turn",
+                "task",
+                "attempt",
+                "attempts",
+                "right",
+                "timed_out",
+            ])),
             "ask" => {
-                let mut ask = pick(&["turn", "text", "scoping"]);
+                let mut ask = pick(&["turn", "text", "scoping", "task"]);
                 let digests: Vec<Value> = line
                     .get("files")
                     .and_then(Value::as_array)
