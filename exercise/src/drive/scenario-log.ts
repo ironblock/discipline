@@ -60,8 +60,9 @@ const REFERENCES = new Set(['request', 'to_request', 'fork', 'at', 'cut', 'after
 const TRIGGER_AT = /^([a-z_]+):(\d+)$/;
 /** Fields that name the build that ran, not what it wrote. */
 const BUILD = new Set(['build_commit', 'build_dirty']);
-/** Fields that are wall time on the machine that ran, as `t` is: a gate's call latency (#862). */
-const CLOCK = new Set(['latency_ms']);
+/** Fields that are wall time on the machine that ran, as `t` is: a gate's call latency (#862), and how long a trunk
+ * request waited for the forks in flight (`trunk.waited`, #782). */
+const CLOCK = new Set(['latency_ms', 'wait_ms']);
 
 type Line = Readonly<Record<string, unknown>> & { readonly seq: number; readonly kind: string };
 

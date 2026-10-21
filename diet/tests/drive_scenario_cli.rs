@@ -170,7 +170,7 @@ fn a_windowed_canned_substrate_fires_the_budget_and_the_window_meditations() {
          isolation = \"none\"\napproval = \"none\"\n\
          approval_policy = \"approvals are off: every command runs without a gate decision or a prompt\"\n\
          interview_warrant = [\"scoping\"]\ncapture_modality = \"fields\"\n\
-         max_output_tokens = 512\nmeditation_at_context_fraction = 0.2\n\
+         max_output_tokens = 512\nmeditation_at_context_fraction = 0.1276\n\
          [limits]\nmax_steps = 4\n[sampler]\ntemperature = 0.6\n",
     )
     .expect("the regimen");
@@ -191,7 +191,7 @@ fn a_windowed_canned_substrate_fires_the_budget_and_the_window_meditations() {
         r#"{"step":"ask","text":"Print it: a long line."}"#,
         r#"{"step":"end"}"#,
         r#"{"expect":"meditation","name":"budget","where":{"reason":"budget","at_turn":"1"}}"#,
-        r#"{"expect":"meditation","where":{"reason":"window","at_turn":"3","window":"24000"},"after":"budget"}"#,
+        r#"{"expect":"meditation","where":{"reason":"window","at_turn":"3","window":"37615"},"after":"budget"}"#,
     ]
     .join("\n");
     let file = dir.join("windowed.jsonl");
@@ -319,7 +319,7 @@ fn run_of(out: &Path) -> (Vec<String>, std::collections::BTreeMap<String, Vec<u8
         .into_iter()
         .map(|mut event| {
             let object = event.as_object_mut().expect("an object");
-            for key in ["t", "seq", "opened", "cwd", "latency_ms"] {
+            for key in ["t", "seq", "opened", "cwd", "latency_ms", "wait_ms"] {
                 object.remove(key);
             }
             for key in REFERENCES {

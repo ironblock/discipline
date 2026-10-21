@@ -971,6 +971,9 @@ export function fold(written: readonly LogLine[]): Session {
       // A hosted API's 429 or 529, retried (#555): the request's own attempt, drawn on no node yet.
       case 'request.retried':
         break;
+      // A trunk request held for the forks in flight (#782): its wait, drawn on no node yet.
+      case 'trunk.waited':
+        break;
       // A step's warrant-gate decision (#850): one line per probe, onto the step it decided (#862).
       case 'warrant.gated':
         gated.set(e.request, [...(gated.get(e.request) ?? []), e]);

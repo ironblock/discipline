@@ -25,7 +25,7 @@ export function kitchenSinkExample(log: readonly LogLine[], previous: Previous |
       `written by diet-drive scenario ${KITCHEN_SINK_SCENARIO} on the canned scenario substrate: every line is diet's own, the model's replies are the scenario's`,
       "the run's temporary and home paths are written /work/..., and its background jobs bg_1, bg_2, ... (src/drive/scenario-log.ts)",
       "retimed: every t is placed on assumed rates (src/drive/retime.ts), not measured, and reads nothing of the run's clock: a tool's run is its timeout_ms when it timed out, else 150 ms",
-      `stitched: each gate's latency_ms (wall time, never compared) is carried from the example this one replaced, by lane and place (src/drive/scenario-log.ts): ${carried} carried, ${own} this run's own`,
+      `stitched: each wall-clock field (a gate's latency_ms, a trunk wait's wait_ms; never compared) is carried from the example this one replaced, by lane and place (src/drive/scenario-log.ts): ${carried} carried, ${own} this run's own`,
       "concurrent: a stopped background job's background.ended is placed by the reaper when it sees the job end, concurrent with the step that stopped it, so a regeneration may move it (#896)",
       ...declarationsKept(previous?.migration ?? [], images),
     ],
