@@ -2354,6 +2354,15 @@ struct Flight {
     cancel: Cancel,
 }
 
+/// Where a session's forks run (#570, #931).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum ForkSeat {
+    /// On the trunk's server, in its window.
+    Warm,
+    /// On an offboard seat, in the seat's own window.
+    Offboard,
+}
+
 struct State {
     settlement: Settlement,
     trunk: Vec<Message>,
@@ -2452,6 +2461,10 @@ struct State {
     /// The turn that last meditated and went again after an overflow (#617):
     /// once per turn.
     overflow_retried: Option<u32>,
+    /// Where the session's forks run (#570): on an offboard seat a fork
+    /// takes nothing of the trunk's window, and the reserve keeps no fork's
+    /// room (#931).
+    fork_seat: ForkSeat,
     /// A meditation queued for its audit or pre-warm (#504), until [`meditation_work`]
     /// takes it.
     meditation_pending: Option<PendingMeditation>,
@@ -2630,6 +2643,7 @@ impl State {
             sent_estimate: None,
             last_sized: None,
             overflow_retried: None,
+            fork_seat: ForkSeat::Warm,
             meditation_pending: None,
             meditating: None,
             held: None,
@@ -3427,6 +3441,7 @@ impl<S: Streaming + 'static> Session<S> {
             self.shared.seat.set(seat).is_ok(),
             "a session is seated once"
         );
+        self.shared.lock().fork_seat = ForkSeat::Offboard;
         self
     }
 
@@ -7346,8 +7361,8 @@ fn one_call<S: Streaming>(
     };
     // In the background (#614): one bare trailing `&` comes off, as Qwen
     // Code takes it off, before the gate judges the command.
-    // Its timeout (#613): its own, or the session's default; refused in
-    // Qwen Code's words when it is not one.
+    // Its timeout (#613): its own, 0 for none (#931), or the session's
+    // default; refused in Qwen Code's words when it is not one.
     let timeout = match tool_loop::timeout_of(&call.arguments) {
         Ok(own) => own.or(tools.timeout_ms),
         Err(why) => return (refused(log::ToolRefusal::Unparsable), Some(why.to_owned())),
@@ -8110,8 +8125,13 @@ fn refilled(
             outputs.as_ref().map_or("", |(text, _)| text.as_str()),
             background.as_deref().unwrap_or_default(),
         );
-    if let Some(line) = window_line(template)
-        && rendered.tokens + around > line
+    if let Some(line) = window_line(
+        template,
+        (
+            state.interview.as_ref(),
+            state.fork_seat == ForkSeat::Offboard,
+        ),
+    ) && rendered.tokens + around > line
     {
         let room = line.saturating_sub(around);
         if budget.is_none_or(|budget| budget.tokens > room) {
@@ -8257,9 +8277,14 @@ fn fitted_items(
             .push(Message::new(Role::User, ask.text.clone()));
         state.prompt_of(&shape)
     };
-    let Some(line) =
-        audit_line(template).filter(|line| asking(&items).is_some_and(|ask| sized(&ask) > *line))
-    else {
+    let Some(line) = audit_line(
+        template,
+        (
+            state.interview.as_ref(),
+            state.fork_seat == ForkSeat::Offboard,
+        ),
+    )
+    .filter(|line| asking(&items).is_some_and(|ask| sized(&ask) > *line)) else {
         return (Some(items), None);
     };
     // The operator's first, then the newest.
@@ -8317,30 +8342,72 @@ fn chosen_of(
     kept.into_iter().map(|at| items[at].clone()).collect()
 }
 
-/// The window's line (#617, #814): the window less its reserve -- the
-/// output cap, or [`crate::meditation::policy::WINDOW_RESERVE`] if more --
-/// when serve knows the window.
 /// The line an audit's prompt is fitted to: the window less the clamp's
 /// margin and the output cap, so the clamp leaves the answer its whole cap
 /// -- an audit fitted to the window's line alone left it what the margin
 /// did not take (11,765 of 32,768 on a 524,288 window, its answer cut off
 /// before the operator's flag); never above the window's line.
-fn audit_line(template: &RequestShape) -> Option<u64> {
+fn audit_line(
+    template: &RequestShape,
+    (interview, seated): (Option<&Interview>, bool),
+) -> Option<u64> {
     let window = template.limits.context_window?;
     let margin = u64::try_from(margin(i128::from(window))).unwrap_or(u64::MAX);
     let room = window
         .saturating_sub(margin)
         .saturating_sub(u64::from(template.limits.max_output_tokens));
-    Some(window_line(template).map_or(room, |line| line.min(room)))
+    Some(window_line(template, (interview, seated)).map_or(room, |line| line.min(room)))
 }
 
-fn window_line(template: &RequestShape) -> Option<u64> {
-    let reserve =
-        u64::from(template.limits.max_output_tokens).max(crate::meditation::policy::WINDOW_RESERVE);
-    template
-        .limits
-        .context_window
-        .map(|window| window.saturating_sub(reserve))
+/// The automatic meditation's reserve of `window` (#617, #931): the native
+/// reserve ([`crate::meditation::policy::native_reserve`]), and, with
+/// interview forks on, a fork's room on top -- the longest ask its ask set
+/// holds and its output cap. The maintainer (#931): "we _need_ to reserve
+/// more to create room for interview forks". The second belongs to the
+/// interview lever, so a session with interviews off reserves exactly the
+/// native room. Forks on an offboard seat (`seated`) run in the seat's own
+/// window and take nothing of the trunk's: their room is 0, and how they
+/// fit the seat stays [`State::fork_fit`]'s.
+fn reserve_of(
+    window: u64,
+    template: &RequestShape,
+    (interview, seated): (Option<&Interview>, bool),
+) -> (u64, Option<u64>) {
+    let fork_room = interview
+        .filter(|interview| !interview.rules.is_empty() || interview.refutation.is_some())
+        .map(|interview| {
+            if seated {
+                return 0;
+            }
+            let ask = interview
+                .asks
+                .files()
+                .iter()
+                .map(|(_, text)| {
+                    u64::try_from(text.chars().count().div_ceil(4)).unwrap_or(u64::MAX)
+                })
+                .max()
+                .unwrap_or(0);
+            ask.saturating_add(u64::from(fork_ceiling(
+                interview.fork_tail,
+                template.limits.max_output_tokens,
+            )))
+        });
+    (crate::meditation::policy::native_reserve(window), fork_room)
+}
+
+/// The window's line (#617, #814): the window less its reserve
+/// ([`reserve_of`]), when serve knows the window.
+fn window_line(
+    template: &RequestShape,
+    (interview, seated): (Option<&Interview>, bool),
+) -> Option<u64> {
+    template.limits.context_window.map(|window| {
+        let (native, forks) = reserve_of(window, template, (interview, seated));
+        window
+            .saturating_sub(native)
+            .saturating_sub(forks.unwrap_or(0))
+    })
 }
 
 /// The estimated tokens of the refill message's text around its render:
@@ -9613,10 +9680,9 @@ fn audit_folded(
 /// `shape`: when serve knows the window, the regimen has not turned it off
 /// ([`crate::meditation::policy::MEDITATION_WINDOW`]), no tangent is open, working
 /// memory holds an entry and the trunk holds turns the refill would drop,
-/// and the prompt as sized (#588) would leave less than
-/// [`crate::meditation::policy::WINDOW_RESERVE`] -- or the output cap, if more --
-/// of the window: the trunk is refilled, and the turn's own messages so far
-/// ride after the refill as they rode after the trunk. Otherwise the request
+/// and the prompt as sized (#588) would leave less than the reserve
+/// ([`reserve_of`]) of the window: the trunk is refilled, and the turn's own
+/// messages so far ride after the refill as they rode after the trunk. Otherwise the request
 /// goes as it is, as Pi, `OpenCode` 2 and Qwen Code all send it when there is
 /// nothing to compact.
 fn window_meditation(
@@ -9642,14 +9708,15 @@ fn window_meditation(
         .trunk
         .get(template.messages.len() + usize::from(state.refilled)..)
         .unwrap_or_default();
-    let reserve =
-        u64::from(template.limits.max_output_tokens).max(crate::meditation::policy::WINDOW_RESERVE);
-    let (ask, steps, keep_from) = split_turn(
-        &shape.messages[state.trunk.len()..],
-        crate::meditation::policy::keep_recent_budget(window, reserve),
+    let (native, fork_room) = reserve_of(
+        window,
+        template,
+        (Some(interview), state.fork_seat == ForkSeat::Offboard),
     );
+    let reserve = native.saturating_add(fork_room.unwrap_or(0));
+    let (ask, steps, keep_from) = split_turn(&shape.messages[state.trunk.len()..]);
     // Nothing to drop: no turn before this one past the tail, and none of
-    // this turn's steps past its budget (#813).
+    // this turn's steps before its last (#813, #931).
     if crate::meditation::render::tail(turns, interview.meditations.tail_tokens).len()
         == turns.len()
         && keep_from <= ask
@@ -9661,8 +9728,8 @@ fn window_meditation(
         return false;
     }
     let mut own = shape.messages.split_off(state.trunk.len());
-    // The running turn split (#813): its ask, then its most recent whole
-    // steps within the budget; the steps before them are compacted.
+    // The running turn split (#813, #931): its ask, then its last step --
+    // the pending call and its result; the steps before it are compacted.
     let kept = own.split_off(keep_from);
     let dropped = own.split_off(ask);
     let riding: Vec<Message> = own.iter().chain(&kept).cloned().collect();
@@ -9674,6 +9741,8 @@ fn window_meditation(
             Some(log::MeditationFired {
                 prompt_tokens: prompt,
                 window,
+                native_reserve: Some(native),
+                fork_room,
             }),
         ),
         None,
@@ -9711,10 +9780,16 @@ fn compacted_out(state: &mut State, shape: &RequestShape, exchange: &mut Vec<Mes
 
 /// Where the running turn's own messages `own` -- its ask, then its steps,
 /// each an assistant message and what follows it up to the next -- split
-/// (#813): the ask's length, the step count, and the index the kept steps
-/// start at: the most recent whole steps within `budget` tokens, the last
-/// always kept. A call is never parted from its result.
-fn split_turn(own: &[Message], budget: u64) -> (usize, u64, usize) {
+/// (#813): the ask's length, the step count, and the index the kept step
+/// starts at. Only the last step is kept: the pending call and its result,
+/// as Qwen Code keeps
+/// (`qc:packages/core/src/services/chatCompressionService.ts:570-574,627-648`
+/// at `v0.25.3`), where Pi (about 20,000 tokens,
+/// `pi:packages/coding-agent/src/core/settings-defaults.ts:12` at `v1.3.0`)
+/// and `OpenCode` 2 (a flat 15,000,
+/// `oc:packages/core/src/session/compaction.ts:197` at `v2.0.32`) differ
+/// (#931). A call is never parted from its result.
+fn split_turn(own: &[Message]) -> (usize, u64, usize) {
     let starts: Vec<usize> = own
         .iter()
         .enumerate()
@@ -9722,17 +9797,7 @@ fn split_turn(own: &[Message], budget: u64) -> (usize, u64, usize) {
         .map(|(at, _)| at)
         .collect();
     let ask = starts.first().copied().unwrap_or(own.len());
-    let mut keep_from = own.len();
-    for (nth, start) in starts.iter().rev().enumerate() {
-        let tokens: u64 = own[*start..]
-            .iter()
-            .map(crate::meditation::render::estimated_tokens)
-            .sum();
-        if nth > 0 && tokens > budget {
-            break;
-        }
-        keep_from = *start;
-    }
+    let keep_from = starts.last().copied().unwrap_or(own.len());
     (ask, starts.len() as u64, keep_from)
 }
 
@@ -18049,8 +18114,45 @@ pub(in crate::drive) mod tests {
         tidy(&[&tree]);
     }
 
-    /// A call's own `timeout` (#613) wins over a session with none, and one
-    /// out of range is refused in Qwen Code's words.
+    /// A call's `timeout` of 0 runs it with no timeout, past the session's
+    /// default (#931), as `OpenCode` 2's call and Qwen Code's setting have
+    /// it; and a call far past the old 600000 ms bound is taken.
+    #[test]
+    fn a_calls_timeout_of_zero_runs_past_the_sessions_default() {
+        let tree = scratch("timeout-zero");
+        let session = timing(
+            &tree,
+            Some(300),
+            vec![
+                vec![Step::call(
+                    0,
+                    "call-1",
+                    "bash",
+                    r#"{"command":"sleep 1; echo woke","timeout":0}"#,
+                )],
+                vec![Step::call(
+                    0,
+                    "call-2",
+                    "bash",
+                    r#"{"command":"echo long","timeout":3600000}"#,
+                )],
+                deltas(&["done"]),
+            ],
+        );
+        session.ask("wait for it", None).expect("accepted");
+        let log = wait_until(&session, "the turn", settled);
+        let written = lines(&log);
+        assert_eq!(written[0].outcome, log::ToolOutcome::Ran);
+        assert_eq!(written[0].timeout_ms, None, "no timeout ended it");
+        assert_eq!(written[0].shown.as_deref(), Some("woke\n"));
+        assert_eq!(written[1].outcome, log::ToolOutcome::Ran);
+        assert_eq!(written[1].shown.as_deref(), Some("long\n"));
+        reads_whole(&session);
+        tidy(&[&tree]);
+    }
+
+    /// A call's own `timeout` (#613) wins over a session with none, and a
+    /// negative one is refused.
     #[test]
     fn a_calls_own_timeout_ends_it_and_a_bad_one_is_refused() {
         let tree = scratch("timeout-own");
@@ -18068,7 +18170,7 @@ pub(in crate::drive) mod tests {
                     0,
                     "call-2",
                     "bash",
-                    r#"{"command":"ls","timeout":700000}"#,
+                    r#"{"command":"ls","timeout":-1}"#,
                 )],
                 deltas(&["done"]),
             ],
@@ -18087,7 +18189,7 @@ pub(in crate::drive) mod tests {
         assert_eq!(written[1].outcome, log::ToolOutcome::Refused);
         assert_eq!(
             written[1].shown.as_deref(),
-            Some("Timeout cannot exceed 600000ms (10 minutes).")
+            Some("Timeout must be 0 or a positive number.")
         );
         let Event::Started {
             bash_timeout_ms, ..
@@ -20435,7 +20537,11 @@ pub(in crate::drive) mod tests {
     #[test]
     fn a_refill_past_the_windows_line_is_elided_to_fit_and_says_so() {
         let mut shape = template();
-        shape.limits.context_window = Some(crate::meditation::policy::WINDOW_RESERVE + 600);
+        shape.limits.context_window = Some(window_for_line(
+            600,
+            &shape,
+            Some(&interviewing(&[log::Warrant::Scoping])),
+        ));
         let session = Session::open_with(
             Canned::new(vec![deltas(&[SCOPED]), deltas(&[DECIDED])]),
             shape,
@@ -20508,10 +20614,13 @@ pub(in crate::drive) mod tests {
         let mut shape = template();
         // Its prompt sized as its request is, with the pad an unmeasured
         // prompt carries (#588): 2,000 tokens of room past it.
-        shape.limits.context_window =
-            Some(crate::meditation::policy::WINDOW_RESERVE + 2_000 + ESTIMATE_PAD);
         let mut interview = interviewing(&[log::Warrant::Scoping]);
         interview.meditations.audit = true;
+        shape.limits.context_window = Some(window_for_line(
+            2_000 + ESTIMATE_PAD,
+            &shape,
+            Some(&interview),
+        ));
         let session = Session::open_with(
             Canned::new(vec![
                 deltas(&[SCOPED]),
@@ -20595,6 +20704,20 @@ pub(in crate::drive) mod tests {
         }
     }
 
+    /// The window whose line (#617, #931) is `line` tokens for `shape` and
+    /// `interview`: the window less its native reserve and, with forks on,
+    /// a fork's room. Searched above 33,000, where the native reserve is a
+    /// flat 33,000, as the old tests' 20,000 was.
+    fn window_for_line(line: u64, shape: &RequestShape, interview: Option<&Interview>) -> u64 {
+        let mut shape = shape.clone();
+        (crate::meditation::policy::NATIVE_RESERVE_MIN + 1..=u64::from(u32::MAX))
+            .find(|window| {
+                shape.limits.context_window = Some(*window);
+                window_line(&shape, (interview, false)) == Some(line)
+            })
+            .expect("a window with that line")
+    }
+
     /// A session auditing at its meditations, in a `window` with output cap
     /// `cap`, past its first scoping turn: its fork answered.
     fn auditing(window: u64, cap: u32) -> Session<Canned> {
@@ -20663,8 +20786,14 @@ pub(in crate::drive) mod tests {
     /// of the newest.
     #[test]
     fn an_audit_fitted_to_the_window_audits_the_operators_flagged_note_first() {
+        let mut shape = template();
+        shape.limits.max_output_tokens = 64;
         let session = auditing(
-            crate::meditation::policy::WINDOW_RESERVE + 2_000 + ESTIMATE_PAD,
+            window_for_line(
+                2_000 + ESTIMATE_PAD,
+                &shape,
+                Some(&interviewing(&[log::Warrant::Scoping])),
+            ),
             64,
         );
         add_notes(&session, 60, 8);
@@ -25240,6 +25369,11 @@ pub(in crate::drive) mod tests {
             model: "small".to_owned(),
             context_window: Some(8192),
         });
+        assert_eq!(
+            session.shared.lock().fork_seat,
+            ForkSeat::Offboard,
+            "the reserve keeps no fork's room"
+        );
         session.ask("an earlier turn", None).expect("accepted");
         wait_until(&session, "turn one", settled);
         let trunk_before = session.trunk();
@@ -25770,6 +25904,74 @@ pub(in crate::drive) mod tests {
             .collect()
     }
 
+    /// #931: the reserve is Qwen Code's native one -- a 100,000 window keeps
+    /// 33,000 -- so a step whose prompt sits at 70,000 meditates first,
+    /// where the old reserve (the larger of 20,000 and the output cap) let it
+    /// through; with interview forks off, the line names the native reserve
+    /// and no fork's room.
+    #[test]
+    fn a_step_past_the_native_reserve_meditates_and_names_its_reserve() {
+        let session = windowed(
+            two_turns_measuring(70_000),
+            100_000,
+            crate::meditation::policy::Served::default(),
+        );
+        session
+            .ask("how are blank lines treated?", None)
+            .expect("accepted");
+        wait_until(&session, "turn one", settled);
+        session.ask("second", None).expect("accepted");
+        let log = wait_until(&session, "turn two", |log| {
+            log.iter()
+                .filter(|logged| matches!(logged.event, Event::TurnSettled { .. }))
+                .count()
+                == 2
+        });
+        let meditations = window_meditations(&log);
+        assert_eq!(meditations.len(), 1, "{log:#?}");
+        let fired = meditations[0].2.expect("its sizes");
+        assert!((67_000..80_000).contains(&fired.prompt_tokens), "{fired:?}");
+        assert_eq!(fired.native_reserve, Some(33_000));
+        assert_eq!(fired.fork_room, None, "interview forks off");
+        reads_whole(&session);
+    }
+
+    /// #931: with interview forks on, the reserve adds a fork's room on top
+    /// of the native one -- the longest ask its set holds and its output
+    /// cap -- and with them off it is exactly native.
+    #[test]
+    fn the_reserve_adds_a_forks_room_with_interview_forks_on() {
+        let mut shape = template();
+        shape.limits.context_window = Some(128_000);
+        assert_eq!(window_line(&shape, (None, false)), Some(95_000));
+        assert_eq!(
+            window_line(&shape, (Some(&interviewing(&[])), false)),
+            Some(95_000),
+            "no forks: exactly native"
+        );
+        let interview = interviewing(&[log::Warrant::Scoping]);
+        let (native, room) = reserve_of(128_000, &shape, (Some(&interview), false));
+        assert_eq!(native, 33_000);
+        let longest = interview
+            .asks
+            .files()
+            .iter()
+            .map(|(_, text)| (text.chars().count() as u64).div_ceil(4))
+            .max()
+            .expect("an ask");
+        assert_eq!(room, Some(longest + 64), "the longest ask and the cap");
+        assert_eq!(
+            window_line(&shape, (Some(&interview), false)),
+            Some(95_000 - longest - 64)
+        );
+        // On an offboard seat a fork runs in the seat's window: no room.
+        assert_eq!(
+            reserve_of(128_000, &shape, (Some(&interview), true)),
+            (33_000, Some(0))
+        );
+        assert_eq!(window_line(&shape, (Some(&interview), true)), Some(95_000));
+    }
+
     /// #617: before a step's request whose prompt would leave less than the
     /// reserve of the window, the trunk is refilled from working memory --
     /// under the turn, between its steps -- and the turn goes on: the next
@@ -25887,12 +26089,12 @@ pub(in crate::drive) mod tests {
 
     /// #813: a turn whose own steps outgrow the window -- here its first
     /// one, with nothing before it on the trunk to drop -- is split by the
-    /// window meditation: the refill, the turn's ask, then only its most
-    /// recent whole steps within the budget (`OpenCode` 2's: a quarter of
-    /// the usable window, at most 15,000 tokens). The turn goes on and
-    /// settles; the meditation line names the steps kept and compacted.
+    /// window meditation: the refill, the turn's ask, then only its last
+    /// step, the pending call and its result (#931, Qwen Code's). The turn
+    /// goes on and settles; the meditation line names the steps kept and
+    /// compacted.
     #[test]
-    fn a_turn_whose_steps_outgrow_the_window_keeps_only_its_recent_steps_and_settles() {
+    fn a_turn_whose_steps_outgrow_the_window_keeps_only_its_last_step_and_settles() {
         const STEPS: usize = 18;
         let session = windowed(
             one_long_turn(STEPS),
@@ -25920,7 +26122,7 @@ pub(in crate::drive) mod tests {
         let Some((kept, compacted)) = split[0] else {
             panic!("the first meditation splits the turn: {split:?}");
         };
-        assert_eq!(kept, 2, "two ~6k steps fit 15,000 tokens: {split:?}");
+        assert_eq!(kept, 1, "the pending call and its result: {split:?}");
         assert!(compacted >= 5, "{split:?}");
         // The request after it: the refill, the ask, then the kept steps --
         // the turn's first step is gone, its fact in working memory.
@@ -25969,7 +26171,7 @@ pub(in crate::drive) mod tests {
                         .collect()
                 })
                 .collect(),
-            crate::meditation::policy::WINDOW_RESERVE + LINE,
+            window_for_line(LINE, &template(), None),
             crate::meditation::policy::Served::default(),
         );
         {
@@ -26043,15 +26245,11 @@ pub(in crate::drive) mod tests {
         reads_whole(&session);
     }
 
-    /// #813: the budget is `OpenCode` 2's -- a quarter of the usable window,
-    /// within 2,000 and 15,000 -- and the split keeps whole steps, the last
-    /// always, never parting a call from its result.
+    /// #813, #931: the split keeps the last step alone -- the pending call
+    /// and its result, as Qwen Code keeps -- whatever its size, never
+    /// parting a call from its result.
     #[test]
-    fn the_running_turn_splits_at_whole_steps_within_opencodes_budget() {
-        use crate::meditation::policy::keep_recent_budget;
-        assert_eq!(keep_recent_budget(163_840, 20_000), 15_000);
-        assert_eq!(keep_recent_budget(32_768, 20_000), 3_192);
-        assert_eq!(keep_recent_budget(8_192, 20_000), 2_000);
+    fn the_running_turn_keeps_only_its_last_step() {
         let words = |n: usize| "word ".repeat(n);
         let call = |id: &str| {
             let mut message = Message::new(Role::Assistant, words(400));
@@ -26078,10 +26276,9 @@ pub(in crate::drive) mod tests {
             call("c"),
             result("c"),
         ];
-        assert_eq!(split_turn(&own, 2_200), (1, 3, 3), "the last two steps");
-        assert_eq!(split_turn(&own, 10_000), (1, 3, 1), "every step fits");
-        assert_eq!(split_turn(&own, 10), (1, 3, 5), "the last step, always");
-        assert_eq!(split_turn(&own[..1], 10), (1, 0, 1), "no step yet");
+        assert_eq!(split_turn(&own), (1, 3, 5), "the last step");
+        assert_eq!(split_turn(&own[..3]), (1, 1, 1), "one step, kept");
+        assert_eq!(split_turn(&own[..1]), (1, 0, 1), "no step yet");
     }
 
     /// #617: a request the engine refuses as an overflow is meditated once

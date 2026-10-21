@@ -42,31 +42,33 @@ pub const MEDITATION_TAIL_TOKENS: &str = "meditation_tail_tokens";
 pub const MEDITATION_TOOL_OUTPUTS: &str = "meditation_tool_outputs";
 /// The automatic meditation (#617): on unless the regimen says `"off"`. Before
 /// every trunk request a served session that keeps working memory and knows
-/// its window refills the trunk when the prompt would leave less than
-/// [`WINDOW_RESERVE`] (or the output cap, if more) of the window.
+/// its window refills the trunk when the prompt would leave less than the
+/// [`native_reserve`] of the window -- plus, with interview forks on, a
+/// fork's room (#931).
 pub const MEDITATION_WINDOW: &str = "meditation_window";
-/// The room the automatic meditation keeps for a request's output (#617):
-/// `OpenCode` 2's `DEFAULT_BUFFER` at `055d95bb`, or the output cap when
-/// that is larger (`oc:packages/core/src/session/compaction.ts:12,236-240`
-/// there).
-pub const WINDOW_RESERVE: u64 = 20_000;
-/// The running turn's recent steps a window meditation under it keeps
-/// (#813): a quarter of the usable window -- the window less the reserve --
-/// within these bounds, `OpenCode` 2's `preserveRecentBudget` at `055d95bb`
-/// (`oc:packages/opencode/src/session/compaction.ts:32-33,115-120` there). Pi keeps
-/// a flat 20,000 (`pi:packages/coding-agent/src/core/settings-defaults.ts:11`,
-/// `keepRecentTokens`); Qwen Code keeps no tail at all, only a pending call's
-/// pair (`qc:packages/core/src/services/chatCompressionService.ts:535-539`),
-/// so the tie goes to the smaller, `OpenCode` 2's.
-pub const KEEP_RECENT_MIN: u64 = 2_000;
-/// [`KEEP_RECENT_MIN`]'s upper bound.
-pub const KEEP_RECENT_MAX: u64 = 15_000;
+/// The least the native reserve keeps, in tokens (#931): Qwen Code's
+/// `SUMMARY_RESERVE` of 20,000 and its 13,000 beside it
+/// (`qc:packages/core/src/services/chatCompressionService.ts:58,109-124` at
+/// `v0.25.3`).
+pub const NATIVE_RESERVE_MIN: u64 = 33_000;
 
-/// The tokens of the running turn's recent steps a window meditation keeps
-/// in a `window` with `reserve` kept for output (#813).
+/// The room the automatic meditation keeps of a `window` (#617, #931), by
+/// the harness vote: Pi keeps 16,384
+/// (`pi:packages/coding-agent/src/core/settings-defaults.ts:9-13` at
+/// `v1.3.0`) and `OpenCode` 2 the larger of a tenth of the window and 16,000
+/// (`oc:packages/core/src/session/compaction.ts:97,911-918` at `v2.0.32`).
+/// They differ, so Qwen Code decides: it compacts above min(0.85 × window,
+/// window − 33,000), and above 0.85 × window when the window is no larger
+/// than 33,000 (`qc:packages/core/src/services/chatCompressionService.ts:210-232`).
 #[must_use]
-pub fn keep_recent_budget(window: u64, reserve: u64) -> u64 {
-    (window.saturating_sub(reserve) / 4).clamp(KEEP_RECENT_MIN, KEEP_RECENT_MAX)
+pub fn native_reserve(window: u64) -> u64 {
+    let fraction = window / 20 * 17 + window % 20 * 17 / 20;
+    let line = if window > NATIVE_RESERVE_MIN {
+        fraction.min(window - NATIVE_RESERVE_MIN)
+    } else {
+        fraction
+    };
+    window - line
 }
 /// A meditation's audit (#504): `"on"` (or `true`) puts the dogma's pinned audit
 /// ask over working memory before the refill and folds its answer; off by
@@ -597,6 +599,26 @@ fn positive(regimen: &Regimen, key: &'static str) -> Result<Option<u64>, PolicyE
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// #931: the native reserve is Qwen Code's -- the window less
+    /// min(0.85 × window, window − 33,000), or less 0.85 × window at a
+    /// window of 33,000 or under.
+    #[test]
+    fn the_native_reserve_is_qwen_codes() {
+        assert_eq!(
+            native_reserve(128_000),
+            33_000,
+            "w − 33,000 is the lower line"
+        );
+        assert_eq!(
+            native_reserve(262_144),
+            39_322,
+            "0.85 × w is the lower line"
+        );
+        assert_eq!(native_reserve(220_000), 33_000, "where the two lines meet");
+        assert_eq!(native_reserve(32_768), 4_916, "a small window keeps 15%");
+        assert_eq!(native_reserve(0), 0);
+    }
     use crate::formats::regimen;
     use crate::meditation::Reason;
 

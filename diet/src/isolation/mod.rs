@@ -1108,9 +1108,13 @@ struct Collected {
 
 /// How much of one output stream a call holds in memory whole (#734):
 /// past it, the whole stream goes to a file and memory keeps its head and
-/// tail -- Pi's spill and `OpenCode` 2's at `055d95bb`
-/// (`pi:core/tools/output-accumulator.ts`, `oc:packages/opencode/src/tool/shell.ts`
-/// 439-503 there). Both bound memory and neither bounds the file, so neither
+/// tail. By the harness vote (#931): Pi spills to a file and keeps a rolling
+/// tail (`pi:packages/coding-agent/src/core/tools/output-accumulator.ts:38,60,239-256`
+/// at `v1.3.0`), and `OpenCode` 2 streams the whole output to a file and keeps
+/// none of it (`oc:packages/core/src/shell.ts:323-335` at `v2.0.32`). They
+/// differ, so Qwen Code decides: the whole output saved to a file, its head
+/// and tail kept (`qc:packages/core/src/tools/truncation.ts:113-114,196-223` at
+/// `v0.25.3`). All three bound memory and none bounds the file, so neither
 /// does this.
 const HELD: usize = 2 * 1024 * 1024;
 

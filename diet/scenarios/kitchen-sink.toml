@@ -1,10 +1,10 @@
 # The kitchen sink (#798): one session on the canned scenario substrate
 # showing every lever that writes a line to the log, each with the value
 # that has the most to show. Its log is the page's `kitchen-sink` example.
-# It runs on `canned-scenario-windowed`, whose declared 24000-token window
+# It runs on `canned-scenario-windowed`, whose declared 37615-token window
 # lets the budget meditation fire at a turn's end and the window meditation
-# inside a later turn; the output cap stays small so the window's reserve is
-# its 20000-token floor.
+# inside a later turn: its line is the window less the 33000-token native
+# reserve and a fork's 615-token room (#931).
 arm = "rehearsal"
 dogma_version = 0
 
@@ -32,7 +32,8 @@ phase_library = "starter"
 starting_phase = "plan"
 
 max_output_tokens = 512
-meditation_at_context_fraction = 0.2
+# 4,800 tokens of the 37615-token window, as 0.2 of 24000 was before #931.
+meditation_at_context_fraction = 0.1276
 meditation_every_turns = 6
 meditation_audit = "on"
 meditation_warm = "on"

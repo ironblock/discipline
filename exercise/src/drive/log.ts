@@ -356,6 +356,9 @@ export type WarrantGated = V0.WarrantGatedLine;
 export type Pruned = V0.PrunedLine;
 /** A hosted API's 429 or 529, retried before its next attempt (v13, #555). Folded, not yet drawn. */
 export type RequestRetried = V0.RequestRetriedLine;
+/** A trunk request held until the forks in flight settled, its prompt and the clamp's floor not fitting beside them
+ * (v8, #782). Folded, not yet drawn: the kitchen sink writes one since its window grew (#931). */
+export type TrunkWaited = V0.TrunkWaitedLine;
 
 export type LogLine =
   | SessionStart
@@ -388,6 +391,7 @@ export type LogLine =
   | TimeoutNear
   | ForkSkipped
   | RequestRetried
+  | TrunkWaited
   | WarrantGated
   | Flag
   | PatchRefused

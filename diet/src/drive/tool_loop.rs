@@ -182,11 +182,6 @@ pub const BASH_DESCRIPTION_BACKGROUND: &str = "Executes a bash command (as `bash
      - The command may run in a sandbox: writes outside the working directory, some reads, and \
      network access can be refused.";
 
-/// The most a call's `timeout` may say, in milliseconds (#613): `OpenCode`
-/// 2's at `055d95bb` and Qwen Code's 600000, which agree
-/// (`oc:packages/core/src/tool/bash.ts:20` there, `tools/shell.ts:5765-5769`).
-pub const MAX_TIMEOUT_MS: u64 = 600_000;
-
 /// The default timeout when the regimen names none (#613): `OpenCode` 2's
 /// and Qwen Code's 120000 ms, where Pi has none and so breaks no tie.
 pub const DEFAULT_TIMEOUT_MS: u64 = 120_000;
@@ -206,31 +201,57 @@ pub fn bash_timeout_ms(regimen: &Regimen) -> Option<u64> {
     }
 }
 
-/// A call's own `timeout` (#613): none, or its milliseconds; refused with
-/// Qwen Code's words (`tools/shell.ts:5813-5826`) when it is not a whole
-/// number of milliseconds between 1 and [`MAX_TIMEOUT_MS`].
+/// What a call's own `timeout` says (#613, #931).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CallTimeout {
+    /// None given: the session's default holds.
+    Unset,
+    /// 0: no timeout, as `OpenCode` 2's call
+    /// (`oc:packages/core/src/tool/plugin/shell.ts:54-56` at `v2.0.32`) and
+    /// Qwen Code's setting have it.
+    Never,
+    /// Its milliseconds.
+    After(u64),
+}
+
+impl CallTimeout {
+    /// The timeout the call runs under, `default` when it gave none.
+    #[must_use]
+    pub fn or(self, default: Option<u64>) -> Option<u64> {
+        match self {
+            Self::Unset => default,
+            Self::Never => None,
+            Self::After(ms) => Some(ms),
+        }
+    }
+}
+
+/// A call's own `timeout` (#613): none, 0 for no timeout, or its
+/// milliseconds, with no upper bound: Pi
+/// (`pi:packages/coding-agent/src/core/tools/bash.ts:40-43` at `v1.3.0`) and
+/// `OpenCode` 2 (`oc:packages/core/src/tool/plugin/shell.ts:54-56` at
+/// `v2.0.32`) agree on none (#931). Refused with Qwen Code's words
+/// (`tools/shell.ts:5813-5826`) when it is not a whole number of
+/// milliseconds, and when it is negative.
 ///
 /// # Errors
 ///
 /// The words the model is answered with.
-pub fn timeout_of(arguments: &str) -> Result<Option<u64>, &'static str> {
+pub fn timeout_of(arguments: &str) -> Result<CallTimeout, &'static str> {
     let Some(value) = serde_json::from_str::<serde_json::Value>(arguments)
         .ok()
         .and_then(|value| value.get("timeout").cloned())
     else {
-        return Ok(None);
+        return Ok(CallTimeout::Unset);
     };
     let Some(ms) = value.as_i64().filter(|_| value.is_i64() || value.is_u64()) else {
         return Err("Timeout must be an integer number of milliseconds.");
     };
-    if ms <= 0 {
-        return Err("Timeout must be a positive number.");
+    match ms {
+        0 => Ok(CallTimeout::Never),
+        ms if ms < 0 => Err("Timeout must be 0 or a positive number."),
+        ms => Ok(CallTimeout::After(ms.unsigned_abs())),
     }
-    let ms = ms.unsigned_abs();
-    if ms > MAX_TIMEOUT_MS {
-        return Err("Timeout cannot exceed 600000ms (10 minutes).");
-    }
-    Ok(Some(ms))
 }
 
 /// `ms` in the words Qwen Code's description gives its default: `(2
@@ -255,8 +276,8 @@ fn in_words(ms: u64) -> String {
 pub fn bash_description(background: bool, timeout: Option<u64>) -> String {
     let timeout_line = match timeout {
         Some(ms) => format!(
-            "- You can specify an optional timeout in milliseconds (up to 600000ms / 10 minutes). \
-             If not specified, commands will timeout after {ms}ms{}. A command at its timeout is \
+            "- You can specify an optional timeout in milliseconds, 0 for none. If not \
+             specified, commands will timeout after {ms}ms{}. A command at its timeout is \
              ended, and what it printed is returned.{}",
             in_words(ms),
             if background {
@@ -265,9 +286,8 @@ pub fn bash_description(background: bool, timeout: Option<u64>) -> String {
                 ""
             }
         ),
-        None => "- You can specify an optional timeout in milliseconds (up to 600000ms / 10 \
-                 minutes). If not specified, a command runs until it exits or the turn is \
-                 cancelled."
+        None => "- You can specify an optional timeout in milliseconds, 0 for none. If not \
+                 specified, a command runs until it exits or the turn is cancelled."
             .to_owned(),
     };
     let running = if background {
@@ -289,9 +309,8 @@ pub fn bash_description(background: bool, timeout: Option<u64>) -> String {
     )
 }
 
-/// The `bash` tool once calls time out (#613): #614's, with `timeout`, its
-/// bounds `OpenCode` 2's and Qwen Code's and its words Qwen Code's
-/// (`tools/shell.ts:5765-5769`), and [`bash_description`].
+/// The `bash` tool once calls time out (#613): #614's, with `timeout`, no
+/// upper bound and 0 for none (#931), and [`bash_description`].
 #[must_use]
 pub fn bash_tool_timed(background: bool, timeout: Option<u64>) -> ToolDefinition {
     let mut tool = bash_tool_with(background);
@@ -304,10 +323,9 @@ pub fn bash_tool_timed(background: bool, timeout: Option<u64>) -> ToolDefinition
             Value::Object(BTreeMap::from([
                 (
                     "description".to_owned(),
-                    Value::String("Optional timeout in milliseconds (max 600000)".to_owned()),
+                    Value::String("Optional timeout in milliseconds, 0 for none".to_owned()),
                 ),
-                ("maximum".to_owned(), Value::Integer(600_000)),
-                ("minimum".to_owned(), Value::Integer(1)),
+                ("minimum".to_owned(), Value::Integer(0)),
                 ("type".to_owned(), Value::String("integer".to_owned())),
             ])),
         );
@@ -2677,22 +2695,29 @@ pub(in crate::drive) mod tests {
 
     /// Before #558, `bash` was I0's definition byte for byte, and no
     /// description.
-    /// A call's own timeout (#613): none, a whole number of milliseconds
-    /// up to 600000, or refused in Qwen Code's words.
+    /// A call's own timeout (#613): none, 0 for no timeout, a whole number
+    /// of milliseconds with no upper bound (#931), or refused in Qwen Code's
+    /// words.
     #[test]
     fn a_calls_timeout_is_read_or_refused_in_qwens_words() {
-        assert_eq!(timeout_of(r#"{"command":"ls"}"#), Ok(None));
+        assert_eq!(timeout_of(r#"{"command":"ls"}"#), Ok(CallTimeout::Unset));
         assert_eq!(
             timeout_of(r#"{"command":"ls","timeout":5000}"#),
-            Ok(Some(5000))
+            Ok(CallTimeout::After(5000))
         );
         assert_eq!(
-            timeout_of(r#"{"command":"ls","timeout":600001}"#),
-            Err("Timeout cannot exceed 600000ms (10 minutes).")
+            timeout_of(r#"{"command":"ls","timeout":3600000}"#),
+            Ok(CallTimeout::After(3_600_000))
         );
         assert_eq!(
             timeout_of(r#"{"command":"ls","timeout":0}"#),
-            Err("Timeout must be a positive number.")
+            Ok(CallTimeout::Never)
+        );
+        assert_eq!(CallTimeout::Never.or(Some(120_000)), None);
+        assert_eq!(CallTimeout::Unset.or(Some(120_000)), Some(120_000));
+        assert_eq!(
+            timeout_of(r#"{"command":"ls","timeout":-1}"#),
+            Err("Timeout must be 0 or a positive number.")
         );
         assert_eq!(
             timeout_of(r#"{"command":"ls","timeout":"soon"}"#),
@@ -2718,6 +2743,10 @@ pub(in crate::drive) mod tests {
         );
         assert!(with.contains("use `is_background: true` instead of a larger timeout"));
         assert!(!with.contains("There is no timeout"));
+        assert!(
+            with.contains("0 for none") && !with.contains("600000"),
+            "{with}"
+        );
         let without = bash_description(false, None);
         assert!(without.contains("a command runs until it exits or the turn is cancelled"));
         assert!(!without.contains("is_background"));
@@ -2726,8 +2755,8 @@ pub(in crate::drive) mod tests {
         json::render(&tool.schema, &mut out);
         assert!(
             out.contains(
-                "\"timeout\":{\"description\":\"Optional timeout in milliseconds (max 600000)\",\
-             \"maximum\":600000,\"minimum\":1,\"type\":\"integer\"}"
+                "\"timeout\":{\"description\":\"Optional timeout in milliseconds, 0 for none\",\
+             \"minimum\":0,\"type\":\"integer\"}"
             ),
             "{out}"
         );
