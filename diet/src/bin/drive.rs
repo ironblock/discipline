@@ -2078,6 +2078,7 @@ fn trunk(
 ) -> RequestShape {
     RequestShape {
         model,
+        cache_prefix: None,
         messages: vec![Message::new(Role::System, system)],
         sampler,
         limits: Limits {
@@ -3617,6 +3618,7 @@ fn shape(regime: &Regime) -> RequestShape {
         // which answers whatever it is asked. `regime_of` names the wire model
         // in its refusal for the day a real endpoint is drivable again.
         model: regime.substrates[0].id.clone(),
+        cache_prefix: None,
         messages: vec![Message::new(Role::User, "replaced per call")],
         // Nothing pinned. A drive that pinned a sampler setting the regimen
         // declares would be pinning it twice -- once in the regime it records

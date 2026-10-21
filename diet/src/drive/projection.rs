@@ -1646,6 +1646,7 @@ impl<'a> Walk<'a> {
         let head = |tools: Vec<ToolDefinition>| {
             Head::of(&RequestShape {
                 model: self.model.clone(),
+                cache_prefix: None,
                 messages: messages.clone(),
                 sampler: SamplerCard::empty(),
                 limits: Limits {
@@ -1776,6 +1777,7 @@ impl<'a> Walk<'a> {
             .map(|tools| {
                 Head::of(&RequestShape {
                     model: self.model.clone(),
+                    cache_prefix: None,
                     messages: messages.clone(),
                     sampler: SamplerCard::empty(),
                     limits: Limits {
@@ -2898,6 +2900,7 @@ mod tests {
         use crate::drive::session::{Session, Settlement, line_of};
         let shape = RequestShape {
             model: "a-model".to_owned(),
+            cache_prefix: None,
             messages: vec![Message::new(
                 crate::client::shape::Role::System,
                 "you are the trunk",

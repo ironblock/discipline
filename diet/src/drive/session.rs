@@ -2400,6 +2400,10 @@ struct State {
     /// The request never sent because the session's `max_api_requests` was
     /// reached (#555): every later ask is refused, and nothing more is sent.
     api_capped: Option<u64>,
+    /// The messages of the last request that wrote a hosted API's cache: the
+    /// trunk's, or the pre-warm's (#555 step 4d). A fork whose messages
+    /// start with them reads that entry.
+    cache_written: Option<Vec<Message>>,
     /// A phase's ground rules due as a note at the next ask (#787): the
     /// session opened in the phase, or moved to it with no meditation.
     phase_note_due: Option<String>,
@@ -2663,6 +2667,7 @@ impl State {
             reminder_due: None,
             blind: None,
             api_capped: None,
+            cache_written: None,
             phase_note_due: None,
             undelivered: Vec::new(),
             archive: super::archive::Archive::default(),
@@ -2749,6 +2754,21 @@ impl State {
 
     /// [`State::sized`], for a request whose prompt is `prompt` (#406: a
     /// fork's, which is not always the trunk's).
+    /// `shape` writes the cache (#555 step 4d): a trunk or pre-warm request.
+    fn wrote_cache(&mut self, shape: &RequestShape) {
+        self.cache_written = Some(shape.messages.clone());
+    }
+
+    /// How much of fork `shape` the cache already holds (#555 step 4d): the
+    /// whole of the last cache-writing request when the fork's messages
+    /// start with it, else none -- and a fork marks nothing of its own.
+    fn cached_prefix(&self, shape: &RequestShape) -> usize {
+        self.cache_written
+            .as_ref()
+            .filter(|written| shape.messages.starts_with(written))
+            .map_or(0, Vec::len)
+    }
+
     fn sized_at(&mut self, shape: &mut RequestShape, ceiling: u32, prompt: u64) -> u32 {
         let estimate = estimate_of(shape);
         self.sent_estimate = Some(estimate);
@@ -3180,8 +3200,8 @@ struct Shared<S> {
     /// the reaper holds it from the start.
     seat: std::sync::OnceLock<Offboard<S>>,
     /// A fork's own transport on the trunk's server, when it asks the cache
-    /// differently (#556): a hosted API's, whose fork never writes its tail
-    /// for an hour. Set once, as `seat` is.
+    /// differently (#556); unset when a fork's calls are the trunk's. Set
+    /// once, as `seat` is.
     forks: std::sync::OnceLock<S>,
 }
 
@@ -3414,8 +3434,7 @@ impl<S: Streaming + 'static> Session<S> {
     ///
     /// # Panics
     ///
-    /// When the session is already shared: a seat is chosen before a
-    /// session serves anything.
+    /// When the session is already seated.
     #[must_use]
     pub fn seated(self, seat: Offboard<S>) -> Self {
         assert!(
@@ -3432,7 +3451,7 @@ impl<S: Streaming + 'static> Session<S> {
     ///
     /// # Panics
     ///
-    /// When the session is already shared.
+    /// When the session's forks are already set.
     #[must_use]
     pub fn forking_through(self, forks: S) -> Self {
         assert!(
@@ -6430,6 +6449,7 @@ fn run_calls<S: Streaming + 'static>(
     // leave it its cap, or it waits for them.
     let (mut state, max_tokens) = trunk_sized(shared, state, shape, (turn, cancel));
     let beside = state.trunk_beside();
+    state.wrote_cache(shape);
     let next = state.push(Event::Requested {
         turn,
         lane: Lane::Trunk,
@@ -7202,6 +7222,7 @@ fn trunk_opening(
     window_meditation(template, state, shape, false);
     let max_tokens = state.sized(shape, template.limits.max_output_tokens);
     let beside = state.trunk_beside();
+    state.wrote_cache(shape);
     let request = state.push(Event::Requested {
         turn,
         lane: Lane::Trunk,
@@ -8755,6 +8776,7 @@ fn prewarm<'a, S: Streaming>(
     // A request like any other, on its own lane (#555): every request
     // the session sends has its line.
     let turn = state.turns;
+    state.wrote_cache(&shape);
     let request = state.push(Event::Requested {
         turn,
         lane: Lane::Warm,
@@ -9263,6 +9285,7 @@ fn audit_sent(
         chunk,
     });
     let max_tokens = state.sized(&mut shape, template.limits.max_output_tokens);
+    shape.cache_prefix = Some(state.cached_prefix(&shape));
     let request = state.push(Event::Requested {
         turn,
         lane: Lane::Audit,
@@ -9814,6 +9837,7 @@ fn retried(
     };
     let max_tokens = state.sized_at(shape, cap, prompt);
     let beside = state.trunk_beside();
+    state.wrote_cache(shape);
     let next = state.push(Event::Requested {
         turn,
         lane: Lane::Trunk,
@@ -11138,6 +11162,7 @@ fn fire_on<S>(
     // Sized aside (#889): a gap fork moves no measurement the trunk's next
     // request is sized from, as a fork cut beside the trunk moves none.
     let max_tokens = state.aside_sizing(|state| state.sized_at(&mut shape, ceiling, prompt));
+    shape.cache_prefix = Some(state.cached_prefix(&shape));
     let request = state.push(Event::Requested {
         turn,
         lane: Lane::Interview,
@@ -12415,6 +12440,7 @@ fn fire_cut<S>(shared: &Shared<S>, state: &mut State, cut: Cut) -> Launched {
         return Launched::Gone;
     }
     let max_tokens = state.aside_sizing(|state| state.sized_at(&mut shape, ceiling, prompt));
+    shape.cache_prefix = Some(state.cached_prefix(&shape));
     let request = state.push(Event::Requested {
         turn,
         lane: Lane::Interview,
@@ -13743,6 +13769,7 @@ pub(in crate::drive) mod tests {
     pub(in crate::drive) fn template() -> RequestShape {
         RequestShape {
             model: "a-model".to_owned(),
+            cache_prefix: None,
             messages: vec![Message::new(Role::System, HEAD)],
             sampler: SamplerCard::empty(),
             limits: Limits {
@@ -15713,69 +15740,96 @@ pub(in crate::drive) mod tests {
         reads_whole(&session);
     }
 
-    /// #556: under `cache_ttl = "1h"` the trunk's request writes every
-    /// breakpoint for an hour; its fork, made through the transport's fork
-    /// form, reads the trunk's system at an hour and writes its own tail for
-    /// five minutes only.
+    /// #555 step 4d: a hosted fork reads the trunk's cache and writes
+    /// nothing, at the trunk's lifetimes, an hour or the five-minute
+    /// default. Its tools and system marks are the trunk's, and its last
+    /// mark sits on the block the trunk's request marked last, never on its
+    /// settled reply or its ask. Read from the requests as sent: the stub's
+    /// usage is canned and proves nothing.
     #[test]
-    fn a_hosted_fork_never_writes_its_tail_for_an_hour() {
+    fn a_hosted_fork_reads_the_trunks_cache_and_writes_nothing() {
         use crate::client::anthropic::tests::{answering, streamed};
         use crate::client::anthropic::{Options, Ttl, Ttls};
         use crate::client::stream::HttpStream;
         use crate::client::stub::Stub;
         use crate::client::transport::Endpoint;
 
-        let stub = Stub::serving(vec![
-            streamed(&answering(SCOPED, (40, 0, 900))),
-            streamed(&answering(DECIDED, (30, 900, 20))),
-        ])
-        .expect("loopback");
-        let transport = HttpStream::new(Endpoint::parse(&stub.url()).expect("an endpoint"))
-            .with_anthropic(Options {
-                ttl: Ttls::all(Ttl::Hour),
-                ..Options::default()
+        for ttl in [Ttls::all(Ttl::Hour), Ttls::default()] {
+            let stub = Stub::serving(vec![
+                streamed(&answering(SCOPED, (40, 0, 900))),
+                streamed(&answering(DECIDED, (30, 900, 20))),
+            ])
+            .expect("loopback");
+            let transport = HttpStream::new(Endpoint::parse(&stub.url()).expect("an endpoint"))
+                .with_anthropic(Options {
+                    ttl,
+                    ..Options::default()
+                });
+            assert!(
+                transport.for_forks().is_none(),
+                "a fork asks the cache as the trunk does"
+            );
+            let session = Session::open_with(
+                transport,
+                template(),
+                None,
+                None,
+                None,
+                Some(interviewing(&[log::Warrant::Scoping])),
+            );
+            session
+                .ask_marked("what are we building?", None, true)
+                .expect("accepted");
+            wait_until(&session, "the fork to settle", |log| {
+                settled(log) && !fork_outcomes(log).is_empty()
             });
-        let forks = transport.for_forks().expect("a fork asks differently");
-        let session = Session::open_with(
-            transport,
-            template(),
-            None,
-            None,
-            None,
-            Some(interviewing(&[log::Warrant::Scoping])),
-        )
-        .forking_through(forks);
-        session
-            .ask_marked("what are we building?", None, true)
-            .expect("accepted");
-        wait_until(&session, "the fork to settle", |log| {
-            settled(log) && !fork_outcomes(log).is_empty()
-        });
-        let bodies: Vec<serde_json::Value> = stub
-            .received()
-            .iter()
-            .map(|body| serde_json::from_str(body).expect("a JSON body"))
-            .collect();
-        let [trunk, fork] = bodies.as_slice() else {
-            panic!("a trunk request and a fork request: {bodies:#?}");
-        };
-        let hour = serde_json::json!({"type": "ephemeral", "ttl": "1h"});
-        let tail = |body: &serde_json::Value| {
-            let messages = body["messages"].as_array().expect("messages");
-            let content = messages.last().expect("a last message")["content"]
-                .as_array()
-                .expect("blocks")
-                .clone();
-            content.last().expect("a last block")["cache_control"].clone()
-        };
-        assert_eq!(
-            (&trunk["system"][0]["cache_control"], tail(trunk)),
-            (&hour, hour.clone())
-        );
-        assert_eq!(
-            (&fork["system"][0]["cache_control"], tail(fork)),
-            (&hour, serde_json::json!({"type": "ephemeral"}))
-        );
+            let bodies: Vec<serde_json::Value> = stub
+                .received()
+                .iter()
+                .map(|body| serde_json::from_str(body).expect("a JSON body"))
+                .collect();
+            let [trunk, fork] = bodies.as_slice() else {
+                panic!("a trunk request and a fork request: {bodies:#?}");
+            };
+            let marks = |body: &serde_json::Value| -> Vec<(usize, usize, serde_json::Value)> {
+                let mut at = Vec::new();
+                for (m, message) in body["messages"]
+                    .as_array()
+                    .expect("messages")
+                    .iter()
+                    .enumerate()
+                {
+                    for (b, block) in message["content"]
+                        .as_array()
+                        .expect("blocks")
+                        .iter()
+                        .enumerate()
+                    {
+                        if let Some(mark) = block.get("cache_control") {
+                            at.push((m, b, mark.clone()));
+                        }
+                    }
+                }
+                at
+            };
+            assert_eq!(
+                marks(fork),
+                marks(trunk),
+                "{ttl:?}: the fork marks the trunk's block"
+            );
+            let (m, b, _) = marks(trunk).pop().expect("the trunk marks its tail");
+            assert_eq!(
+                fork["messages"][m]["content"][b], trunk["messages"][m]["content"][b],
+                "the same block"
+            );
+            assert!(
+                fork["messages"].as_array().expect("messages").len()
+                    > trunk["messages"].as_array().expect("messages").len(),
+                "the fork carries its reply and its ask past the mark"
+            );
+            assert_eq!(fork["system"], trunk["system"], "{ttl:?}");
+            assert_eq!(fork["tools"], trunk["tools"], "{ttl:?}");
+        }
     }
 
     /// #555: on a hosted API a fork reuses the trunk's prefix through the
@@ -20353,6 +20407,7 @@ pub(in crate::drive) mod tests {
         let transport = HttpStream::new(Endpoint::parse(&stub.url()).expect("the stub's endpoint"));
         let shape = RequestShape {
             model: "qwen3.8-flash-next".to_owned(),
+            cache_prefix: None,
             tools: vec![tool_loop::bash_tool_before_its_description()],
             messages: vec![Message::new(
                 Role::System,
@@ -23093,6 +23148,48 @@ pub(in crate::drive) mod tests {
             }),
         )
         .forking_through(Canned::new(forks))
+    }
+
+    /// A session whose regimen runs background commands is held by its
+    /// reaper from the start (#614), and still takes a fork transport and a
+    /// seat: each is set once, whatever else holds the session. Taking one
+    /// panicked while the reaper held the session (#927).
+    #[test]
+    fn a_session_with_background_commands_takes_its_forks_and_its_seat() {
+        let tree = scratch("background-setters");
+        let mut tools = tools(
+            Confinement::Unconfined,
+            &tree,
+            &["cat"],
+            None,
+            Decider::Decline,
+        );
+        tools.background = true;
+        let session = Session::open_with(
+            Canned::new(Vec::<Vec<Step>>::new()),
+            looping(),
+            None,
+            Some(tools),
+            None,
+            None,
+        );
+        assert!(
+            session
+                .shared
+                .reap
+                .lock()
+                .unwrap_or_else(PoisonError::into_inner)
+                .is_some(),
+            "the reaper started"
+        );
+        let _session = session
+            .forking_through(Canned::new(Vec::<Vec<Step>>::new()))
+            .seated(Offboard {
+                transport: Canned::new(Vec::<Vec<Step>>::new()),
+                substrate: "cpu-seat".to_owned(),
+                model: "small".to_owned(),
+                context_window: None,
+            });
     }
 
     /// Each fork's line: its seq, its `cut` and its `timing`.

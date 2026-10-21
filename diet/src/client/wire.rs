@@ -523,6 +523,7 @@ mod tests {
     fn shape(sampler: SamplerCard) -> RequestShape {
         RequestShape {
             model: "a-model".to_owned(),
+            cache_prefix: None,
             messages: vec![Message::new(Role::User, "hello")],
             sampler,
             limits: Limits {
