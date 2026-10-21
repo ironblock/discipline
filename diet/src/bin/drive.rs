@@ -86,6 +86,9 @@ const CHECK: &str = "check";
 /// The scenario runner's subcommand (#760).
 const SCENARIO: &str = "scenario";
 
+/// The paired runner's subcommand (#912).
+const PAIR: &str = "pair";
+
 /// The subcommand that projects a finished log's record offline (#879).
 const RECORD: &str = "record";
 
@@ -2397,16 +2400,8 @@ fn registered_regime(
     diet::drive::regimen::regime_registered(&regimen, diet::drive::registry::REGISTRY)
         .map(|regime| {
             let output_cap = diet::drive::regimen::output_cap(flag, Some(&regimen));
-            let mut levers = diet::drive::regimen::serve_levers(&regimen, output_cap);
-            // The audit's chunks in flight at once, against what the trunk's
-            // server batches.
-            levers.insert(
-                "meditation_audit_concurrency".to_owned(),
-                diet::drive::regimen::meditation_audit_concurrency_lever(
-                    &regimen,
-                    served_batch(&regime.substrates[0].id),
-                ),
-            );
+            let levers =
+                diet::drive::regimen::start_levers(&regimen, output_cap, &regime.substrates[0].id);
             (
                 regime,
                 ReadAtStart {
@@ -2590,6 +2585,13 @@ fn usage() -> String {
     );
     out.push_str("       (a scenario, #760: on the canned scenario substrate, or re-fired on\n");
     out.push_str("       an endpoint; diet/scenarios/README.md)\n");
+    out.push_str(
+        "       diet-drive pair FILE --a R1 --b R2 --repeat N --out DIR [--endpoint URL\n",
+    );
+    out.push_str("           --model NAME [--key-file FILE]] [--no-assemble] [--stop-file PATH]\n");
+    out.push_str("           [--void-cap K]\n");
+    out.push_str("       (a scenario under two regimens one lever apart, N times each, ABBA;\n");
+    out.push_str("       #912, diet/scenarios/README.md)\n");
     out.push_str("       diet-drive replay [--answers] [--port N]\n");
     out.push_str("       (substrate `canned-replay-tools` on loopback: captured llama.cpp\n");
     out.push_str("       replies, a `bash` call and then its answer, for a regimen rehearsed\n");
@@ -2713,6 +2715,86 @@ fn scenario(args: &[String]) -> ExitCode {
         ),
         None => run(&drive, &options),
     };
+    println!("{said}");
+    if passed {
+        ExitCode::SUCCESS
+    } else {
+        ExitCode::from(EXIT_INPUT)
+    }
+}
+
+/// `diet-drive pair FILE --a R1 --b R2 --repeat N --out DIR`: the scenario
+/// under two regimens one lever apart, N times each, interleaved ABBA ABBA
+/// (#912). One line per run, then the batch's.
+fn pair(args: &[String]) -> ExitCode {
+    use diet::drive::scenario::{Repeats, RunOptions, VOID_CAP};
+    let usage = || {
+        fail(
+            EXIT_USAGE,
+            "usage: diet-drive pair FILE --a R1 --b R2 --repeat N --out DIR [--endpoint URL \
+             --model NAME [--key-file FILE]] [--no-assemble] [--stop-file PATH] [--void-cap K]",
+        )
+    };
+    let Some((file, rest)) = args.split_first() else {
+        return usage();
+    };
+    let mut options = RunOptions {
+        file: file.into(),
+        assemble: true,
+        ..RunOptions::default()
+    };
+    let (mut a, mut b, mut out, mut count, mut stop_file, mut void_cap) =
+        (None, None, None, None, None, None);
+    let mut flags = rest.iter();
+    while let Some(flag) = flags.next() {
+        if flag == "--no-assemble" {
+            options.assemble = false;
+            continue;
+        }
+        let Some(value) = flags.next() else {
+            return usage();
+        };
+        match flag.as_str() {
+            "--a" => a = Some(std::path::PathBuf::from(value)),
+            "--b" => b = Some(std::path::PathBuf::from(value)),
+            "--out" => out = Some(value.into()),
+            "--endpoint" => options.endpoint = Some(value.clone()),
+            "--model" => options.model = Some(value.clone()),
+            "--key-file" => options.key_file = Some(value.clone()),
+            "--repeat" => match value.parse::<u64>() {
+                Ok(n) if n > 0 => count = Some(n),
+                _ => return usage(),
+            },
+            "--stop-file" => stop_file = Some(value.into()),
+            "--void-cap" => match value.parse::<u64>() {
+                Ok(k) => void_cap = Some(k),
+                Err(_) => return usage(),
+            },
+            _ => return usage(),
+        }
+    }
+    let (Some(a), Some(b), Some(out), Some(count)) = (a, b, out, count) else {
+        return usage();
+    };
+    options.out = out;
+    if options.endpoint.is_some() != options.model.is_some() {
+        return fail(EXIT_USAGE, "--endpoint and --model go together");
+    }
+    let drive = match std::env::current_exe() {
+        Ok(drive) => drive,
+        Err(why) => return fail(EXIT_HALT, &format!("this binary cannot be found: {why}")),
+    };
+    let (said, passed) = diet::drive::pair::pair(
+        &drive,
+        &options,
+        (&a, &b),
+        &Repeats {
+            count,
+            stop_file,
+            void_cap: void_cap.unwrap_or(VOID_CAP),
+        },
+        &mut |line| println!("{line}"),
+    );
     println!("{said}");
     if passed {
         ExitCode::SUCCESS
@@ -3469,10 +3551,7 @@ fn subcommand(args: &[String]) -> Option<ExitCode> {
 /// The requests substrate `id`'s server batches at once: its registry
 /// entry's `served_max_batch_size`, when declared.
 fn served_batch(id: &str) -> Option<usize> {
-    diet::drive::registry::identity(diet::drive::registry::REGISTRY, id)
-        .ok()
-        .and_then(|identity| identity.served.get("max_batch_size")?.parse::<usize>().ok())
-        .filter(|batch| *batch > 0)
+    diet::drive::regimen::served_batch(id)
 }
 
 fn main() -> ExitCode {
@@ -3494,8 +3573,10 @@ fn main() -> ExitCode {
     }
     // Nor does the scenario runner: the serve it starts re-executes itself,
     // and the assembler it hands to runs with the environment it was given.
-    if args.first().map(String::as_str) == Some(SCENARIO) {
-        return scenario(&args[1..]);
+    match args.first().map(String::as_str) {
+        Some(SCENARIO) => return scenario(&args[1..]),
+        Some(PAIR) => return pair(&args[1..]),
+        _ => {}
     }
     // Nor do the offline readers of a log: the record's projection and the
     // operator script.

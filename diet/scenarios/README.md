@@ -164,3 +164,15 @@ This runs the scenario N times. Each repeat ends before the next starts.
 
   An HTTP error the server returned is data. A void attempt's outputs are kept beside the slot, as `repeat-NN.void-M/`. After `--void-cap` re-runs (2 unless given) have voided too, the batch stops, names the slot in `void_cap_reached`, and fails.
 - **The stop file stops the batch between repeats.** It is `DIR/STOP` unless `--stop-file` names another. It is read before each repeat starts, and the batch's line says where it stopped (`stopped_at`).
+
+## Running a pair (#912)
+
+```
+diet-drive pair FILE --a R1 --b R2 --repeat N --out DIR [--endpoint URL --model NAME [--key-file FILE]] [--no-assemble] [--stop-file PATH] [--void-cap K]
+```
+
+This runs the scenario under two regimens, N times each, so their records can be compared.
+- **The two regimens must differ in exactly one lever.** The levers are compared as `session.start` names them. Each key the regimens bind differently is also tried alone: `R2` with only that key as `R1` binds it. A key whose change moves no lever, such as a sampler setting or `arm`, counts as a difference. Otherwise the pair is refused before any run, naming the levers that differ (with each state), the keys, and the keys that move no lever.
+- **The arms interleave ABBA ABBA,** so drift on the box falls on both arms. Each arm's repeats go in `DIR/a/repeat-NN/` and `DIR/b/repeat-NN/`.
+- **Each run's `run`** names its `arm` (`a` or `b`), the `pair`, the script's digest and its repeat of its arm, on its log's `session.start` and its record's start. `pair` is the sha256 of the two regimens' sha256s, `R1`'s then `R2`'s, as lowercase hex with nothing between.
+- **Each run is a repeat as above.** The same mechanics apply: a fresh worktree, a void run re-run at its slot up to the cap, the stop file read before each run, and one line per run, which names its `arm`. The batch's line names the `pair`, the `lever` with its state under each arm, and how many runs each arm `ran`.

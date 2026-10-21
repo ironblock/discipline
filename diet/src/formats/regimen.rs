@@ -177,6 +177,23 @@ impl Regimen {
     pub fn is_empty(&self) -> bool {
         self.entries.is_empty()
     }
+
+    /// This regimen with the top-level `key` bound to `value`, or unbound
+    /// when `value` is `None` (#912): what a pair's other regimen would be
+    /// with only that key changed.
+    ///
+    /// # Errors
+    ///
+    /// When the result binds a key under both its spellings (#583).
+    pub fn with(&self, key: &str, value: Option<Value>) -> Result<Self, ParseError> {
+        let mut entries = self.entries.clone();
+        match value {
+            Some(value) => entries.insert(key.to_owned(), value),
+            None => entries.remove(key),
+        };
+        let aliased = aliased(&entries)?;
+        Ok(Self { entries, aliased })
+    }
 }
 
 impl<'a> IntoIterator for &'a Regimen {

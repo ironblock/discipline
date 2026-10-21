@@ -1681,13 +1681,7 @@ pub fn repeat(
     let mut said =
         serde_json::json!({"batch": options.file.display().to_string(), "of": repeats.count});
     // A scenario that does not read is refused before any repeat runs.
-    let script_sha256 = match std::fs::read_to_string(&options.file)
-        .map_err(|why| format!("{} cannot be read: {why}", options.file.display()))
-        .and_then(|text| {
-            parse(&text)
-                .map(|_| crate::digest::sha256_hex(text.as_bytes()))
-                .map_err(|why| why.to_string())
-        }) {
+    let script_sha256 = match script_digest(&options.file) {
         Ok(digest) => digest,
         Err(why) => {
             said["failure"] = serde_json::Value::String(why);
@@ -1734,8 +1728,23 @@ pub fn repeat(
     (said, ok)
 }
 
+/// The sha256 of a scenario file's bytes, once it reads as a scenario.
+///
+/// # Errors
+///
+/// When it cannot be read, or is not a scenario.
+pub fn script_digest(file: &std::path::Path) -> Result<String, String> {
+    std::fs::read_to_string(file)
+        .map_err(|why| format!("{} cannot be read: {why}", file.display()))
+        .and_then(|text| {
+            parse(&text)
+                .map(|_| crate::digest::sha256_hex(text.as_bytes()))
+                .map_err(|why| why.to_string())
+        })
+}
+
 /// How one repeat's slot ended.
-enum Slot {
+pub(crate) enum Slot {
     /// A repeat ran to its end, met or not.
     Ran,
     /// The stop file was there before it started.
@@ -1746,7 +1755,7 @@ enum Slot {
 
 /// One repeat's slot (#910): the run, re-run while it voids, up to `cap`
 /// re-runs, the stop file read before each attempt.
-fn slot(
+pub(crate) fn slot(
     drive: &std::path::Path,
     options: &RunOptions,
     run: &crate::formats::log::Run,
@@ -1770,6 +1779,9 @@ fn slot(
         line["repeat"] = serde_json::json!(run.repeat);
         line["of"] = serde_json::json!(run.of);
         line["attempt"] = serde_json::json!(voids + 1);
+        if let Some((arm, _)) = &run.paired {
+            line["arm"] = serde_json::Value::String(arm.tag().to_owned());
+        }
         if line["void"].is_null() {
             emit(&line);
             return Slot::Ran;
