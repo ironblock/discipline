@@ -118,6 +118,7 @@ pub mod session;
 pub mod shell_gate;
 pub mod shown;
 pub mod standard;
+pub mod table;
 pub mod template_roles;
 pub mod tool_loop;
 pub mod warrant_gate;

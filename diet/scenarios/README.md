@@ -163,6 +163,7 @@ This runs the scenario N times. Each repeat ends before the next starts.
   - a transport failure at any point: a `request.failed` whose reason is `transport` or `crashed`, or `timeout` with nothing arriving.
 
   An HTTP error the server returned is data. A void attempt's outputs are kept beside the slot, as `repeat-NN.void-M/`. After `--void-cap` re-runs (2 unless given) have voided too, the batch stops, names the slot in `void_cap_reached`, and fails.
+- **The batch keeps its lines** in `DIR/runs.jsonl`, one per attempt, void ones included (#914). It is the one source of a run's unmet expectations. A line that cannot be written fails the batch and is named as `runs_failed`.
 - **The stop file stops the batch between repeats.** It is `DIR/STOP` unless `--stop-file` names another. It is read before each repeat starts, and the batch's line says where it stopped (`stopped_at`).
 
 ## Running a pair (#912)
@@ -185,3 +186,27 @@ This runs the scenario under two regimens, N times each, so their records can be
 - **The arms interleave ABBA ABBA,** so drift on the box falls on both arms. Each arm's repeats go in `DIR/a/repeat-NN/` and `DIR/b/repeat-NN/`.
 - **Each run's `run`** names its `arm` (`a` or `b`), the `pair`, the script's digest and its repeat of its arm, on its log's `session.start` and its record's start. `pair` is the sha256 of the two regimens' sha256s, `R1`'s then `R2`'s, as lowercase hex with nothing between.
 - **Each run is a repeat as above.** The same mechanics apply: a fresh worktree, a void run re-run at its slot up to the cap, the stop file read before each run, and one line per run, which names its `arm`. The batch's line names the `pair`, the `lever` with its state under each arm, and how many runs each arm `ran`.
+
+## A pair's table (#914)
+
+```
+diet-drive table DIR [--seed S]
+```
+
+This reads a `pair` batch and writes `DIR/table.md` and `DIR/table.json`. It is a table, not a claim.
+- **What it reads:** the batch's `runs.jsonl`, skipping void attempts, and each run's log at `DIR/<arm>/repeat-NN/session.log`. Each log's `run` must be the run `runs.jsonl` names there. No model is asked.
+- **Per arm:** each row's median, range and mean over the arm's runs. The JSON also holds every run's value.
+- **Per pair:** two B − A deltas, of the medians and of the means.
+  - Each has a 95% percentile interval from the same draws: each arm's runs are resampled with replacement, independently, 10,000 times.
+  - The interval's ends are the 250th and 9,750th sorted draws.
+  - The seed is 0 unless `--seed` is given, and both files print it.
+  - **At small N the interval describes the runs; it is not a test.** A median over five runs is lumpy, and a mean is pulled by one outlier, so both are shown.
+- **The rows, and each one's source:**
+  - the primary measure (#932): `not declared`, with no numbers, until the maintainer writes it;
+  - failed commands: `tool_call` with `name: bash`, `outcome: ran` and `exit` ≠ 0, plus `background.ended` with `exit` ≠ 0;
+  - beside them, with no failure dropped: commands ended by a signal (`outcome: ran`, no `exit`), and commands their confinement failed (`outcome: command_failed`);
+  - output and prompt tokens, per run and per turn: `response.usage`'s `completion_tokens` and `prompt_tokens`, summed, and per turn divided by the `turn.settled` lines;
+  - wall ms per run: the last line's `t`;
+  - wall ms per turn: each `turn.settled`'s `t` less its `ask`'s, the run's median;
+  - turns (`turn.settled`), forks (`fork`), captures (`patch`), refusals (`refused`), and settles, one row per `reason`;
+  - unmet expectations: `runs.jsonl`'s `unmet`.

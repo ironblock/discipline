@@ -89,6 +89,9 @@ const SCENARIO: &str = "scenario";
 /// The paired runner's subcommand (#912).
 const PAIR: &str = "pair";
 
+/// The subcommand that writes a pair batch's table (#914).
+const TABLE: &str = "table";
+
 /// The subcommand that projects a finished log's record offline (#879).
 const RECORD: &str = "record";
 
@@ -2592,6 +2595,9 @@ fn usage() -> String {
     out.push_str("           [--void-cap K] [--contrast L1,L2,...]\n");
     out.push_str("       (a scenario under two regimens one lever apart, N times each, ABBA;\n");
     out.push_str("       #912, diet/scenarios/README.md)\n");
+    out.push_str("       diet-drive table DIR [--seed S]\n");
+    out.push_str("       (a pair batch's receipts per arm and its B - A deltas, as DIR/table.md\n");
+    out.push_str("       and DIR/table.json; #914, diet/scenarios/README.md)\n");
     out.push_str("       diet-drive replay [--answers] [--port N]\n");
     out.push_str("       (substrate `canned-replay-tools` on loopback: captured llama.cpp\n");
     out.push_str("       replies, a `bash` call and then its answer, for a regimen rehearsed\n");
@@ -2810,6 +2816,47 @@ fn pair(args: &[String]) -> ExitCode {
     } else {
         ExitCode::from(EXIT_INPUT)
     }
+}
+
+/// `diet-drive table DIR [--seed S]`: a pair batch's table (#914), written
+/// beside its runs as `table.md` and `table.json`. One line on stdout names
+/// them and the seed.
+fn table(args: &[String]) -> ExitCode {
+    use diet::drive::table::{SEED, table};
+    let (dir, seed) = match args {
+        [dir] => (dir, SEED),
+        [dir, flag, seed] if flag == "--seed" => match seed.parse() {
+            Ok(seed) => (dir, seed),
+            Err(_) => return fail(EXIT_USAGE, &format!("`{seed}` is not a seed")),
+        },
+        _ => return fail(EXIT_USAGE, "usage: diet-drive table DIR [--seed S]"),
+    };
+    let dir = std::path::Path::new(dir);
+    let (json, markdown) = match table(dir, seed) {
+        Ok(written) => written,
+        Err(why) => return fail(EXIT_INPUT, &why),
+    };
+    let (json_path, markdown_path) = (dir.join("table.json"), dir.join("table.md"));
+    let mut pretty = serde_json::to_string_pretty(&json).unwrap_or_default();
+    pretty.push('\n');
+    for (path, text) in [(&json_path, pretty), (&markdown_path, markdown)] {
+        if let Err(why) = std::fs::write(path, text) {
+            return fail(
+                EXIT_OUTPUT,
+                &format!("{} cannot be written: {why}", path.display()),
+            );
+        }
+    }
+    println!(
+        "{}",
+        serde_json::json!({
+            "table": markdown_path.display().to_string(),
+            "json": json_path.display().to_string(),
+            "seed": seed,
+            "pair": json["pair"],
+        })
+    );
+    ExitCode::SUCCESS
 }
 
 /// `diet-drive replay [--answers] [--port N]`: the stream-replay
@@ -3585,6 +3632,7 @@ fn main() -> ExitCode {
     match args.first().map(String::as_str) {
         Some(SCENARIO) => return scenario(&args[1..]),
         Some(PAIR) => return pair(&args[1..]),
+        Some(TABLE) => return table(&args[1..]),
         _ => {}
     }
     // Nor do the offline readers of a log: the record's projection and the
