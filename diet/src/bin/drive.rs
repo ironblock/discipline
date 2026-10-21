@@ -86,6 +86,18 @@ const CHECK: &str = "check";
 /// The scenario runner's subcommand (#760).
 const SCENARIO: &str = "scenario";
 
+/// The registry serve reads its substrate's entries from (#926): the
+/// built-in one, or, under `--rehearse-as`, the built-in one with the canned
+/// hosted substrate's table declaring the rung's. Set once, at start.
+static REHEARSAL_REGISTRY: std::sync::OnceLock<String> = std::sync::OnceLock::new();
+
+/// [`REHEARSAL_REGISTRY`] when set, else the built-in registry.
+fn registry() -> &'static str {
+    REHEARSAL_REGISTRY
+        .get()
+        .map_or(diet::drive::registry::REGISTRY, String::as_str)
+}
+
 /// The paired runner's subcommand (#912).
 const PAIR: &str = "pair";
 
@@ -107,7 +119,7 @@ fn serve_usage() -> String {
          \x20                       [--listen IP] [--port N] [--auth-file FILE] [--regimen FILE]\n\
          \x20                       [--log FILE] [--record FILE]\n\
          \x20                       [--allow-origin URL]... [--max-output-tokens N]\n\
-         \x20                       [--worktree DIR] [--run JSON]\n\
+         \x20                       [--worktree DIR] [--run JSON] [--rehearse-as RUNG]\n\
          \x20                       [--seat-endpoint URL --seat-model NAME [--seat-key-file FILE]]\n\
          \x20      diet-drive serve --profile NAME [--config FILE] [any flag above]\n\n",
     );
@@ -127,6 +139,10 @@ fn serve_usage() -> String {
     out.push_str("--shown-root REAL=SHOWN (a canned substrate's only, as `scenario` passes\n");
     out.push_str("it) shows the model SHOWN wherever REAL would appear, fixes background job\n");
     out.push_str("ids and the pid it is shown, and declares both on session.start.\n");
+    out.push_str("--rehearse-as RUNG (a rehearsal's only, on `canned-scenario-hosted`, as a\n");
+    out.push_str("dry run passes it) runs under RUNG's declarations -- window, output cap,\n");
+    out.push_str("efforts, sampler, vision, thinking -- its claim the canned one, and\n");
+    out.push_str("names RUNG as `rehearsing_as` on session.start and the record (#926).\n");
     out.push_str("--run JSON names which repeat of which script the session is, as\n");
     out.push_str("`scenario --repeat` passes it: {script_sha256, repeat, of}, and a pair's\n");
     out.push_str("arm and pair; session.start and the record's start carry it (#910).\n");
@@ -211,6 +227,9 @@ struct ServeArgs {
     classifier_endpoint: Option<String>,
     /// `--run`: which repeat of which script the session is (#910), as JSON.
     run: Option<String>,
+    /// `--rehearse-as`: the rung a rehearsal runs under the declarations of
+    /// (#926).
+    rehearse_as: Option<String>,
 }
 
 /// Whether `regime`'s substrate has canned weights: every answer written in
@@ -218,9 +237,7 @@ struct ServeArgs {
 fn canned_substrate(regime: Option<&diet::formats::record::Regime>) -> bool {
     regime
         .and_then(|regime| regime.substrates.first())
-        .and_then(|substrate| {
-            diet::drive::registry::identity(diet::drive::registry::REGISTRY, &substrate.id).ok()
-        })
+        .and_then(|substrate| diet::drive::registry::identity(registry(), &substrate.id).ok())
         .is_some_and(|identity| {
             matches!(
                 identity.weights,
@@ -304,6 +321,23 @@ fn asks_for_help(args: &[String]) -> bool {
         .any(|flag| flag == "--help" || flag == "-h")
 }
 
+/// The registry a rehearsal for `rung` reads (#926): the canned hosted
+/// substrate's table declaring what `rung`'s declares of its requests.
+///
+/// # Errors
+///
+/// When `rung` is no `api` entry, or declares nothing a rehearsal takes.
+fn rehearsal_registry(rung: &str) -> Result<String, String> {
+    use diet::drive::registry::{REGISTRY, identity, rehearsing_as};
+    let entry = identity(REGISTRY, rung)?;
+    if entry.server_kind.as_deref() != Some("api") {
+        return Err(format!(
+            "a rehearsal is for a hosted API's rung, and `{rung}`'s entry is not `server_kind = \"api\"`"
+        ));
+    }
+    rehearsing_as(REGISTRY, diet::drive::scenario::REHEARSED_ON, rung)
+}
+
 /// `serve`'s flags, or nothing when they are not a usage it takes.
 #[allow(clippy::too_many_lines)]
 fn serve_args(args: &[String]) -> Option<ServeArgs> {
@@ -325,6 +359,7 @@ fn serve_args(args: &[String]) -> Option<ServeArgs> {
     let mut shown_roots = Vec::new();
     let mut classifier_endpoint = None;
     let mut run = None;
+    let mut rehearse_as = None;
     let mut given = args.iter();
     while let Some(flag) = given.next() {
         let value = given.next()?;
@@ -375,6 +410,9 @@ fn serve_args(args: &[String]) -> Option<ServeArgs> {
         } else if flag == "--run" {
             run = Some(value.clone());
             true
+        } else if flag == "--rehearse-as" {
+            rehearse_as = Some(value.clone());
+            true
         } else if flag == "--allow-origin" {
             let origin = is_an_origin(value);
             if origin {
@@ -419,6 +457,7 @@ fn serve_args(args: &[String]) -> Option<ServeArgs> {
         shown_roots,
         classifier_endpoint,
         run,
+        rehearse_as,
     })
 }
 
@@ -450,6 +489,7 @@ fn serve(args: &[String]) -> ExitCode {
         shown_roots,
         classifier_endpoint,
         run,
+        rehearse_as,
     }) = serve_args(args)
     else {
         eprint!("{}", serve_usage());
@@ -459,6 +499,14 @@ fn serve(args: &[String]) -> ExitCode {
         Ok(run) => run,
         Err(why) => return fail(EXIT_USAGE, &format!("--run: {why}")),
     };
+    if let Some(rung) = &rehearse_as {
+        match rehearsal_registry(rung) {
+            Ok(overlaid) => {
+                let _ = REHEARSAL_REGISTRY.set(overlaid);
+            }
+            Err(why) => return fail(EXIT_USAGE, &format!("--rehearse-as: {why}")),
+        }
+    }
     // The surface's bundle (#716): `--ui`, else a `ui` directory beside the
     // binary, as a release archive or a native shell ships it; else none.
     let ui = match page_bundle(ui.as_deref()) {
@@ -493,11 +541,8 @@ fn serve(args: &[String]) -> ExitCode {
     // would sample at defaults nobody recorded.
     if let Some(regime) = regime.as_ref().filter(|regime| {
         diet::drive::regimen::pins_nothing(&regime.substrates[0].sampler_card)
-            && !diet::drive::registry::identity(
-                diet::drive::registry::REGISTRY,
-                &regime.substrates[0].id,
-            )
-            .is_ok_and(|identity| identity.server_kind.as_deref() == Some("api"))
+            && !diet::drive::registry::identity(registry(), &regime.substrates[0].id)
+                .is_ok_and(|identity| identity.server_kind.as_deref() == Some("api"))
     }) {
         let path = regimen_file.as_deref().unwrap_or_default();
         return fail(
@@ -578,16 +623,12 @@ fn serve(args: &[String]) -> ExitCode {
     // A hosted API's entry (#555): its requests carry no template kwargs --
     // a local template's -- and its thinking is the transport's.
     let hosted = regime.as_ref().and_then(|regime| {
-        diet::drive::registry::identity(diet::drive::registry::REGISTRY, &regime.substrates[0].id)
+        diet::drive::registry::identity(registry(), &regime.substrates[0].id)
             .ok()
             .filter(|identity| identity.server_kind.as_deref() == Some("api"))
     });
     if let Some(regime) = regime.as_ref().filter(|_| hosted.is_none()) {
-        let identity = diet::drive::registry::identity(
-            diet::drive::registry::REGISTRY,
-            &regime.substrates[0].id,
-        )
-        .ok();
+        let identity = diet::drive::registry::identity(registry(), &regime.substrates[0].id).ok();
         match diet::drive::regimen::template_kwargs_declared(
             &regime.substrates[0],
             identity.as_ref(),
@@ -906,18 +947,31 @@ fn serve(args: &[String]) -> ExitCode {
         Ok(listener) => listener,
         Err(refused) => return refused,
     };
+    // A rehearsal's declarations are a rung's, its claim the canned hosted
+    // substrate's (#926): on any other, a rung's declarations would ride a
+    // claim they are not checked against.
+    if rehearse_as.is_some() && substrate != Some(diet::drive::scenario::REHEARSED_ON) {
+        return fail(
+            EXIT_USAGE,
+            &format!(
+                "--rehearse-as is a rehearsal's: its regimen's substrate is `{}`, not `{}`",
+                substrate.unwrap_or("none"),
+                diet::drive::scenario::REHEARSED_ON
+            ),
+        );
+    }
     // A substrate whose served configuration takes no images (#815): an
     // ask carrying one is refused rather than dropped by the engine.
     let blind = substrate
         .filter(|id| {
-            diet::drive::registry::identity(diet::drive::registry::REGISTRY, id)
+            diet::drive::registry::identity(registry(), id)
                 .is_ok_and(|identity| !diet::drive::served::takes_images(&identity))
         })
         .map(str::to_owned);
     let session = served_session(
         (transport, seat),
         (shape, dialect, blind),
-        (tools, run),
+        (tools, run, rehearse_as),
         (
             claim,
             interview,
@@ -1136,7 +1190,11 @@ fn outputs(
 fn served_session(
     (transport, seat): (HttpStream, Option<session::Offboard<HttpStream>>),
     (mut shape, dialect, blind): (RequestShape, Dialect, Option<String>),
-    (tools, run): (Option<Tools>, Option<diet::formats::log::Run>),
+    (tools, run, rehearse_as): (
+        Option<Tools>,
+        Option<diet::formats::log::Run>,
+        Option<String>,
+    ),
     declared: session::Declared,
 ) -> std::sync::Arc<Session<HttpStream>> {
     let forks = transport.for_forks();
@@ -1179,6 +1237,10 @@ fn served_session(
     };
     let session = match run {
         Some(run) => session.in_run(run),
+        None => session,
+    };
+    let session = match rehearse_as {
+        Some(rung) => session.rehearsing_as(&rung),
         None => session,
     };
     std::sync::Arc::new(match seat {
@@ -1228,7 +1290,7 @@ fn offboard_seat(
              say where and as what"
         ));
     };
-    let seat_speaks = diet::drive::registry::identity(diet::drive::registry::REGISTRY, id)
+    let seat_speaks = diet::drive::registry::identity(registry(), id)
         .ok()
         .and_then(|identity| identity.dialect);
     let endpoint = match Endpoint::parse(&endpoint) {
@@ -1242,7 +1304,7 @@ fn offboard_seat(
              `warm`, not `offboard:{id}`"
         ));
     }
-    let entry = diet::drive::registry::identity(diet::drive::registry::REGISTRY, id)?;
+    let entry = diet::drive::registry::identity(registry(), id)?;
     if entry.server_kind.as_deref() == Some("api") {
         return Err(format!(
             "`{id}` is a hosted API, and an offboard seat on one is not built: a seat speaks the \
@@ -1277,9 +1339,9 @@ fn offboard_seat(
             substrate: id.to_owned(),
             model,
             // The window the seat reports, else the one its entry declares.
-            context_window: window.map(|(tokens, _)| tokens).or_else(|| {
-                diet::drive::registry::serving_context(diet::drive::registry::REGISTRY, id)
-            }),
+            context_window: window
+                .map(|(tokens, _)| tokens)
+                .or_else(|| diet::drive::registry::serving_context(registry(), id)),
         },
         template,
     )))
@@ -1299,7 +1361,7 @@ fn tls_only_for_an_api(endpoint: &Endpoint, substrate: Option<&str>) -> Result<(
     }
     let api = substrate
         .map(|id| {
-            let identity = diet::drive::registry::identity(diet::drive::registry::REGISTRY, id)?;
+            let identity = diet::drive::registry::identity(registry(), id)?;
             diet::drive::served::ServerKind::of(id, &identity)
                 .map(|kind| kind == diet::drive::served::ServerKind::Api)
         })
@@ -1326,7 +1388,7 @@ fn tls_only_for_an_api(endpoint: &Endpoint, substrate: Option<&str>) -> Result<(
 /// When the entry cannot be read, or names a dialect this client does not
 /// speak.
 fn served_dialect(id: &str) -> Result<Dialect, String> {
-    let identity = diet::drive::registry::identity(diet::drive::registry::REGISTRY, id)?;
+    let identity = diet::drive::registry::identity(registry(), id)?;
     match identity.dialect.as_deref() {
         None => Ok(Dialect::llama_cpp()),
         Some(name) => Dialect::named(name).ok_or_else(|| {
@@ -1401,37 +1463,28 @@ fn serving_interview(
     let rules = session::interview_warrant(&read).map_err(|why| format!("{path}: {why}"))?;
     // #784: the mechanical lane fills working memory too, forks or none.
     let mechanical = session::mechanical_capture(&read);
-    let window = diet::drive::registry::serving_context(
-        diet::drive::registry::REGISTRY,
-        &regime.substrates[0].id,
-    );
+    let window = diet::drive::registry::serving_context(registry(), &regime.substrates[0].id);
     let meditations = diet::meditation::policy::Served::from_regimen(&read, window)
         .map_err(|why| format!("{path}: {why}"))?;
     let delivery = session::fork_delivery(&read).map_err(|why| format!("{path}: {why}"))?;
     // #782: when a step's forks run, and how many at once beside the trunk.
-    let (timing, fork_slots) = session::timing_and_slots(
-        &read,
-        (diet::drive::registry::REGISTRY, &regime.substrates[0].id),
-    )
-    .map_err(|why| format!("{path}: {why}"))?;
+    let (timing, fork_slots) =
+        session::timing_and_slots(&read, (registry(), &regime.substrates[0].id))
+            .map_err(|why| format!("{path}: {why}"))?;
     // #797: whether the trunk's server shares a cut fork's prefix pages.
     let prefix_pages = session::PrefixPages::of(
-        diet::drive::registry::served_prefix_shared(
-            diet::drive::registry::REGISTRY,
-            &regime.substrates[0].id,
-        )
-        .map_err(|why| format!("{path}: {why}"))?,
+        diet::drive::registry::served_prefix_shared(registry(), &regime.substrates[0].id)
+            .map_err(|why| format!("{path}: {why}"))?,
     );
     // #822: the forks cut during the turn that may wait for a slot.
     let fork_backlog = session::fork_backlog(&read).map_err(|why| format!("{path}: {why}"))?;
     // The chunk the trunk's server allocates its pool in, each job counted
     // in whole chunks and two more.
-    let pool_chunk =
-        diet::drive::registry::identity(diet::drive::registry::REGISTRY, &regime.substrates[0].id)
-            .ok()
-            .and_then(|identity| identity.served.get("chunk_size")?.parse::<u64>().ok())
-            .filter(|chunk| *chunk > 0)
-            .unwrap_or(session::POOL_CHUNK_DEFAULT);
+    let pool_chunk = diet::drive::registry::identity(registry(), &regime.substrates[0].id)
+        .ok()
+        .and_then(|identity| identity.served.get("chunk_size")?.parse::<u64>().ok())
+        .filter(|chunk| *chunk > 0)
+        .unwrap_or(session::POOL_CHUNK_DEFAULT);
     // The requests it batches at once, which an audit's chunks overlap no
     // further than.
     let served_batch = served_batch(&regime.substrates[0].id);
@@ -1980,10 +2033,9 @@ fn written_record(
 ) -> Result<(String, bool), String> {
     use diet::drive::projection;
     use diet::formats::record;
-    let engine =
-        diet::drive::registry::identity(diet::drive::registry::REGISTRY, &regime.substrates[0].id)
-            .ok()
-            .and_then(|identity| projection::cited(&identity));
+    let engine = diet::drive::registry::identity(registry(), &regime.substrates[0].id)
+        .ok()
+        .and_then(|identity| projection::cited(&identity));
     let lines: Vec<_> = session
         .events_from(0)
         .iter()
@@ -2249,14 +2301,14 @@ fn confirmations(
     shape: &RequestShape,
 ) -> Result<Confirmed, String> {
     use diet::drive::served::{self, Engine, ServerKind};
-    let identity = diet::drive::registry::identity(diet::drive::registry::REGISTRY, id)?;
+    let identity = diet::drive::registry::identity(registry(), id)?;
     if matches!(
         identity.weights,
         diet::formats::record::Weights::Canned { .. }
     ) {
         // A canned substrate's window is the one its registry entry
         // declares, as an API substrate's is (#798): none, mostly.
-        let window = diet::drive::registry::serving_context(diet::drive::registry::REGISTRY, id)
+        let window = diet::drive::registry::serving_context(registry(), id)
             .map(|tokens| (tokens, "declared"));
         return Ok(Confirmed {
             fields: Vec::new(),
@@ -2266,8 +2318,7 @@ fn confirmations(
         });
     }
     // The window each request's output cap is clamped to (#588).
-    let serving_context =
-        diet::drive::registry::serving_context(diet::drive::registry::REGISTRY, id);
+    let serving_context = diet::drive::registry::serving_context(registry(), id);
     if ServerKind::of(id, &identity)? == ServerKind::Api {
         let mut fields = served::corroborated(id, &identity, None)?;
         fields.extend(served::draft_corroborated(id, &identity, None)?);
@@ -2400,7 +2451,7 @@ fn registered_regime(
         regimen::parse(&text).map_err(|why| format!("{path} is not a regimen: {why:?}"))?;
     let stream_idle = diet::drive::regimen::stream_idle(Some(&regimen))
         .map_err(|why| format!("{path}: {why}"))?;
-    diet::drive::regimen::regime_registered(&regimen, diet::drive::registry::REGISTRY)
+    diet::drive::regimen::regime_registered(&regimen, registry())
         .map(|regime| {
             let output_cap = diet::drive::regimen::output_cap(flag, Some(&regimen));
             let levers =
@@ -2962,10 +3013,9 @@ fn record_from_log(args: &[String]) -> ExitCode {
         },
         std::path::PathBuf::from,
     );
-    let engine =
-        diet::drive::registry::identity(diet::drive::registry::REGISTRY, &regime.substrates[0].id)
-            .ok()
-            .and_then(|identity| projection::cited(&identity));
+    let engine = diet::drive::registry::identity(registry(), &regime.substrates[0].id)
+        .ok()
+        .and_then(|identity| projection::cited(&identity));
     let mut projected = match projection::project_in(&lines, &regime, engine, Some(&recording)) {
         Ok(projected) => projected,
         Err(why) => return fail(EXIT_INPUT, &format!("{log_path}: {why}")),

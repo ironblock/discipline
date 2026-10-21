@@ -853,6 +853,7 @@ pub fn run<T: Transport>(script: &Script, gym: &Gym<'_, T>) -> Result<Drive, Hal
         // #583: the version this crate writes, spelling it `meditation`.
         version: Some(crate::formats::record::VERSION),
         run: None,
+        rehearsing_as: None,
     }];
     let mut unspellable: Vec<Unspellable> = Vec::new();
     let mut uncaptured: Vec<Uncaptured> = Vec::new();

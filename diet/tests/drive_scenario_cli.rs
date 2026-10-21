@@ -462,6 +462,18 @@ fn a_dry_run_prints_the_plan_a_live_run_would_spend() {
         plan["api_unchecked"],
         serde_json::json!(["api_temperature_with_top_p"])
     );
+    // #926: a drive that ran to its end plans completely, and its log's and
+    // record's starts name the rung it ran under the declarations of.
+    assert_eq!(plan["complete"], true, "{plan}");
+    for start in [
+        first_line(&dir.join("out/session.log")),
+        first_line(&dir.join("out/session.record.jsonl")),
+    ] {
+        assert_eq!(
+            start["rehearsing_as"], "anthropic-claude-sonnet-5-5",
+            "{start}"
+        );
+    }
     let _ = std::fs::remove_dir_all(&dir);
 }
 
@@ -1753,5 +1765,179 @@ fn a_graded_runs_script_derives_its_grade_step() {
             .is_some_and(|check| check.contains(&digest) && check.ends_with("exit 1")),
         "{grade}"
     );
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// The tree's Sonnet 5.5 regimen, its commands run as hosted.jsonl's turn
+/// needs, its rung swapped to `rung` (on `hardware`) when given, and
+/// `extra` bound at its top level: what a live run would take.
+fn hosted_regimen(dir: &Path, name: &str, rung: Option<(&str, &str)>, extra: &str) -> PathBuf {
+    let sonnet = std::fs::read_to_string(root().join("diet/drive/sonnet-5-5.toml"))
+        .expect("the Sonnet regimen");
+    let sonnet = match rung {
+        Some((rung, hardware)) => sonnet
+            .replace("substrate = \"anthropic-claude-sonnet-5-5\"", &format!("substrate = \"{rung}\""))
+            .replace(
+                "substrate_hardware = \"24a1117b0a8112dbcd56ec38eb21cb44bf8124400d6233af927ecadc1db1b13e\"",
+                &format!("substrate_hardware = \"{hardware}\""),
+            ),
+        None => sonnet,
+    };
+    let commands = format!(
+        "isolation = \"none\"\napproval = \"none\"\napproval_policy = \"approvals are \
+         off: every command runs without a gate decision or a prompt\"\n{extra}\n\n\
+         [limits]\nmax_steps = 4\n\n"
+    );
+    let at = sonnet.find("[reasoning]").expect("a reasoning table");
+    let path = dir.join(name);
+    std::fs::write(
+        &path,
+        format!("{}{commands}{}", &sonnet[..at], &sonnet[at..]),
+    )
+    .expect("the live regimen");
+    path
+}
+
+/// A dry run of `file` under `regimen`: its exit code and its report.
+fn dry_run(file: &Path, regimen: &Path, out: &Path) -> (Option<i32>, serde_json::Value) {
+    let ran = Command::new(DRIVE)
+        .current_dir(root())
+        .arg("scenario")
+        .arg(file)
+        .arg("--dry-run")
+        .arg("--regimen")
+        .arg(regimen)
+        .arg("--out")
+        .arg(out)
+        .arg("--no-assemble")
+        .env_remove("ANTHROPIC_API_KEY")
+        .output()
+        .expect("diet-drive runs");
+    let stdout = String::from_utf8_lossy(&ran.stdout);
+    let said = serde_json::from_str(stdout.lines().last().unwrap_or(""))
+        .unwrap_or_else(|_| panic!("not JSON: {stdout}{}", String::from_utf8_lossy(&ran.stderr)));
+    (ran.status.code(), said)
+}
+
+/// #926: a rehearsal takes its rung's window. A window meditation's share
+/// is admitted rehearsing for a rung that declares a window (Sonnet 5.5's
+/// 1,000,000), and refused at start rehearsing for one that declares none
+/// (`stub-hosted-api`), as a live run on each would be.
+#[test]
+fn a_rehearsal_is_refused_at_start_where_its_rung_would_be() {
+    let dir = scratch("rehearse-window");
+    // A fraction trigger needs something to fill working memory: a scoping
+    // warrant, which hosted.jsonl's asks never fire.
+    let fraction = "interview_warrant = [\"scoping\"]\nmeditation_at_context_fraction = 0.5";
+    let declares = hosted_regimen(&dir, "declares.toml", None, fraction);
+    let file = root().join("diet/scenarios/hosted.jsonl");
+    let (code, said) = dry_run(&file, &declares, &dir.join("declares"));
+    assert_eq!(code, Some(0), "{said}");
+    assert_eq!(said["plan"]["complete"], true, "{said}");
+    let none = hosted_regimen(
+        &dir,
+        "none.toml",
+        Some((
+            "stub-hosted-api",
+            "e2f4ca82432821d2f721a5dc9ece9a6bebeb16292c0f45da9ced80613626fbf0",
+        )),
+        fraction,
+    );
+    let (code, said) = dry_run(&file, &none, &dir.join("none"));
+    assert_eq!(code, Some(1), "{said}");
+    assert!(
+        said["failure"].to_string().contains("serve did not start")
+            && said["failure"].to_string().contains("serving_context"),
+        "{said}"
+    );
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// #926: a drive that fails partway still plans from what its log holds,
+/// marked incomplete, with the failure beside it.
+#[test]
+fn a_dry_run_whose_drive_fails_plans_what_its_log_holds() {
+    let dir = scratch("rehearse-failed");
+    let regimen = hosted_regimen(&dir, "live.toml", None, "");
+    let head = root()
+        .join("diet/drive/heads/floor.md")
+        .display()
+        .to_string();
+    let text = std::fs::read_to_string(root().join("diet/scenarios/hosted.jsonl"))
+        .expect("hosted.jsonl")
+        .replace("\"../drive/heads/floor.md\"", &format!("\"{head}\""));
+    assert!(text.contains(&head), "the head named by its whole path");
+    // A last step that cannot be met: no `grade` line is ever logged.
+    let file = dir.join("fails.jsonl");
+    std::fs::write(
+        &file,
+        format!(
+            "{text}{}\n",
+            r#"{"step":"wait","until":"grade","timeout":1}"#
+        ),
+    )
+    .expect("the scenario");
+    let (code, said) = dry_run(&file, &regimen, &dir.join("out"));
+    assert_eq!(code, Some(1), "{said}");
+    let plan = &said["plan"];
+    assert_eq!(plan["complete"], false, "{said}");
+    assert!(
+        plan["stopped_by"]
+            .as_str()
+            .is_some_and(|why| why.contains("grade")),
+        "{said}"
+    );
+    assert_eq!(
+        plan["rehearsal"]["requests"], 4,
+        "every request before it: {said}"
+    );
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// #926: a rehearsal takes its rung's vision. An ask attaching a picture is
+/// admitted rehearsing for a rung that takes images (Sonnet 5.5, declared
+/// from the provider's docs) and refused `no-vision` rehearsing for one
+/// that declares none (`stub-hosted-api`).
+#[test]
+fn a_rehearsal_takes_an_image_where_its_rung_would() {
+    let dir = scratch("rehearse-vision");
+    std::fs::write(dir.join("shot.png"), b"\x89PNG\r\n\x1a\n0000").expect("the picture");
+    let header = serde_json::json!({
+        "scenario": "vision",
+        "regimen": "unused.toml",
+        "head": root().join("diet/drive/heads/floor.md"),
+        "seed": {"shot.png": "shot.png"},
+    });
+    let file = dir.join("vision.jsonl");
+    std::fs::write(
+        &file,
+        format!(
+            "{header}\n{}",
+            concat!(
+                r#"{"reply":{"text":"A PNG signature."}}"#,
+                "\n",
+                r#"{"step":"ask","text":"What is in the picture?","attach":["shot.png"]}"#,
+                "\n",
+                r#"{"step":"end"}"#,
+                "\n",
+            )
+        ),
+    )
+    .expect("the scenario");
+    let takes = hosted_regimen(&dir, "takes.toml", None, "");
+    let (code, said) = dry_run(&file, &takes, &dir.join("takes"));
+    assert_eq!(code, Some(0), "{said}");
+    let blind = hosted_regimen(
+        &dir,
+        "blind.toml",
+        Some((
+            "stub-hosted-api",
+            "e2f4ca82432821d2f721a5dc9ece9a6bebeb16292c0f45da9ced80613626fbf0",
+        )),
+        "",
+    );
+    let (code, said) = dry_run(&file, &blind, &dir.join("blind"));
+    assert_eq!(code, Some(1), "{said}");
+    assert!(said["failure"].to_string().contains("no-vision"), "{said}");
     let _ = std::fs::remove_dir_all(&dir);
 }

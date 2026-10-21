@@ -2259,6 +2259,7 @@ fn synthesized_record(
                 // #583: version 1 spells the boundary `seam`; nothing here writes one.
                 version: None,
                 run: None,
+                rehearsing_as: None,
             },
             Event::Claim {
                 id: "c1".to_owned(),
