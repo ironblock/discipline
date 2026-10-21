@@ -374,6 +374,9 @@ pub enum Event {
         /// The rung whose declarations a rehearsal ran under (#926), when
         /// serve was told with `--rehearse-as`.
         rehearsing_as: Option<String>,
+        /// The nonce the head's first line carries (#932), under the
+        /// `head_nonce` lever.
+        head_nonce: Option<String>,
     },
     /// An ask was accepted, and a turn begins on it.
     Asked {
@@ -3457,6 +3460,7 @@ impl<S: Streaming + 'static> Session<S> {
             phase_document,
             run: None,
             rehearsing_as: None,
+            head_nonce: None,
         });
         Self::sharing(Shared {
             transport,
@@ -3517,6 +3521,20 @@ impl<S: Streaming + 'static> Session<S> {
     #[must_use]
     pub fn without_vision(self, substrate: &str) -> Self {
         self.shared.lock().blind = Some(substrate.to_owned());
+        self
+    }
+
+    /// This session, its `session.start` naming the nonce its head's first
+    /// line carries (#932): what the `head_nonce` lever put there.
+    #[must_use]
+    pub fn with_head_nonce(self, nonce: &str) -> Self {
+        if let Some(Logged {
+            event: Event::Started { head_nonce, .. },
+            ..
+        }) = self.shared.lock().log.first_mut()
+        {
+            *head_nonce = Some(nonce.to_owned());
+        }
         self
     }
 
@@ -5066,9 +5084,11 @@ pub fn line_of(logged: &Logged) -> log::Line {
             hosted,
             run,
             rehearsing_as,
+            head_nonce,
         } => log::Event::SessionStart {
             run: run.clone(),
             rehearsing_as: rehearsing_as.clone(),
+            head_nonce: head_nonce.clone(),
             phase_document: phase_document.clone(),
             build_commit: build.as_ref().map(|(commit, _)| commit.clone()),
             build_dirty: build.as_ref().map(|(_, dirty)| *dirty),
@@ -16871,6 +16891,7 @@ pub(in crate::drive) mod tests {
                 phase_document: None,
                 run: None,
                 rehearsing_as: None,
+                head_nonce: None,
                 bash_timeout_ms: None,
                 shown_roots: None,
                 opened: 1_790_000_000_000,
@@ -17478,6 +17499,7 @@ pub(in crate::drive) mod tests {
                 api_retry_after_max_seconds: None,
                 run: None,
                 rehearsing_as: None,
+                head_nonce: None,
             },
             log::Event::Ask {
                 turn: 1,

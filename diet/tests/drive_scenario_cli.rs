@@ -1941,3 +1941,96 @@ fn a_rehearsal_takes_an_image_where_its_rung_would() {
     assert!(said["failure"].to_string().contains("no-vision"), "{said}");
     let _ = std::fs::remove_dir_all(&dir);
 }
+
+/// #932: under `head_nonce = "per_run"` each run's head opens with a nonce
+/// of its own, drawn from its run, which `session.start` names; the
+/// table's cached prefill is then labelled carryover-free; `script` takes
+/// the nonce off the head it derives; and a value that is not a state is
+/// refused at start.
+#[test]
+fn a_nonced_pairs_heads_are_each_their_own_and_its_table_says_so() {
+    let dir = scratch("nonce");
+    let file = one_turn(
+        &dir,
+        "nonce",
+        r#"{"expect":"turn.settled","where":{"reason":"final"}}"#,
+    );
+    let a = canned_with(&dir, "a.toml", "head_nonce = \"per_run\"");
+    let b = canned_with(
+        &dir,
+        "b.toml",
+        "head_nonce = \"per_run\"\nmax_output_tokens = 512",
+    );
+    let out = dir.join("out");
+    let (code, lines) = paired(&file, (&a, &b), &out, &["--repeat", "2"]);
+    assert_eq!(code, Some(0), "{lines:?}");
+    let floor =
+        std::fs::read_to_string(root().join("diet/drive/heads/floor.md")).expect("the head");
+    let mut nonces = std::collections::BTreeSet::new();
+    for (arm, k) in [("a", 1), ("a", 2), ("b", 1), ("b", 2)] {
+        let start = first_line(
+            &out.join(arm)
+                .join(format!("repeat-{k:02}"))
+                .join("session.log"),
+        );
+        let nonce = start["head_nonce"].as_str().expect("a nonce").to_owned();
+        assert_eq!(nonce.len(), 16, "{start}");
+        let head = start["head"][0]["content"].as_str().expect("the head");
+        assert!(
+            head.starts_with(&format!("Session nonce: {nonce}\n")),
+            "{head}"
+        );
+        assert!(head.contains(floor.trim()), "the head after it");
+        assert_eq!(start["levers"]["head_nonce"], "per_run", "{start}");
+        nonces.insert(nonce);
+    }
+    assert_eq!(nonces.len(), 4, "every run's nonce its own: {nonces:?}");
+    let ran = Command::new(DRIVE)
+        .arg("table")
+        .arg(&out)
+        .output()
+        .expect("diet-drive runs");
+    assert_eq!(
+        ran.status.code(),
+        Some(0),
+        "{}",
+        String::from_utf8_lossy(&ran.stderr)
+    );
+    let table: serde_json::Value =
+        serde_json::from_str(&std::fs::read_to_string(out.join("table.json")).expect("table.json"))
+            .expect("JSON");
+    let cached = table["rows"]
+        .as_array()
+        .and_then(|rows| {
+            rows.iter()
+                .find(|row| row["row"] == "cached prefill: trunk")
+        })
+        .cloned()
+        .unwrap_or_else(|| panic!("no trunk prefill row: {table}"));
+    assert!(
+        cached["source"]
+            .as_str()
+            .is_some_and(|source| source.contains("carryover-free")),
+        "{cached}"
+    );
+    let derived = dir.join("derived");
+    let (code, stdout, stderr) = script(&out.join("a/repeat-01/session.log"), &derived, None);
+    assert_eq!(code, Some(0), "{stdout}{stderr}");
+    let head = std::fs::read_to_string(derived.join("head.md")).expect("the derived head");
+    assert!(!head.contains("Session nonce"), "{head}");
+    let bad = canned_with(&dir, "bad.toml", "head_nonce = \"sometimes\"");
+    let ran = Command::new(DRIVE)
+        .current_dir(root())
+        .arg("scenario")
+        .arg(&file)
+        .args(["--no-assemble", "--regimen"])
+        .arg(&bad)
+        .arg("--out")
+        .arg(dir.join("refused"))
+        .output()
+        .expect("diet-drive runs");
+    let said = String::from_utf8_lossy(&ran.stdout);
+    assert_eq!(ran.status.code(), Some(1), "{said}");
+    assert!(said.contains("head_nonce"), "{said}");
+    let _ = std::fs::remove_dir_all(&dir);
+}

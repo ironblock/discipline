@@ -2348,6 +2348,7 @@ mod tests {
             api_retry_after_max_seconds: None,
             run: None,
             rehearsing_as: None,
+            head_nonce: None,
         }
     }
 
