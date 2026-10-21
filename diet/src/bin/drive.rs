@@ -2589,7 +2589,7 @@ fn usage() -> String {
         "       diet-drive pair FILE --a R1 --b R2 --repeat N --out DIR [--endpoint URL\n",
     );
     out.push_str("           --model NAME [--key-file FILE]] [--no-assemble] [--stop-file PATH]\n");
-    out.push_str("           [--void-cap K]\n");
+    out.push_str("           [--void-cap K] [--contrast L1,L2,...]\n");
     out.push_str("       (a scenario under two regimens one lever apart, N times each, ABBA;\n");
     out.push_str("       #912, diet/scenarios/README.md)\n");
     out.push_str("       diet-drive replay [--answers] [--port N]\n");
@@ -2732,7 +2732,8 @@ fn pair(args: &[String]) -> ExitCode {
         fail(
             EXIT_USAGE,
             "usage: diet-drive pair FILE --a R1 --b R2 --repeat N --out DIR [--endpoint URL \
-             --model NAME [--key-file FILE]] [--no-assemble] [--stop-file PATH] [--void-cap K]",
+             --model NAME [--key-file FILE]] [--no-assemble] [--stop-file PATH] [--void-cap K] \
+             [--contrast L1,L2,...]",
         )
     };
     let Some((file, rest)) = args.split_first() else {
@@ -2745,6 +2746,7 @@ fn pair(args: &[String]) -> ExitCode {
     };
     let (mut a, mut b, mut out, mut count, mut stop_file, mut void_cap) =
         (None, None, None, None, None, None);
+    let mut contrast: Option<Vec<String>> = None;
     let mut flags = rest.iter();
     while let Some(flag) = flags.next() {
         if flag == "--no-assemble" {
@@ -2770,6 +2772,13 @@ fn pair(args: &[String]) -> ExitCode {
                 Ok(k) => void_cap = Some(k),
                 Err(_) => return usage(),
             },
+            "--contrast" => {
+                let members: Vec<String> = value.split(',').map(str::to_owned).collect();
+                if members.iter().any(String::is_empty) {
+                    return usage();
+                }
+                contrast = Some(members);
+            }
             _ => return usage(),
         }
     }
@@ -2787,7 +2796,7 @@ fn pair(args: &[String]) -> ExitCode {
     let (said, passed) = diet::drive::pair::pair(
         &drive,
         &options,
-        (&a, &b),
+        (&a, &b, contrast.as_deref()),
         &Repeats {
             count,
             stop_file,

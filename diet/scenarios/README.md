@@ -168,11 +168,20 @@ This runs the scenario N times. Each repeat ends before the next starts.
 ## Running a pair (#912)
 
 ```
-diet-drive pair FILE --a R1 --b R2 --repeat N --out DIR [--endpoint URL --model NAME [--key-file FILE]] [--no-assemble] [--stop-file PATH] [--void-cap K]
+diet-drive pair FILE --a R1 --b R2 --repeat N --out DIR [--endpoint URL --model NAME [--key-file FILE]] [--no-assemble] [--stop-file PATH] [--void-cap K] [--contrast L1,L2,...]
 ```
 
 This runs the scenario under two regimens, N times each, so their records can be compared.
-- **The two regimens must differ in exactly one lever.** The levers are compared as `session.start` names them. Each key the regimens bind differently is also tried alone: `R2` with only that key as `R1` binds it. A key whose change moves no lever, such as a sampler setting or `arm`, counts as a difference. Otherwise the pair is refused before any run, naming the levers that differ (with each state), the keys, and the keys that move no lever.
+- **The two regimens must differ in exactly one lever.**
+  - The levers are compared as `session.start` names them.
+  - Each key the regimens bind differently is also tried alone: `R2` with only that key as `R1` binds it. A key whose change moves no lever, such as a sampler setting, counts as a difference.
+  - **`arm` is the one exempt key.** It is a label no request carries: two regimens that differ only in `arm` send byte-identical request bodies (`a_regimens_arm_reaches_no_request`, `diet/tests/drive_serve_cli.rs`).
+  - Otherwise the pair is refused before any run. The refusal names the levers that differ (with each state), the keys, and the keys that move no lever.
+- **`--contrast L1,L2,...` declares a bundle** (#932: interviews on against native). The pair then differs in exactly what it names, no more and no fewer.
+  - A lever is named by its own name, or by a key that moves it.
+  - A key that moves no lever is named by its dotted name.
+  - A difference left out, or a member that names none, is refused before any run, as `missing` and `extra`.
+  - The batch's line names the declared set and each lever's states, as `contrast`. `pair` is the regimens' digest as before, and the two regimens fix the set.
 - **The arms interleave ABBA ABBA,** so drift on the box falls on both arms. Each arm's repeats go in `DIR/a/repeat-NN/` and `DIR/b/repeat-NN/`.
 - **Each run's `run`** names its `arm` (`a` or `b`), the `pair`, the script's digest and its repeat of its arm, on its log's `session.start` and its record's start. `pair` is the sha256 of the two regimens' sha256s, `R1`'s then `R2`'s, as lowercase hex with nothing between.
 - **Each run is a repeat as above.** The same mechanics apply: a fresh worktree, a void run re-run at its slot up to the cap, the stop file read before each run, and one line per run, which names its `arm`. The batch's line names the `pair`, the `lever` with its state under each arm, and how many runs each arm `ran`.

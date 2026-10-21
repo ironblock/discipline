@@ -1254,3 +1254,93 @@ fn a_pair_more_than_one_lever_apart_is_refused_naming_the_levers_and_keys() {
     assert!(!out.join("a").exists(), "nothing ran");
     let _ = std::fs::remove_dir_all(&dir);
 }
+
+/// `diet-drive pair` on `file` under `a` and `b`, once each, with `extra`:
+/// its exit code and every stdout line.
+fn paired(
+    file: &Path,
+    (a, b): (&Path, &Path),
+    out: &Path,
+    extra: &[&str],
+) -> (Option<i32>, Vec<serde_json::Value>) {
+    let ran = Command::new(DRIVE)
+        .current_dir(root())
+        .arg("pair")
+        .arg(file)
+        .arg("--a")
+        .arg(a)
+        .arg("--b")
+        .arg(b)
+        .args(["--repeat", "1", "--no-assemble", "--out"])
+        .arg(out)
+        .args(extra)
+        .output()
+        .expect("diet-drive runs");
+    let stdout = String::from_utf8_lossy(&ran.stdout);
+    let lines = stdout
+        .lines()
+        .map(|line| serde_json::from_str(line).expect("a JSON line"))
+        .collect();
+    (ran.status.code(), lines)
+}
+
+/// #912: `--contrast` declares what a pair differs in; it runs when the
+/// declared set is exactly what differs, and the batch names it; a member
+/// missing or extra is refused before any run, naming it.
+#[test]
+fn a_declared_contrast_runs_when_exact_and_is_refused_naming_a_missing_or_extra_member() {
+    let dir = scratch("contrast");
+    let file = one_turn(
+        &dir,
+        "contrast",
+        r#"{"expect":"turn.settled","where":{"reason":"final"}}"#,
+    );
+    let a = canned_with(&dir, "a.toml", "");
+    let b = canned_with(
+        &dir,
+        "b.toml",
+        "max_output_tokens = 512\nmeditation_window = \"off\"",
+    );
+    let (code, lines) = paired(
+        &file,
+        (&a, &b),
+        &dir.join("ran"),
+        &["--contrast", "max_output_tokens,meditation_window"],
+    );
+    assert_eq!(code, Some(0), "{lines:?}");
+    assert_eq!(lines.len(), 3, "{lines:?}");
+    let batch = &lines[2];
+    assert_eq!(
+        batch["contrast"]["declared"],
+        serde_json::json!(["max_output_tokens", "meditation_window"]),
+        "{batch}"
+    );
+    assert_eq!(
+        batch["contrast"]["levers"]
+            .as_object()
+            .map(serde_json::Map::len),
+        Some(2),
+        "{batch}"
+    );
+    for (contrast, missing, extra) in [
+        (
+            "max_output_tokens",
+            serde_json::json!(["meditation_trigger"]),
+            serde_json::json!([]),
+        ),
+        (
+            "max_output_tokens,meditation_window,note_dedupe",
+            serde_json::json!([]),
+            serde_json::json!(["note_dedupe"]),
+        ),
+    ] {
+        let out = dir.join(format!("refused-{}", contrast.len()));
+        let (code, lines) = paired(&file, (&a, &b), &out, &["--contrast", contrast]);
+        assert_eq!(code, Some(1), "{contrast}: {lines:?}");
+        assert_eq!(lines.len(), 1, "{contrast}: nothing ran: {lines:?}");
+        assert_eq!(lines[0]["missing"], missing, "{contrast}: {}", lines[0]);
+        assert_eq!(lines[0]["extra"], extra, "{contrast}: {}", lines[0]);
+        assert!(!out.join("a").exists(), "{contrast}: nothing ran");
+    }
+    let _ = std::fs::remove_dir_all(&dir);
+}

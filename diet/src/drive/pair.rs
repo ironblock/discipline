@@ -24,8 +24,9 @@ pub struct Lever {
 
 /// Why two regimens are no pair: every lever they differ in, with its
 /// state under each, and every key they differ in, dotted into its table,
-/// with those that move no lever named apart.
-#[derive(Debug, Clone, PartialEq, Eq)]
+/// with those that move no lever named apart; under a declared contrast,
+/// the differences it left out and the members that name none.
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct NoPair {
     /// The levers that differ, by name: (a's state, b's state).
     pub levers: BTreeMap<String, (String, String)>,
@@ -33,27 +34,42 @@ pub struct NoPair {
     pub keys: Vec<String>,
     /// Of those, the keys whose change moves no lever.
     pub naming_no_lever: Vec<String>,
+    /// The differences a declared contrast does not name.
+    pub missing: Vec<String>,
+    /// The members of a declared contrast that name no difference.
+    pub extra: Vec<String>,
 }
 
 impl NoPair {
     /// The refusal, in words.
     #[must_use]
     pub fn why(&self) -> String {
+        let listed = |items: &[String]| {
+            if items.is_empty() {
+                "none".to_owned()
+            } else {
+                items.join(", ")
+            }
+        };
         let levers: Vec<_> = self.levers.keys().cloned().collect();
-        let mut why = format!(
-            "a pair differs in exactly one lever; these regimens differ in {} ({}), by the keys {}",
-            levers.len(),
-            if levers.is_empty() {
-                "none".to_owned()
-            } else {
-                levers.join(", ")
-            },
-            if self.keys.is_empty() {
-                "none".to_owned()
-            } else {
-                self.keys.join(", ")
-            },
-        );
+        let mut why = if self.missing.is_empty() && self.extra.is_empty() {
+            format!(
+                "a pair differs in exactly one lever, or in the contrast it declares; these \
+                 regimens differ in {} ({}), by the keys {}",
+                levers.len(),
+                listed(&levers),
+                listed(&self.keys),
+            )
+        } else {
+            format!(
+                "the declared contrast is not what these regimens differ in: it leaves out {} \
+                 and names {} that differs in nothing; they differ in the levers {}, by the keys {}",
+                listed(&self.missing),
+                listed(&self.extra),
+                listed(&levers),
+                listed(&self.keys),
+            )
+        };
         if !self.naming_no_lever.is_empty() {
             why.push_str("; ");
             why.push_str(&self.naming_no_lever.join(", "));
@@ -62,6 +78,10 @@ impl NoPair {
         why
     }
 }
+
+/// The one key a pair may differ in freely: the regimen's `arm`, a label
+/// no request carries (`a_regimens_arm_reaches_no_request`).
+pub const LABEL: &str = "arm";
 
 /// Each lever's state a session under `regimen` starts at, as serve names
 /// it on `session.start`.
@@ -92,55 +112,96 @@ fn differing(prefix: &str, a: Option<&Value>, b: Option<&Value>, into: &mut Vec<
     }
 }
 
+/// What two regimens differ in: the levers, the keys, the keys that move
+/// no lever, and the levers each differing key moves when tried alone.
+struct Differences {
+    levers: BTreeMap<String, (String, String)>,
+    keys: Vec<String>,
+    naming_no_lever: Vec<String>,
+    moved_by: BTreeMap<String, BTreeSet<String>>,
+}
+
+impl Differences {
+    fn of(a: &Regimen, b: &Regimen) -> Self {
+        let (under_a, under_b) = (levers_of(a), levers_of(b));
+        let changed = |left: &BTreeMap<String, String>, right: &BTreeMap<String, String>| {
+            left.keys()
+                .chain(right.keys())
+                .filter(|name| left.get(*name) != right.get(*name))
+                .cloned()
+                .collect::<BTreeSet<String>>()
+        };
+        let levers = changed(&under_a, &under_b)
+            .into_iter()
+            .map(|name| {
+                let state = |levers: &BTreeMap<String, String>| {
+                    levers.get(&name).cloned().unwrap_or_default()
+                };
+                let states = (state(&under_a), state(&under_b));
+                (name, states)
+            })
+            .collect();
+        let raw = |regimen: &Regimen| -> BTreeMap<String, Value> {
+            regimen
+                .iter()
+                .map(|(key, value)| (key.to_owned(), value.clone()))
+                .collect()
+        };
+        let (raw_a, raw_b) = (raw(a), raw(b));
+        let mut found = Self {
+            levers,
+            keys: Vec::new(),
+            naming_no_lever: Vec::new(),
+            moved_by: BTreeMap::new(),
+        };
+        let top: BTreeSet<&String> = raw_a.keys().chain(raw_b.keys()).collect();
+        for key in top.into_iter().filter(|key| key.as_str() != LABEL) {
+            let mut under = Vec::new();
+            differing(key, raw_a.get(key), raw_b.get(key), &mut under);
+            if under.is_empty() {
+                continue;
+            }
+            // `b` with this key alone as `a` binds it: a key that moves no
+            // lever leaves `b`'s levers as they were.
+            let moved = b
+                .with(key, raw_a.get(key).cloned())
+                .map(|tried| changed(&levers_of(&tried), &under_b))
+                .unwrap_or_default();
+            if moved.is_empty() {
+                found.naming_no_lever.extend(under.iter().cloned());
+            }
+            for dotted in &under {
+                found.moved_by.insert(dotted.clone(), moved.clone());
+            }
+            found.keys.extend(under);
+        }
+        found
+    }
+
+    fn refused(self) -> NoPair {
+        NoPair {
+            levers: self.levers,
+            keys: self.keys,
+            naming_no_lever: self.naming_no_lever,
+            ..NoPair::default()
+        }
+    }
+}
+
 /// The one lever `a` and `b` differ in (#912), as `session.start` names
 /// the levers. A key whose change moves no lever counts as a difference:
-/// it is tried alone, `b` with only that key as `a` binds it.
+/// it is tried alone, `b` with only that key as `a` binds it. Only
+/// [`LABEL`] may differ besides.
 ///
 /// # Errors
 ///
 /// [`NoPair`] when they differ in no lever, in more than one, or in a key
 /// that moves none.
 pub fn one_lever(a: &Regimen, b: &Regimen) -> Result<Lever, NoPair> {
-    let (under_a, under_b) = (levers_of(a), levers_of(b));
-    let levers: BTreeMap<String, (String, String)> = under_a
-        .keys()
-        .chain(under_b.keys())
-        .filter(|name| under_a.get(*name) != under_b.get(*name))
-        .map(|name| {
-            let state =
-                |levers: &BTreeMap<String, String>| levers.get(name).cloned().unwrap_or_default();
-            (name.clone(), (state(&under_a), state(&under_b)))
-        })
-        .collect();
-    let raw = |regimen: &Regimen| -> BTreeMap<String, Value> {
-        regimen
-            .iter()
-            .map(|(key, value)| (key.to_owned(), value.clone()))
-            .collect()
-    };
-    let (raw_a, raw_b) = (raw(a), raw(b));
-    let mut keys = Vec::new();
-    let mut naming_no_lever = Vec::new();
-    let top: BTreeSet<&String> = raw_a.keys().chain(raw_b.keys()).collect();
-    for key in top {
-        let mut under = Vec::new();
-        differing(key, raw_a.get(key), raw_b.get(key), &mut under);
-        if under.is_empty() {
-            continue;
-        }
-        // `b` with this key alone as `a` binds it: a key that moves no
-        // lever leaves `b`'s levers as they were.
-        let moves = b
-            .with(key, raw_a.get(key).cloned())
-            .is_ok_and(|tried| levers_of(&tried) != under_b);
-        if !moves {
-            naming_no_lever.extend(under.iter().cloned());
-        }
-        keys.extend(under);
-    }
-    if levers.len() == 1
-        && naming_no_lever.is_empty()
-        && let Some((name, (a, b))) = levers.first_key_value()
+    let found = Differences::of(a, b);
+    if found.levers.len() == 1
+        && found.naming_no_lever.is_empty()
+        && let Some((name, (a, b))) = found.levers.first_key_value()
     {
         return Ok(Lever {
             name: name.clone(),
@@ -148,10 +209,60 @@ pub fn one_lever(a: &Regimen, b: &Regimen) -> Result<Lever, NoPair> {
             b: b.clone(),
         });
     }
+    Err(found.refused())
+}
+
+/// The levers `a` and `b` differ in when they are `declared` to differ in
+/// exactly those (#912, for #932's bundle): every difference named, and
+/// every member naming one. A lever is named by its own name or by a key
+/// that moves it; a key that moves no lever, by its dotted name. Only
+/// [`LABEL`] may differ besides.
+///
+/// # Errors
+///
+/// [`NoPair`] naming what the declaration leaves out and what it names
+/// that differs in nothing.
+pub fn contrast_of(
+    a: &Regimen,
+    b: &Regimen,
+    declared: &[String],
+) -> Result<BTreeMap<String, (String, String)>, NoPair> {
+    let found = Differences::of(a, b);
+    let names = |member: &String, lever: &String| {
+        member == lever
+            || found
+                .moved_by
+                .get(member)
+                .is_some_and(|moved| moved.contains(lever))
+    };
+    let mut missing: Vec<String> = found
+        .levers
+        .keys()
+        .filter(|lever| !declared.iter().any(|member| names(member, lever)))
+        .cloned()
+        .collect();
+    missing.extend(
+        found
+            .naming_no_lever
+            .iter()
+            .filter(|key| !declared.contains(key))
+            .cloned(),
+    );
+    let extra: Vec<String> = declared
+        .iter()
+        .filter(|member| {
+            !found.levers.keys().any(|lever| names(member, lever))
+                && !found.naming_no_lever.contains(member)
+        })
+        .cloned()
+        .collect();
+    if missing.is_empty() && extra.is_empty() && !found.levers.is_empty() {
+        return Ok(found.levers);
+    }
     Err(NoPair {
-        levers,
-        keys,
-        naming_no_lever,
+        missing,
+        extra,
+        ..found.refused()
     })
 }
 
@@ -171,16 +282,57 @@ pub fn arm_at(index: u64) -> RunArm {
     }
 }
 
+/// Levers by name, each with its state under `a` and under `b`.
+fn states(levers: &BTreeMap<String, (String, String)>) -> serde_json::Value {
+    serde_json::json!(
+        levers
+            .iter()
+            .map(|(name, (a, b))| (name.clone(), serde_json::json!({"a": a, "b": b})))
+            .collect::<BTreeMap<_, _>>()
+    )
+}
+
+/// What the batch's line names of the pair once it is checked -- its
+/// `lever`, or its declared `contrast` -- or, refused, the refusal's keys.
+fn checked(
+    a: &Regimen,
+    b: &Regimen,
+    contrast: Option<&[String]>,
+) -> Result<serde_json::Value, serde_json::Value> {
+    let checked = match contrast {
+        None => one_lever(a, b).map(
+            |lever| serde_json::json!({"lever": {"name": lever.name, "a": lever.a, "b": lever.b}}),
+        ),
+        Some(declared) => contrast_of(a, b, declared).map(|levers| {
+            serde_json::json!({"contrast": {"declared": declared, "levers": states(&levers)}})
+        }),
+    };
+    checked.map_err(|no| {
+        let mut refused = serde_json::json!({
+            "refused": no.why(),
+            "levers": states(&no.levers),
+            "keys": no.keys,
+            "keys_naming_no_lever": no.naming_no_lever,
+        });
+        if contrast.is_some() {
+            refused["missing"] = serde_json::json!(no.missing);
+            refused["extra"] = serde_json::json!(no.extra);
+        }
+        refused
+    })
+}
+
 /// Run `options.file` under `a` and under `b`, `repeats.count` times each
 /// (#912), interleaved ABBA ABBA, each arm's repeats in `--out/a/` and
 /// `--out/b/`, and each run's `run` naming its arm, the pair, the script's
 /// digest and its repeat of its arm. Refused before any run unless the two
-/// regimens differ in exactly one lever. `emit` is given one line per run.
+/// regimens differ in exactly one lever, or, with `contrast` declared, in
+/// exactly the levers and keys it names. `emit` is given one line per run.
 /// The batch's line, and whether it ran to its end.
 pub fn pair(
     drive: &Path,
     options: &RunOptions,
-    (a, b): (&Path, &Path),
+    (a, b, contrast): (&Path, &Path, Option<&[String]>),
     repeats: &Repeats,
     emit: &mut dyn FnMut(&serde_json::Value),
 ) -> (serde_json::Value, bool) {
@@ -210,25 +362,25 @@ pub fn pair(
             return (said, false);
         }
     };
-    let lever = match one_lever(&a_read, &b_read) {
-        Ok(lever) => lever,
-        Err(no) => {
-            said["refused"] = serde_json::Value::String(no.why());
-            said["levers"] = serde_json::json!(
-                no.levers
-                    .iter()
-                    .map(|(name, (a, b))| (name.clone(), serde_json::json!({"a": a, "b": b})))
-                    .collect::<BTreeMap<_, _>>()
-            );
-            said["keys"] = serde_json::json!(no.keys);
-            said["keys_naming_no_lever"] = serde_json::json!(no.naming_no_lever);
+    let named = match checked(&a_read, &b_read, contrast) {
+        Ok(named) => named,
+        Err(refused) => {
+            if let serde_json::Value::Object(refused) = refused {
+                for (key, value) in refused {
+                    said[key] = value;
+                }
+            }
             return (said, false);
         }
     };
     let digest = pair_digest(&a_sha256, &b_sha256);
     said["script_sha256"] = serde_json::Value::String(script_sha256.clone());
     said["pair"] = serde_json::Value::String(digest.clone());
-    said["lever"] = serde_json::json!({"name": lever.name, "a": lever.a, "b": lever.b});
+    if let serde_json::Value::Object(named) = named {
+        for (key, value) in named {
+            said[key] = value;
+        }
+    }
     if let Err(why) = std::fs::create_dir_all(&options.out) {
         said["failure"] =
             serde_json::Value::String(format!("{} cannot be made: {why}", options.out.display()));
@@ -346,6 +498,94 @@ mod tests {
         );
         assert_eq!(no.naming_no_lever, ["sampler.temperature"]);
         assert!(no.why().contains("sampler.temperature"), "{}", no.why());
+    }
+
+    /// #912: `arm` is a label (`a_regimens_arm_reaches_no_request`), the
+    /// one key a pair may differ in besides its lever.
+    #[test]
+    fn a_pair_may_differ_in_its_arm_alone_besides() {
+        let a = regimen(&format!("{BASE}refutation_interview = \"off\"\n"));
+        let b = regimen(
+            &format!("{BASE}refutation_interview = \"on\"\n")
+                .replace("arm = \"pair\"", "arm = \"other\""),
+        );
+        let lever = one_lever(&a, &b).expect("one lever, and a label");
+        assert_eq!(lever.name, "refutation_interview");
+        let no = one_lever(
+            &a,
+            &a.with("arm", Some(Value::String("x".to_owned())))
+                .expect("a regimen"),
+        )
+        .expect_err("a label alone is no lever");
+        assert!(no.keys.is_empty() && no.levers.is_empty(), "{no:?}");
+    }
+
+    /// #912: a declared contrast runs when it names exactly what differs:
+    /// a lever by its name or by a key that moves it.
+    #[test]
+    fn a_declared_contrast_naming_exactly_what_differs_is_a_pair() {
+        let a = regimen(&format!("{BASE}refutation_interview = \"on\"\n"));
+        let b = regimen(&format!(
+            "{BASE}meditation_carry = \"native_summary\"\nmax_output_tokens = 512\n"
+        ));
+        let declared = |names: &[&str]| {
+            names
+                .iter()
+                .map(|name| (*name).to_owned())
+                .collect::<Vec<_>>()
+        };
+        let levers = contrast_of(
+            &a,
+            &b,
+            &declared(&[
+                "refutation_interview",
+                "meditation_carry",
+                "max_output_tokens",
+            ]),
+        )
+        .expect("the declared contrast");
+        assert_eq!(
+            levers.keys().collect::<Vec<_>>(),
+            [
+                "meditation_carry",
+                "refutation_interview",
+                "step_and_output_limits"
+            ]
+        );
+        assert!(
+            one_lever(&a, &b).is_err(),
+            "undeclared, three levers are refused"
+        );
+    }
+
+    /// #912: a declared contrast that leaves a difference out, or names one
+    /// that is not there, is refused, naming it.
+    #[test]
+    fn a_declared_contrast_with_a_missing_or_extra_member_is_refused_naming_it() {
+        let a = regimen(&format!("{BASE}refutation_interview = \"on\"\n"));
+        let b = regimen(&format!("{BASE}meditation_carry = \"native_summary\"\n"));
+        let missing = contrast_of(&a, &b, &["refutation_interview".to_owned()])
+            .expect_err("meditation_carry left out");
+        assert_eq!(missing.missing, ["meditation_carry"], "{missing:?}");
+        assert!(missing.extra.is_empty(), "{missing:?}");
+        assert!(
+            missing.why().contains("meditation_carry"),
+            "{}",
+            missing.why()
+        );
+        let extra = contrast_of(
+            &a,
+            &b,
+            &[
+                "refutation_interview".to_owned(),
+                "meditation_carry".to_owned(),
+                "note_dedupe".to_owned(),
+            ],
+        )
+        .expect_err("note_dedupe differs in nothing");
+        assert_eq!(extra.extra, ["note_dedupe"], "{extra:?}");
+        assert!(extra.missing.is_empty(), "{extra:?}");
+        assert!(extra.why().contains("note_dedupe"), "{}", extra.why());
     }
 
     /// #912: ABBA ABBA.
