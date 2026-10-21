@@ -34,8 +34,9 @@ use crate::client::shape::{Message, RequestShape, Role};
 use crate::formats::record::json::Value;
 
 /// Qwen Code's compression prompt, verbatim
-/// (`qc:packages/core/src/core/prompts.ts:927-969` at `v0.25.3`).
-pub const PROMPT: &str = include_str!("../../dogma/compaction/qwen-code-v0.25.3.txt");
+/// (`qc:packages/core/src/core/prompts.ts:927-969` at `v0.25.3`), pinned in
+/// the dogma (`crate::dogma::compaction`).
+pub const PROMPT: &str = crate::dogma::compaction::QWEN_CODE;
 
 /// The directive the history is followed by
 /// (`qc:packages/core/src/services/chatCompressionService.ts:100-101`).
