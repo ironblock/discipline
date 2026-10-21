@@ -366,6 +366,9 @@ pub enum Event {
         phases: Option<(Vec<String>, Vec<log::PhaseMove>, String)>,
         /// The opening phase's document (#787), under a phase library.
         phase_document: Option<log::PhaseDocument>,
+        /// Which repeat of which script the session is (#910), when serve
+        /// was told with `--run`.
+        run: Option<log::Run>,
     },
     /// An ask was accepted, and a turn begins on it.
     Asked {
@@ -3418,6 +3421,7 @@ impl<S: Streaming + 'static> Session<S> {
                 .and_then(|tools| tools.shown_roots.declared()),
             phases,
             phase_document,
+            run: None,
         });
         Self::sharing(Shared {
             transport,
@@ -3478,6 +3482,20 @@ impl<S: Streaming + 'static> Session<S> {
     #[must_use]
     pub fn without_vision(self, substrate: &str) -> Self {
         self.shared.lock().blind = Some(substrate.to_owned());
+        self
+    }
+
+    /// This session, its `session.start` naming which repeat of which script
+    /// it is (#910): what a repeating runner told serve with `--run`.
+    #[must_use]
+    pub fn in_run(self, named: log::Run) -> Self {
+        if let Some(Logged {
+            event: Event::Started { run, .. },
+            ..
+        }) = self.shared.lock().log.first_mut()
+        {
+            *run = Some(named);
+        }
         self
     }
 
@@ -4952,7 +4970,9 @@ pub fn line_of(logged: &Logged) -> log::Line {
             notes_in_the_ask,
             build,
             hosted,
+            run,
         } => log::Event::SessionStart {
+            run: run.clone(),
             phase_document: phase_document.clone(),
             build_commit: build.as_ref().map(|(commit, _)| commit.clone()),
             build_dirty: build.as_ref().map(|(_, dirty)| *dirty),
@@ -16740,6 +16760,7 @@ pub(in crate::drive) mod tests {
         let events = vec![
             Event::Started {
                 phase_document: None,
+                run: None,
                 bash_timeout_ms: None,
                 shown_roots: None,
                 opened: 1_790_000_000_000,
@@ -17332,6 +17353,7 @@ pub(in crate::drive) mod tests {
                 max_api_requests: None,
                 api_retries: None,
                 api_retry_after_max_seconds: None,
+                run: None,
             },
             log::Event::Ask {
                 turn: 1,

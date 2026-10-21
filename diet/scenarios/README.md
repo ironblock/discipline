@@ -139,3 +139,28 @@ Beside it the command writes:
   - a meditation declared with a phase move;
   - a refused command that is not an ask;
   - a flag or edit whose entry's text does not pick it alone.
+
+## Repeating a scenario (#910)
+
+```
+diet-drive scenario FILE --out DIR --repeat N [--stop-file PATH] [--void-cap K]
+```
+
+This runs the scenario N times. Each repeat ends before the next starts.
+- **Each repeat is its own session.** It gets a fresh worktree, so `--worktree` is refused, and its own outputs in `DIR/repeat-NN/`, from `repeat-01`.
+- **Each repeat says which it is.** Serve is told with `--run`: the scenario file's `script_sha256`, the `repeat` and the count, `of`. Its log's `session.start` carries them as `run` (log v17), and so does its record's start (record v3).
+- **One JSON line per repeat** as it ends, then the batch's line. A repeat's line holds:
+  - `repeat`, `of` and `attempt`;
+  - `void`: why it was void, or `null`;
+  - `turns`, the `turn.settled` lines, and `settles`, counted by reason;
+  - `tokens`, every response's prompt and completion tokens;
+  - `captures`, the `patch` lines, and `refusals`, the `refused` lines;
+  - `unmet`, the expectations the log did not meet, and `record`, its path.
+- **Unmet expectations are data.** A repeat that misses one is still assembled, and the batch still passes. So is a failed turn, a `summary_failed` and the API cap.
+- **A void repeat is re-run at its slot.** Void means serve could not run the session to its end for a reason outside the model:
+  - serve did not start, crashed or never exited, or the assembler crashed (a refusal is the assembler's answer, not a crash);
+  - the worktree, its seed or the run's directories could not be made;
+  - a transport failure at any point: a `request.failed` whose reason is `transport` or `crashed`, or `timeout` with nothing arriving.
+
+  An HTTP error the server returned is data. A void attempt's outputs are kept beside the slot, as `repeat-NN.void-M/`. After `--void-cap` re-runs (2 unless given) have voided too, the batch stops, names the slot in `void_cap_reached`, and fails.
+- **The stop file stops the batch between repeats.** It is `DIR/STOP` unless `--stop-file` names another. It is read before each repeat starts, and the batch's line says where it stopped (`stopped_at`).

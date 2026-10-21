@@ -4,8 +4,8 @@
 // i64, and a JavaScript number is exact only to 2^53. A `timings`
 // millisecond may carry a fraction, written as the server wrote it.
 
-export const VERSION = 16;
-export const READS = [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16] as const;
+export const VERSION = 17;
+export const READS = [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17] as const;
 export const PRESENCE_WINDOW_MS = 2000;
 
 export type Kind =
@@ -269,6 +269,11 @@ export type MeditationCarry =
   | "native_summary"
 ;
 
+export type RunArm =
+  | "a"
+  | "b"
+;
+
 export type RenderPlacement =
   | "system"
   | "message"
@@ -307,6 +312,14 @@ export interface Usage {
 export interface Serving {
   dialect: string;
   concurrency?: number;
+}
+
+export interface Run {
+  script_sha256: string;
+  repeat: number;
+  of: number;
+  arm?: RunArm;
+  pair?: string;
 }
 
 export interface TemplateKwargs {
@@ -401,7 +414,7 @@ export type SessionStartLine = {
   seq: number;
   t: number;
   kind: "session.start";
-  version: 0 | 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9 | 10 | 11 | 12 | 13 | 14 | 15 | 16;
+  version: 0 | 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9 | 10 | 11 | 12 | 13 | 14 | 15 | 16 | 17;
   opened: number;
   model: string;
   head: HeadMessage[];
@@ -439,6 +452,7 @@ export type SessionStartLine = {
   max_api_requests?: number;
   api_retries?: number;
   api_retry_after_max_seconds?: number;
+  run?: Run;
 } & ({ substrate: string; registry_sha256: string } | { substrate?: never; registry_sha256?: never });
 
 export type AskLine = {
