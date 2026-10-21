@@ -99,6 +99,7 @@ pub mod attach;
 pub mod background;
 pub mod canned;
 pub mod engine;
+pub mod grade;
 pub mod hosted;
 pub mod instructions;
 pub mod mcp;

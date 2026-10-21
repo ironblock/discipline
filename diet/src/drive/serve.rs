@@ -882,7 +882,7 @@ impl<S: Streaming + 'static> Serving<S> {
         text: &str,
         files: &[String],
         gap: Option<IdleGap>,
-        scoping: bool,
+        (scoping, task): (bool, Option<String>),
     ) -> (u16, BTreeMap<String, Value>) {
         let attached = self
             .uploads_named(files)
@@ -891,7 +891,7 @@ impl<S: Streaming + 'static> Serving<S> {
             Ok(attached) => attached,
             Err(unattachable) => return (400, unattached(&unattachable)),
         };
-        match self.session.ask_attached(attached, gap, scoping) {
+        match self.session.ask_for(attached, gap, (scoping, task)) {
             Ok(admitted) => (
                 200,
                 BTreeMap::from([
@@ -943,6 +943,7 @@ impl<S: Streaming + 'static> Serving<S> {
             command,
             gap,
             scoping,
+            task,
         } = command;
         let rejected = |rejection: Rejected| match rejection {
             Rejected::Refused(because) => refused(because),
@@ -951,7 +952,11 @@ impl<S: Streaming + 'static> Serving<S> {
             Rejected::NoSuchTurn(_) | Rejected::BadGap(_) => (400, BTreeMap::new()),
         };
         match command {
-            Command::Ask(text, files) => self.asked(&text, &files, gap, scoping),
+            Command::Ask(text, files) => self.asked(&text, &files, gap, (scoping, task)),
+            Command::Grade(grade) => match self.session.grade(grade) {
+                Ok(()) => (200, BTreeMap::new()),
+                Err(rejection) => rejected(rejection),
+            },
             Command::Cancel(turn) => match self.session.cancel(turn, gap) {
                 Ok(()) => (200, BTreeMap::new()),
                 Err(rejection) => rejected(rejection),
@@ -1029,6 +1034,8 @@ struct Posted {
     command: Command,
     gap: Option<IdleGap>,
     scoping: bool,
+    /// For an ask, the task it asks or answers the grade of (#942).
+    task: Option<String>,
 }
 
 /// A command.
@@ -1060,6 +1067,8 @@ enum Command {
     ProposePhase(String, bool),
     /// Move the phase alone, through a meditation or not (#788).
     MovePhase(String, bool),
+    /// A scenario runner's grade of the latest turn (#942).
+    Grade(crate::drive::session::Grade),
 }
 
 /// A command's word as a client written before #583's rename may send it,
@@ -1124,7 +1133,7 @@ impl Command {
             .find(|candidate| candidate.tag() == kind)?;
         // Any command may carry the idle gap it ended (#117, D13 (c)).
         let takes: &[&str] = match kind {
-            CommandKind::Ask => &["kind", "text", "idle_gap", "scoping", "files"],
+            CommandKind::Ask => &["kind", "text", "idle_gap", "scoping", "files", "task"],
             CommandKind::Cancel => &["kind", "turn", "idle_gap"],
             CommandKind::DeclareMeditation => &["kind", "idle_gap", "phase"],
             CommandKind::End => &["kind", "idle_gap"],
@@ -1144,6 +1153,16 @@ impl Command {
             // #788: the operator's phase commands; none ends an idle gap.
             CommandKind::StartPhase => &["kind", "phase"],
             CommandKind::ProposePhase | CommandKind::MovePhase => &["kind", "to", "meditate"],
+            // #942: a runner's grade ends no idle gap.
+            CommandKind::Grade => &[
+                "kind",
+                "task",
+                "attempt",
+                "attempts",
+                "right",
+                "timed_out",
+                "check_sha256",
+            ],
         };
         if object.keys().any(|key| !takes.contains(&key.as_str())) {
             return None;
@@ -1157,6 +1176,12 @@ impl Command {
         let scoping = match object.get("scoping") {
             None => false,
             Some(Value::Boolean(mark)) => *mark,
+            Some(_) => return None,
+        };
+        // An ask's task (#942), and a grade's: text, never blank.
+        let task = match object.get("task") {
+            None => None,
+            Some(Value::String(task)) if !task.trim().is_empty() => Some(task.clone()),
             Some(_) => return None,
         };
         let command = match kind {
@@ -1223,13 +1248,59 @@ impl Command {
                 entry_and(object, "note").map(|(id, text)| Self::FlagEntry(id, text))
             }
             CommandKind::RefillAnyway => Some(Self::RefillAnyway),
+            CommandKind::Grade => grade_of(object, task.clone()).map(Self::Grade),
         }?;
         Some(Posted {
             command,
             gap,
             scoping,
+            task,
         })
     }
+}
+
+/// A runner's grade (#942): its task, its attempt from 1, its verdict,
+/// `timed_out` only as `true`, and its check's sha256.
+fn grade_of(
+    object: &BTreeMap<String, Value>,
+    task: Option<String>,
+) -> Option<crate::drive::session::Grade> {
+    let count = |key: &str| match object.get(key) {
+        Some(Value::Integer(n)) if *n > 0 => u64::try_from(*n).ok(),
+        _ => None,
+    };
+    let (attempt, attempts) = (count("attempt")?, count("attempts")?);
+    if attempt > attempts {
+        return None;
+    }
+    let right = match object.get("right") {
+        Some(Value::Boolean(right)) => *right,
+        _ => return None,
+    };
+    let timed_out = match object.get("timed_out") {
+        None => false,
+        Some(Value::Boolean(true)) => true,
+        Some(_) => return None,
+    };
+    let check_sha256 = match object.get("check_sha256") {
+        Some(Value::String(digest))
+            if digest.len() == 64
+                && digest
+                    .bytes()
+                    .all(|byte| matches!(byte, b'0'..=b'9' | b'a'..=b'f')) =>
+        {
+            digest.clone()
+        }
+        _ => return None,
+    };
+    Some(crate::drive::session::Grade {
+        task: task?,
+        attempt,
+        attempts,
+        right,
+        timed_out,
+        check_sha256,
+    })
 }
 
 /// An operator edit's or flag's entry `id` and its `key`'s text (#150).

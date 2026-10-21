@@ -122,6 +122,8 @@ vocabulary! {
         ProposePhase => "propose-phase",
         /// Move the phase alone (#788), under `operator_unilateral`.
         MovePhase => "move-phase",
+        /// Log a scenario runner's grade of the latest turn (#942).
+        Grade => "grade",
     }
 }
 
@@ -384,6 +386,9 @@ pub enum Event {
         /// recording's directory. Empty when nothing was attached, and when
         /// something was but no recording keeps a copy.
         files: Vec<log::RecordedFile>,
+        /// The task it asks, or answers the grade of (#942), when a
+        /// scenario's `grade` step names one.
+        task: Option<String>,
     },
     /// A call was made to the model. Every event the call produces names
     /// this event by its sequence number.
@@ -792,6 +797,14 @@ pub enum Event {
         entry: String,
         /// The operator's note.
         note: String,
+    },
+    /// A scenario runner graded an attempt (#942): logged at its word and
+    /// never sent to the model.
+    Graded {
+        /// The turn graded: the latest.
+        turn: u32,
+        /// The grade, as the runner gave it.
+        grade: Grade,
     },
     /// A model's patch refused (#150): it targeted an entry the operator
     /// wrote. The fold went on.
@@ -1250,6 +1263,23 @@ pub type Declared = (
         Option<HostedStart>,
     ),
 );
+
+/// A scenario runner's grade of an attempt (#942).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Grade {
+    /// The task, as the scenario's `grade` step names it.
+    pub task: String,
+    /// Which attempt, from 1.
+    pub attempt: u64,
+    /// How many attempts the task is given.
+    pub attempts: u64,
+    /// Whether the check found it right.
+    pub right: bool,
+    /// Whether the check ran out of time, the attempt then wrong.
+    pub timed_out: bool,
+    /// The sha256 of the check command's text.
+    pub check_sha256: String,
+}
 
 /// What a hosted API's session start says beside its claim (#555).
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
@@ -3026,7 +3056,8 @@ impl State {
                 | CommandKind::RefillAnyway
                 | CommandKind::StartPhase
                 | CommandKind::ProposePhase
-                | CommandKind::MovePhase => {
+                | CommandKind::MovePhase
+                | CommandKind::Grade => {
                     unreachable!("a tangent, background or phase ruling carries no idle gap")
                 }
             };
@@ -3550,12 +3581,27 @@ impl<S: Streaming + 'static> Session<S> {
     /// # Errors
     ///
     /// As [`Session::ask_marked`].
-    #[allow(clippy::too_many_lines)]
     pub fn ask_attached(
         &self,
         attached: super::attach::Attached,
         gap: Option<IdleGap>,
         scoping: bool,
+    ) -> Result<Admitted, Rejected> {
+        self.ask_for(attached, gap, (scoping, None))
+    }
+
+    /// [`Session::ask_attached`], naming the task it asks or answers the
+    /// grade of (#942) on its `ask` line.
+    ///
+    /// # Errors
+    ///
+    /// As [`Session::ask_marked`].
+    #[allow(clippy::too_many_lines)]
+    pub fn ask_for(
+        &self,
+        attached: super::attach::Attached,
+        gap: Option<IdleGap>,
+        (scoping, task): (bool, Option<String>),
     ) -> Result<Admitted, Rejected> {
         let super::attach::Attached { message, files } = attached;
         let mut state = self.shared.lock();
@@ -3615,6 +3661,7 @@ impl<S: Streaming + 'static> Session<S> {
             text: message.content.clone(),
             scoping,
             files,
+            task,
         });
         state.move_to(Settlement::Turn);
         let mut shape = self.shared.template.clone();
@@ -4375,6 +4422,34 @@ impl<S: Streaming + 'static> Session<S> {
         Ok(())
     }
 
+    /// Log a scenario runner's grade of the latest turn (#942): a `grade`
+    /// line, never sent to the model. A grade ends no idle gap.
+    ///
+    /// # Errors
+    ///
+    /// [`Refusal::InFlight`] while a turn or a capture is in flight, since a
+    /// grade reads a settled turn, and [`Refusal::Ended`] once the session
+    /// has ended; the first is logged.
+    pub fn grade(&self, grade: Grade) -> Result<(), Rejected> {
+        let mut state = self.shared.lock();
+        let refusal = match state.settlement {
+            Settlement::Awaiting => None,
+            Settlement::Turn | Settlement::Capture => Some(Refusal::InFlight),
+            Settlement::Ended => Some(Refusal::Ended),
+        };
+        if let Some(because) = refusal {
+            let refused = state.refuse(CommandKind::Grade, because);
+            drop(state);
+            self.shared.changed.notify_all();
+            return Err(Rejected::Refused(refused));
+        }
+        let turn = state.turns;
+        state.push(Event::Graded { turn, grade });
+        drop(state);
+        self.shared.changed.notify_all();
+        Ok(())
+    }
+
     /// Refill the meditation held for the operator anyway (#150's gate): the
     /// refill the meditation would have made, with no audit and no gate, its pre-
     /// warm when the regimen asks for one, and its meditation line marked
@@ -5055,7 +5130,9 @@ pub fn line_of(logged: &Logged) -> log::Line {
             text,
             scoping,
             files,
+            task,
         } => log::Event::Ask {
+            task: task.clone(),
             turn: *turn,
             text: text.clone(),
             // Only the operator's mark is written (#374): `true`, or nothing.
@@ -5737,6 +5814,15 @@ pub fn line_of(logged: &Logged) -> log::Line {
             entry: entry.clone(),
             note: note.clone(),
         },
+        Event::Graded { turn, grade } => log::Event::Grade {
+            turn: *turn,
+            task: grade.task.clone(),
+            attempt: grade.attempt,
+            attempts: grade.attempts,
+            right: grade.right,
+            timed_out: grade.timed_out.then_some(true),
+            check_sha256: grade.check_sha256.clone(),
+        },
         Event::PatchRefused {
             fork,
             lane,
@@ -5890,6 +5976,7 @@ fn command_of(command: CommandKind) -> log::Command {
         CommandKind::StartPhase => log::Command::StartPhase,
         CommandKind::ProposePhase => log::Command::ProposePhase,
         CommandKind::MovePhase => log::Command::MovePhase,
+        CommandKind::Grade => log::Command::Grade,
     }
 }
 
@@ -14200,6 +14287,7 @@ pub(in crate::drive) mod tests {
                     text: "say hello".to_owned(),
                     scoping: false,
                     files: Vec::new(),
+                    task: None,
                 },
                 Event::Settled {
                     from: Settlement::Awaiting,
@@ -16803,6 +16891,7 @@ pub(in crate::drive) mod tests {
                 text: "say \"hi\"\n".to_owned(),
                 scoping: true,
                 files: vec![attached_file()],
+                task: None,
             },
             Event::Settled {
                 from: Settlement::Awaiting,
@@ -17224,6 +17313,17 @@ pub(in crate::drive) mod tests {
                 attempt: 1,
                 wait_ms: 7_000,
             },
+            Event::Graded {
+                turn: 1,
+                grade: Grade {
+                    task: "t1".to_owned(),
+                    attempt: 1,
+                    attempts: 3,
+                    right: false,
+                    timed_out: true,
+                    check_sha256: "c".repeat(64),
+                },
+            },
         ];
         let mut kinds = std::collections::BTreeSet::new();
         for event in &events {
@@ -17277,9 +17377,10 @@ pub(in crate::drive) mod tests {
                 Event::TrunkWaited { .. } => 46,
                 Event::WarrantGated { .. } => 47,
                 Event::Retried { .. } => 48,
+                Event::Graded { .. } => 49,
             });
         }
-        assert_eq!(kinds.len(), 49, "a variant has no sample");
+        assert_eq!(kinds.len(), 50, "a variant has no sample");
         events
             .into_iter()
             .enumerate()
@@ -17360,6 +17461,7 @@ pub(in crate::drive) mod tests {
                 text: "say \"hi\"\n".to_owned(),
                 scoping: Some(true),
                 files: Some(vec![attached_file()]),
+                task: None,
             },
             log::Event::Settlement {
                 from: log::State::Awaiting,
@@ -17820,6 +17922,15 @@ pub(in crate::drive) mod tests {
                 retry_after: Some(7),
                 attempt: 1,
                 wait_ms: 7_000,
+            },
+            log::Event::Grade {
+                turn: 1,
+                task: "t1".to_owned(),
+                attempt: 1,
+                attempts: 3,
+                right: false,
+                timed_out: Some(true),
+                check_sha256: "c".repeat(64),
             },
         ]
     }
@@ -18287,7 +18398,7 @@ pub(in crate::drive) mod tests {
                     .collect::<Vec<_>>()
             ),
             "ask cancel declare-meditation end open-tangent close-tangent background ratify-phase \
-             edit-entry flag-entry refill-anyway start-phase propose-phase move-phase"
+             edit-entry flag-entry refill-anyway start-phase propose-phase move-phase grade"
         );
         assert_eq!(
             tags(&Refusal::ALL.iter().map(|it| it.tag()).collect::<Vec<_>>()),
