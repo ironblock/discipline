@@ -53,6 +53,7 @@ use std::fmt;
 pub mod asks;
 pub mod audits;
 pub mod capture;
+pub mod compaction;
 pub mod refutation;
 pub mod vocabulary;
 
@@ -131,7 +132,13 @@ pub mod vocabulary;
 ///   `[]` for none; offered on the trunk too. The maintainer's wording from
 ///   his second review, approved verbatim on 2026-10-16 (relayed by
 ///   Dispatch). No template already pinned changed.
-pub const VERSION: u32 = 12;
+/// * 13, 2026-10-20: `compaction/qwen-code-v0.25.3` joined (#936): Qwen
+///   Code's compression prompt at its `v0.25.3` tag, verbatim and under its
+///   Apache-2.0 notice (`diet/dogma/compaction/README.md`), the system
+///   message of `meditation_carry = "native_summary"`'s summary request, by
+///   the harness vote Dispatch relayed on 2026-10-20. No template already
+///   pinned changed.
+pub const VERSION: u32 = 13;
 
 /// The digest of `diet/dogma/MANIFEST.tsv` that [`VERSION`] was declared
 /// against.
@@ -141,7 +148,7 @@ pub const VERSION: u32 = 12;
 /// that recomputes it fails until both lines are edited together. Without it
 /// the manifest could be regenerated after an edit and the version left at
 /// what it was, which is a bump that never happened.
-pub const MANIFEST_DIGEST: &str = "08858477b245db35";
+pub const MANIFEST_DIGEST: &str = "e8a8f985e02d19bd";
 
 /// The per-model operating points, as TOML text, exactly as pinned.
 ///
@@ -807,6 +814,8 @@ mod tests {
             .filter(|line| !line.starts_with("audit-tools/"))
             // The refutation tool's line, held by `refutation`'s own test.
             .filter(|line| !line.starts_with("refutation/"))
+            // The compaction prompt's line, held by `compaction`'s own test.
+            .filter(|line| !line.starts_with("compaction/"))
             .map(|line| {
                 let mut fields = line.split('\t');
                 let name = fields.next().expect("a manifest line starts with a name");

@@ -5,7 +5,7 @@
     "written by diet-drive scenario diet/scenarios/kitchen-sink.jsonl on the canned scenario substrate: every line is diet's own, the model's replies are the scenario's",
     "the run's temporary and home paths are written /work/..., and its background jobs bg_1, bg_2, ... (src/drive/scenario-log.ts)",
     "retimed: every t is placed on assumed rates (src/drive/retime.ts), not measured, and reads nothing of the run's clock: a tool's run is its timeout_ms when it timed out, else 150 ms",
-    "stitched: each wall-clock field (a gate's latency_ms, a trunk wait's wait_ms; never compared) is carried from the example this one replaced, by lane and place (src/drive/scenario-log.ts): 180 carried, 1 this run's own",
+    "stitched: each wall-clock field (a gate's latency_ms, a trunk wait's wait_ms; never compared) is carried from the example this one replaced, by lane and place (src/drive/scenario-log.ts): 181 carried, 0 this run's own",
     "concurrent: a stopped background job's background.ended is placed by the reaper when it sees the job end, concurrent with the step that stopped it, so a regeneration may move it (#896)",
     "Declared-clean: 7343d363d427f598455ae5f102d2f7e8c95efa14a6f454b8acc352c9458cac11 by Corey Vixie on 2026-10-15"
   ],
@@ -15,7 +15,7 @@
     {
       "approvals_off": true,
       "bash_timeout_ms": 120000,
-      "build_commit": "fe24305d1d50d83f8cbcbcc49ab4e2e566d00541",
+      "build_commit": "5013e77cd453f031bb3903efd1b8ca9e0d3dc4a7",
       "build_dirty": false,
       "compaction_persists": true,
       "fork_asks": "v4",
@@ -59,6 +59,7 @@
         "meditation_audit": "on",
         "meditation_audit_chunk": "notes:8",
         "meditation_audit_concurrency": "2:effective:2",
+        "meditation_carry": "render",
         "meditation_trigger": "operator-declared+cadence+budget+window+model-proposed",
         "meditation_warm": "on",
         "model_pruning": "off",
@@ -82,7 +83,7 @@
       },
       "model": "scenario",
       "notes_in_the_ask": true,
-      "opened": 1792542745212,
+      "opened": 1792552248429,
       "opening_phase": "plan",
       "phase_document": {
         "digest": "c3c3afe17657994b1403ed749e7352bdf4ad1eb47c688b6e60bb0e122db95e8e",
@@ -174,7 +175,7 @@
         "propose_phase_transition",
         "refute_beliefs"
       ],
-      "version": 15
+      "version": 16
     },
     {
       "kind": "phase.started",
@@ -1744,6 +1745,7 @@
       "carried_outputs": 1,
       "carried_tokens": 294,
       "carried_turns": 2,
+      "carry": "render",
       "fork_room": 615,
       "frame": "placeholder",
       "kind": "meditation",
@@ -1972,6 +1974,7 @@
       "carried_outputs": 5,
       "carried_tokens": 0,
       "carried_turns": 0,
+      "carry": "render",
       "fork_room": 615,
       "frame": "placeholder",
       "kind": "meditation",
@@ -2173,6 +2176,7 @@
       "carried_entries": 10,
       "carried_tokens": 0,
       "carried_turns": 0,
+      "carry": "render",
       "frame": "placeholder",
       "kind": "meditation",
       "newest_turn_tokens": 16413,
@@ -4216,6 +4220,7 @@
       "carried_outputs": 6,
       "carried_tokens": 0,
       "carried_turns": 0,
+      "carry": "render",
       "fork_room": 615,
       "frame": "placeholder",
       "kind": "meditation",
@@ -6816,6 +6821,7 @@
       "carried_outputs": 2,
       "carried_tokens": 393,
       "carried_turns": 5,
+      "carry": "render",
       "frame": "placeholder",
       "kind": "meditation",
       "outputs": "\n# tool outputs\nThe following tool results were produced before context was compacted. They are listed as reference only: each was saved whole, and can be read at its path.\n\n- turn 8: bash args={\"command\":\"python3 -c \\\"print('x' * 20000)\\\"\"}: 20001 bytes, sha256 a168e7ecc1c0f191c22ad3221fd52fa3e5e4d8883d085099d3fbf500cadf3f8a, saved at /scenario/recording/files/a168e7ecc1c0f191c22ad3221fd52fa3e5e4d8883d085099d3fbf500cadf3f8a\n- turn 8: bash args={\"command\":\"seq 1 2000\"}: 8893 bytes, sha256 6251e5743b6fd6a7d606130bdf7c15077ce85ebd3a0fdee284d15a46df199e38, saved at /scenario/recording/files/6251e5743b6fd6a7d606130bdf7c15077ce85ebd3a0fdee284d15a46df199e38\n",
@@ -7276,6 +7282,7 @@
       "carried_outputs": 4,
       "carried_tokens": 379,
       "carried_turns": 4,
+      "carry": "render",
       "frame": "placeholder",
       "kind": "meditation",
       "outputs": "\n# tool outputs\nThe following tool results were produced before context was compacted. They are listed as reference only: each was saved whole, and can be read at its path.\n\n- turn 10: bash args={\"command\":\"sleep 30\"}: 98 bytes, sha256 982df996395efea89420c265324be791d77a83390a151782a20dd122403a949c, saved at /scenario/recording/files/982df996395efea89420c265324be791d77a83390a151782a20dd122403a949c\n- turn 11: bash args={\"command\":\"echo count-one\"}: 10 bytes, sha256 7e0143d929fe4a2f57413136aa502510f6dbddd21a06a6037c791b119ddb3983, saved at /scenario/recording/files/7e0143d929fe4a2f57413136aa502510f6dbddd21a06a6037c791b119ddb3983\n- turn 11: bash args={\"command\":\"echo count-two\"}: 10 bytes, sha256 710280b2b72f06ea698589dd7a570da98e7c33eed872b04c3869f53ff8944c1d, saved at /scenario/recording/files/710280b2b72f06ea698589dd7a570da98e7c33eed872b04c3869f53ff8944c1d\n- turn 11: bash args={\"command\":\"echo count-three\"}: 12 bytes, sha256 02b4be205d3db534b504e27651d49628a5b0f276e80bcbc2c73b67a28c254cb9, saved at /scenario/recording/files/02b4be205d3db534b504e27651d49628a5b0f276e80bcbc2c73b67a28c254cb9\n",
@@ -9010,6 +9017,7 @@
       "carried_outputs": 4,
       "carried_tokens": 398,
       "carried_turns": 3,
+      "carry": "render",
       "frame": "placeholder",
       "kind": "meditation",
       "operator_changes": [
@@ -9668,6 +9676,7 @@
       "carried_outputs": 1,
       "carried_tokens": 180,
       "carried_turns": 2,
+      "carry": "render",
       "frame": "placeholder",
       "kind": "meditation",
       "operator_changes": [

@@ -1,0 +1,15 @@
+# The native arm's refill (#936): interviews off, so working memory stays
+# empty, and `meditation_carry = "native_summary"`, so a declared meditation
+# asks the model for a compaction summary under Qwen Code's prompt, on the
+# `summary` lane, and the refill carries it -- with the model's
+# acknowledgement -- in place of a render.
+arm = "rehearsal"
+dogma_version = 0
+substrate = "canned-scenario"
+substrate_reasoning = "off"
+substrate_hardware = "b6bc80e9e8e4bc2342219f064dab89a8d17c02535600b32b84895fc0b9ba6513"
+meditation_carry = "native_summary"
+[sampler]
+temperature = 0.6
+top_p = 0.95
+seed = 7

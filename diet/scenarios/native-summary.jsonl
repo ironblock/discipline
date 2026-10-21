@@ -1,0 +1,12 @@
+{"scenario":"native-summary","regimen":"native-summary.toml","head":"../drive/heads/floor.md"}
+{"reply":{"when":"What are we building","text":"A bug tracker for one team, with no login."}}
+{"reply":{"when":"First, reason in your <analysis> block","text":"<analysis>The operator scoped a bug tracker.</analysis>\n<state_snapshot>\n    <primary_request_and_intent>A bug tracker for one team, with no login.</primary_request_and_intent>\n</state_snapshot>"}}
+{"reply":{"when":"Go on","text":"Starting on the schema."}}
+{"step":"ask","text":"What are we building?"}
+{"step":"declare-meditation"}
+{"step":"ask","text":"Go on."}
+{"step":"end"}
+{"expect":"request","where":{"lane":"summary"}}
+{"expect":"meditation","name":"refill","where":{"reason":"operator","carry":"native_summary","render~":"<primary_request_and_intent>A bug tracker for one team","carried_entries":"0"}}
+{"expect":"ask","where":{"text":"Go on."},"after":"refill"}
+{"expect":"turn.settled","where":{"turn":"2","reason":"final"}}

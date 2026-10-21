@@ -63,6 +63,7 @@
 //! audit ask needs so that `{n}` and the number of lines agree.
 
 pub mod library;
+pub mod native;
 pub mod outputs;
 pub mod phase;
 pub mod policy;

@@ -198,6 +198,14 @@
 //! nothing: a v14 window meditation's reserve was the larger of 20,000 and
 //! the output cap, and it named neither part.
 //!
+//! v16 (#936) adds what a meditation carries: `carry` on `meditation`,
+//! `render` or `native_summary`, and under `native_summary` the summary's
+//! `summary_tokens`; the `summary` lane, the request that asks the model for
+//! that summary; and the settle reason `summary_failed`, a turn whose
+//! native summary failed. A log that declares 15 or less and carries any of
+//! them is refused. For a reader of v15 logs, the migration is nothing:
+//! every v15 meditation carried its render.
+//!
 //! # A torn final line
 //!
 //! A writer killed mid-write leaves the start of an event with no line break
@@ -229,10 +237,10 @@ use super::record::vocabulary;
 struct LogParser;
 
 /// The version this module writes, as `session.start` states it.
-pub const VERSION: i64 = 15;
+pub const VERSION: i64 = 16;
 
 /// Every version this module reads.
-pub const READS: &[i64] = &[0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15];
+pub const READS: &[i64] = &[0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16];
 
 /// How recent an input event must be, at the moment a turn settles, for the
 /// person to count as already present: `notice` is then zero (Q4 (a), ruled
@@ -448,6 +456,24 @@ vocabulary! {
     }
 }
 
+vocabulary! {
+    /// What a meditation's refill carries in place of the trunk (v16, #936).
+    MeditationCarry {
+        /// Working memory, rendered: today's behaviour, the default.
+        Render => "render",
+        /// A compaction summary the model writes with the vote's prompt,
+        /// and what Qwen Code puts beside it.
+        NativeSummary => "native_summary",
+    }
+}
+
+impl Default for MeditationCarry {
+    /// `render`: today's behaviour.
+    fn default() -> Self {
+        Self::Render
+    }
+}
+
 impl Default for MeditationToolOutputs {
     /// `evict`: today's behaviour.
     fn default() -> Self {
@@ -646,6 +672,9 @@ vocabulary! {
         /// A meditation's pre-warm (v12, #555): the refilled trunk sent once
         /// with an output cap of one, so its forks read a cache it wrote.
         Warm => "warm",
+        /// A meditation's native summary (v16, #936): the history put to
+        /// the model under the vote's compaction prompt.
+        Summary => "summary",
     }
 }
 
@@ -779,6 +808,10 @@ vocabulary! {
         /// Its trunk's next request was never sent: the session's
         /// `max_api_requests` was reached (v12, #555).
         ApiCap => "api_cap",
+        /// A window meditation under it carries a native summary, and the
+        /// summary's request failed or its answer was empty (v16, #936):
+        /// the render is never carried in its place.
+        SummaryFailed => "summary_failed",
     }
 }
 
@@ -2072,6 +2105,13 @@ pub enum Event {
         /// The operator refilled this meditation over the changes it was held for
         /// (v7, #150's gate): `true`, or absent.
         refilled_anyway: Option<bool>,
+        /// What its refill carried (v16, #936): working memory's render, or
+        /// a native summary; absent before v16, when it was always the
+        /// render.
+        carry: Option<MeditationCarry>,
+        /// The native summary's estimated tokens, as its refill carried it
+        /// (v16): under `native_summary` only.
+        summary_tokens: Option<u64>,
         /// A `window` meditation under a running turn (v8, #813): its steps
         /// kept after its ask, and those compacted with the turns before
         /// it. `turn_steps_kept` and `turn_steps_compacted`, both or neither.
@@ -3031,7 +3071,7 @@ impl Forks {
     /// pre-warm none (v12, #555).
     fn request(&self, lane: Lane, fork: Option<u64>) -> Result<(), String> {
         let Some(fork) = fork else {
-            if lane != Lane::Trunk && lane != Lane::Warm {
+            if !matches!(lane, Lane::Trunk | Lane::Warm | Lane::Summary) {
                 return Err(format!(
                     "a `{}` request carries no `fork`: it names the fork it is the call of",
                     lane.tag()
@@ -3039,7 +3079,7 @@ impl Forks {
             }
             return Ok(());
         };
-        if lane == Lane::Trunk || lane == Lane::Warm {
+        if matches!(lane, Lane::Trunk | Lane::Warm | Lane::Summary) {
             return Err(format!(
                 "a {} request carries `fork` {fork}: only an `interview` request is a fork's",
                 lane.tag()
@@ -4356,6 +4396,8 @@ fn from_object(object: &BTreeMap<String, Value>) -> Result<Line, String> {
             unaddressed: fields.optional_strings("unaddressed")?,
             newest_turn_tokens: fields.optional_count("newest_turn_tokens")?,
             refilled_anyway: fields.optional_flag("refilled_anyway")?,
+            carry: fields.optional_tag("carry", MeditationCarry::from_tag)?,
+            summary_tokens: fields.optional_count("summary_tokens")?,
             // Built only when its two keys are carried ([`all_or_none`]).
             turn_steps: match (
                 fields.optional_count("turn_steps_kept")?,
@@ -4880,6 +4922,8 @@ pub enum Tags {
     ToolOutputState,
     /// [`MeditationToolOutputs`] (v7).
     MeditationToolOutputs,
+    /// [`MeditationCarry`] (v16).
+    MeditationCarry,
     /// [`RenderPlacement`] (v7).
     RenderPlacement,
     /// [`BackgroundStatus`] (v7).
@@ -4914,6 +4958,7 @@ impl Tags {
         Self::ForkDelivery,
         Self::ToolOutputState,
         Self::MeditationToolOutputs,
+        Self::MeditationCarry,
         Self::RenderPlacement,
         Self::BackgroundStatus,
     ];
@@ -4947,6 +4992,7 @@ impl Tags {
             Self::ForkDelivery => "ForkDelivery",
             Self::ToolOutputState => "ToolOutputState",
             Self::MeditationToolOutputs => "MeditationToolOutputs",
+            Self::MeditationCarry => "MeditationCarry",
             Self::RenderPlacement => "RenderPlacement",
             Self::BackgroundStatus => "BackgroundStatus",
         }
@@ -4986,6 +5032,7 @@ impl Tags {
             Self::MeditationToolOutputs => {
                 of(MeditationToolOutputs::ALL, MeditationToolOutputs::tag)
             }
+            Self::MeditationCarry => of(MeditationCarry::ALL, MeditationCarry::tag),
             Self::RenderPlacement => of(RenderPlacement::ALL, RenderPlacement::tag),
             Self::BackgroundStatus => of(BackgroundStatus::ALL, BackgroundStatus::tag),
         }
@@ -5332,6 +5379,16 @@ const fn must_v8(key: &'static str, holds: Holds) -> Field {
     }
 }
 
+/// A key that arrived in v16, optional wherever its object is written.
+const fn may_v16(key: &'static str, holds: Holds) -> Field {
+    Field {
+        key,
+        holds,
+        required: false,
+        since: 16,
+    }
+}
+
 /// A key that arrived in v15, optional wherever its object is written.
 const fn may_v15(key: &'static str, holds: Holds) -> Field {
     Field {
@@ -5577,6 +5634,12 @@ pub fn tag_introduced(tags: Tags, tag: &str) -> i64 {
         || (tags == Tags::Refusal && Refusal::from_tag(tag) == Some(Refusal::ApiCap));
     if api_cap {
         return 12;
+    }
+    if (tags == Tags::Lane && Lane::from_tag(tag) == Some(Lane::Summary))
+        || (tags == Tags::SettleReason
+            && SettleReason::from_tag(tag) == Some(SettleReason::SummaryFailed))
+    {
+        return 16;
     }
     if tags == Tags::Warrant && Warrant::from_tag(tag) == Some(Warrant::Refutation) {
         return 9;
@@ -6042,6 +6105,8 @@ pub fn schema(kind: Kind) -> &'static [Field] {
                 may_v7("unaddressed", Holds::Strings),
                 may_v7("newest_turn_tokens", Count),
                 may_v7("refilled_anyway", Holds::Flag),
+                may_v16("carry", Tag(Tags::MeditationCarry)),
+                may_v16("summary_tokens", Count),
                 may_v7("warm", Holds::Timings),
                 may_v8("turn_steps_kept", Count),
                 may_v8("audit_notes", Count),
@@ -7306,6 +7371,8 @@ fn to_value(line: &Line) -> Value {
             unaddressed,
             newest_turn_tokens,
             refilled_anyway,
+            carry,
+            summary_tokens,
             warm,
             turn_steps,
             audit_notes,
@@ -7419,6 +7486,12 @@ fn to_value(line: &Line) -> Value {
             }
             if let Some(anyway) = refilled_anyway {
                 put("refilled_anyway", Value::Boolean(*anyway));
+            }
+            if let Some(carry) = carry {
+                put("carry", text(carry.tag()));
+            }
+            if let Some(tokens) = summary_tokens {
+                put("summary_tokens", count(*tokens));
             }
             Kind::Meditation
         }
@@ -8780,13 +8853,13 @@ mod tests {
         assert!(refused.why.contains("v8"), "{refused}");
     }
 
-    /// #583, #878, #904, #555, #931: this module writes v15.
+    /// #583, #878, #904, #555, #931, #936: this module writes v16.
     #[test]
-    fn this_module_writes_v15_and_reads_every_version_before_it() {
-        assert_eq!(super::VERSION, 15);
+    fn this_module_writes_v16_and_reads_every_version_before_it() {
+        assert_eq!(super::VERSION, 16);
         assert_eq!(
             super::READS,
-            &[0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15]
+            &[0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16]
         );
     }
 
@@ -10814,7 +10887,7 @@ mod tests {
         );
         assert_eq!(
             tags(SettleReason::ALL.iter().map(|it| it.tag()).collect()),
-            "final cancelled max_steps timeout failed capped api_cap"
+            "final cancelled max_steps timeout failed capped api_cap summary_failed"
         );
         assert_eq!(
             tags(ToolOutcome::ALL.iter().map(|it| it.tag()).collect()),
@@ -10834,7 +10907,7 @@ mod tests {
         );
         assert_eq!(
             tags(Lane::ALL.iter().map(|it| it.tag()).collect()),
-            "trunk interview audit warm"
+            "trunk interview audit warm summary"
         );
         assert_eq!(
             tags(Warrant::ALL.iter().map(|it| it.tag()).collect()),

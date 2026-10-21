@@ -742,6 +742,13 @@ pub fn serve_levers(regimen: &Regimen, output_cap: (u32, &str)) -> BTreeMap<Stri
             meditation_work_lever(regimen, crate::meditation::policy::MEDITATION_WARM),
         ),
         ("reconcile_gate".to_owned(), reconcile_gate_lever(regimen)),
+        // #936: what a meditation's refill carries.
+        (
+            "meditation_carry".to_owned(),
+            crate::meditation::policy::meditation_carry(regimen)
+                .tag()
+                .to_owned(),
+        ),
         ("phase_graph".to_owned(), phase_graph_lever(regimen)),
         // #788: whether the operator may move the phase alone.
         (
