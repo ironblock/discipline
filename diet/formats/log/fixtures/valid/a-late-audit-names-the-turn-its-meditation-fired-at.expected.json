@@ -1,0 +1,165 @@
+{
+  "events": [
+    {
+      "head": [
+        {
+          "content": "you are the trunk",
+          "role": "system"
+        }
+      ],
+      "kind": "session.start",
+      "model": "a-model",
+      "opened": 1790000000000,
+      "seq": 0,
+      "t": 0,
+      "version": 19
+    },
+    {
+      "kind": "ask",
+      "seq": 1,
+      "t": 5,
+      "text": "what are we building",
+      "turn": 1
+    },
+    {
+      "from": "awaiting",
+      "kind": "settlement",
+      "seq": 2,
+      "t": 10,
+      "to": "turn"
+    },
+    {
+      "kind": "request",
+      "lane": "trunk",
+      "seq": 3,
+      "t": 15,
+      "turn": 1
+    },
+    {
+      "kind": "response",
+      "seq": 4,
+      "t": 20,
+      "text": "a tracker for the team's bugs",
+      "to_request": 3
+    },
+    {
+      "kind": "turn.settled",
+      "reason": "final",
+      "seq": 5,
+      "t": 25,
+      "turn": 1
+    },
+    {
+      "from": "turn",
+      "kind": "settlement",
+      "seq": 6,
+      "t": 30,
+      "to": "awaiting"
+    },
+    {
+      "kind": "ask",
+      "seq": 7,
+      "t": 35,
+      "text": "and who files them",
+      "turn": 2
+    },
+    {
+      "from": "awaiting",
+      "kind": "settlement",
+      "seq": 8,
+      "t": 40,
+      "to": "turn"
+    },
+    {
+      "kind": "request",
+      "lane": "trunk",
+      "seq": 9,
+      "t": 45,
+      "turn": 2
+    },
+    {
+      "kind": "request.failed",
+      "message": "busy",
+      "reason": "server",
+      "request": 9,
+      "seq": 10,
+      "status": 503,
+      "t": 50
+    },
+    {
+      "kind": "turn.settled",
+      "reason": "failed",
+      "seq": 11,
+      "t": 55,
+      "turn": 2
+    },
+    {
+      "from": "turn",
+      "kind": "settlement",
+      "seq": 12,
+      "t": 60,
+      "to": "awaiting"
+    },
+    {
+      "from": "awaiting",
+      "kind": "settlement",
+      "seq": 13,
+      "t": 65,
+      "to": "capture"
+    },
+    {
+      "ask": "audit_q_human",
+      "at": 3,
+      "kind": "fork",
+      "lane": "audit",
+      "of_turn": 1,
+      "question": "We've reached a scheduled checkpoint -- audit our working notes.\n\n1. a tracker",
+      "seq": 14,
+      "t": 70,
+      "why": "meditation"
+    },
+    {
+      "fork": 14,
+      "kind": "request",
+      "lane": "audit",
+      "seq": 15,
+      "t": 75,
+      "turn": 1
+    },
+    {
+      "kind": "response",
+      "seq": 16,
+      "t": 80,
+      "text": "1. KEEP",
+      "to_request": 15
+    },
+    {
+      "fork": 14,
+      "kind": "fork.settled",
+      "outcome": "value",
+      "seq": 17,
+      "t": 85
+    },
+    {
+      "from": "capture",
+      "kind": "settlement",
+      "seq": 18,
+      "t": 90,
+      "to": "awaiting"
+    },
+    {
+      "at_turn": 2,
+      "carried_entries": 1,
+      "carried_turns": 2,
+      "frame": "placeholder",
+      "kind": "meditation",
+      "prefix_hash_after": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+      "prefix_hash_before": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "reason": "cadence",
+      "render": "# working set\nd1\ta tracker\n",
+      "seq": 19,
+      "t": 95
+    }
+  ],
+  "torn": 0
+}

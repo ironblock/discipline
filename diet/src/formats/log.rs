@@ -3547,7 +3547,13 @@ fn check(lines: &[Line]) -> Result<(), LogError> {
             Event::Request {
                 turn, lane, fork, ..
             } => {
-                if *turn == 0 || *turn != turns {
+                // A meditation's audit runs when the meditation does, which
+                // turns asked after it fired may precede (#945): its request
+                // names the turn its own fork was cut at, never a later one.
+                let late_audit = *lane == Lane::Audit
+                    && *turn <= turns
+                    && fork.is_some_and(|fork| forks.of_turn.get(&fork) == Some(turn));
+                if *turn == 0 || (*turn != turns && !late_audit) {
                     return Err(at(
                         index,
                         format!("a request for turn {turn} where the latest is {turns}"),
