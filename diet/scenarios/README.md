@@ -34,6 +34,7 @@ The format has no grammar of its own, so it has no directory under `diet/formats
 | `head` | required | the trunk's head, relative to the file |
 | `approvals` | optional | the `POST /approve` scope (`once`, `session`, `workspace`, `decline`) that answers each prompt; absent, a prompt fails the run |
 | `seed` | optional | `{worktree path: file}`: each file, relative to the scenario, copied into the fresh worktree before serve starts (an `AGENTS.md`, say). The regimen must run commands. |
+| `fixed_asks` | optional | the asks, by their place among the asks from 0, that are fixed: an operator script (below) lists `[0]`. Every later ask was typed in answer to what the model did, so a scripted run of it is not that answer. A person who knows a later ask was written in advance adds its index. |
 
 ## `reply`: what the canned substrate answers
 
@@ -89,6 +90,7 @@ The format has no grammar of its own, so it has no directory under `diet/formats
 - After each admitted ask, meditation or refill, the runner waits until `GET /state` is `idle`.
 - `patience` (optional) on a step it waits after -- an ask to be admitted, `declare-meditation`, `refill-anyway`, `rule-phase`, `start-phase`, `propose-phase` or `move-phase` -- is how long, in whole seconds above 0, that wait may take before the drive fails; absent, 900. A live re-fire whose turns run long names one, and always a number: a hung run still ends. Any other step refuses it.
 - `pick` names a live entry, read from `GET /memory`: a number is its place in id order, and text is the first entry whose content holds it.
+- `place` (optional, an object) on any step is for a reader. The runner never reads it. An operator script writes it (below).
 
 ## `expect`: what the log must show
 
@@ -99,3 +101,39 @@ The format has no grammar of its own, so it has no directory under `diet/formats
 - **`at_least`:** how many lines must match (default 1).
 - **`name`:** a name for this expectation's first match.
 - **`after`:** a later expectation counts only the lines after the first match of the expectation that `after` names.
+
+## Deriving an operator script from a run's log (#908)
+
+```
+diet-drive script --log RUN/session.log --regimen R.toml --out DIR [--name NAME] [--canned SCENARIO] [--recording DIR]
+```
+
+This writes a scenario, `DIR/NAME.jsonl` (`script` unless named). It holds every move the run's operator made, in the log's order: asks with their scoping marks and attached files, flags, edits, meditations and refills, phase starts, proposals, moves and rulings, tangents, and the end.
+
+Beside it the command writes:
+- the head, `head.md`;
+- the regimen, `regimen.toml`: `--regimen`, the one the run ran under, since the log does not hold it;
+- each attached file under `files/`, seeded into the replay's worktree.
+
+`diet-drive scenario DIR/NAME.jsonl` plays it. The script fixes the inputs, not what comes back.
+
+- **Each step keeps its place.** Its `place` holds:
+  - `turn`: the turn the move belongs to;
+  - `between`: always true, since a scenario's steps run once the session has settled;
+  - for each ask after the first, `answers`: the `seq` of the trunk response it followed, plus `read_ms` and `compose_ms` from its `idle.gap`.
+
+  The header's `fixed_asks` is `[0]`.
+- **Background jobs are waited for.** A job that ended between turns, before the next move, becomes a `wait` for its `background.ended`.
+- **The head is what the replay's start begins from.** The instruction files' render (#559) and the fork ask set's priming (#598) come off it, since the replay's start adds them again from its worktree and its regimen. The report names the instruction files the run read, which the replay's worktree must hold.
+- **A refused ask is written with no text.** Its log line keeps none, and its refusal turns on the session's state.
+- **For a replay on the canned substrate**, `--canned SCENARIO` copies that scenario's `reply` and `classify` lines and its `seed` (under `seed/`).
+  - The round trip is tested this way. The kitchen sink's log becomes a script, which replays with the kitchen sink's replies, and its operator lines are the original's apart from `seq` and `t` (`diet/tests/drive_scenario_cli.rs`).
+  - A live re-fire takes no replies.
+- **A move the format cannot express is refused, naming its line, and never dropped:**
+  - a stop;
+  - a call the operator moved to the background;
+  - approvals answered with different scopes;
+  - a tangent closed with more than one ruling;
+  - a meditation declared with a phase move;
+  - a refused command that is not an ask;
+  - a flag or edit whose entry's text does not pick it alone.
