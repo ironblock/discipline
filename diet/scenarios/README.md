@@ -229,19 +229,49 @@ This runs the scenario under two regimens, N times each, so their records can be
   - A difference left out, or a member that names none, is refused before any run, as `missing` and `extra`.
   - The batch's line names the declared set and each lever's states, as `contrast`. `pair` is the regimens' digest as before, and the two regimens fix the set.
 - **The arms interleave ABBA ABBA,** so drift on the box falls on both arms. Each arm's repeats go in `DIR/a/repeat-NN/` and `DIR/b/repeat-NN/`.
-- **Each run's `run`** names its `arm` (`a` or `b`), the `pair`, the script's digest and its repeat of its arm, on its log's `session.start` and its record's start. `pair` is the sha256 of the two regimens' sha256s, `R1`'s then `R2`'s, as lowercase hex with nothing between.
+- **Each run's `run`** names its `arm` (`a` or `b`), the batch's digest as `arms`, the script's digest and its repeat of its arm, on its log's `session.start` and its record's start. The digest is the sha256 of the two regimens' sha256s, `R1`'s then `R2`'s, as lowercase hex with nothing between. Before log v22 and record v5 it was spelled `pair`, which both still read.
 - **Each run is a repeat as above.** The same mechanics apply: a fresh worktree, a void run re-run at its slot up to the cap, the stop file read before each run, and one line per run, which names its `arm`. The batch's line names the `pair`, the `lever` with its state under each arm, and how many runs each arm `ran`.
 
-## A pair's table (#914)
+## Running k arms (#932)
+
+```
+diet-drive arms FILE --arms ARMS.toml --repeat N --out DIR [--endpoint URL --model NAME [--key-file FILE]] [--no-assemble] [--stop-file PATH] [--void-cap K]
+```
+
+This runs the scenario under each of a manifest's regimens, N times each. A pair is its k = 2 case: `pair` is `arms` with arms `a` (the baseline) and `b`.
+- **The manifest** names its `baseline`, then one table per arm:
+  ```toml
+  baseline = "native"
+  [arm.native]
+  regimen = "native.toml"
+  [arm.refute]
+  regimen = "refute.toml"
+  [arm.dedupe]
+  regimen = "dedupe.toml"
+  contrast = ["refutation_interview", "note_dedupe"]
+  ```
+  - An arm's name is a directory its runs go in: 1 to 32 lowercase letters, digits, `-` and `_`, starting with a letter or digit.
+  - `regimen` is relative to the manifest. `contrast` is optional, as `--contrast` is for a pair, and the baseline declares none.
+  - Two or more arms, and no other key.
+- **Every other arm must differ from the baseline in exactly one lever, or in exactly its contrast,** checked as a pair's are. Otherwise the batch is refused before any run, naming the `arm`.
+- **The order is a Williams design.** Block b runs the arms in row b of the design, cycling through its rows.
+  - Over a whole cycle, every arm runs in every position equally often and follows every other arm once. So a linear drift on the box, and a carryover from the run before (the server's cache), balance across arms.
+  - A cycle is k rows when k is even and 2k when it is odd. Two arms' rows are AB and BA, so a pair runs ABBA ABBA as before.
+  - The batch's line says the design, its rows, the blocks run, and whether N is a whole number of cycles (`balanced`). When it is not, it says so: positions and carryover balance only at a multiple of the cycle.
+- **Each run's `run`** names its `arm` by name, the batch's digest as `arms`, the script's digest and its repeat of its arm. The digest is the sha256 of every arm's regimen sha256, in arm-name order, as lowercase hex with nothing between.
+- **Each run is a repeat as above,** in `DIR/<arm>/repeat-NN/`. The batch's line names the `baseline`, the digest, what each other arm differs in (`against`), the `order`, and how many runs each arm `ran`. It is also kept as `DIR/batch.json`.
+
+## A batch's table (#914)
 
 ```
 diet-drive table DIR [--seed S]
 ```
 
-This reads a `pair` batch and writes `DIR/table.md` and `DIR/table.json`. It is a table, not a claim.
+This reads a `pair` or `arms` batch and writes `DIR/table.md` and `DIR/table.json`. It is a table, not a claim.
+- **The baseline** is what `DIR/batch.json` names. A pair batch written before it was kept has arms `a` and `b`, and its baseline is `a`.
 - **What it reads:** the batch's `runs.jsonl`, skipping void attempts, and each run's log at `DIR/<arm>/repeat-NN/session.log`. Each log's `run` must be the run `runs.jsonl` names there. No model is asked.
 - **Per arm:** each row's median, range and mean over the arm's runs. The JSON also holds every run's value.
-- **Per pair:** two B − A deltas, of the medians and of the means.
+- **Per other arm:** two deltas against the baseline, the arm's minus the baseline's, of the medians and of the means. For a pair, B − A.
   - Each has a 95% percentile interval from the same draws: each arm's runs are resampled with replacement, independently, 10,000 times.
   - The interval's ends are the 250th and 9,750th sorted draws.
   - The seed is 0 unless `--seed` is given, and both files print it.

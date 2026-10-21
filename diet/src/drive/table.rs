@@ -1,5 +1,5 @@
-//! A pair's receipt-level table (#914): what each arm's runs did, read from
-//! their logs, and the B − A deltas. A table, not a claim: at small N the
+//! A batch's receipt-level table (#914, #932): what each arm's runs did,
+//! read from their logs, and each arm's deltas against the baseline. A table, not a claim: at small N the
 //! interval describes the runs and tests nothing.
 //!
 //! Every row names its source: a line kind of the session log
@@ -10,6 +10,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::fmt::Write as _;
 use std::path::Path;
 
+use crate::drive::pair::BATCH;
 use crate::drive::scenario::{RUNS, repeat_dir};
 use crate::formats::log::{self, Event, ToolOutcome};
 
@@ -515,18 +516,27 @@ fn number(value: f64) -> serde_json::Value {
     }
 }
 
-/// One row, as the JSON holds it and as a Markdown line.
+/// An arm's runs: its name and each run's receipts, in `runs.jsonl` order.
+type ArmRuns = (String, Vec<Receipts>);
+
+/// One row, as the JSON holds it and as a Markdown line: each arm's
+/// spread, in name order, then each other arm's deltas against the
+/// baseline's, `base` its index. Each pair of arms draws in turn, the
+/// baseline's runs then the other's, so a pair's draws are as they were.
 fn laid_out(
     row: &Row,
-    (a, b): (&[Receipts], &[Receipts]),
+    (arms, base): (&[ArmRuns], usize),
     draws: &mut Draws,
 ) -> (serde_json::Value, String) {
     let values = |runs: &[Receipts]| runs.iter().map(|r| (row.value)(r)).collect::<Vec<_>>();
-    let (under_a, under_b) = (values(a), values(b));
-    let (by_median, by_mean) = deltas(&under_a, &under_b, &mut || {
-        (draws.resample(&under_a), draws.resample(&under_b))
-    });
-    let (of_a, of_b) = (Spread::of(&under_a), Spread::of(&under_b));
+    let under: Vec<Vec<f64>> = arms.iter().map(|(_, runs)| values(runs)).collect();
+    let mut against = Vec::new();
+    for (at, (name, _)) in arms.iter().enumerate().filter(|(at, _)| *at != base) {
+        let (from, to) = (&under[base], &under[at]);
+        let found = deltas(from, to, &mut || (draws.resample(from), draws.resample(to)));
+        against.push((name.clone(), found));
+    }
+    let spreads: Vec<Spread> = under.iter().map(|values| Spread::of(values)).collect();
     let or_missing = |value: f64| {
         if value.is_nan() {
             row.missing.to_owned()
@@ -550,15 +560,14 @@ fn laid_out(
             shown(delta.high)
         )
     };
-    let line = format!(
-        "| {} | {} | {} | {} | {} | {} |\n",
-        row.name,
-        arm(&of_a),
-        arm(&of_b),
-        interval(&by_median),
-        interval(&by_mean),
-        row.source
-    );
+    let mut line = format!("| {} |", row.name);
+    for spread in &spreads {
+        let _ = write!(line, " {} |", arm(spread));
+    }
+    for (_, (by_median, by_mean)) in &against {
+        let _ = write!(line, " {} | {} |", interval(by_median), interval(by_mean));
+    }
+    let _ = writeln!(line, " {} |", row.source);
     let held = |runs: &[f64], spread: &Spread| {
         serde_json::json!({
             "runs": runs.iter().copied().map(number).collect::<Vec<_>>(),
@@ -569,18 +578,29 @@ fn laid_out(
         })
     };
     let delta = |delta: &Delta| serde_json::json!({"value": number(delta.value), "low": number(delta.low), "high": number(delta.high)});
-    let mut json = serde_json::json!({
+    let mut by_arm = serde_json::Map::new();
+    for ((name, runs), (values, spread)) in arms.iter().zip(under.iter().zip(&spreads)) {
+        let mut held = held(values, spread);
+        if let Some(note) = &row.note {
+            held["notes"] = serde_json::json!(runs.iter().map(note).collect::<Vec<_>>());
+        }
+        by_arm.insert(name.clone(), held);
+    }
+    let deltas: serde_json::Map<String, serde_json::Value> = against
+        .iter()
+        .map(|(name, (by_median, by_mean))| {
+            (
+                name.clone(),
+                serde_json::json!({"delta_median": delta(by_median), "delta_mean": delta(by_mean)}),
+            )
+        })
+        .collect();
+    let json = serde_json::json!({
         "row": row.name,
         "source": row.source,
-        "a": held(&under_a, &of_a),
-        "b": held(&under_b, &of_b),
-        "delta_median": delta(&by_median),
-        "delta_mean": delta(&by_mean),
+        "by_arm": by_arm,
+        "deltas": deltas,
     });
-    if let Some(note) = &row.note {
-        json["a"]["notes"] = serde_json::json!(a.iter().map(note).collect::<Vec<_>>());
-        json["b"]["notes"] = serde_json::json!(b.iter().map(note).collect::<Vec<_>>());
-    }
     (json, line)
 }
 
@@ -605,7 +625,7 @@ fn ran(dir: &Path) -> Result<Vec<Ran>, String> {
         }
         let arm = read["arm"].as_str().ok_or_else(|| {
             format!(
-                "{} line {} names no arm: the table reads a `pair` batch",
+                "{} line {} names no arm: the table reads a `pair` or `arms` batch",
                 path.display(),
                 index + 1
             )
@@ -621,17 +641,71 @@ fn ran(dir: &Path) -> Result<Vec<Ran>, String> {
     Ok(runs)
 }
 
-/// A `pair` batch's table (#914), from `dir`'s `runs.jsonl` and each run's
+/// A batch's baseline (#932): what its `batch.json` names, or, for a pair
+/// batch that kept none, `a`.
+fn baseline_of(dir: &Path, names: &BTreeSet<&str>) -> Result<String, String> {
+    let path = dir.join(BATCH);
+    match std::fs::read_to_string(&path) {
+        Ok(text) => {
+            let read: serde_json::Value =
+                serde_json::from_str(&text).map_err(|why| format!("{}: {why}", path.display()))?;
+            read["baseline"]
+                .as_str()
+                .map(str::to_owned)
+                .ok_or_else(|| format!("{} names no baseline", path.display()))
+        }
+        Err(_) if *names == BTreeSet::from(["a", "b"]) => Ok("a".to_owned()),
+        Err(why) => Err(format!(
+            "{} cannot be read, and a batch whose arms are not `a` and `b` names its baseline \
+             there: {why}",
+            path.display()
+        )),
+    }
+}
+
+/// The Markdown table's head: a column per arm's spread, in name order,
+/// two per other arm's deltas against `baseline`, then the primary
+/// measure's row.
+fn header(arms: &[ArmRuns], baseline: &str) -> String {
+    let mut markdown = String::from("| row |");
+    let others: Vec<&str> = arms
+        .iter()
+        .filter(|(name, _)| *name != baseline)
+        .map(|(name, _)| name.as_str())
+        .collect();
+    for (name, _) in arms {
+        let _ = write!(markdown, " {name} median [min, max] |");
+    }
+    for name in &others {
+        let _ = write!(
+            markdown,
+            " {name} − {baseline} median [95%] | {name} − {baseline} mean [95%] |"
+        );
+    }
+    markdown.push_str(" source |\n|");
+    let columns = 2 + arms.len() + 2 * others.len();
+    markdown.push_str(&" --- |".repeat(columns));
+    let _ = writeln!(
+        markdown,
+        "\n| {PRIMARY_MEASURE} |{}",
+        " |".repeat(columns - 1)
+    );
+    markdown
+}
+
+/// A batch's table (#914, #932), from `dir`'s `runs.jsonl` and each run's
 /// log at `dir/<arm>/repeat-NN/session.log`, its draws seeded by `seed`:
-/// the table as JSON and as Markdown.
+/// each arm's receipts, and each other arm's deltas against the baseline,
+/// as JSON and as Markdown.
 ///
 /// # Errors
 ///
-/// When a file cannot be read, a log does not parse, or a log's `run` is
-/// not the run `runs.jsonl` names there.
+/// When a file cannot be read, a log does not parse, a log's `run` is not
+/// the run `runs.jsonl` names there, the runs name more than one batch, or
+/// the baseline has no runs.
 pub fn table(dir: &Path, seed: u64) -> Result<(serde_json::Value, String), String> {
     let mut receipts: BTreeMap<String, Vec<Receipts>> = BTreeMap::new();
-    let mut pairs = BTreeSet::new();
+    let mut batches = BTreeSet::new();
     for run in ran(dir)? {
         let path = repeat_dir(&dir.join(&run.arm), run.repeat).join("session.log");
         let text = std::fs::read_to_string(&path)
@@ -644,8 +718,8 @@ pub fn table(dir: &Path, seed: u64) -> Result<(serde_json::Value, String), Strin
             return Err(format!("{} names no run on its start", path.display()));
         };
         match &named.paired {
-            Some((arm, pair)) if arm.tag() == run.arm && named.repeat == run.repeat => {
-                pairs.insert(pair.clone());
+            Some((arm, batch)) if *arm == run.arm && named.repeat == run.repeat => {
+                batches.insert(batch.clone());
             }
             _ => {
                 return Err(format!(
@@ -661,62 +735,62 @@ pub fn table(dir: &Path, seed: u64) -> Result<(serde_json::Value, String), Strin
             .or_default()
             .push(Receipts::of(&lines, run.unmet));
     }
-    if pairs.len() > 1 {
-        return Err(format!("the runs name {} pairs: {pairs:?}", pairs.len()));
+    if batches.len() > 1 {
+        return Err(format!(
+            "the runs name {} batches: {batches:?}",
+            batches.len()
+        ));
     }
-    let (a, b) = (
-        receipts.get("a").cloned().unwrap_or_default(),
-        receipts.get("b").cloned().unwrap_or_default(),
-    );
-    if a.is_empty() || b.is_empty() {
-        return Err("a table needs at least one run of each arm".to_owned());
+    let names: BTreeSet<&str> = receipts.keys().map(String::as_str).collect();
+    let baseline = baseline_of(dir, &names)?;
+    if !receipts.contains_key(&baseline) || receipts.len() < 2 {
+        return Err(format!(
+            "a table needs runs of the baseline `{baseline}` and of at least one other arm; \
+             the runs are of {names:?}"
+        ));
     }
-    let reasons: BTreeSet<String> = a
+    let arms: Vec<ArmRuns> = receipts.into_iter().collect();
+    let base = arms
         .iter()
-        .chain(&b)
-        .flat_map(|r| r.settles.keys().cloned())
-        .collect();
-    let tasks: BTreeSet<String> = a
-        .iter()
-        .chain(&b)
-        .flat_map(|r| r.tasks.keys().cloned())
-        .collect();
+        .position(|(name, _)| *name == baseline)
+        .unwrap_or(0);
+    let all = || arms.iter().flat_map(|(_, runs)| runs);
+    let reasons: BTreeSet<String> = all().flat_map(|r| r.settles.keys().cloned()).collect();
+    let tasks: BTreeSet<String> = all().flat_map(|r| r.tasks.keys().cloned()).collect();
+    let lanes: BTreeSet<String> = all().flat_map(|r| r.lanes.keys().cloned()).collect();
+    let nonced = all().all(|r| r.nonced);
     let mut draws = Draws(seed);
     let mut json_rows = Vec::new();
-    let mut markdown = String::new();
-    let _ = writeln!(
-        markdown,
-        "| row | A median [min, max] | B median [min, max] | B − A median [95%] | B − A mean [95%] | source |"
-    );
-    let _ = writeln!(markdown, "| --- | --- | --- | --- | --- | --- |");
-    let _ = writeln!(markdown, "| {PRIMARY_MEASURE} | | | | | |");
-    let lanes: BTreeSet<String> = a
-        .iter()
-        .chain(&b)
-        .flat_map(|r| r.lanes.keys().cloned())
-        .collect();
-    let nonced = a.iter().chain(&b).all(|r| r.nonced);
+    let mut markdown = header(&arms, &baseline);
     for row in rows(&reasons, &tasks, (&lanes, nonced)) {
-        let (json, line) = laid_out(&row, (&a, &b), &mut draws);
+        let (json, line) = laid_out(&row, (&arms, base), &mut draws);
         json_rows.push(json);
         markdown.push_str(&line);
     }
-    let pair = pairs.into_iter().next();
+    let digest = batches.into_iter().next();
+    let ran: BTreeMap<&str, usize> = arms
+        .iter()
+        .map(|(name, runs)| (name.as_str(), runs.len()))
+        .collect();
     let mut head = String::new();
     let _ = writeln!(
         head,
-        "# Pair table\n\nPair `{}`. A ran {} run(s), B ran {}. Each delta is B − A, with a 95% \
-         percentile interval over {DRAWS} draws, each arm's runs resampled independently, seed \
-         {seed}. At small N the interval describes the runs; it is not a test.\n",
-        pair.as_deref().unwrap_or("?"),
-        a.len(),
-        b.len()
+        "# Arms table\n\nBatch `{}`, baseline `{baseline}`. Runs per arm: {}. Each delta is an \
+         arm's minus the baseline's, with a 95% percentile interval over {DRAWS} draws, each \
+         arm's runs resampled independently, seed {seed}. At small N the interval describes the \
+         runs; it is not a test.\n",
+        digest.as_deref().unwrap_or("?"),
+        ran.iter()
+            .map(|(name, n)| format!("{name} {n}"))
+            .collect::<Vec<_>>()
+            .join(", ")
     );
     let json = serde_json::json!({
-        "pair": pair,
+        "arms": digest,
+        "baseline": baseline,
         "seed": seed,
         "draws": DRAWS,
-        "runs": {"a": a.len(), "b": b.len()},
+        "runs": ran,
         "primary_measure": PRIMARY_MEASURE,
         "rows": json_rows,
     });

@@ -2142,7 +2142,7 @@ pub(crate) fn slot(
         line["of"] = serde_json::json!(run.of);
         line["attempt"] = serde_json::json!(voids + 1);
         if let Some((arm, _)) = &run.paired {
-            line["arm"] = serde_json::Value::String(arm.tag().to_owned());
+            line["arm"] = serde_json::Value::String(arm.clone());
         }
         if line["void"].is_null() {
             emit(&line);
