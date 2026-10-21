@@ -862,3 +862,268 @@ fn an_operator_script_refuses_a_move_it_cannot_express_naming_its_line() {
     assert!(!dir.join("script/script.jsonl").exists());
     let _ = std::fs::remove_dir_all(&dir);
 }
+
+/// One asked-and-answered turn, met by its one expectation, or by
+/// `expect` in its place.
+fn one_turn(dir: &Path, name: &str, expect: &str) -> PathBuf {
+    scenario(
+        dir,
+        name,
+        &format!(
+            "{}\n{}\n{}\n{expect}\n",
+            r#"{"reply":{"when":"hello there","text":"Hello."}}"#,
+            r#"{"step":"ask","text":"hello there"}"#,
+            r#"{"step":"end"}"#,
+        ),
+    )
+}
+
+/// `diet-drive scenario FILE --out OUT --repeat N` and `extra`: its exit
+/// code and every stdout line, as JSON.
+fn repeated(file: &Path, out: &Path, extra: &[&str]) -> (Option<i32>, Vec<serde_json::Value>) {
+    let ran = Command::new(DRIVE)
+        .current_dir(root())
+        .arg("scenario")
+        .arg(file)
+        .arg("--out")
+        .arg(out)
+        .args(extra)
+        .output()
+        .expect("diet-drive runs");
+    let stdout = String::from_utf8_lossy(&ran.stdout);
+    let lines = stdout
+        .lines()
+        .map(|line| {
+            serde_json::from_str(line).unwrap_or_else(|_| {
+                panic!(
+                    "not JSON: {line}\nstderr: {}",
+                    String::from_utf8_lossy(&ran.stderr)
+                )
+            })
+        })
+        .collect();
+    (ran.status.code(), lines)
+}
+
+/// A file's first line, as JSON.
+fn first_line(path: &Path) -> serde_json::Value {
+    let text =
+        std::fs::read_to_string(path).unwrap_or_else(|why| panic!("{}: {why}", path.display()));
+    serde_json::from_str(text.lines().next().unwrap_or("")).expect("a JSON line")
+}
+
+/// #910: `--repeat 3` runs three sessions one after another, each in its
+/// own `repeat-NN/`, each log's `session.start` (v17) and record's start
+/// (v3) naming its script's digest, its repeat and the count; one line per
+/// repeat, then the batch's.
+#[test]
+fn repeats_run_one_after_another_each_naming_its_repeat() {
+    let dir = scratch("repeats");
+    let file = one_turn(
+        &dir,
+        "repeats",
+        r#"{"expect":"turn.settled","where":{"reason":"final"}}"#,
+    );
+    let digest = diet::digest::sha256_hex(&std::fs::read(&file).expect("the scenario"));
+    let out = dir.join("out");
+    let (code, lines) = repeated(&file, &out, &["--no-assemble", "--repeat", "3"]);
+    assert_eq!(code, Some(0), "{lines:?}");
+    assert_eq!(lines.len(), 4, "{lines:?}");
+    let mut ended_before = 0;
+    for (k, line) in (1..=3).zip(&lines) {
+        assert_eq!(line["repeat"], k, "{line}");
+        assert_eq!(line["of"], 3, "{line}");
+        assert_eq!(line["attempt"], 1, "{line}");
+        assert_eq!(line["void"], serde_json::Value::Null, "{line}");
+        assert_eq!(line["ok"], true, "{line}");
+        assert_eq!(line["turns"], 1, "{line}");
+        assert_eq!(line["settles"], serde_json::json!({"final": 1}), "{line}");
+        assert_eq!(line["unmet"], serde_json::json!([]), "{line}");
+        assert!(line["tokens"].as_u64().is_some_and(|n| n > 0), "{line}");
+        let repeat = out.join(format!("repeat-{k:02}"));
+        assert_eq!(
+            line["record"],
+            repeat.join("session.record.jsonl").display().to_string(),
+            "{line}"
+        );
+        let run = serde_json::json!({"script_sha256": digest, "repeat": k, "of": 3});
+        let start = first_line(&repeat.join("session.log"));
+        assert_eq!(start["version"], 17, "{start}");
+        assert_eq!(start["run"], run, "{start}");
+        let record = first_line(&repeat.join("session.record.jsonl"));
+        assert_eq!(record["version"], 3, "{record}");
+        assert_eq!(record["run"], run, "{record}");
+        // Repeat k ended before repeat k+1 opened.
+        let log = std::fs::read_to_string(repeat.join("session.log")).expect("the log");
+        let last: serde_json::Value =
+            serde_json::from_str(log.lines().last().unwrap_or("")).expect("a JSON line");
+        let opened = start["opened"].as_u64().expect("opened");
+        assert!(
+            opened >= ended_before,
+            "repeat {k} opened before the last ended"
+        );
+        ended_before = opened + last["t"].as_u64().expect("t");
+    }
+    assert_eq!(lines[3]["ok"], true, "{}", lines[3]);
+    assert_eq!(lines[3]["ran"], 3, "{}", lines[3]);
+    assert_eq!(lines[3]["script_sha256"], digest, "{}", lines[3]);
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// #910: a repeat whose expectation is unmet is data: its line names it,
+/// it is assembled all the same, and the batch passes.
+#[test]
+fn an_unmet_expectation_in_a_repeat_is_data_and_the_repeat_is_assembled() {
+    let dir = scratch("repeat-unmet");
+    let file = one_turn(&dir, "unmet", r#"{"expect":"meditation.held"}"#);
+    let out = dir.join("out");
+    let (code, lines) = repeated(&file, &out, &["--repeat", "2"]);
+    assert_eq!(code, Some(0), "{lines:?}");
+    assert_eq!(lines.len(), 3, "{lines:?}");
+    for (k, line) in (1..=2).zip(&lines) {
+        assert_eq!(line["ok"], false, "{line}");
+        assert_eq!(line["void"], serde_json::Value::Null, "{line}");
+        assert!(
+            line["unmet"].to_string().contains("meditation.held"),
+            "{line}"
+        );
+        let repeat = out.join(format!("repeat-{k:02}"));
+        assert_eq!(
+            line["record"],
+            repeat.join("record.jsonl").display().to_string(),
+            "{line}"
+        );
+        assert_eq!(
+            first_line(&repeat.join("record.jsonl"))["run"]["repeat"],
+            k,
+            "{line}"
+        );
+    }
+    assert_eq!(lines[2]["ok"], true, "{}", lines[2]);
+    assert_eq!(lines[2]["ran"], 2, "{}", lines[2]);
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// #910: the stop file, `STOP` in `--out` unless `--stop-file` names
+/// another, stops the batch before its next repeat starts, and the batch's
+/// line says at which.
+#[test]
+fn the_stop_file_stops_the_batch_before_its_next_repeat() {
+    let dir = scratch("repeat-stop");
+    let file = one_turn(
+        &dir,
+        "stops",
+        r#"{"expect":"turn.settled","where":{"reason":"final"}}"#,
+    );
+    let out = dir.join("out");
+    std::fs::create_dir_all(&out).expect("the out directory");
+    std::fs::write(out.join("STOP"), "").expect("the stop file");
+    let (code, lines) = repeated(&file, &out, &["--no-assemble", "--repeat", "2"]);
+    assert_eq!(code, Some(0), "{lines:?}");
+    assert_eq!(lines.len(), 1, "no repeat ran: {lines:?}");
+    assert_eq!(lines[0]["stopped_at"], 1, "{}", lines[0]);
+    assert_eq!(lines[0]["ran"], 0, "{}", lines[0]);
+    assert!(!out.join("repeat-01").exists());
+    let elsewhere = dir.join("halt");
+    std::fs::write(&elsewhere, "").expect("another stop file");
+    let other = dir.join("other");
+    let (code, lines) = repeated(
+        &file,
+        &other,
+        &[
+            "--no-assemble",
+            "--repeat",
+            "2",
+            "--stop-file",
+            &elsewhere.display().to_string(),
+        ],
+    );
+    assert_eq!(code, Some(0), "{lines:?}");
+    assert_eq!(lines[0]["stopped_at"], 1, "{}", lines[0]);
+    assert_eq!(
+        lines[0]["stopped_by"],
+        elsewhere.display().to_string(),
+        "{}",
+        lines[0]
+    );
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// #910: a repeat serve cannot run to its end for a reason outside the
+/// model -- here, an endpoint that refuses the connection, so serve never
+/// starts -- is void: re-run at its slot, each attempt's outputs kept
+/// beside it, until `--void-cap` re-runs have voided too; then the batch
+/// stops, naming the slot, and fails. Nothing leaves loopback.
+#[test]
+fn a_void_repeat_is_rerun_at_its_slot_until_the_cap_then_the_batch_stops_naming_it() {
+    let dir = scratch("repeat-void");
+    let file = one_turn(
+        &dir,
+        "voids",
+        r#"{"expect":"turn.settled","where":{"reason":"final"}}"#,
+    );
+    let regimen = root().join("diet/scenarios/canned.toml");
+    let (code, lines) = repeated(
+        &file,
+        &dir.join("out"),
+        &[
+            "--no-assemble",
+            "--repeat",
+            "2",
+            "--void-cap",
+            "1",
+            "--endpoint",
+            "http://127.0.0.1:1",
+            "--model",
+            "unreachable",
+            "--regimen",
+            &regimen.display().to_string(),
+        ],
+    );
+    assert_eq!(code, Some(1), "{lines:?}");
+    assert_eq!(lines.len(), 3, "two attempts, then the batch: {lines:?}");
+    for (attempt, line) in (1..=2).zip(&lines) {
+        assert_eq!(line["repeat"], 1, "{line}");
+        assert_eq!(line["attempt"], attempt, "{line}");
+        assert_eq!(line["void"], "serve", "{line}");
+        assert!(
+            line["failure"].to_string().contains("serve did not start"),
+            "{line}"
+        );
+    }
+    assert_eq!(lines[2]["ok"], false, "{}", lines[2]);
+    assert_eq!(lines[2]["ran"], 0, "{}", lines[2]);
+    assert_eq!(
+        lines[2]["void_cap_reached"],
+        serde_json::json!({"repeat": 1, "voids": 2}),
+        "{}",
+        lines[2]
+    );
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// #910: `--repeat` gives each repeat a fresh worktree, so it takes no
+/// `--worktree`; `--stop-file` and `--void-cap` are its alone.
+#[test]
+fn repeat_refuses_a_worktree_and_its_flags_refuse_to_go_without_it() {
+    let dir = scratch("repeat-usage");
+    let file = one_turn(&dir, "usage", r#"{"expect":"turn.settled"}"#);
+    for extra in [
+        vec!["--repeat", "2", "--worktree", "/tmp"],
+        vec!["--void-cap", "1"],
+        vec!["--stop-file", "/tmp/stop"],
+        vec!["--repeat", "0"],
+    ] {
+        let ran = Command::new(DRIVE)
+            .current_dir(root())
+            .arg("scenario")
+            .arg(&file)
+            .arg("--out")
+            .arg(dir.join("out"))
+            .args(&extra)
+            .output()
+            .expect("diet-drive runs");
+        assert_eq!(ran.status.code(), Some(2), "{extra:?}");
+    }
+    let _ = std::fs::remove_dir_all(&dir);
+}

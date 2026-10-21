@@ -101,7 +101,7 @@ fn serve_usage() -> String {
          \x20                       [--listen IP] [--port N] [--auth-file FILE] [--regimen FILE]\n\
          \x20                       [--log FILE] [--record FILE]\n\
          \x20                       [--allow-origin URL]... [--max-output-tokens N]\n\
-         \x20                       [--worktree DIR]\n\
+         \x20                       [--worktree DIR] [--run JSON]\n\
          \x20                       [--seat-endpoint URL --seat-model NAME [--seat-key-file FILE]]\n\
          \x20      diet-drive serve --profile NAME [--config FILE] [any flag above]\n\n",
     );
@@ -121,6 +121,9 @@ fn serve_usage() -> String {
     out.push_str("--shown-root REAL=SHOWN (a canned substrate's only, as `scenario` passes\n");
     out.push_str("it) shows the model SHOWN wherever REAL would appear, fixes background job\n");
     out.push_str("ids and the pid it is shown, and declares both on session.start.\n");
+    out.push_str("--run JSON names which repeat of which script the session is, as\n");
+    out.push_str("`scenario --repeat` passes it: {script_sha256, repeat, of}, and a pair's\n");
+    out.push_str("arm and pair; session.start and the record's start carry it (#910).\n");
     out.push_str("--classifier-endpoint URL (a canned substrate's only, as `scenario` passes\n");
     out.push_str("it) scores the warrant gate's steps on the scenario's canned classifier.\n");
     out.push_str("--key-file names a file holding the endpoint's key, sent as a bearer\n");
@@ -200,6 +203,8 @@ struct ServeArgs {
     shown_roots: Vec<String>,
     /// `--classifier-endpoint`: a scenario's canned classifier (#862).
     classifier_endpoint: Option<String>,
+    /// `--run`: which repeat of which script the session is (#910), as JSON.
+    run: Option<String>,
 }
 
 /// Whether `regime`'s substrate has canned weights: every answer written in
@@ -313,6 +318,7 @@ fn serve_args(args: &[String]) -> Option<ServeArgs> {
     let mut ui = None;
     let mut shown_roots = Vec::new();
     let mut classifier_endpoint = None;
+    let mut run = None;
     let mut given = args.iter();
     while let Some(flag) = given.next() {
         let value = given.next()?;
@@ -360,6 +366,9 @@ fn serve_args(args: &[String]) -> Option<ServeArgs> {
         } else if flag == "--classifier-endpoint" {
             classifier_endpoint = Some(value.clone());
             true
+        } else if flag == "--run" {
+            run = Some(value.clone());
+            true
         } else if flag == "--allow-origin" {
             let origin = is_an_origin(value);
             if origin {
@@ -403,6 +412,7 @@ fn serve_args(args: &[String]) -> Option<ServeArgs> {
         ui,
         shown_roots,
         classifier_endpoint,
+        run,
     })
 }
 
@@ -433,10 +443,15 @@ fn serve(args: &[String]) -> ExitCode {
         ui,
         shown_roots,
         classifier_endpoint,
+        run,
     }) = serve_args(args)
     else {
         eprint!("{}", serve_usage());
         return ExitCode::from(EXIT_USAGE);
+    };
+    let run = match run.as_deref().map(diet::formats::log::run_of).transpose() {
+        Ok(run) => run,
+        Err(why) => return fail(EXIT_USAGE, &format!("--run: {why}")),
     };
     // The surface's bundle (#716): `--ui`, else a `ui` directory beside the
     // binary, as a release archive or a native shell ships it; else none.
@@ -896,7 +911,7 @@ fn serve(args: &[String]) -> ExitCode {
     let session = served_session(
         (transport, seat),
         (shape, dialect, blind),
-        tools,
+        (tools, run),
         (
             claim,
             interview,
@@ -1115,7 +1130,7 @@ fn outputs(
 fn served_session(
     (transport, seat): (HttpStream, Option<session::Offboard<HttpStream>>),
     (mut shape, dialect, blind): (RequestShape, Dialect, Option<String>),
-    tools: Option<Tools>,
+    (tools, run): (Option<Tools>, Option<diet::formats::log::Run>),
     declared: session::Declared,
 ) -> std::sync::Arc<Session<HttpStream>> {
     let forks = transport.for_forks();
@@ -1154,6 +1169,10 @@ fn served_session(
     };
     let session = match blind {
         Some(substrate) => session.without_vision(&substrate),
+        None => session,
+    };
+    let session = match run {
+        Some(run) => session.in_run(run),
         None => session,
     };
     std::sync::Arc::new(match seat {
@@ -2604,12 +2623,13 @@ fn usage() -> String {
 /// how it went, and it exits 0 when every step went as written, every
 /// expectation was met and every request had its reply, else 1.
 fn scenario(args: &[String]) -> ExitCode {
-    use diet::drive::scenario::{RunOptions, run};
+    use diet::drive::scenario::{Repeats, RunOptions, VOID_CAP, repeat, run};
     let usage = || {
         fail(
             EXIT_USAGE,
             "usage: diet-drive scenario FILE --out DIR [--endpoint URL --model NAME \
-             [--key-file FILE]] [--regimen FILE] [--worktree DIR] [--no-assemble] [--dry-run]",
+             [--key-file FILE]] [--regimen FILE] [--worktree DIR] [--no-assemble] [--dry-run] \
+             [--repeat N [--stop-file PATH] [--void-cap K]]",
         )
     };
     let Some((file, rest)) = args.split_first() else {
@@ -2621,6 +2641,7 @@ fn scenario(args: &[String]) -> ExitCode {
         ..RunOptions::default()
     };
     let mut out = None;
+    let (mut count, mut stop_file, mut void_cap) = (None, None, None);
     let mut flags = rest.iter();
     while let Some(flag) = flags.next() {
         if flag == "--no-assemble" {
@@ -2641,6 +2662,15 @@ fn scenario(args: &[String]) -> ExitCode {
             "--key-file" => options.key_file = Some(value.clone()),
             "--regimen" => options.regimen = Some(value.into()),
             "--worktree" => options.worktree = Some(value.into()),
+            "--repeat" => match value.parse::<u64>() {
+                Ok(n) if n > 0 => count = Some(n),
+                _ => return usage(),
+            },
+            "--stop-file" => stop_file = Some(value.into()),
+            "--void-cap" => match value.parse::<u64>() {
+                Ok(k) => void_cap = Some(k),
+                Err(_) => return usage(),
+            },
             _ => return usage(),
         }
     }
@@ -2648,6 +2678,15 @@ fn scenario(args: &[String]) -> ExitCode {
         return usage();
     };
     options.out = out;
+    if count.is_none() && (stop_file.is_some() || void_cap.is_some()) {
+        return fail(EXIT_USAGE, "--stop-file and --void-cap are --repeat's");
+    }
+    if count.is_some() && options.worktree.is_some() {
+        return fail(
+            EXIT_USAGE,
+            "--repeat gives each repeat a fresh worktree: it takes no --worktree",
+        );
+    }
     if options.dry_run && options.endpoint.is_some() {
         return fail(
             EXIT_USAGE,
@@ -2661,7 +2700,19 @@ fn scenario(args: &[String]) -> ExitCode {
         Ok(drive) => drive,
         Err(why) => return fail(EXIT_HALT, &format!("this binary cannot be found: {why}")),
     };
-    let (said, passed) = run(&drive, &options);
+    let (said, passed) = match count {
+        Some(count) => repeat(
+            &drive,
+            &options,
+            &Repeats {
+                count,
+                stop_file,
+                void_cap: void_cap.unwrap_or(VOID_CAP),
+            },
+            &mut |line| println!("{line}"),
+        ),
+        None => run(&drive, &options),
+    };
     println!("{said}");
     if passed {
         ExitCode::SUCCESS

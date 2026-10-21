@@ -513,6 +513,7 @@ pub fn project_in(
                 notes_in_the_ask,
                 compaction_persists,
                 phase_document,
+                run,
                 ..
             },
         ..
@@ -562,6 +563,8 @@ pub fn project_in(
         phase: phase_document.as_ref().map(phase_named),
         // #583: the version this crate writes, spelling it `meditation`.
         version: Some(crate::formats::record::VERSION),
+        // Which repeat of which script, as `session.start` names it (#910).
+        run: run.clone(),
     }];
     events.extend(walk.events);
     Ok(Projection {
@@ -2322,6 +2325,7 @@ mod tests {
             max_api_requests: None,
             api_retries: None,
             api_retry_after_max_seconds: None,
+            run: None,
         }
     }
 

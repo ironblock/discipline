@@ -44,11 +44,15 @@ use crate::formats::log;
 use crate::formats::spelling;
 
 /// The version this module writes, as a record's `start` names it (#583):
-/// the first that names one, spelling the boundary `meditation`.
-pub const VERSION: i64 = 2;
+/// 2 was the first that names one, spelling the boundary `meditation`; 3
+/// (#910) adds the start's `run`.
+pub const VERSION: i64 = 3;
 
-/// Every version this module reads: 1, a start naming none, and 2.
-pub const READS: &[i64] = &[1, 2];
+/// Every version this module reads: 1, a start naming none, then 2 and 3.
+pub const READS: &[i64] = &[1, 2, 3];
+
+/// The version a start's `run` arrived in (#910).
+const RUN_ARRIVED_IN: i64 = 3;
 
 #[derive(Parser)]
 #[grammar = "../formats/record/grammar.pest"]
@@ -1196,6 +1200,9 @@ pub enum Event {
         /// The record's version (#583): [`VERSION`] for one this crate
         /// writes; absent, version 1, which spells the boundary `seam`.
         version: Option<i64>,
+        /// Which repeat of which script the session was (v3, #910), as its
+        /// log's `session.start` names it. Absent, it was no counted repeat.
+        run: Option<log::Run>,
     },
     /// A turn happened.
     Turn {
@@ -2597,21 +2604,7 @@ fn event(mut members: BTreeMap<String, Value>) -> Result<Event, ParseError> {
     let of = kind.tag();
 
     let built = match kind {
-        Kind::Start => Event::Start {
-            regime: Box::new(regime(&mut take_object(&mut members, of, "regime")?, of)?),
-            source: source(&mut members, of)?,
-            regimen_sha256: take_optional_digest(&mut members, of, "regimen_sha256")?,
-            fork_delivery: take_optional_word(
-                &mut members,
-                of,
-                "fork_delivery",
-                log::ForkDelivery::from_tag,
-            )?,
-            tool_output: take_tool_output(&mut members, of)?,
-            levers: levers(&mut members),
-            phase: take_phase(&mut members, of)?,
-            version: take_version(&mut members, of)?,
-        },
+        Kind::Start => start(&mut members, of)?,
         Kind::Turn => Event::Turn {
             index: take_u32(&mut members, of, "index")?,
             prefill_tokens: take_count(&mut members, of, "prefill_tokens")?,
@@ -3918,6 +3911,26 @@ fn take_optional_word<T>(
     }
 }
 
+/// A `start` row.
+fn start(members: &mut BTreeMap<String, Value>, of: &'static str) -> Result<Event, ParseError> {
+    Ok(Event::Start {
+        run: take_run(members, of)?,
+        regime: Box::new(regime(&mut take_object(members, of, "regime")?, of)?),
+        source: source(members, of)?,
+        regimen_sha256: take_optional_digest(members, of, "regimen_sha256")?,
+        fork_delivery: take_optional_word(
+            members,
+            of,
+            "fork_delivery",
+            log::ForkDelivery::from_tag,
+        )?,
+        tool_output: take_tool_output(members, of)?,
+        levers: levers(members),
+        phase: take_phase(members, of)?,
+        version: take_version(members, of)?,
+    })
+}
+
 /// A `tool_call` row: its call, and how it ran when a projected log said.
 fn tool_call(members: &mut BTreeMap<String, Value>, of: &'static str) -> Result<Event, ParseError> {
     let id = take_string(members, of, "id")?;
@@ -4149,6 +4162,62 @@ fn take_payload(
 /// `take_digests` gives one function up: a string that is not a digest is a
 /// shape error, because nothing downstream can compare it.
 /// A row's phase (#787): `phase` and `phase_sha256`, both or neither.
+/// A start's `run` (v3, #910): `script_sha256`, `repeat` from 1 to `of`,
+/// and a pair's `arm` and `pair`, both or neither, as the log's
+/// `session.start` carries it. Refused in a record of version 2 or less,
+/// so it is taken before `version` is.
+fn take_run(
+    members: &mut BTreeMap<String, Value>,
+    of: &'static str,
+) -> Result<Option<log::Run>, ParseError> {
+    let version = match members.get("version") {
+        Some(Value::Integer(version)) => *version,
+        _ => 1,
+    };
+    let Some(mut inner) = take_optional_object(members, of, "run")? else {
+        return Ok(None);
+    };
+    let wrong = |why: String| -> ParseError { SchemaError::Inconsistent { of, why }.into() };
+    if version < RUN_ARRIVED_IN {
+        return Err(wrong(format!(
+            "`run` arrived in version {RUN_ARRIVED_IN}: a version {version} record carries none"
+        )));
+    }
+    let script_sha256 = take_optional_digest(&mut inner, of, "script_sha256")?.ok_or(
+        SchemaError::MissingField {
+            of,
+            field: "run.script_sha256",
+        },
+    )?;
+    let repeat = take_u64(&mut inner, of, "repeat")?.get();
+    let count = take_u64(&mut inner, of, "of")?.get();
+    if repeat == 0 || repeat > count {
+        return Err(wrong(format!(
+            "`run` is repeat {repeat} of {count}, and a repeat counts from 1 to its `of`"
+        )));
+    }
+    let arm = take_optional_word(&mut inner, of, "arm", log::RunArm::from_tag)?;
+    let pair = take_optional_digest(&mut inner, of, "pair")?;
+    let paired = match (arm, pair) {
+        (Some(arm), Some(pair)) => Some((arm, pair)),
+        (None, None) => None,
+        _ => {
+            return Err(wrong(
+                "`run`'s `arm` and `pair` name one pair's side: both or neither".to_owned(),
+            ));
+        }
+    };
+    if let Some(field) = inner.keys().next() {
+        return Err(wrong(format!("`run` carries no `{field}`")));
+    }
+    Ok(Some(log::Run {
+        script_sha256,
+        repeat,
+        of: count,
+        paired,
+    }))
+}
+
 fn take_phase(
     members: &mut BTreeMap<String, Value>,
     of: &'static str,
@@ -5280,8 +5349,30 @@ fn event_value(event: &Event) -> BTreeMap<String, Value> {
             levers,
             phase,
             version,
+            run,
         } => {
             put_phase(&mut members, phase.as_ref());
+            if let Some(run) = run {
+                let mut inner = BTreeMap::from([
+                    (
+                        "script_sha256".to_owned(),
+                        Value::String(run.script_sha256.clone()),
+                    ),
+                    (
+                        "repeat".to_owned(),
+                        Value::Integer(i64::try_from(run.repeat).unwrap_or(i64::MAX)),
+                    ),
+                    (
+                        "of".to_owned(),
+                        Value::Integer(i64::try_from(run.of).unwrap_or(i64::MAX)),
+                    ),
+                ]);
+                if let Some((arm, pair)) = &run.paired {
+                    inner.insert("arm".to_owned(), Value::String(arm.tag().to_owned()));
+                    inner.insert("pair".to_owned(), Value::String(pair.clone()));
+                }
+                members.put("run", Value::Object(inner));
+            }
             members.put("regime", regime_value(regime));
             members.put_optional("version", version.map(Value::Integer));
             if let Some(cap) = tool_output {

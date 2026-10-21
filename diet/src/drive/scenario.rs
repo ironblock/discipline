@@ -1615,6 +1615,10 @@ pub struct RunOptions {
     /// scenario's `live_regimen` -- its substrate alone swapped, and the
     /// plan it would spend reported. Nothing leaves loopback.
     pub dry_run: bool,
+    /// Which repeat of which script this run is (#910), passed to serve as
+    /// `--run`. A counted repeat keeps its outputs, assembled, whether or
+    /// not its expectations were met.
+    pub run: Option<crate::formats::log::Run>,
 }
 
 /// Run a scenario (#760): `serve` started as a child of `drive` -- this
@@ -1634,6 +1638,232 @@ pub fn run(drive: &std::path::Path, options: &RunOptions) -> (serde_json::Value,
     };
     said["ok"] = serde_json::Value::Bool(passed);
     (said, passed)
+}
+
+/// How `diet-drive scenario --repeat` repeats (#910).
+#[derive(Debug, Clone)]
+pub struct Repeats {
+    /// How many repeats: each ends before the next starts.
+    pub count: u64,
+    /// The file whose existence stops the batch between repeats; absent,
+    /// `STOP` in the batch's `--out`.
+    pub stop_file: Option<std::path::PathBuf>,
+    /// How many times one slot's void repeat is re-run before the batch
+    /// stops and names it.
+    pub void_cap: u64,
+}
+
+/// `--void-cap`'s default (#910).
+pub const VOID_CAP: u64 = 2;
+
+/// A repeat's directory under the batch's `--out`: `repeat-NN`, from 1.
+#[must_use]
+pub fn repeat_dir(out: &std::path::Path, repeat: u64) -> std::path::PathBuf {
+    out.join(format!("repeat-{repeat:02}"))
+}
+
+/// Run a scenario `repeats.count` times (#910), one after another, each its
+/// own session: a fresh worktree, its own `repeat-NN/` under `--out`, and
+/// serve told which repeat it is (`--run`), so its log's `session.start`
+/// and its record's start say so. `emit` is given one line per repeat as
+/// it ends. A void repeat -- serve could not run it to its end for a reason
+/// outside the model -- is re-run at its slot, its outputs kept beside as
+/// `repeat-NN.void-M/`, up to `void_cap` times; then the batch stops and
+/// names it. Between repeats the stop file stops it. Unmet expectations
+/// are data: they never fail the batch. The batch's line, and whether it
+/// ran to its end.
+pub fn repeat(
+    drive: &std::path::Path,
+    options: &RunOptions,
+    repeats: &Repeats,
+    emit: &mut dyn FnMut(&serde_json::Value),
+) -> (serde_json::Value, bool) {
+    let mut said =
+        serde_json::json!({"batch": options.file.display().to_string(), "of": repeats.count});
+    // A scenario that does not read is refused before any repeat runs.
+    let script_sha256 = match std::fs::read_to_string(&options.file)
+        .map_err(|why| format!("{} cannot be read: {why}", options.file.display()))
+        .and_then(|text| {
+            parse(&text)
+                .map(|_| crate::digest::sha256_hex(text.as_bytes()))
+                .map_err(|why| why.to_string())
+        }) {
+        Ok(digest) => digest,
+        Err(why) => {
+            said["failure"] = serde_json::Value::String(why);
+            said["ok"] = serde_json::Value::Bool(false);
+            return (said, false);
+        }
+    };
+    said["script_sha256"] = serde_json::Value::String(script_sha256.clone());
+    if let Err(why) = std::fs::create_dir_all(&options.out) {
+        said["failure"] =
+            serde_json::Value::String(format!("{} cannot be made: {why}", options.out.display()));
+        said["ok"] = serde_json::Value::Bool(false);
+        return (said, false);
+    }
+    let stop_file = repeats
+        .stop_file
+        .clone()
+        .unwrap_or_else(|| options.out.join("STOP"));
+    let mut ran = 0;
+    let mut ok = true;
+    for repeat in 1..=repeats.count {
+        let run = crate::formats::log::Run {
+            script_sha256: script_sha256.clone(),
+            repeat,
+            of: repeats.count,
+            paired: None,
+        };
+        match slot(drive, options, &run, (&stop_file, repeats.void_cap), emit) {
+            Slot::Ran => ran += 1,
+            Slot::Stopped => {
+                said["stopped_at"] = serde_json::json!(repeat);
+                said["stopped_by"] = serde_json::Value::String(stop_file.display().to_string());
+                break;
+            }
+            Slot::Voided(voids) => {
+                said["void_cap_reached"] = serde_json::json!({"repeat": repeat, "voids": voids});
+                ok = false;
+                break;
+            }
+        }
+    }
+    said["ran"] = serde_json::json!(ran);
+    said["ok"] = serde_json::Value::Bool(ok);
+    (said, ok)
+}
+
+/// How one repeat's slot ended.
+enum Slot {
+    /// A repeat ran to its end, met or not.
+    Ran,
+    /// The stop file was there before it started.
+    Stopped,
+    /// It voided this many times: one more than the cap.
+    Voided(u64),
+}
+
+/// One repeat's slot (#910): the run, re-run while it voids, up to `cap`
+/// re-runs, the stop file read before each attempt.
+fn slot(
+    drive: &std::path::Path,
+    options: &RunOptions,
+    run: &crate::formats::log::Run,
+    (stop_file, cap): (&std::path::Path, u64),
+    emit: &mut dyn FnMut(&serde_json::Value),
+) -> Slot {
+    let dir = repeat_dir(&options.out, run.repeat);
+    let mut voids = 0;
+    loop {
+        if stop_file.exists() {
+            return Slot::Stopped;
+        }
+        let attempt = RunOptions {
+            out: dir.clone(),
+            worktree: None,
+            run: Some(run.clone()),
+            ..options.clone()
+        };
+        let (said, _) = self::run(drive, &attempt);
+        let mut line = tallied(&said);
+        line["repeat"] = serde_json::json!(run.repeat);
+        line["of"] = serde_json::json!(run.of);
+        line["attempt"] = serde_json::json!(voids + 1);
+        if line["void"].is_null() {
+            emit(&line);
+            return Slot::Ran;
+        }
+        voids += 1;
+        // The void attempt's outputs are kept beside its slot, which the
+        // re-run then has to itself.
+        if dir.exists() {
+            let kept = dir.with_file_name(format!(
+                "{}.void-{voids}",
+                dir.file_name()
+                    .map_or_else(String::new, |name| name.to_string_lossy().into_owned())
+            ));
+            line["kept"] = match std::fs::rename(&dir, &kept) {
+                Ok(()) => serde_json::Value::String(kept.display().to_string()),
+                Err(why) => serde_json::Value::String(format!("not kept: {why}")),
+            };
+        }
+        emit(&line);
+        if voids > cap {
+            return Slot::Voided(voids);
+        }
+    }
+}
+
+/// One repeat's line (#910), from what [`run`] said and the log it names:
+/// whether it voided and why, its turns, tokens, captures, refusals,
+/// settles by reason, unmet expectations and record.
+fn tallied(said: &serde_json::Value) -> serde_json::Value {
+    use crate::formats::log::{Event, FailReason};
+    let mut line = serde_json::json!({
+        "void": said["void"],
+        "ok": said["ok"],
+        "unmet": said.get("unmet").cloned().unwrap_or_else(|| serde_json::json!([])),
+        "record": said["record"],
+    });
+    if let Some(failure) = said.get("failure") {
+        line["failure"] = failure.clone();
+    }
+    let read = said["log"]
+        .as_str()
+        .and_then(|log| std::fs::read_to_string(log).ok())
+        .map(|text| crate::formats::log::parse(&text));
+    let lines = match read {
+        Some(Ok(lines)) => lines,
+        Some(Err(why)) => {
+            line["log"] = serde_json::Value::String(format!("unreadable: {why}"));
+            return line;
+        }
+        None => {
+            line["log"] = serde_json::Value::String("none".to_owned());
+            return line;
+        }
+    };
+    let (mut turns, mut tokens, mut captures, mut refusals) = (0u64, 0u64, 0u64, 0u64);
+    let mut settles: BTreeMap<String, u64> = BTreeMap::new();
+    for logged in &lines {
+        match &logged.event {
+            Event::TurnSettled { reason, .. } => {
+                turns += 1;
+                *settles.entry(reason.tag().to_owned()).or_default() += 1;
+            }
+            Event::Response {
+                usage: Some(usage), ..
+            } => tokens += usage.prompt_tokens + usage.completion_tokens,
+            Event::Patch { .. } => captures += 1,
+            Event::Refused { .. } => refusals += 1,
+            // A transport failure at any point is no answer from the model
+            // (#910): the connection failed, the call's thread crashed, or
+            // it timed out with nothing arriving.
+            Event::RequestFailed {
+                reason, partial, ..
+            } if line["void"].is_null() => {
+                let cause = match reason {
+                    FailReason::Transport => Some("transport"),
+                    FailReason::Crashed => Some("crashed"),
+                    FailReason::Timeout if partial.as_deref().is_none_or(str::is_empty) => {
+                        Some("timeout")
+                    }
+                    _ => None,
+                };
+                if let Some(cause) = cause {
+                    line["void"] = serde_json::Value::String(cause.to_owned());
+                }
+            }
+            _ => {}
+        }
+    }
+    line["turns"] = serde_json::json!(turns);
+    line["tokens"] = serde_json::json!(tokens);
+    line["captures"] = serde_json::json!(captures);
+    line["refusals"] = serde_json::json!(refusals);
+    line["settles"] = serde_json::json!(settles);
+    line
 }
 
 /// A file beside the scenario, or as written when absolute.
@@ -1712,6 +1942,13 @@ fn kept_files(work: &std::path::Path, out: &std::path::Path) -> Result<(), Failu
             .map_err(|why| Failure(format!("{} cannot be kept: {why}", entry.path().display())))?;
     }
     Ok(())
+}
+
+/// `failure`, marked void (#910): serve could not run the session to its
+/// end for a reason outside the model, `cause` naming which.
+fn voided(said: &mut serde_json::Value, cause: &str, failure: Failure) -> Failure {
+    said["void"] = serde_json::Value::String(cause.to_owned());
+    failure
 }
 
 #[allow(clippy::too_many_lines)]
@@ -1812,17 +2049,22 @@ fn running(
         (None, None) => unreachable!("a run is live or canned"),
     };
     let work = if options.assemble {
-        fresh("work")?
+        fresh("work").map_err(|failure| voided(said, "setup", failure))?
     } else {
-        std::fs::create_dir_all(&options.out)
-            .map_err(|why| Failure(format!("{} cannot be made: {why}", options.out.display())))?;
+        std::fs::create_dir_all(&options.out).map_err(|why| {
+            voided(
+                said,
+                "setup",
+                Failure(format!("{} cannot be made: {why}", options.out.display())),
+            )
+        })?;
         options.out.clone()
     };
     let (log, record) = (work.join("session.log"), work.join("session.record.jsonl"));
     said["log"] = serde_json::Value::String(log.display().to_string());
     said["record"] = serde_json::Value::String(record.display().to_string());
     // Every route asks for this credential; it never reaches the outputs.
-    let secrets = fresh("auth")?;
+    let secrets = fresh("auth").map_err(|failure| voided(said, "setup", failure))?;
     let user_password = format!(
         "scenario:{}",
         crate::digest::sha256_hex(
@@ -1830,8 +2072,13 @@ fn running(
         )
     );
     let auth_file = secrets.join("drive.auth");
-    std::fs::write(&auth_file, &user_password)
-        .map_err(|why| Failure(format!("the auth file cannot be written: {why}")))?;
+    std::fs::write(&auth_file, &user_password).map_err(|why| {
+        voided(
+            said,
+            "setup",
+            Failure(format!("the auth file cannot be written: {why}")),
+        )
+    })?;
     let mut serve = std::process::Command::new(drive);
     serve
         .arg("serve")
@@ -1853,6 +2100,9 @@ fn running(
         .arg(&record)
         .stdin(std::process::Stdio::null())
         .stdout(std::process::Stdio::piped());
+    if let Some(run) = &options.run {
+        serve.arg("--run").arg(crate::formats::log::run_text(run));
+    }
     if let Some(key_file) = &options.key_file {
         serve.arg("--key-file").arg(key_file);
     } else if hosted && !live {
@@ -1869,9 +2119,10 @@ fn running(
     if runs_commands {
         let dir = match &options.worktree {
             Some(worktree) => worktree.clone(),
-            None => fresh("worktree")?,
+            None => fresh("worktree").map_err(|failure| voided(said, "worktree", failure))?,
         };
-        seeded(&dir, &options.file, &scenario.seed)?;
+        seeded(&dir, &options.file, &scenario.seed)
+            .map_err(|failure| voided(said, "worktree", failure))?;
         serve.arg("--worktree").arg(&dir);
         worktree = Some(dir);
     } else if !scenario.seed.is_empty() {
@@ -1904,7 +2155,7 @@ fn running(
     }
     let mut child = serve
         .spawn()
-        .map_err(|why| Failure(format!("serve cannot start: {why}")))?;
+        .map_err(|why| voided(said, "serve", Failure(format!("serve cannot start: {why}"))))?;
     let stdout = child.stdout.take().expect("piped");
     let mut lines = std::io::BufReader::new(stdout).lines();
     let first = lines.next().and_then(Result::ok).unwrap_or_default();
@@ -1915,7 +2166,11 @@ fn running(
         let _ = child.kill();
         let _ = child.wait();
         let _ = std::fs::remove_dir_all(&secrets);
-        return Err(Failure(format!("serve did not start: {first}")));
+        return Err(voided(
+            said,
+            "serve",
+            Failure(format!("serve did not start: {first}")),
+        ));
     };
     let mut driver = Driver::new(listening, Some(&user_password));
     if let Some(worktree) = worktree {
@@ -1947,8 +2202,13 @@ fn running(
         .map(crate::client::stub::Stub::unmatched)
         .unwrap_or_default();
     said["unmatched"] = serde_json::json!(unmatched);
+    // Serve crashed, or never exited (#910): void, whatever the drive said.
+    let clean = exited.is_some_and(|status| status.success());
+    if !clean {
+        said["void"] = serde_json::Value::String("serve".to_owned());
+    }
     let bound = outcome?;
-    if exited.is_none_or(|status| !status.success()) {
+    if !clean {
         return Err(Failure(format!("serve did not exit cleanly: {exited:?}")));
     }
     let written = std::fs::read_to_string(&log)
@@ -1958,7 +2218,9 @@ fn running(
     }
     let missed = unmet(&scenario, &written, &bound);
     said["unmet"] = serde_json::json!(missed);
-    if !missed.is_empty() || !unmatched.is_empty() {
+    let met = missed.is_empty() && unmatched.is_empty();
+    // A counted repeat is data either way (#910): it is assembled.
+    if !met && options.run.is_none() {
         return Ok(false);
     }
     if options.assemble {
@@ -1985,11 +2247,21 @@ fn running(
             .arg("--driven-by")
             .arg(&driven_by)
             .output()
-            .map_err(|why| Failure(format!("the assembler cannot run: {why}")))?;
+            .map_err(|why| {
+                voided(
+                    said,
+                    "assembler",
+                    Failure(format!("the assembler cannot run: {why}")),
+                )
+            })?;
         let reply = String::from_utf8_lossy(&assembled.stdout);
         said["assembled"] = serde_json::from_str(reply.lines().last().unwrap_or(""))
             .unwrap_or_else(|_| serde_json::Value::String(reply.into_owned()));
         if !assembled.status.success() {
+            // A refusal is the assembler's answer; anything else, a crash.
+            if said["assembled"].get("refused").is_none() {
+                said["void"] = serde_json::Value::String("assembler".to_owned());
+            }
             return Ok(false);
         }
         // The copies of the files its asks attached are the run's too, kept
@@ -2003,7 +2275,7 @@ fn running(
             serde_json::Value::String(options.out.join("record.jsonl").display().to_string());
         let _ = std::fs::remove_dir_all(&work);
     }
-    Ok(true)
+    Ok(met)
 }
 
 #[cfg(test)]
@@ -2434,5 +2706,73 @@ mod tests {
         assert_eq!(read.patience(1), std::time::Duration::from_secs(120));
         assert_eq!(read.patience(2), STEP_PATIENCE);
         assert_eq!(read.patience(3), STEP_PATIENCE);
+    }
+
+    /// #910: a repeat's line reads a transport failure at any point off its
+    /// log as void -- the connection failed, the call's thread crashed, or
+    /// it timed out with nothing arriving -- and an HTTP error the server
+    /// returned, or a timeout after something arrived, as data.
+    #[test]
+    fn a_repeats_line_calls_a_transport_failure_void_and_an_answer_data() {
+        const FAILED: &str =
+            include_str!("../../formats/log/fixtures/valid/a-turn-whose-connection-failed.jsonl");
+        let silent_timeout = FAILED.replace(
+            r#""message":"could not connect: refused","reason":"transport""#,
+            r#""message":"the server did not finish in 5s","reason":"timeout""#,
+        );
+        assert_ne!(
+            silent_timeout, FAILED,
+            "the timeout is made from the fixture"
+        );
+        let dir = fresh("tallied").expect("a scratch directory");
+        for (named, text, void) in [
+            (
+                "connection",
+                FAILED.to_owned(),
+                serde_json::json!("transport"),
+            ),
+            (
+                "crashed",
+                include_str!("../../formats/log/fixtures/valid/a-turn-whose-thread-crashed.jsonl")
+                    .to_owned(),
+                serde_json::json!("crashed"),
+            ),
+            (
+                "silent-timeout",
+                silent_timeout,
+                serde_json::json!("timeout"),
+            ),
+            (
+                "timeout-after-text",
+                include_str!("../../formats/log/fixtures/valid/a-turn-that-ran-out-of-time.jsonl")
+                    .to_owned(),
+                serde_json::Value::Null,
+            ),
+            (
+                "server",
+                include_str!("../../formats/log/fixtures/valid/a-turn-the-server-refused.jsonl")
+                    .to_owned(),
+                serde_json::Value::Null,
+            ),
+        ] {
+            let log = dir.join(format!("{named}.log"));
+            std::fs::write(&log, text).expect("the log");
+            let line = tallied(&serde_json::json!({"log": log.display().to_string(), "ok": false}));
+            assert_eq!(line["void"], void, "{named}: {line}");
+            assert_eq!(line["turns"], 1, "{named}: {line}");
+        }
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// #910: a void [`run`] marked at its cause stays void on the repeat's
+    /// line whatever its log says.
+    #[test]
+    fn a_repeats_line_keeps_the_void_its_run_marked() {
+        let line = tallied(
+            &serde_json::json!({"void": "serve", "ok": false, "failure": "serve did not start"}),
+        );
+        assert_eq!(line["void"], "serve", "{line}");
+        assert_eq!(line["failure"], "serve did not start", "{line}");
+        assert_eq!(line["log"], "none", "{line}");
     }
 }

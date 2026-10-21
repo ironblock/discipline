@@ -206,6 +206,15 @@
 //! them is refused. For a reader of v15 logs, the migration is nothing:
 //! every v15 meditation carried its render.
 //!
+//! v17 (#910) adds `run` on `session.start`: which repeat of which script
+//! the session is, as `diet-drive scenario --repeat` or `pair` told serve.
+//! It holds `script_sha256`, the scenario file's digest; `repeat`, from 1;
+//! and `of`, the repeats asked for. A paired run (#912) adds `arm`, `a` or
+//! `b`, and `pair`, the digest of the two regimens' digests, both or
+//! neither. A log that declares 16 or less and carries it is refused. For a
+//! reader of v16 logs, the migration is nothing: a v16 session was no
+//! repeat anyone counted.
+//!
 //! # A torn final line
 //!
 //! A writer killed mid-write leaves the start of an event with no line break
@@ -237,10 +246,10 @@ use super::record::vocabulary;
 struct LogParser;
 
 /// The version this module writes, as `session.start` states it.
-pub const VERSION: i64 = 16;
+pub const VERSION: i64 = 17;
 
 /// Every version this module reads.
-pub const READS: &[i64] = &[0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16];
+pub const READS: &[i64] = &[0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17];
 
 /// How recent an input event must be, at the moment a turn settles, for the
 /// person to count as already present: `notice` is then zero (Q4 (a), ruled
@@ -453,6 +462,16 @@ vocabulary! {
         Salient => "salient",
         /// Each output as the trunk had it, after the cap.
         Keep => "keep",
+    }
+}
+
+vocabulary! {
+    /// Which of a pair's two regimens a repeat ran under (v17, #912).
+    RunArm {
+        /// The pair's first regimen, `--a`.
+        A => "a",
+        /// Its second, `--b`.
+        B => "b",
     }
 }
 
@@ -1316,6 +1335,9 @@ pub enum Event {
         /// On a hosted API's session (v13, #555): the longest `retry-after`
         /// waited, in seconds, and the backoff's ceiling.
         api_retry_after_max_seconds: Option<u64>,
+        /// Which repeat of which script the session is (v17, #910), when a
+        /// repeating runner started it.
+        run: Option<Run>,
     },
     /// An ask was admitted.
     Ask {
@@ -2243,6 +2265,21 @@ pub struct Usage {
     pub cache_creation_1h_tokens: Option<u64>,
 }
 
+/// Which repeat of which script a session is (v17, #910): what
+/// `diet-drive scenario --repeat` and `pair` tell serve with `--run`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Run {
+    /// The sha256 of the scenario file's bytes.
+    pub script_sha256: String,
+    /// Which repeat, from 1.
+    pub repeat: u64,
+    /// How many repeats were asked for.
+    pub of: u64,
+    /// A paired run's arm and pair (#912): `a` or `b`, and the digest of
+    /// the two regimens' digests. Both or neither.
+    pub paired: Option<(RunArm, String)>,
+}
+
 /// What serves a session, as the client declares it (v2, #30 D7/N10).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Serving {
@@ -2365,6 +2402,46 @@ pub fn line(text: &str) -> Result<Line, String> {
         None => super::spelling::to_current_either(&mut object),
     }
     from_object(&object)
+}
+
+/// A `session.start`'s `run` (v17, #910) from its JSON text, as serve's
+/// `--run` takes it: read by the reader that reads it on the line.
+///
+/// # Errors
+///
+/// When the text is not one JSON object of [`RUN`]'s keys, each as the
+/// line's reader takes it.
+pub fn run_of(text: &str) -> Result<Run, String> {
+    let object = BTreeMap::from([(
+        "run".to_owned(),
+        Value::Object(json::line(text).map_err(|err| err.to_string())?),
+    )]);
+    Fields(&object).run("run")
+}
+
+/// The JSON text of `run`, as [`run_of`] reads it back.
+#[must_use]
+pub fn run_text(run: &Run) -> String {
+    let mut out = String::new();
+    json::render(&run_value(run), &mut out);
+    out
+}
+
+/// `run` as `session.start` writes it (v17).
+fn run_value(run: &Run) -> Value {
+    let mut object = BTreeMap::from([
+        (
+            "script_sha256".to_owned(),
+            Value::String(run.script_sha256.clone()),
+        ),
+        ("repeat".to_owned(), count(run.repeat)),
+        ("of".to_owned(), count(run.of)),
+    ]);
+    if let Some((arm, pair)) = &run.paired {
+        object.insert("arm".to_owned(), Value::String(arm.tag().to_owned()));
+        object.insert("pair".to_owned(), Value::String(pair.clone()));
+    }
+    Value::Object(object)
 }
 
 /// [`line`], in a log declaring `declared`: its words respelled from the
@@ -3737,6 +3814,11 @@ fn from_object(object: &BTreeMap<String, Value>) -> Result<Line, String> {
                 api_retries: fields.optional_count("api_retries")?,
                 api_retry_after_max_seconds: fields
                     .optional_count("api_retry_after_max_seconds")?,
+                run: if object.contains_key("run") {
+                    Some(fields.run("run")?)
+                } else {
+                    None
+                },
                 phases: fields.optional_strings("phases")?,
                 phase_transitions: match object.get("phase_transitions") {
                     None => None,
@@ -4924,6 +5006,8 @@ pub enum Tags {
     MeditationToolOutputs,
     /// [`MeditationCarry`] (v16).
     MeditationCarry,
+    /// [`RunArm`] (v17).
+    RunArm,
     /// [`RenderPlacement`] (v7).
     RenderPlacement,
     /// [`BackgroundStatus`] (v7).
@@ -4959,6 +5043,7 @@ impl Tags {
         Self::ToolOutputState,
         Self::MeditationToolOutputs,
         Self::MeditationCarry,
+        Self::RunArm,
         Self::RenderPlacement,
         Self::BackgroundStatus,
     ];
@@ -4993,6 +5078,7 @@ impl Tags {
             Self::ToolOutputState => "ToolOutputState",
             Self::MeditationToolOutputs => "MeditationToolOutputs",
             Self::MeditationCarry => "MeditationCarry",
+            Self::RunArm => "RunArm",
             Self::RenderPlacement => "RenderPlacement",
             Self::BackgroundStatus => "BackgroundStatus",
         }
@@ -5033,6 +5119,7 @@ impl Tags {
                 of(MeditationToolOutputs::ALL, MeditationToolOutputs::tag)
             }
             Self::MeditationCarry => of(MeditationCarry::ALL, MeditationCarry::tag),
+            Self::RunArm => of(RunArm::ALL, RunArm::tag),
             Self::RenderPlacement => of(RenderPlacement::ALL, RenderPlacement::tag),
             Self::BackgroundStatus => of(BackgroundStatus::ALL, BackgroundStatus::tag),
         }
@@ -5098,6 +5185,9 @@ pub enum Holds {
     /// A `session.start`'s [`Serving`]: an object of the keys [`SERVING`]
     /// declares (v2).
     Serving,
+    /// A `session.start`'s [`Run`]: an object of the keys [`RUN`] declares
+    /// (v17, #910).
+    Run,
     /// A list of text (v3).
     Strings,
     /// An object of names to words (v7, #573): a `session.start`'s
@@ -5379,6 +5469,26 @@ const fn must_v8(key: &'static str, holds: Holds) -> Field {
     }
 }
 
+/// A key that arrived in v17, optional wherever its object is written.
+const fn may_v17(key: &'static str, holds: Holds) -> Field {
+    Field {
+        key,
+        holds,
+        required: false,
+        since: 17,
+    }
+}
+
+/// A key that arrived in v17 and is required wherever its object is written.
+const fn must_v17(key: &'static str, holds: Holds) -> Field {
+    Field {
+        key,
+        holds,
+        required: true,
+        since: 17,
+    }
+}
+
 /// A key that arrived in v16, optional wherever its object is written.
 const fn may_v16(key: &'static str, holds: Holds) -> Field {
     Field {
@@ -5508,6 +5618,16 @@ pub const SERVING: &[Field] = &[
     may_v2("concurrency", Holds::Count),
 ];
 
+/// The keys a `session.start`'s `run` carries (v17, #910): its script's
+/// digest, its repeat and their count, and a pair's `arm` and `pair`.
+pub const RUN: &[Field] = &[
+    must_v17("script_sha256", Holds::Digest),
+    must_v17("repeat", Holds::Count),
+    must_v17("of", Holds::Count),
+    may_v17("arm", Holds::Tag(Tags::RunArm)),
+    may_v17("pair", Holds::Digest),
+];
+
 /// Whether `text` is a sha256 as this format writes one.
 /// A start's build (#757): `build_commit`, 40 lowercase hex digits, and
 /// `build_dirty`, both or neither.
@@ -5550,6 +5670,7 @@ pub fn object_fields(holds: Holds) -> Option<&'static [Field]> {
         Holds::Timings => Some(TIMINGS),
         Holds::Usage => Some(USAGE),
         Holds::Serving => Some(SERVING),
+        Holds::Run => Some(RUN),
         Holds::TemplateKwargs => Some(TEMPLATE_KWARGS),
         Holds::Unsent => Some(UNSENT),
         Holds::PhaseMove | Holds::PhaseMoves => Some(PHASE_MOVE),
@@ -5815,6 +5936,7 @@ pub fn schema(kind: Kind) -> &'static [Field] {
                 may_v12("max_api_requests", Count),
                 may_v13("api_retries", Count),
                 may_v13("api_retry_after_max_seconds", Count),
+                may_v17("run", Holds::Run),
             ];
             F
         }
@@ -6352,6 +6474,7 @@ fn ts_holds(holds: Holds) -> String {
         Holds::Flag => "boolean".to_owned(),
         Holds::Usage => "Usage".to_owned(),
         Holds::Serving => "Serving".to_owned(),
+        Holds::Run => "Run".to_owned(),
         Holds::TemplateKwargs => "TemplateKwargs".to_owned(),
         Holds::Unsent => "Unsent".to_owned(),
         Holds::PhaseMove => "PhaseMove".to_owned(),
@@ -6460,6 +6583,7 @@ pub fn typescript() -> String {
         ("Timings", TIMINGS),
         ("Usage", USAGE),
         ("Serving", SERVING),
+        ("Run", RUN),
         ("TemplateKwargs", TEMPLATE_KWARGS),
         ("Unsent", UNSENT),
         ("PhaseMove", PHASE_MOVE),
@@ -6590,6 +6714,7 @@ fn to_value(line: &Line) -> Value {
             max_api_requests,
             api_retries,
             api_retry_after_max_seconds,
+            run,
             phases,
             phase_transitions,
             opening_phase,
@@ -6686,6 +6811,9 @@ fn to_value(line: &Line) -> Value {
             }
             if let Some(seconds) = api_retry_after_max_seconds {
                 put("api_retry_after_max_seconds", count(*seconds));
+            }
+            if let Some(run) = run {
+                put("run", run_value(run));
             }
             if let Some(keys) = api_unchecked {
                 put(
@@ -8608,6 +8736,42 @@ impl Fields<'_> {
         })
     }
 
+    /// A `session.start`'s `run` (v17, #910): its script, repeat and count,
+    /// and a pair's arm and digest, both or neither.
+    fn run(&self, key: &str) -> Result<Run, String> {
+        let inner = Fields(self.object(key, RUN)?);
+        let within = |why: String| format!("`{key}`: {why}");
+        let repeat = inner.count("repeat").map_err(within)?;
+        let of = inner.count("of").map_err(within)?;
+        if repeat == 0 || repeat > of {
+            return Err(format!(
+                "`{key}`: repeat {repeat} of {of}, and a repeat counts from 1 to its `of`"
+            ));
+        }
+        let arm = inner
+            .optional_tag("arm", RunArm::from_tag)
+            .map_err(within)?;
+        let pair = match inner.0.get("pair") {
+            None => None,
+            Some(_) => Some(inner.digest("pair").map_err(within)?),
+        };
+        let paired = match (arm, pair) {
+            (Some(arm), Some(pair)) => Some((arm, pair)),
+            (None, None) => None,
+            _ => {
+                return Err(format!(
+                    "`{key}`: `arm` and `pair` name one pair's side: both or neither"
+                ));
+            }
+        };
+        Ok(Run {
+            script_sha256: inner.digest("script_sha256").map_err(within)?,
+            repeat,
+            of,
+            paired,
+        })
+    }
+
     /// A `session.start`'s `serving`: its dialect, and its concurrency when
     /// declared.
     fn serving(&self, key: &str) -> Result<Serving, String> {
@@ -8853,13 +9017,13 @@ mod tests {
         assert!(refused.why.contains("v8"), "{refused}");
     }
 
-    /// #583, #878, #904, #555, #931, #936: this module writes v16.
+    /// #583, #878, #904, #555, #931, #936, #910: this module writes v17.
     #[test]
-    fn this_module_writes_v16_and_reads_every_version_before_it() {
-        assert_eq!(super::VERSION, 16);
+    fn this_module_writes_v17_and_reads_every_version_before_it() {
+        assert_eq!(super::VERSION, 17);
         assert_eq!(
             super::READS,
-            &[0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16]
+            &[0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17]
         );
     }
 
@@ -8879,6 +9043,12 @@ mod tests {
                 max_api_requests: Some(40),
                 api_retries: Some(2),
                 api_retry_after_max_seconds: Some(60),
+                run: Some(Run {
+                    script_sha256: "a".repeat(64),
+                    repeat: 2,
+                    of: 4,
+                    paired: Some((RunArm::B, "b".repeat(64))),
+                }),
                 version: VERSION,
                 opened: 1_790_000_000_000,
                 model: "a-model".to_owned(),
@@ -9553,6 +9723,7 @@ mod tests {
                 Holds::Timings
                 | Holds::Usage
                 | Holds::Serving
+                | Holds::Run
                 | Holds::TemplateKwargs
                 | Holds::Unsent
                 | Holds::PhaseMove
@@ -9812,6 +9983,7 @@ mod tests {
             ("timings", TIMINGS),
             ("usage", USAGE),
             ("serving", SERVING),
+            ("run", RUN),
             ("template_kwargs", TEMPLATE_KWARGS),
             ("unsent", UNSENT),
             ("phase", PHASE_MOVE),
@@ -10289,12 +10461,14 @@ mod tests {
             max_api_requests,
             api_retries,
             api_retry_after_max_seconds,
+            run,
             ..
         } = &mut lines[0].event
         else {
             panic!("the first line opens the session");
         };
         *version = 0;
+        *run = None;
         // A v7 key on the first line would be the one named; the check is of
         // what arrived in v1, further down.
         *tool_output = None;
