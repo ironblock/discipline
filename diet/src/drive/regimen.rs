@@ -716,6 +716,8 @@ pub fn serve_levers(regimen: &Regimen, output_cap: (u32, &str)) -> BTreeMap<Stri
     let warrant = warrant_lever(regimen);
     let depth = match regimen.get(MEDITATION_TAIL_TOKENS) {
         None | Some(regimen::Value::Integer(0)) => "total".to_owned(),
+        // #932: never meditate.
+        Some(regimen::Value::String(word)) if word == "none" => "none".to_owned(),
         Some(regimen::Value::Integer(n)) => format!("tail:{n}"),
         Some(_) => undeclared(),
     };
@@ -1088,7 +1090,7 @@ fn meditation_triggers(regimen: &Regimen) -> String {
     // The automatic meditation (#617): on unless the regimen turns it off; it
     // fires only where serve knows the window and keeps working memory.
     if crate::meditation::policy::Served::from_regimen(regimen, None)
-        .map_or(true, |served| !served.window_off)
+        .map_or(true, |served| !served.meditating.window_off())
     {
         triggers.push("window");
     }

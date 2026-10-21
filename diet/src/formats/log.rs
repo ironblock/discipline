@@ -237,6 +237,13 @@
 //! less and carries it is refused. For a reader of v19 logs, the migration
 //! is nothing: no v19 head carried one.
 //!
+//! v21 (#932) adds `meditation.skipped`: a meditation a session under
+//! compaction depth `none` (never meditate) was asked for and did not make,
+//! its `at_turn`, its `reason`, and the phase `to` it named, which the
+//! session moved to with no refill. A log that declares 20 or less and
+//! carries one is refused. For a reader of v20 logs, the migration is
+//! nothing: no v20 session declined a meditation.
+//!
 //! # A torn final line
 //!
 //! A writer killed mid-write leaves the start of an event with no line break
@@ -268,11 +275,11 @@ use super::record::vocabulary;
 struct LogParser;
 
 /// The version this module writes, as `session.start` states it.
-pub const VERSION: i64 = 20;
+pub const VERSION: i64 = 21;
 
 /// Every version this module reads.
 pub const READS: &[i64] = &[
-    0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20,
+    0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21,
 ];
 
 /// How recent an input event must be, at the moment a turn settles, for the
@@ -386,6 +393,9 @@ vocabulary! {
         /// A scenario runner's grade of an attempt (v18, #942): logged at the
         /// operator's word, never sent to the model.
         Grade => "grade",
+        /// A meditation a session that never meditates was asked for and
+        /// did not make (v21, #932).
+        MeditationSkipped => "meditation.skipped",
     }
 }
 
@@ -1745,6 +1755,16 @@ pub enum Event {
         /// Each line, in order: the patch it delivers and the template it
         /// was written with.
         lines: Vec<NoteLine>,
+    },
+    /// A meditation a session under compaction depth `none` was asked for
+    /// and did not make (v21, #932): never meditates.
+    MeditationSkipped {
+        /// The latest turn when it was asked for.
+        at_turn: u32,
+        /// What asked for it.
+        reason: MeditationReason,
+        /// The phase it named, which the session moved to with no refill.
+        to: Option<String>,
     },
     /// A scenario runner's grade of an attempt (v18, #942), at the
     /// operator's word: never sent to the model.
@@ -4484,6 +4504,11 @@ fn from_object(object: &BTreeMap<String, Value>) -> Result<Line, String> {
             entry: fields.string("entry")?,
             note: fields.string("note")?,
         },
+        Kind::MeditationSkipped => Event::MeditationSkipped {
+            at_turn: fields.turn("at_turn")?,
+            reason: fields.tag("reason", MeditationReason::from_tag)?,
+            to: fields.optional_string("to")?,
+        },
         Kind::Grade => Event::Grade {
             turn: fields.turn("turn")?,
             task: fields.string("task")?,
@@ -5563,6 +5588,26 @@ const fn must_v8(key: &'static str, holds: Holds) -> Field {
     }
 }
 
+/// A key that arrived in v21, optional wherever its object is written.
+const fn may_v21(key: &'static str, holds: Holds) -> Field {
+    Field {
+        key,
+        holds,
+        required: false,
+        since: 21,
+    }
+}
+
+/// A key that arrived in v21 and is required wherever its object is written.
+const fn must_v21(key: &'static str, holds: Holds) -> Field {
+    Field {
+        key,
+        holds,
+        required: true,
+        since: 21,
+    }
+}
+
 /// A key that arrived in v20, optional wherever its object is written.
 const fn may_v20(key: &'static str, holds: Holds) -> Field {
     Field {
@@ -5856,6 +5901,7 @@ pub fn introduced(kind: Kind) -> i64 {
         | Kind::WarrantGated => 8,
         Kind::RequestRetried => 13,
         Kind::Grade => 18,
+        Kind::MeditationSkipped => 21,
         _ => 0,
     }
 }
@@ -6504,6 +6550,14 @@ pub fn schema(kind: Kind) -> &'static [Field] {
                 must_v7("turn", Count),
                 must_v7("entry", Text),
                 must_v7("note", Text),
+            ];
+            F
+        }
+        Kind::MeditationSkipped => {
+            const F: &[Field] = &[
+                must_v21("at_turn", Count),
+                must_v21("reason", Tag(Tags::MeditationReason)),
+                may_v21("to", Text),
             ];
             F
         }
@@ -7877,6 +7931,18 @@ fn to_value(line: &Line) -> Value {
             put("note", text(note));
             Kind::Flag
         }
+        Event::MeditationSkipped {
+            at_turn,
+            reason,
+            to,
+        } => {
+            put("at_turn", count(u64::from(*at_turn)));
+            put("reason", text(reason.tag()));
+            if let Some(to) = to {
+                put("to", text(to));
+            }
+            Kind::MeditationSkipped
+        }
         Event::Grade {
             turn,
             task,
@@ -9202,14 +9268,14 @@ mod tests {
         assert!(refused.why.contains("v8"), "{refused}");
     }
 
-    /// #583, #878, #904, #555, #931, #936, #910, #942, #926, #932: this module writes v20.
+    /// #583, #878, #904, #555, #931, #936, #910, #942, #926, #932: this module writes v21.
     #[test]
-    fn this_module_writes_v20_and_reads_every_version_before_it() {
-        assert_eq!(super::VERSION, 20);
+    fn this_module_writes_v21_and_reads_every_version_before_it() {
+        assert_eq!(super::VERSION, 21);
         assert_eq!(
             super::READS,
             &[
-                0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20
+                0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21
             ]
         );
     }
@@ -9895,6 +9961,11 @@ mod tests {
             retry_after: None,
             attempt: 2,
             wait_ms: 4_000,
+        });
+        events.push(Event::MeditationSkipped {
+            at_turn: 5,
+            reason: MeditationReason::Operator,
+            to: Some("build".to_owned()),
         });
         events.push(Event::Grade {
             turn: 5,
@@ -11255,7 +11326,7 @@ mod tests {
             tags(Kind::ALL.iter().map(|it| it.tag()).collect()),
             "session.start ask settlement request refused delta stop.asked response \
              cancelled request.failed turn.settled idle.gap progress tool_call fork \
-             fork.settled patch meditation delivered recalled flag meditation.held patch.refused pruned phase.ruled phase.proposed phase.answered phase.started tangent.open tangent.close capture reminded background.ended notice timeout.near fork.skipped phase.noted trunk.clamped trunk.waited warrant.gated request.retried grade"
+             fork.settled patch meditation delivered recalled flag meditation.held patch.refused pruned phase.ruled phase.proposed phase.answered phase.started tangent.open tangent.close capture reminded background.ended notice timeout.near fork.skipped phase.noted trunk.clamped trunk.waited warrant.gated request.retried grade meditation.skipped"
         );
         assert_eq!(
             tags(FailReason::ALL.iter().map(|it| it.tag()).collect()),

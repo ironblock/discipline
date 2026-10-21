@@ -204,6 +204,9 @@ pub enum PolicyError {
     PhaseLibrary(String),
     /// [`STARTING_PHASE`] names no phase of the library.
     NotInTheLibrary(String),
+    /// Compaction depth `none` (#932, never meditate) beside a key that
+    /// asks a meditation for something: no meditation would ever do it.
+    NeverMeditates(&'static str),
 }
 
 impl fmt::Display for PolicyError {
@@ -261,6 +264,11 @@ impl fmt::Display for PolicyError {
             Self::NotAGate => write!(
                 f,
                 "`{RECONCILE_GATE}` takes \"carry\" (the default) or \"refuse\""
+            ),
+            Self::NeverMeditates(key) => write!(
+                f,
+                "`{MEDITATION_TAIL_TOKENS} = \"none\"` never meditates, so `{key}` would never \
+                 do anything: declare one or the other"
             ),
             Self::GateWithoutAudit => write!(
                 f,
@@ -370,6 +378,28 @@ impl Policy {
     }
 }
 
+/// What meditates on its own (#617, #932).
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub enum Meditating {
+    /// The window meditation too: the default.
+    #[default]
+    WithTheWindow,
+    /// Not the window ([`MEDITATION_WINDOW`] `off`).
+    WindowOff,
+    /// Nothing: compaction depth `none` ([`MEDITATION_TAIL_TOKENS`] `"none"`,
+    /// #932). No derived or window meditation fires; a declared one is
+    /// acknowledged and logged skipped; an overflow is the request's data.
+    Never,
+}
+
+impl Meditating {
+    /// Whether the window meditation is off.
+    #[must_use]
+    pub fn window_off(self) -> bool {
+        self != Self::WithTheWindow
+    }
+}
+
 /// When a served session's derived meditations fire: after an operator turn
 /// returns the session to awaiting, a cadence of operator turns since the
 /// last meditation, or the trunk reaching a token count. The operator's own
@@ -391,9 +421,11 @@ pub struct Served {
     pub carry: crate::formats::log::MeditationCarry,
     /// The render's budget ([`RENDER_BUDGET_TOKENS`], #565), when declared.
     pub render_budget: Option<super::render::Budget>,
-    /// Whether the regimen turned the automatic meditation off ([`MEDITATION_WINDOW`],
-    /// #617): on by default, as Pi and `OpenCode` 2 both have it.
-    pub window_off: bool,
+    /// What meditates on its own: the window meditation too, by default, as
+    /// Pi and `OpenCode` 2 both have it (#617); not the window, under
+    /// [`MEDITATION_WINDOW`] `off`; or nothing at all, under compaction
+    /// depth `none` (#932).
+    pub meditating: Meditating,
     /// Whether a meditation puts the dogma's audit ask to the model before its
     /// refill ([`MEDITATION_AUDIT`], #504).
     pub audit: bool,
@@ -524,8 +556,26 @@ impl Served {
                 Some(tokens.max(1))
             }
         };
+        let never = matches!(regimen.get(MEDITATION_TAIL_TOKENS), Some(Value::String(word)) if word == "none");
+        if never {
+            // A key that asks a meditation for something, beside one that
+            // never meditates (#932).
+            for key in [
+                MEDITATION_EVERY_TURNS,
+                MEDITATION_AT_CONTEXT_FRACTION,
+                MEDITATION_AUDIT,
+                MEDITATION_WARM,
+                MEDITATION_CARRY,
+                MEDITATION_WINDOW,
+            ] {
+                if regimen.get(key).is_some() {
+                    return Err(PolicyError::NeverMeditates(key));
+                }
+            }
+        }
         let tail_tokens = match regimen.get(MEDITATION_TAIL_TOKENS) {
             None => 0,
+            Some(Value::String(word)) if word == "none" => 0,
             Some(Value::Integer(count)) if *count >= 0 => count.unsigned_abs(),
             Some(Value::Integer(_)) => {
                 return Err(PolicyError::NotPositive(MEDITATION_TAIL_TOKENS));
@@ -556,8 +606,15 @@ impl Served {
             },
             audit_concurrency: audit_concurrency_declared(regimen)?,
             warm: on(regimen, MEDITATION_WARM),
-            window_off: matches!(regimen.get(MEDITATION_WINDOW), Some(Value::String(word)) if word == "off")
-                || matches!(regimen.get(MEDITATION_WINDOW), Some(Value::Boolean(false))),
+            meditating: if never {
+                Meditating::Never
+            } else if matches!(regimen.get(MEDITATION_WINDOW), Some(Value::String(word)) if word == "off")
+                || matches!(regimen.get(MEDITATION_WINDOW), Some(Value::Boolean(false)))
+            {
+                Meditating::WindowOff
+            } else {
+                Meditating::WithTheWindow
+            },
         })
     }
 
@@ -722,7 +779,7 @@ mod tests {
                 outputs: crate::formats::log::MeditationToolOutputs::Evict,
                 carry: crate::formats::log::MeditationCarry::Render,
                 render_budget: None,
-                window_off: false,
+                meditating: Meditating::WithTheWindow,
                 warm: false,
                 audit: false,
                 audit_chunk_notes: None,
@@ -739,7 +796,7 @@ mod tests {
                 outputs: crate::formats::log::MeditationToolOutputs::Evict,
                 carry: crate::formats::log::MeditationCarry::Render,
                 render_budget: None,
-                window_off: false,
+                meditating: Meditating::WithTheWindow,
                 warm: false,
                 audit: false,
                 audit_chunk_notes: None,
@@ -782,7 +839,7 @@ mod tests {
             outputs: crate::formats::log::MeditationToolOutputs::Evict,
             carry: crate::formats::log::MeditationCarry::Render,
             render_budget: None,
-            window_off: false,
+            meditating: Meditating::WithTheWindow,
             warm: false,
             audit: false,
             audit_chunk_notes: None,
@@ -794,5 +851,42 @@ mod tests {
         assert_eq!(policy.due(2, Some(1000)), Some(Reason::Budget));
         assert_eq!(policy.due(3, Some(1000)), Some(Reason::Budget));
         assert_eq!(Served::default().due(100, Some(u64::MAX)), None);
+    }
+
+    /// #932: compaction depth `none` never meditates. It turns the window
+    /// meditation off and fires nothing; beside a key that asks a meditation
+    /// for something, it is refused at start, naming the key.
+    #[test]
+    fn compaction_depth_none_never_meditates_and_refuses_a_trigger_beside_it() {
+        let never = served("meditation_tail_tokens = \"none\"\n", Some(160_000)).expect("never");
+        assert_eq!(never.meditating, Meditating::Never, "{never:?}");
+        assert!(never.meditating.window_off());
+        assert_eq!(never.tail_tokens, 0);
+        assert!(!never.declares_a_trigger());
+        assert_eq!(never.due(100, Some(u64::MAX)), None);
+        for key in [
+            "meditation_every_turns = 3",
+            "meditation_at_context_fraction = 0.5",
+            "meditation_audit = \"on\"",
+            "meditation_warm = \"on\"",
+            "meditation_carry = \"native_summary\"",
+            "meditation_window = \"on\"",
+        ] {
+            let refused = served(
+                &format!("meditation_tail_tokens = \"none\"\n{key}\n"),
+                Some(160_000),
+            )
+            .expect_err(key);
+            let named = key.split(' ').next().unwrap_or(key);
+            assert_eq!(refused, PolicyError::NeverMeditates(named), "{key}");
+            assert!(refused.to_string().contains(named), "{refused}");
+        }
+        assert!(served("meditation_tail_tokens = \"some\"\n", None).is_err());
+        assert_eq!(
+            served("meditation_tail_tokens = 0\n", None)
+                .expect("total")
+                .meditating,
+            Meditating::WithTheWindow
+        );
     }
 }

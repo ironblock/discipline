@@ -1003,6 +1003,7 @@ impl<'a> Walk<'a> {
             Line::ForkSkipped { .. } => log::Kind::ForkSkipped,
             Line::Flag { .. } => log::Kind::Flag,
             Line::MeditationHeld { .. } => log::Kind::MeditationHeld,
+            Line::MeditationSkipped { .. } => log::Kind::MeditationSkipped,
             Line::PatchRefused { .. } => log::Kind::PatchRefused,
             // The trunk's own self-capture patch (#609), fork-less.
             Line::Patch { .. } => log::Kind::Patch,
@@ -1163,6 +1164,8 @@ impl<'a> Walk<'a> {
             // A meditation held for the operator (#150's gate): the trunk was
             // not refilled, so no meditation row; the one that refills has it.
             | Line::MeditationHeld { .. }
+            // A meditation never made (#932): no meditation row.
+            | Line::MeditationSkipped { .. }
             // The trunk's own self-capture patch (#609): no fork row to
             // count it on, as its `capture` line has none.
             | Line::Patch { fork: None, .. } => self.no_row(line),

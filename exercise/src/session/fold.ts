@@ -974,6 +974,9 @@ export function fold(written: readonly LogLine[]): Session {
       // A scenario runner's grade of an attempt (#942): the operator's verdict, never the model's, drawn on no node yet.
       case 'grade':
         break;
+      // A meditation a session that never meditates did not make (#932): nothing changed, drawn on no node yet.
+      case 'meditation.skipped':
+        break;
       // A trunk request held for the forks in flight (#782): its wait, drawn on no node yet.
       case 'trunk.waited':
         break;

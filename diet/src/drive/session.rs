@@ -804,6 +804,16 @@ pub enum Event {
         /// The operator's note.
         note: String,
     },
+    /// A meditation a session that never meditates was asked for, and did
+    /// not make (#932): compaction depth `none`.
+    MeditationSkipped {
+        /// The latest turn.
+        at_turn: u32,
+        /// What asked for it.
+        reason: crate::meditation::Reason,
+        /// The phase it named, moved to with no refill.
+        to: Option<String>,
+    },
     /// A scenario runner graded an attempt (#942): logged at its word and
     /// never sent to the model.
     Graded {
@@ -5855,6 +5865,15 @@ pub fn line_of(logged: &Logged) -> log::Line {
             entry: entry.clone(),
             note: note.clone(),
         },
+        Event::MeditationSkipped {
+            at_turn,
+            reason,
+            to,
+        } => log::Event::MeditationSkipped {
+            at_turn: *at_turn,
+            reason: meditation_reason_of(*reason),
+            to: to.clone(),
+        },
         Event::Graded { turn, grade } => log::Event::Grade {
             turn: *turn,
             task: grade.task.clone(),
@@ -8889,6 +8908,20 @@ fn meditation(
     reason: crate::meditation::Reason,
     to: Option<String>,
 ) -> bool {
+    // Compaction depth `none` (#932): never meditates. Acknowledged and
+    // logged; a phase it names is moved to with no refill.
+    if never_meditates(state) {
+        let at_turn = state.turns;
+        state.push(Event::MeditationSkipped {
+            at_turn,
+            reason,
+            to: to.clone(),
+        });
+        if let Some(to) = to {
+            moved(template, state, &to, PhaseChoice::Keep);
+        }
+        return false;
+    }
     let (audit, warm) = state
         .interview
         .as_ref()
@@ -9057,11 +9090,22 @@ fn summary_failed(state: &mut State, turn: u32) {
 /// place. A native summary (#936) is written from the trunk itself, so it
 /// needs only a turn.
 fn nothing_to_refill(state: &State) -> bool {
+    // A session that never meditates (#932) refills nothing either way: an
+    // empty working memory does not refuse what it would only skip.
     state.turns == 0
-        || state.interview.as_ref().is_none_or(|interview| {
-            interview.meditations.carry == log::MeditationCarry::Render
-                && interview.object.live().next().is_none()
-        })
+        || (!never_meditates(state)
+            && state.interview.as_ref().is_none_or(|interview| {
+                interview.meditations.carry == log::MeditationCarry::Render
+                    && interview.object.live().next().is_none()
+            }))
+}
+
+/// Whether `state`'s session never meditates (#932): compaction depth
+/// `none`.
+fn never_meditates(state: &State) -> bool {
+    state.interview.as_ref().is_some_and(|interview| {
+        interview.meditations.meditating == crate::meditation::policy::Meditating::Never
+    })
 }
 
 /// Whether `state`'s meditations carry a native summary (#936).
@@ -10119,7 +10163,7 @@ fn window_split(
     // A native summary needs no working memory to refill from (#936).
     let nothing_held = interview.meditations.carry == log::MeditationCarry::Render
         && interview.object.live().next().is_none();
-    if interview.meditations.window_off
+    if interview.meditations.meditating.window_off()
         || state.tangent.is_some()
         || nothing_held
         || !shape.messages.starts_with(&state.trunk)
@@ -17356,6 +17400,11 @@ pub(in crate::drive) mod tests {
                 attempt: 1,
                 wait_ms: 7_000,
             },
+            Event::MeditationSkipped {
+                at_turn: 1,
+                reason: crate::meditation::Reason::Operator,
+                to: None,
+            },
             Event::Graded {
                 turn: 1,
                 grade: Grade {
@@ -17421,9 +17470,10 @@ pub(in crate::drive) mod tests {
                 Event::WarrantGated { .. } => 47,
                 Event::Retried { .. } => 48,
                 Event::Graded { .. } => 49,
+                Event::MeditationSkipped { .. } => 50,
             });
         }
-        assert_eq!(kinds.len(), 50, "a variant has no sample");
+        assert_eq!(kinds.len(), 51, "a variant has no sample");
         events
             .into_iter()
             .enumerate()
@@ -17967,6 +18017,11 @@ pub(in crate::drive) mod tests {
                 retry_after: Some(7),
                 attempt: 1,
                 wait_ms: 7_000,
+            },
+            log::Event::MeditationSkipped {
+                at_turn: 1,
+                reason: log::MeditationReason::Operator,
+                to: None,
             },
             log::Event::Grade {
                 turn: 1,
@@ -27160,7 +27215,7 @@ pub(in crate::drive) mod tests {
             two_turns_measuring(90_000),
             100_000,
             crate::meditation::policy::Served {
-                window_off: true,
+                meditating: crate::meditation::policy::Meditating::WindowOff,
                 ..crate::meditation::policy::Served::default()
             },
         );
@@ -29567,7 +29622,7 @@ pub(in crate::drive) mod tests {
                     outputs: state,
                     carry: crate::formats::log::MeditationCarry::Render,
                     render_budget: None,
-                    window_off: false,
+                    meditating: crate::meditation::policy::Meditating::WithTheWindow,
                     warm: false,
                     audit: false,
                     audit_chunk_notes: None,
@@ -29910,7 +29965,7 @@ pub(in crate::drive) mod tests {
                 outputs: log::MeditationToolOutputs::Evict,
                 carry: crate::formats::log::MeditationCarry::Render,
                 render_budget: None,
-                window_off: false,
+                meditating: crate::meditation::policy::Meditating::WithTheWindow,
                 warm: false,
                 audit: false,
                 audit_chunk_notes: None,
@@ -29983,7 +30038,7 @@ pub(in crate::drive) mod tests {
                     outputs: log::MeditationToolOutputs::Evict,
                     carry: crate::formats::log::MeditationCarry::Render,
                     render_budget: None,
-                    window_off: false,
+                    meditating: crate::meditation::policy::Meditating::WithTheWindow,
                     warm: false,
                     audit: false,
                     audit_chunk_notes: None,
@@ -30088,7 +30143,7 @@ pub(in crate::drive) mod tests {
                 outputs: log::MeditationToolOutputs::Evict,
                 carry: crate::formats::log::MeditationCarry::Render,
                 render_budget: None,
-                window_off: false,
+                meditating: crate::meditation::policy::Meditating::WithTheWindow,
                 warm: false,
                 audit: false,
                 audit_chunk_notes: None,
@@ -30129,7 +30184,7 @@ pub(in crate::drive) mod tests {
                 outputs: log::MeditationToolOutputs::Evict,
                 carry: crate::formats::log::MeditationCarry::Render,
                 render_budget: None,
-                window_off: false,
+                meditating: crate::meditation::policy::Meditating::WithTheWindow,
                 warm: false,
                 audit: false,
                 audit_chunk_notes: None,
@@ -30182,7 +30237,7 @@ pub(in crate::drive) mod tests {
                 outputs: log::MeditationToolOutputs::Evict,
                 carry: crate::formats::log::MeditationCarry::Render,
                 render_budget: None,
-                window_off: false,
+                meditating: crate::meditation::policy::Meditating::WithTheWindow,
                 warm: false,
                 audit: false,
                 audit_chunk_notes: None,
@@ -30237,7 +30292,7 @@ pub(in crate::drive) mod tests {
                 outputs: log::MeditationToolOutputs::Evict,
                 carry: crate::formats::log::MeditationCarry::Render,
                 render_budget: None,
-                window_off: false,
+                meditating: crate::meditation::policy::Meditating::WithTheWindow,
                 warm: false,
                 audit: false,
                 audit_chunk_notes: None,
@@ -30281,7 +30336,7 @@ pub(in crate::drive) mod tests {
                 outputs: log::MeditationToolOutputs::Evict,
                 carry: crate::formats::log::MeditationCarry::Render,
                 render_budget: None,
-                window_off: false,
+                meditating: crate::meditation::policy::Meditating::WithTheWindow,
                 warm: false,
                 audit: false,
                 audit_chunk_notes: None,

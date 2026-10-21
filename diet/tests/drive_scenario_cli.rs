@@ -2034,3 +2034,77 @@ fn a_nonced_pairs_heads_are_each_their_own_and_its_table_says_so() {
     assert!(said.contains("head_nonce"), "{said}");
     let _ = std::fs::remove_dir_all(&dir);
 }
+
+/// #932: compaction depth `none`, the golden arm's state, never meditates.
+/// A declared meditation is admitted and logged `meditation.skipped`, not
+/// refused, though working memory is empty; no meditation line or record
+/// row is written, so nothing was refilled; the next ask is sent on the
+/// trunk as it stood; and the start names the lever `none`. Without it, the same declaration over an
+/// empty working memory is refused `nothing-to-meditate`.
+#[test]
+fn a_session_that_never_meditates_skips_a_declared_meditation_and_never_refills() {
+    let dir = scratch("never");
+    let body = format!(
+        "{}\n{}\n{}\n{}\n{}\n{}\n",
+        r#"{"reply":{"when":"what are we building","text":"A tracker for the team's bugs."}}"#,
+        r#"{"reply":{"when":"who files them","text":"Anyone on the team."}}"#,
+        r#"{"step":"ask","text":"what are we building"}"#,
+        r#"{"step":"declare-meditation"}"#,
+        r#"{"step":"ask","text":"who files them"}"#,
+        r#"{"step":"end"}"#,
+    );
+    let never = canned_with(&dir, "never.toml", "meditation_tail_tokens = \"none\"");
+    let file = scenario(&dir, "never", &body);
+    let out = dir.join("never");
+    let ran = Command::new(DRIVE)
+        .current_dir(root())
+        .arg("scenario")
+        .arg(&file)
+        .args(["--no-assemble", "--regimen"])
+        .arg(&never)
+        .arg("--out")
+        .arg(&out)
+        .output()
+        .expect("diet-drive runs");
+    let said = String::from_utf8_lossy(&ran.stdout);
+    assert_eq!(
+        ran.status.code(),
+        Some(0),
+        "{said}{}",
+        String::from_utf8_lossy(&ran.stderr)
+    );
+    let log = out.join("session.log");
+    let skipped = logged(&log, "meditation.skipped");
+    assert_eq!(skipped.len(), 1, "{skipped:?}");
+    assert_eq!(
+        (&skipped[0]["at_turn"], &skipped[0]["reason"]),
+        (&serde_json::json!(1), &serde_json::json!("operator"))
+    );
+    assert!(logged(&log, "meditation").is_empty(), "no meditation line");
+    assert_eq!(first_line(&log)["levers"]["compaction_depth"], "none");
+    let record = std::fs::read_to_string(out.join("session.record.jsonl")).expect("the record");
+    assert!(
+        !record.contains(r#""record":"meditation""#),
+        "no meditation row"
+    );
+    // The second turn is asked and sent, on no refill.
+    let requests = logged(&log, "request");
+    assert_eq!(requests.len(), 2, "{requests:?}");
+    // Under total compaction the same declaration over an empty working
+    // memory is refused.
+    let total = canned_with(&dir, "total.toml", "");
+    let ran = Command::new(DRIVE)
+        .current_dir(root())
+        .arg("scenario")
+        .arg(&file)
+        .args(["--no-assemble", "--regimen"])
+        .arg(&total)
+        .arg("--out")
+        .arg(dir.join("total"))
+        .output()
+        .expect("diet-drive runs");
+    let said = String::from_utf8_lossy(&ran.stdout);
+    assert_eq!(ran.status.code(), Some(1), "{said}");
+    assert!(said.contains("nothing-to-meditate"), "{said}");
+    let _ = std::fs::remove_dir_all(&dir);
+}
