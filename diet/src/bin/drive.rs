@@ -1422,13 +1422,16 @@ fn serving_interview(
     // The phase graph, by the scripted drive's own reader (#563).
     let phases =
         diet::meditation::policy::phase_graph(&read).map_err(|why| format!("{path}: {why}"))?;
-    if rules.is_empty() && !mechanical && !phases.is_empty() {
+    // A native summary (#936) is written from the trunk, not working memory:
+    // its meditations need nothing to fill it.
+    let native = meditations.carry == diet::formats::log::MeditationCarry::NativeSummary;
+    if rules.is_empty() && !mechanical && !native && !phases.is_empty() {
         return Err(format!(
             "{path} declares phases and no `interview_warrant`: nothing fills working \
              memory, so no meditation could ever move between them"
         ));
     }
-    if rules.is_empty() && !mechanical && meditations.declares_a_trigger() {
+    if rules.is_empty() && !mechanical && !native && meditations.declares_a_trigger() {
         return Err(format!(
             "{path} declares a meditation trigger and no `interview_warrant`: nothing fills \
              working memory, so no meditation could ever fire"
@@ -1482,53 +1485,54 @@ fn serving_interview(
         Some(threshold) => object.merging_similar(threshold),
         None => object,
     };
-    Ok(
-        (!rules.is_empty() || self_capture.is_some() || mechanical || refutation.is_some()).then(
-            || Interview {
-                rules,
-                object,
-                meditations,
-                delivery,
-                phases,
-                // #566: how archived items are recalled; off unless declared.
-                recall: diet::drive::archive::Recall::of(&read),
-                // Undeclared is left to the seat (#570): the whole trunk warm,
-                // the last turn offboard.
-                view: read
-                    .get(session::FORK_VIEW)
-                    .is_some()
-                    .then(|| session::fork_view(&read)),
-                self_capture,
-                // #609: c1 unless the regimen names another set.
-                capture_contract: session::self_capture_contract(&read),
-                asks,
-                capture,
-                // #564: when a fork fires, and on what; one per gap unless declared.
-                cadence: session::interview_cadence(&read),
-                threshold_bytes: session::interview_threshold_bytes(&read),
-                // #611: off unless declared.
-                skip_self_recorded: session::interview_skip_self_recorded(&read),
-                mechanical_capture: mechanical,
-                role: session::interview_role(&read),
-                // #612: whether the model may prune its tool results; off unless
-                // declared.
-                prune: diet::drive::prune::of(&read),
-                // #406: a fork's tail; 8,192 or the output cap if less, unless
-                // declared (#826).
-                fork_tail: session::fork_tail(&read),
-                timing,
-                fork_slots,
-                fork_backlog,
-                prefix_pages,
-                warrant_gate,
-                pool_chunk,
-                served_batch,
-                step,
-                operator_unilateral,
-                refutation,
-            },
-        ),
-    )
+    Ok((!rules.is_empty()
+        || self_capture.is_some()
+        || mechanical
+        || refutation.is_some()
+        || native)
+        .then(|| Interview {
+            rules,
+            object,
+            meditations,
+            delivery,
+            phases,
+            // #566: how archived items are recalled; off unless declared.
+            recall: diet::drive::archive::Recall::of(&read),
+            // Undeclared is left to the seat (#570): the whole trunk warm,
+            // the last turn offboard.
+            view: read
+                .get(session::FORK_VIEW)
+                .is_some()
+                .then(|| session::fork_view(&read)),
+            self_capture,
+            // #609: c1 unless the regimen names another set.
+            capture_contract: session::self_capture_contract(&read),
+            asks,
+            capture,
+            // #564: when a fork fires, and on what; one per gap unless declared.
+            cadence: session::interview_cadence(&read),
+            threshold_bytes: session::interview_threshold_bytes(&read),
+            // #611: off unless declared.
+            skip_self_recorded: session::interview_skip_self_recorded(&read),
+            mechanical_capture: mechanical,
+            role: session::interview_role(&read),
+            // #612: whether the model may prune its tool results; off unless
+            // declared.
+            prune: diet::drive::prune::of(&read),
+            // #406: a fork's tail; 8,192 or the output cap if less, unless
+            // declared (#826).
+            fork_tail: session::fork_tail(&read),
+            timing,
+            fork_slots,
+            fork_backlog,
+            prefix_pages,
+            warrant_gate,
+            pool_chunk,
+            served_batch,
+            step,
+            operator_unilateral,
+            refutation,
+        }))
 }
 
 /// What `serve` runs the model's calls under, when the regimen at

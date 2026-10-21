@@ -154,6 +154,19 @@ The maintainer ruled on 2026-10-20 on the conventions the OpenCode 2 re-pin (#92
 | **shell output in memory** | a rolling tail (`pi:packages/coding-agent/src/core/tools/output-accumulator.ts:38,60,239-256`) | none; all of it to a file (`oc:packages/core/src/shell.ts:323-335`) | head and tail, the whole to a file (`qc:packages/core/src/tools/truncation.ts:113-114,196-223`) | head and tail (`ours:diet/src/isolation/mod.rs`), unchanged |
 | **default `max_tokens`** | 16,384, clamped to the window (`pi:packages/coding-agent/src/core/provider-composer.ts:243`) | the catalog's limit, clamped (`oc:packages/core/src/session/model-request.ts:88-98,259-262`) | 64,000 for `qwen3.x`, clamped (`qc:packages/core/src/core/tokenLimits.ts:34,335-337,453-459`) | 64,000, clamped (`ours:diet/src/drive/regimen.rs`), unchanged |
 
+## The compaction prompt (#936)
+
+What each harness asks for when it compacts, and what it carries beside the summary. It's read at Pi `v1.3.0`, OpenCode 2 `v2.0.32` and Qwen Code `v0.25.3`. This is the vote `meditation_carry = "native_summary"` follows: they differ throughout, so Qwen Code decides.
+
+| | Pi `v1.3.0` | OpenCode 2 `v2.0.32` | Qwen Code `v0.25.3` | ours under `native_summary` |
+|---|---|---|---|---|
+| **the summariser's prompt** | its own system prompt (`pi:packages/coding-agent/src/core/compaction/utils.ts:161-163`) and a 7-section markdown instruction (`compaction.ts:507-538`) | the session's own system and tools, with a 7-section template and rules appended (`oc:packages/core/src/session/compaction.ts:104-176`) | the compression prompt as the system message: an `<analysis>` scratchpad, then a 9-section `<state_snapshot>` (`qc:packages/core/src/core/prompts.ts:925-971`) | Qwen Code's, verbatim (`ours:diet/dogma/compaction/qwen-code-v0.25.3.txt`) |
+| **how the history is shown** | serialised into one `<conversation>` text (`compaction.ts:682-693,723-733`) | as messages, the instruction a final user message (`compaction.ts:253-294`) | as messages, then "First, reason in your <analysis> block. Then, produce the <state_snapshot> XML." (`qc:packages/core/src/services/chatCompressionService.ts:100-101`) | Qwen Code's |
+| **output cap** | 13,107 by default (`compaction.ts:712-715`) | at most 32,000, fitted to the window (`oc:packages/core/src/session/model-request.ts:87-98`) | at most 20,000, fitted to the window less 1,024 (`chatCompressionService.ts:58,69,91-98`) | Qwen Code's |
+| **tools, reasoning** | none; the session's thinking level (`compaction.ts:595-610`) | the session's tools; reasoning not established | none, thinking off on its cold path (`chatCompressionService.ts:838-880`) | Qwen Code's |
+| **beside the summary** | ~20,000 recent tokens, verbatim (`compaction.ts:129`) | the newest 15,000 tokens, stringified into the checkpoint (`compaction.ts:195-197`) | no tail; the model's acknowledgement; up to 5 files and 3 images restored; a plan-mode reminder and running subagents; a trailing call (`qc:packages/core/src/services/postCompactAttachments.ts:800-882`) | Qwen Code's, without the reminder and the subagents, which this harness has neither of |
+| **the wrapper** | a user message, `<summary>` tags with a lead line (`pi:packages/coding-agent/src/core/messages.ts:11-17`) | a user message, `<conversation-checkpoint>` with `<summary>` (`oc:packages/core/src/session/runner/to-llm-message.ts:312-324`) | a user message with a "Resume the prior task…" trailer (`postCompactAttachments.ts:514-515,572`) | ours (#597): Pi and OpenCode 2 agree on a user message in `<summary>` tags |
+
 ## For the maintainer: approve or reject
 
 ### Label (1): changes what the model sees

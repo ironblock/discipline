@@ -40,6 +40,11 @@ pub const MEDITATION_TAIL_TOKENS: &str = "meditation_tail_tokens";
 /// (#553): `evict` (the default), `reference`, `salient` or `keep`, read
 /// leniently -- any other value is unset.
 pub const MEDITATION_TOOL_OUTPUTS: &str = "meditation_tool_outputs";
+/// What a served meditation's refill carries (#936): `render` (the default),
+/// working memory rendered; or `native_summary`, a compaction summary the
+/// model writes with the vote's prompt, and what Qwen Code puts beside it
+/// ([`super::native`]). Read leniently: any other value is the default.
+pub const MEDITATION_CARRY: &str = "meditation_carry";
 /// The automatic meditation (#617): on unless the regimen says `"off"`. Before
 /// every trunk request a served session that keeps working memory and knows
 /// its window refills the trunk when the prompt would leave less than the
@@ -278,6 +283,16 @@ pub fn meditation_tool_outputs(regimen: &Regimen) -> crate::formats::log::Medita
     }
 }
 
+/// [`MEDITATION_CARRY`] read, leniently: a state's word, or `render`.
+#[must_use]
+pub fn meditation_carry(regimen: &Regimen) -> crate::formats::log::MeditationCarry {
+    use crate::formats::log::MeditationCarry;
+    match regimen.get(MEDITATION_CARRY) {
+        Some(Value::String(word)) => MeditationCarry::from_tag(word).unwrap_or_default(),
+        _ => MeditationCarry::default(),
+    }
+}
+
 impl Policy {
     /// Read the policy `regimen` declares.
     ///
@@ -372,6 +387,8 @@ pub struct Served {
     /// What a meditation carries of the tool outputs it compacts away
     /// ([`MEDITATION_TOOL_OUTPUTS`]).
     pub outputs: crate::formats::log::MeditationToolOutputs,
+    /// What a meditation's refill carries ([`MEDITATION_CARRY`], #936).
+    pub carry: crate::formats::log::MeditationCarry,
     /// The render's budget ([`RENDER_BUDGET_TOKENS`], #565), when declared.
     pub render_budget: Option<super::render::Budget>,
     /// Whether the regimen turned the automatic meditation off ([`MEDITATION_WINDOW`],
@@ -530,6 +547,7 @@ impl Served {
             at_trunk_tokens,
             tail_tokens,
             outputs: meditation_tool_outputs(regimen),
+            carry: meditation_carry(regimen),
             render_budget: render_budget(regimen),
             audit: on(regimen, MEDITATION_AUDIT),
             audit_chunk_notes: match regimen.get(MEDITATION_AUDIT_CHUNK_NOTES) {
@@ -702,6 +720,7 @@ mod tests {
                 at_trunk_tokens: Some(96_000),
                 tail_tokens: 0,
                 outputs: crate::formats::log::MeditationToolOutputs::Evict,
+                carry: crate::formats::log::MeditationCarry::Render,
                 render_budget: None,
                 window_off: false,
                 warm: false,
@@ -718,6 +737,7 @@ mod tests {
                 at_trunk_tokens: Some(8192),
                 tail_tokens: 0,
                 outputs: crate::formats::log::MeditationToolOutputs::Evict,
+                carry: crate::formats::log::MeditationCarry::Render,
                 render_budget: None,
                 window_off: false,
                 warm: false,
@@ -760,6 +780,7 @@ mod tests {
             at_trunk_tokens: Some(1000),
             tail_tokens: 0,
             outputs: crate::formats::log::MeditationToolOutputs::Evict,
+            carry: crate::formats::log::MeditationCarry::Render,
             render_budget: None,
             window_off: false,
             warm: false,

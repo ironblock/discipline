@@ -4,8 +4,8 @@
 // i64, and a JavaScript number is exact only to 2^53. A `timings`
 // millisecond may carry a fraction, written as the server wrote it.
 
-export const VERSION = 15;
-export const READS = [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15] as const;
+export const VERSION = 16;
+export const READS = [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16] as const;
 export const PRESENCE_WINDOW_MS = 2000;
 
 export type Kind =
@@ -64,6 +64,7 @@ export type Lane =
   | "interview"
   | "audit"
   | "warm"
+  | "summary"
 ;
 
 export type Command =
@@ -131,6 +132,7 @@ export type SettleReason =
   | "failed"
   | "capped"
   | "api_cap"
+  | "summary_failed"
 ;
 
 export type GapEnd =
@@ -260,6 +262,11 @@ export type MeditationToolOutputs =
   | "reference"
   | "salient"
   | "keep"
+;
+
+export type MeditationCarry =
+  | "render"
+  | "native_summary"
 ;
 
 export type RenderPlacement =
@@ -394,7 +401,7 @@ export type SessionStartLine = {
   seq: number;
   t: number;
   kind: "session.start";
-  version: 0 | 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9 | 10 | 11 | 12 | 13 | 14 | 15;
+  version: 0 | 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9 | 10 | 11 | 12 | 13 | 14 | 15 | 16;
   opened: number;
   model: string;
   head: HeadMessage[];
@@ -671,6 +678,8 @@ export type MeditationLine = {
   unaddressed?: string[];
   newest_turn_tokens?: number;
   refilled_anyway?: boolean;
+  carry?: MeditationCarry;
+  summary_tokens?: number;
   warm?: Timings;
   audit_notes?: number;
   audit_notes_left?: number;

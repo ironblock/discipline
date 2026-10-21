@@ -214,6 +214,10 @@ vocabulary! {
         /// The trunk's next request was never sent: the session's
         /// `max_api_requests` was reached (#555).
         ApiCap => "api_cap",
+        /// A window meditation under it carries a native summary, and the
+        /// summary failed (#936): its request did not finish, or its answer
+        /// was empty.
+        SummaryFailed => "summary_failed",
     }
 }
 
@@ -287,6 +291,9 @@ vocabulary! {
         /// A meditation's pre-warm (#555): the refilled trunk once, its output
         /// capped at one.
         Warm => "warm",
+        /// A meditation's native summary (#936): the history under the
+        /// vote's compaction prompt.
+        Summary => "summary",
     }
 }
 
@@ -729,6 +736,10 @@ pub enum Event {
         /// The operator refilled it over the changes it was held for
         /// (#150's gate): `Some(true)`, or `None`.
         refilled_anyway: Option<bool>,
+        /// What its refill carried (#936): the render, or a native summary.
+        carry: log::MeditationCarry,
+        /// The native summary's estimated tokens, under `native_summary`.
+        summary_tokens: Option<u64>,
         /// The pre-warm's timings (#504), when the refilled trunk was sent
         /// once and the call finished.
         warm: Option<Timings>,
@@ -3646,8 +3657,13 @@ impl<S: Streaming + 'static> Session<S> {
         // turn's thread: a thread that cannot start still settles with a
         // `request.failed` that cites a request that exists (#117, R2c
         // finding 21) -- the trunk's, or the arrival fork's it waits for.
-        let first = arrival
-            .is_none()
+        // Under a native summary (#936), a window meditation due before the
+        // first request makes its summary on the turn's thread, which can
+        // wait for it; the first request is opened there, after it.
+        let deferred = arrival.is_none()
+            && carries_native(&state)
+            && window_split(&self.shared.template, &state, &shape, false).is_some();
+        let first = (arrival.is_none() && !deferred)
             .then(|| trunk_opening(&self.shared.template, &mut state, turn, &mut shape));
         drop(state);
         self.shared.changed.notify_all();
@@ -3662,11 +3678,17 @@ impl<S: Streaming + 'static> Session<S> {
                 // every ask (#120's first review).
                 let outcome = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
                     let mut shape = shape;
-                    let first = first.or_else(|| {
-                        arrival.and_then(|forked| {
-                            on_arrival(&shared, &forked, turn, &opening, &mut shape)
+                    let first = first
+                        .or_else(|| {
+                            arrival.and_then(|forked| {
+                                on_arrival(&shared, &forked, turn, &opening, &mut shape)
+                            })
                         })
-                    });
+                        .or_else(|| {
+                            deferred
+                                .then(|| native_opening(&shared, turn, &mut shape))
+                                .flatten()
+                        });
                     if let Some((request, cancel)) = first {
                         call(&shared, &shape, &cancel, opening, turn, request);
                     }
@@ -3803,15 +3825,7 @@ impl<S: Streaming + 'static> Session<S> {
             // A meditation while a tangent is open would replace the trunk its
             // close restores (#22).
             Settlement::Awaiting if state.tangent.is_some() => Some(Refusal::TangentOpen),
-            Settlement::Awaiting
-                if state.turns == 0
-                    || state
-                        .interview
-                        .as_ref()
-                        .is_none_or(|interview| interview.object.live().next().is_none()) =>
-            {
-                Some(Refusal::NothingToMeditate)
-            }
+            Settlement::Awaiting if nothing_to_refill(&state) => Some(Refusal::NothingToMeditate),
             Settlement::Awaiting => to.and_then(|to| graph_refusal(&state, to)),
         };
         if let Some(because) = because {
@@ -3897,13 +3911,8 @@ impl<S: Streaming + 'static> Session<S> {
                 Some(Refusal::TangentOpen)
             }
             (Settlement::Awaiting, Some(to)) => graph_refusal(&state, to).or_else(|| {
-                (choice == PhaseChoice::Meditation
-                    && (state.turns == 0
-                        || state
-                            .interview
-                            .as_ref()
-                            .is_none_or(|interview| interview.object.live().next().is_none())))
-                .then_some(Refusal::NothingToMeditate)
+                (choice == PhaseChoice::Meditation && nothing_to_refill(&state))
+                    .then_some(Refusal::NothingToMeditate)
             }),
         };
         if let Some(because) = because {
@@ -4043,12 +4052,7 @@ impl<S: Streaming + 'static> Session<S> {
                 } else if state.tangent.is_some() {
                     Some(Refusal::TangentOpen)
                 } else {
-                    (state.turns == 0
-                        || state
-                            .interview
-                            .as_ref()
-                            .is_none_or(|interview| interview.object.live().next().is_none()))
-                    .then_some(Refusal::NothingToMeditate)
+                    nothing_to_refill(&state).then_some(Refusal::NothingToMeditate)
                 }
             }),
         };
@@ -5057,6 +5061,7 @@ pub fn line_of(logged: &Logged) -> log::Line {
                 Lane::Interview => log::Lane::Interview,
                 Lane::Audit => log::Lane::Audit,
                 Lane::Warm => log::Lane::Warm,
+                Lane::Summary => log::Lane::Summary,
             },
             head_sha256: Some(head_sha256.clone()),
             fork: *fork,
@@ -5650,11 +5655,15 @@ pub fn line_of(logged: &Logged) -> log::Line {
             unaddressed,
             newest_turn_tokens,
             refilled_anyway,
+            carry,
+            summary_tokens,
             warm,
             turn_steps,
             audit_notes,
             audit_unreached,
         } => log::Event::Meditation {
+            carry: Some(*carry),
+            summary_tokens: *summary_tokens,
             audit_notes_unreached: *audit_unreached,
             turn_steps: turn_steps.map(|(kept, compacted)| log::TurnSteps { kept, compacted }),
             audit_notes: audit_notes.map(|(audited, left, line)| log::AuditNotes {
@@ -5903,6 +5912,7 @@ fn settle_reason_in_the_log(reason: SettleReason) -> log::SettleReason {
         SettleReason::Timeout => log::SettleReason::Timeout,
         SettleReason::Failed => log::SettleReason::Failed,
         SettleReason::ApiCap => log::SettleReason::ApiCap,
+        SettleReason::SummaryFailed => log::SettleReason::SummaryFailed,
     }
 }
 
@@ -6206,15 +6216,30 @@ fn step<S: Streaming + 'static>(
                 shared.changed.notify_all();
                 return None;
             }
-            // #617: an overflow meditates once and goes again.
-            if overflow.is_some()
-                && let Some(next) = retried(&shared.template, &mut state, shape, (turn, cancel))
-            {
-                compacted_out(&mut state, shape, exchange);
-                drop(state);
-                shared.changed.notify_all();
-                // The same step sent again (#728): no step of its own.
-                return Some((next, false));
+            // #617: an overflow meditates once and goes again; under a native
+            // summary (#936), its request first, waited for.
+            if overflow.is_some() && state.overflow_retried != Some(turn) {
+                let (again, summary) = window_summary(shared, state, shape, true);
+                state = again;
+                let Ok(summary) = summary else {
+                    summary_failed(&mut state, turn);
+                    drop(state);
+                    shared.changed.notify_all();
+                    return None;
+                };
+                if let Some(next) = retried(
+                    &shared.template,
+                    &mut state,
+                    shape,
+                    (turn, cancel),
+                    summary.as_ref(),
+                ) {
+                    compacted_out(&mut state, shape, exchange);
+                    drop(state);
+                    shared.changed.notify_all();
+                    // The same step sent again (#728): no step of its own.
+                    return Some((next, false));
+                }
             }
             state.keep_ran_steps();
             state.push(Event::TurnSettled {
@@ -6232,15 +6257,30 @@ fn step<S: Streaming + 'static>(
                 failure,
                 partial,
             });
-            // #617: an overflow meditates once and goes again.
-            if overflow.is_some()
-                && let Some(next) = retried(&shared.template, &mut state, shape, (turn, cancel))
-            {
-                compacted_out(&mut state, shape, exchange);
-                drop(state);
-                shared.changed.notify_all();
-                // The same step sent again (#728): no step of its own.
-                return Some((next, false));
+            // #617: an overflow meditates once and goes again; under a native
+            // summary (#936), its request first, waited for.
+            if overflow.is_some() && state.overflow_retried != Some(turn) {
+                let (again, summary) = window_summary(shared, state, shape, true);
+                state = again;
+                let Ok(summary) = summary else {
+                    summary_failed(&mut state, turn);
+                    drop(state);
+                    shared.changed.notify_all();
+                    return None;
+                };
+                if let Some(next) = retried(
+                    &shared.template,
+                    &mut state,
+                    shape,
+                    (turn, cancel),
+                    summary.as_ref(),
+                ) {
+                    compacted_out(&mut state, shape, exchange);
+                    drop(state);
+                    shared.changed.notify_all();
+                    // The same step sent again (#728): no step of its own.
+                    return Some((next, false));
+                }
             }
             state.keep_ran_steps();
             state.push(Event::TurnSettled { turn, reason });
@@ -6441,8 +6481,16 @@ fn run_calls<S: Streaming + 'static>(
     state.ran.clone_from(exchange);
     shape.messages.push(said);
     shape.messages.extend(results);
-    // The automatic meditation (#617), between the turn's steps too.
-    if window_meditation(&shared.template, &mut state, shape, false) {
+    // The automatic meditation (#617), between the turn's steps too; under
+    // a native summary (#936) its request first, waited for.
+    let (mut state, summary) = window_summary(shared, state, shape, false);
+    let Ok(summary) = summary else {
+        summary_failed(&mut state, turn);
+        drop(state);
+        shared.changed.notify_all();
+        return None;
+    };
+    if window_meditation(&shared.template, &mut state, shape, false, summary.as_ref()) {
         compacted_out(&mut state, shape, exchange);
     }
     // Never more on the server than its pool holds: the forks in flight
@@ -7219,7 +7267,9 @@ fn trunk_opening(
     turn: u32,
     shape: &mut RequestShape,
 ) -> (u64, Cancel) {
-    window_meditation(template, state, shape, false);
+    // Under a native summary a due meditation was made on the turn's
+    // thread before this (#936); here it refills with none.
+    window_meditation(template, state, shape, false, None);
     let max_tokens = state.sized(shape, template.limits.max_output_tokens);
     let beside = state.trunk_beside();
     state.wrote_cache(shape);
@@ -8008,7 +8058,7 @@ fn refill_trunk(
     meditation: (crate::meditation::Reason, Option<log::MeditationFired>),
     to: Option<String>,
 ) {
-    let meditated = refilled(template, state, meditation, to, (&[], &[]));
+    let meditated = refilled(template, state, meditation, to, (&[], &[]), None);
     state.push(meditated);
 }
 
@@ -8021,6 +8071,7 @@ fn refilled(
     (reason, fired): (crate::meditation::Reason, Option<log::MeditationFired>),
     to: Option<String>,
     (steps, riding): (&[Message], &[Message]),
+    native: Option<&crate::meditation::native::Summary>,
 ) -> Event {
     // The move the graph allowed, made before the render, so the refill
     // names the phase the session is now in (#563).
@@ -8052,7 +8103,12 @@ fn refilled(
         fits: Some(rendered.fits),
         window_line: None,
     });
-    let carried_entries = interview.object.live().count() as u64;
+    // Under a native summary (#936) working memory is not carried.
+    let carried_entries = if native.is_some() {
+        0
+    } else {
+        interview.object.live().count() as u64
+    };
     // The head a trunk request on `messages` carries: `Head::of` leaves
     // out a request's last message, its ask, so one stands in for it.
     let digest = |messages: &[Message]| {
@@ -8131,7 +8187,8 @@ fn refilled(
             state.interview.as_ref(),
             state.fork_seat == ForkSeat::Offboard,
         ),
-    ) && rendered.tokens + around > line
+    ) && native.is_none()
+        && rendered.tokens + around > line
     {
         let room = line.saturating_sub(around);
         if budget.is_none_or(|budget| budget.tokens > room) {
@@ -8151,11 +8208,24 @@ fn refilled(
             });
         }
     }
-    let render = rendered.text;
+    // A native summary (#936) is carried in the render's place, and what
+    // Qwen Code puts beside it follows: the acknowledgement, then the
+    // restored files and images.
+    let render = native.map_or(rendered.text, |summary| summary.text.clone());
+    if native.is_some() {
+        render_budget = None;
+    }
     let sent = outputs
         .as_ref()
         .map_or_else(|| render.clone(), |(text, _)| format!("{render}{text}"));
     let mut refilled = crate::meditation::render::refill_with(&head, &sent, background.as_deref());
+    if let Some(summary) = native {
+        refilled.push(Message::new(
+            Role::Assistant,
+            crate::meditation::native::ACK.to_owned(),
+        ));
+        refilled.extend(summary.restored.clone());
+    }
     state.refilled = true;
     state.refills += 1;
     refilled.extend(kept);
@@ -8201,6 +8271,17 @@ fn refilled(
         unaddressed,
         newest_turn_tokens,
         refilled_anyway: None,
+        carry: if native.is_some() {
+            log::MeditationCarry::NativeSummary
+        } else {
+            log::MeditationCarry::Render
+        },
+        summary_tokens: native.map(|summary| {
+            crate::meditation::render::estimated_tokens(&Message::new(
+                Role::User,
+                summary.text.clone(),
+            ))
+        }),
         warm: None,
         turn_steps: None,
         audit_notes: state.audit_cut.take(),
@@ -8669,7 +8750,8 @@ fn meditation(
                 interview.meditations.warm && reason != crate::meditation::Reason::Window,
             )
         });
-    if !audit && !warm {
+    // A native summary (#936) is a request too: queued, as an audit is.
+    if !audit && !warm && !carries_native(state) {
         refill_trunk(template, state, (reason, None), to);
         return false;
     }
@@ -8728,7 +8810,36 @@ fn meditation_work<S: Streaming>(shared: &Shared<S>) {
             return;
         }
     }
-    let mut meditated = refilled(&shared.template, &mut state, (reason, None), to, (&[], &[]));
+    // Under a native summary (#936), the summary of the trunk first. One
+    // that fails is no meditation: the request's line says why, and the
+    // render is never carried in its place.
+    let summary = if carries_native(&state) {
+        let history = state.trunk.clone();
+        let (again, summary) = summarize(shared, state, &history);
+        state = again;
+        let Ok(summary) = summary else {
+            state.meditating = None;
+            state.move_to(Settlement::Awaiting);
+            if state.ending {
+                state.ending = false;
+                state.move_to(Settlement::Ended);
+            }
+            drop(state);
+            shared.changed.notify_all();
+            return;
+        };
+        Some(summary)
+    } else {
+        None
+    };
+    let mut meditated = refilled(
+        &shared.template,
+        &mut state,
+        (reason, None),
+        to,
+        (&[], &[]),
+        summary.as_ref(),
+    );
     if let Event::Meditated {
         refilled_anyway, ..
     } = &mut meditated
@@ -8754,6 +8865,163 @@ fn meditation_work<S: Streaming>(shared: &Shared<S>) {
     }
     drop(state);
     shared.changed.notify_all();
+}
+
+/// A turn's first request under a native summary (#936), when a window
+/// meditation was due before it: the summary made and waited for, the trunk
+/// refilled with it, then the request opened as [`trunk_opening`] opens it;
+/// `None` when the summary failed and the turn settled `summary_failed`.
+fn native_opening<S: Streaming>(
+    shared: &Shared<S>,
+    turn: u32,
+    shape: &mut RequestShape,
+) -> Option<(u64, Cancel)> {
+    let state = shared.lock();
+    let (mut state, summary) = window_summary(shared, state, shape, false);
+    let opened = if let Ok(summary) = summary {
+        window_meditation(&shared.template, &mut state, shape, false, summary.as_ref());
+        Some(trunk_opening(&shared.template, &mut state, turn, shape))
+    } else {
+        summary_failed(&mut state, turn);
+        None
+    };
+    drop(state);
+    shared.changed.notify_all();
+    opened
+}
+
+/// A turn whose window meditation's native summary failed (#936), settled
+/// `summary_failed`: the steps it ran kept, and the render never carried in
+/// the summary's place.
+fn summary_failed(state: &mut State, turn: u32) {
+    state.flight = None;
+    state.keep_ran_steps();
+    state.push(Event::TurnSettled {
+        turn,
+        reason: SettleReason::SummaryFailed,
+    });
+    state.move_to(Settlement::Awaiting);
+}
+
+/// Whether a meditation has nothing to refill from: no turn has settled, the
+/// session keeps no working memory, or -- carrying the render -- it holds no
+/// entry, so a refill would drop every turn and carry nothing in their
+/// place. A native summary (#936) is written from the trunk itself, so it
+/// needs only a turn.
+fn nothing_to_refill(state: &State) -> bool {
+    state.turns == 0
+        || state.interview.as_ref().is_none_or(|interview| {
+            interview.meditations.carry == log::MeditationCarry::Render
+                && interview.object.live().next().is_none()
+        })
+}
+
+/// Whether `state`'s meditations carry a native summary (#936).
+fn carries_native(state: &State) -> bool {
+    state
+        .interview
+        .as_ref()
+        .is_some_and(|interview| interview.meditations.carry == log::MeditationCarry::NativeSummary)
+}
+
+/// A native summary of `history` (#936): the summary request on its own
+/// lane, logged like any request, the lock let go while it is in flight and
+/// taken back; then its answer, the analysis stripped, and what Qwen Code
+/// restores beside it. `Err` naming why when the request fails or the
+/// summary is empty -- the render is never carried in its place.
+fn summarize<'a, S: Streaming>(
+    shared: &'a Shared<S>,
+    mut state: MutexGuard<'a, State>,
+    history: &[Message],
+) -> (
+    MutexGuard<'a, State>,
+    Result<crate::meditation::native::Summary, String>,
+) {
+    let shape = crate::meditation::native::request(&shared.template, history);
+    let cancel = Cancel::new();
+    let turn = state.turns;
+    let request = state.push(Event::Requested {
+        turn,
+        lane: Lane::Summary,
+        head_sha256: crate::client::head::Head::of(&shape).digest().to_owned(),
+        sized_tokens: estimate_of(&shape),
+        fork: None,
+        max_tokens: shape.limits.max_output_tokens,
+        beside: None,
+    });
+    drop(state);
+    shared.changed.notify_all();
+    let deadline = Instant::now() + shared.template.limits.call;
+    let mut text = String::new();
+    let mut hosted = Hosted::default();
+    let ended = shared
+        .transport
+        .stream(&shape, deadline, &cancel, &mut |piece: Piece<'_>| {
+            if hosted.took(&piece) {
+                return;
+            }
+            match piece {
+                Piece::Text(piece) => text.push_str(piece),
+                Piece::Retried {
+                    status,
+                    retry_after,
+                    attempt,
+                    wait_ms,
+                } => {
+                    shared.lock().push(Event::Retried {
+                        request,
+                        status,
+                        retry_after,
+                        attempt,
+                        wait_ms,
+                    });
+                    shared.changed.notify_all();
+                }
+                _ => {}
+            }
+        });
+    let mut state = shared.lock();
+    let finished = matches!(ended, Ok(StreamEnded::Finished { .. }));
+    let answer = text.clone();
+    // Its outcome is logged as the pre-warm's is, against its request.
+    warm_ended(&mut state, request, (ended, text, hosted), None);
+    if !finished {
+        return (state, Err("the summary request did not finish".to_owned()));
+    }
+    let summary = crate::meditation::native::stripped(&answer);
+    if summary.is_empty() {
+        return (state, Err("the summary was empty".to_owned()));
+    }
+    let worktree = shared.tools.as_ref().map(|tools| tools.worktree.clone());
+    let restored = crate::meditation::native::restored(history, worktree.as_deref());
+    (
+        state,
+        Ok(crate::meditation::native::Summary {
+            text: summary,
+            restored,
+        }),
+    )
+}
+
+/// What a window meditation needs before it refills under a native summary
+/// (#936): `Ok(None)` when the session carries the render or no window
+/// meditation is due on `shape`; else the summary of what `shape` would
+/// send, made on this thread, which waits for it -- as `OpenCode` 2 and Qwen
+/// Code compress before the next request -- or `Err` naming why it failed.
+fn window_summary<'a, S: Streaming>(
+    shared: &'a Shared<S>,
+    state: MutexGuard<'a, State>,
+    shape: &RequestShape,
+    forced: bool,
+) -> (
+    MutexGuard<'a, State>,
+    Result<Option<crate::meditation::native::Summary>, String>,
+) {
+    if !carries_native(&state) || window_split(&shared.template, &state, shape, forced).is_none() {
+        return (state, Ok(None));
+    }
+    let (state, summary) = summarize(shared, state, &shape.messages);
+    (state, summary.map(Some))
 }
 
 /// A meditation's audit, made and folded (#504); then, under `reconcile_gate =
@@ -8819,17 +9087,18 @@ fn prewarm<'a, S: Streaming>(
         });
     state = shared.lock();
     state.warming = None;
-    warm_ended(&mut state, request, (ended, text, hosted), meditated);
+    warm_ended(&mut state, request, (ended, text, hosted), Some(meditated));
     state
 }
 
 /// The pre-warm's outcome, logged against its `request` (#555), its
-/// timings on the meditation's line when it finished (#504).
+/// timings on the meditation's line when it finished (#504); a native
+/// summary's (#936), with no meditation line to time.
 fn warm_ended(
     state: &mut State,
     request: u64,
     (ended, text, hosted): (Result<StreamEnded, TransportFailure>, String, Hosted),
-    meditated: &mut Event,
+    meditated: Option<&mut Event>,
 ) {
     match ended {
         Ok(StreamEnded::Finished {
@@ -8844,7 +9113,7 @@ fn warm_ended(
                 timings: timings.clone(),
                 hosted,
             });
-            if let Event::Meditated { warm, .. } = meditated {
+            if let Some(Event::Meditated { warm, .. }) = meditated.map(|event| &mut *event) {
                 *warm = timings;
             }
         }
@@ -9676,33 +9945,38 @@ fn audit_folded(
     applied(state, &patches, fork)
 }
 
-/// The automatic meditation (#617), checked before every trunk request on
-/// `shape`: when serve knows the window, the regimen has not turned it off
-/// ([`crate::meditation::policy::MEDITATION_WINDOW`]), no tangent is open, working
-/// memory holds an entry and the trunk holds turns the refill would drop,
-/// and the prompt as sized (#588) would leave less than the reserve
-/// ([`reserve_of`]) of the window: the trunk is refilled, and the turn's own
-/// messages so far ride after the refill as they rode after the trunk. Otherwise the request
-/// goes as it is, as Pi, `OpenCode` 2 and Qwen Code all send it when there is
-/// nothing to compact.
-fn window_meditation(
+/// Where a window meditation due on `shape` falls (#617, #813): the window,
+/// the reserve's two parts (#931), the running turn's split, and the prompt
+/// that fired it.
+struct WindowSplit {
+    window: u64,
+    native: u64,
+    fork_room: Option<u64>,
+    ask: usize,
+    steps: u64,
+    keep_from: usize,
+    prompt: u64,
+}
+
+/// The window meditation due on `shape`, when one is ([`window_meditation`]'s
+/// conditions): `None` when it is not.
+fn window_split(
     template: &RequestShape,
-    state: &mut State,
-    shape: &mut RequestShape,
+    state: &State,
+    shape: &RequestShape,
     forced: bool,
-) -> bool {
-    let Some(window) = shape.limits.context_window else {
-        return false;
-    };
-    let Some(interview) = state.interview.as_ref() else {
-        return false;
-    };
+) -> Option<WindowSplit> {
+    let window = shape.limits.context_window?;
+    let interview = state.interview.as_ref()?;
+    // A native summary needs no working memory to refill from (#936).
+    let nothing_held = interview.meditations.carry == log::MeditationCarry::Render
+        && interview.object.live().next().is_none();
     if interview.meditations.window_off
         || state.tangent.is_some()
-        || interview.object.live().next().is_none()
+        || nothing_held
         || !shape.messages.starts_with(&state.trunk)
     {
-        return false;
+        return None;
     }
     let turns = state
         .trunk
@@ -9721,12 +9995,56 @@ fn window_meditation(
         == turns.len()
         && keep_from <= ask
     {
-        return false;
+        return None;
     }
     let prompt = state.prompt_of(shape);
     if !forced && prompt <= window.saturating_sub(reserve) {
+        return None;
+    }
+    Some(WindowSplit {
+        window,
+        native,
+        fork_room,
+        ask,
+        steps,
+        keep_from,
+        prompt,
+    })
+}
+
+/// The automatic meditation (#617), checked before every trunk request on
+/// `shape`: when serve knows the window, the regimen has not turned it off
+/// ([`crate::meditation::policy::MEDITATION_WINDOW`]), no tangent is open, working
+/// memory holds an entry and the trunk holds turns the refill would drop,
+/// and the prompt as sized (#588) would leave less than the reserve
+/// ([`reserve_of`]) of the window: the trunk is refilled, and the turn's own
+/// messages so far ride after the refill as they rode after the trunk. Otherwise the request
+/// goes as it is, as Pi, `OpenCode` 2 and Qwen Code all send it when there is
+/// nothing to compact.
+fn window_meditation(
+    template: &RequestShape,
+    state: &mut State,
+    shape: &mut RequestShape,
+    forced: bool,
+    summary: Option<&crate::meditation::native::Summary>,
+) -> bool {
+    // Under a native summary the refill carries it, made before (#936):
+    // with none in hand there is nothing to refill with.
+    if carries_native(state) && summary.is_none() {
         return false;
     }
+    let Some(WindowSplit {
+        window,
+        native,
+        fork_room,
+        ask,
+        steps,
+        keep_from,
+        prompt,
+    }) = window_split(template, state, shape, forced)
+    else {
+        return false;
+    };
     let mut own = shape.messages.split_off(state.trunk.len());
     // The running turn split (#813, #931): its ask, then its last step --
     // the pending call and its result; the steps before it are compacted.
@@ -9747,6 +10065,7 @@ fn window_meditation(
         ),
         None,
         (&dropped, &riding),
+        summary,
     );
     if let Event::Meditated { turn_steps, .. } = &mut meditated {
         *turn_steps = (steps > 0).then(|| {
@@ -9813,8 +10132,11 @@ fn retried(
     state: &mut State,
     shape: &mut RequestShape,
     (turn, cancel): (u32, &Cancel),
+    summary: Option<&crate::meditation::native::Summary>,
 ) -> Option<u64> {
-    if state.overflow_retried == Some(turn) || !window_meditation(template, state, shape, true) {
+    if state.overflow_retried == Some(turn)
+        || !window_meditation(template, state, shape, true, summary)
+    {
         return None;
     }
     state.overflow_retried = Some(turn);
@@ -10166,8 +10488,8 @@ fn turn_over(template: &RequestShape, state: &mut State) {
         .interview
         .as_ref()
         .filter(|_| state.tangent.is_none())
+        .filter(|_| !nothing_to_refill(state))
         .and_then(|interview| {
-            interview.object.live().next()?;
             interview
                 .meditations
                 .due(state.turns - state.turns_at_meditation, state.trunk_tokens)
@@ -12530,12 +12852,7 @@ fn pool_settled(template: &RequestShape, state: &mut State) -> bool {
 fn pool_refusal(state: &State, to: Option<&str>) -> Option<Refusal> {
     if state.tangent.is_some() {
         Some(Refusal::TangentOpen)
-    } else if state.turns == 0
-        || state
-            .interview
-            .as_ref()
-            .is_none_or(|interview| interview.object.live().next().is_none())
-    {
+    } else if nothing_to_refill(state) {
         Some(Refusal::NothingToMeditate)
     } else {
         to.and_then(|to| graph_refusal(state, to))
@@ -12550,11 +12867,7 @@ fn declared_now(template: &RequestShape, state: &mut State) -> bool {
     let Some(DeclaredMeditation { to }) = state.declared_after_pool.take() else {
         return false;
     };
-    let has_memory = state
-        .interview
-        .as_ref()
-        .is_some_and(|interview| interview.object.live().next().is_some());
-    if has_memory && state.tangent.is_none() {
+    if !nothing_to_refill(state) && state.tangent.is_none() {
         meditation(template, state, crate::meditation::Reason::Operator, to);
     }
     true
@@ -16686,6 +16999,8 @@ pub(in crate::drive) mod tests {
                 phase_document: None,
                 newest_turn_tokens: None,
                 refilled_anyway: None,
+                carry: log::MeditationCarry::Render,
+                summary_tokens: None,
                 operator_changes: None,
                 unaddressed: None,
                 at_turn: 1,
@@ -17258,6 +17573,8 @@ pub(in crate::drive) mod tests {
                 phase_document: None,
                 newest_turn_tokens: None,
                 refilled_anyway: None,
+                carry: Some(log::MeditationCarry::Render),
+                summary_tokens: None,
                 operator_changes: None,
                 unaddressed: None,
                 at_turn: 1,
@@ -17962,11 +18279,11 @@ pub(in crate::drive) mod tests {
                     .map(|it| it.tag())
                     .collect::<Vec<_>>()
             ),
-            "final cancelled max_steps timeout failed api_cap"
+            "final cancelled max_steps timeout failed api_cap summary_failed"
         );
         assert_eq!(
             tags(&Lane::ALL.iter().map(|it| it.tag()).collect::<Vec<_>>()),
-            "trunk interview audit warm"
+            "trunk interview audit warm summary"
         );
     }
 
@@ -25904,6 +26221,266 @@ pub(in crate::drive) mod tests {
             .collect()
     }
 
+    /// The meditation lines' carries, in order.
+    fn carries(log: &[Logged]) -> Vec<log::MeditationCarry> {
+        log.iter()
+            .filter_map(|logged| match &logged.event {
+                Event::Meditated { carry, .. } => Some(*carry),
+                _ => None,
+            })
+            .collect()
+    }
+
+    /// Two settled turns: what a native test waits for.
+    fn two_settled(log: &[Logged]) -> bool {
+        log.iter()
+            .filter(|logged| matches!(logged.event, Event::TurnSettled { .. }))
+            .count()
+            == 2
+            && settled(log)
+    }
+
+    /// #936: under `meditation_carry = "native_summary"`, a declared
+    /// meditation -- with interviews off, so working memory is empty --
+    /// asks the model for a summary on its own lane, under Qwen Code's
+    /// compression prompt, the history after it and the directive last, no
+    /// tools; and the refill carries the summary, its analysis stripped, in
+    /// the render's place, then the model's acknowledgement. No turn of the
+    /// old trunk rides, and the next ask runs on it.
+    #[test]
+    fn a_declared_meditation_under_a_native_summary_carries_the_summary_not_the_render() {
+        const SNAPSHOT: &str = "<state_snapshot>a tracker for one team</state_snapshot>";
+        let mut interview = interviewing(&[]);
+        interview.meditations.carry = log::MeditationCarry::NativeSummary;
+        let session = Session::open_with(
+            Canned::new([
+                deltas(&["a tracker, for one team"]),
+                deltas(&[&format!(
+                    "<analysis>they want a tracker</analysis>\n{SNAPSHOT}"
+                )]),
+                deltas(&["started on the schema"]),
+            ]),
+            template(),
+            None,
+            None,
+            None,
+            Some(interview),
+        );
+        session
+            .ask("what are we building?", None)
+            .expect("accepted");
+        wait_until(&session, "turn one", settled);
+        session
+            .declare_meditation(None)
+            .expect("admitted, though working memory is empty");
+        let log = wait_until(&session, "the meditation", meditated);
+        let sent = session.shared.transport.sent();
+        let asked = &sent[1];
+        assert_eq!(asked.messages[0].role, Role::System);
+        assert_eq!(
+            asked.messages[0].content,
+            crate::meditation::native::PROMPT.trim()
+        );
+        assert!(
+            asked
+                .messages
+                .iter()
+                .any(|message| message.content == "what are we building?")
+        );
+        assert_eq!(
+            asked
+                .messages
+                .last()
+                .map(|message| message.content.as_str()),
+            Some(crate::meditation::native::DIRECTIVE)
+        );
+        assert!(asked.tools.is_empty());
+        assert!(log.iter().any(|logged| matches!(
+            logged.event,
+            Event::Requested {
+                lane: Lane::Summary,
+                ..
+            }
+        )));
+        let trunk = session.trunk();
+        let refill = crate::meditation::render::refill(&template().messages, SNAPSHOT);
+        assert_eq!(&trunk[..refill.len()], refill.as_slice(), "{trunk:#?}");
+        assert_eq!(trunk.len(), refill.len() + 1, "{trunk:#?}");
+        assert_eq!(trunk[refill.len()].role, Role::Assistant);
+        assert_eq!(trunk[refill.len()].content, crate::meditation::native::ACK);
+        let Some(Event::Meditated {
+            carry,
+            summary_tokens,
+            render,
+            carried_entries,
+            ..
+        }) = log
+            .iter()
+            .rev()
+            .map(|logged| &logged.event)
+            .find(|event| matches!(event, Event::Meditated { .. }))
+        else {
+            unreachable!("waited for")
+        };
+        assert_eq!(*carry, log::MeditationCarry::NativeSummary);
+        assert_eq!(render, SNAPSHOT, "the summary, not a render");
+        assert!(summary_tokens.is_some_and(|tokens| tokens > 0));
+        assert_eq!(*carried_entries, 0);
+        session.ask("go on", None).expect("accepted");
+        wait_until(&session, "turn two", two_settled);
+        assert!(
+            session.shared.transport.sent()[2]
+                .messages
+                .starts_with(&trunk)
+        );
+        reads_whole(&session);
+    }
+
+    /// #936: under a native summary, a window meditation inside a turn waits
+    /// for its summary on the turn's thread -- as `OpenCode` 2 and Qwen Code
+    /// compress before the next request -- and the request after it carries
+    /// the summary and the acknowledgement, then the turn's ask and its last
+    /// step.
+    #[test]
+    fn a_window_meditation_under_a_native_summary_waits_for_it_inside_the_turn() {
+        const SNAPSHOT: &str = "<state_snapshot>blank lines are dropped</state_snapshot>";
+        let mut acts = two_turns_measuring(90_000);
+        acts.insert(3, deltas(&[SNAPSHOT]));
+        let session = windowed(
+            acts,
+            100_000,
+            crate::meditation::policy::Served {
+                carry: log::MeditationCarry::NativeSummary,
+                ..crate::meditation::policy::Served::default()
+            },
+        );
+        session
+            .ask("how are blank lines treated?", None)
+            .expect("accepted");
+        wait_until(&session, "turn one", settled);
+        session.ask("second", None).expect("accepted");
+        let log = wait_until(&session, "turn two", two_settled);
+        assert_eq!(settled_as(&log), Some(SettleReason::Final), "{log:#?}");
+        assert_eq!(window_meditations(&log).len(), 1, "{log:#?}");
+        assert_eq!(carries(&log), [log::MeditationCarry::NativeSummary]);
+        let sent = session.shared.transport.sent();
+        assert_eq!(
+            sent[3].messages[0].content,
+            crate::meditation::native::PROMPT.trim()
+        );
+        let after = &sent[4].messages;
+        assert!(
+            after
+                .iter()
+                .any(|message| message.content.contains(SNAPSHOT)),
+            "{after:#?}"
+        );
+        assert!(
+            after
+                .iter()
+                .any(|message| message.content == crate::meditation::native::ACK)
+        );
+        assert!(after.iter().any(|message| message.content == "second"));
+        assert!(
+            !after
+                .iter()
+                .any(|message| message.content == "how are blank lines treated?"),
+            "turn one is compacted away"
+        );
+        reads_whole(&session);
+    }
+
+    /// #936: a window meditation due before a turn's first request, under a
+    /// native summary: the ask is admitted at once and the summary made on
+    /// the turn's thread, then the first request opened on the refill --
+    /// the operator's command never waits on the model.
+    #[test]
+    fn a_turn_opening_past_the_line_under_a_native_summary_summarizes_on_its_thread() {
+        const SNAPSHOT: &str = "<state_snapshot>the parser drops blank lines</state_snapshot>";
+        let mut acts = two_turns_measuring(1_000);
+        // Turn one's answer measures past the line: turn two opens on it.
+        acts[1] = vec![
+            Step::Delta("done".to_owned()),
+            Step::Timings(Timings {
+                prompt_n: Some(90_000),
+                cache_n: Some(0),
+                ..Timings::default()
+            }),
+        ];
+        acts.truncate(2);
+        acts.push(deltas(&[SNAPSHOT]));
+        acts.push(deltas(&["answered on the refill"]));
+        let session = windowed(
+            acts,
+            100_000,
+            crate::meditation::policy::Served {
+                carry: log::MeditationCarry::NativeSummary,
+                ..crate::meditation::policy::Served::default()
+            },
+        );
+        session
+            .ask("how are blank lines treated?", None)
+            .expect("accepted");
+        wait_until(&session, "turn one", settled);
+        session.ask("second", None).expect("accepted");
+        let log = wait_until(&session, "turn two", two_settled);
+        assert_eq!(settled_as(&log), Some(SettleReason::Final), "{log:#?}");
+        assert_eq!(
+            carries(&log),
+            [log::MeditationCarry::NativeSummary],
+            "{log:#?}"
+        );
+        let sent = session.shared.transport.sent();
+        assert_eq!(
+            sent[2].messages[0].content,
+            crate::meditation::native::PROMPT.trim()
+        );
+        assert!(
+            sent[3]
+                .messages
+                .iter()
+                .any(|message| message.content.contains(SNAPSHOT))
+        );
+        assert_eq!(
+            sent[3]
+                .messages
+                .last()
+                .map(|message| message.content.as_str()),
+            Some("second")
+        );
+        reads_whole(&session);
+    }
+
+    /// #936: a native summary that comes back empty -- all analysis -- is a
+    /// failure: the turn settles `summary_failed`, no meditation is logged,
+    /// and the render is never carried in its place.
+    #[test]
+    fn an_empty_native_summary_settles_the_turn_summary_failed() {
+        let mut acts = two_turns_measuring(90_000);
+        acts.insert(3, deltas(&["<analysis>only thinking</analysis>"]));
+        let session = windowed(
+            acts,
+            100_000,
+            crate::meditation::policy::Served {
+                carry: log::MeditationCarry::NativeSummary,
+                ..crate::meditation::policy::Served::default()
+            },
+        );
+        session
+            .ask("how are blank lines treated?", None)
+            .expect("accepted");
+        wait_until(&session, "turn one", settled);
+        session.ask("second", None).expect("accepted");
+        let log = wait_until(&session, "turn two", two_settled);
+        assert_eq!(
+            settled_as(&log),
+            Some(SettleReason::SummaryFailed),
+            "{log:#?}"
+        );
+        assert!(carries(&log).is_empty(), "no meditation: {log:#?}");
+        reads_whole(&session);
+    }
+
     /// #931: the reserve is Qwen Code's native one -- a 100,000 window keeps
     /// 33,000 -- so a step whose prompt sits at 70,000 meditates first,
     /// where the old reserve (the larger of 20,000 and the output cap) let it
@@ -28810,6 +29387,7 @@ pub(in crate::drive) mod tests {
                     at_trunk_tokens: None,
                     tail_tokens,
                     outputs: state,
+                    carry: crate::formats::log::MeditationCarry::Render,
                     render_budget: None,
                     window_off: false,
                     warm: false,
@@ -29152,6 +29730,7 @@ pub(in crate::drive) mod tests {
                 at_trunk_tokens: None,
                 tail_tokens: 0,
                 outputs: log::MeditationToolOutputs::Evict,
+                carry: crate::formats::log::MeditationCarry::Render,
                 render_budget: None,
                 window_off: false,
                 warm: false,
@@ -29224,6 +29803,7 @@ pub(in crate::drive) mod tests {
                     at_trunk_tokens: None,
                     tail_tokens,
                     outputs: log::MeditationToolOutputs::Evict,
+                    carry: crate::formats::log::MeditationCarry::Render,
                     render_budget: None,
                     window_off: false,
                     warm: false,
@@ -29328,6 +29908,7 @@ pub(in crate::drive) mod tests {
                 at_trunk_tokens: Some(200),
                 tail_tokens: 0,
                 outputs: log::MeditationToolOutputs::Evict,
+                carry: crate::formats::log::MeditationCarry::Render,
                 render_budget: None,
                 window_off: false,
                 warm: false,
@@ -29368,6 +29949,7 @@ pub(in crate::drive) mod tests {
                 at_trunk_tokens: Some(245),
                 tail_tokens: 0,
                 outputs: log::MeditationToolOutputs::Evict,
+                carry: crate::formats::log::MeditationCarry::Render,
                 render_budget: None,
                 window_off: false,
                 warm: false,
@@ -29420,6 +30002,7 @@ pub(in crate::drive) mod tests {
                 at_trunk_tokens: Some(100),
                 tail_tokens: 0,
                 outputs: log::MeditationToolOutputs::Evict,
+                carry: crate::formats::log::MeditationCarry::Render,
                 render_budget: None,
                 window_off: false,
                 warm: false,
@@ -29474,6 +30057,7 @@ pub(in crate::drive) mod tests {
                 at_trunk_tokens: None,
                 tail_tokens: 0,
                 outputs: log::MeditationToolOutputs::Evict,
+                carry: crate::formats::log::MeditationCarry::Render,
                 render_budget: None,
                 window_off: false,
                 warm: false,
@@ -29517,6 +30101,7 @@ pub(in crate::drive) mod tests {
                 at_trunk_tokens: None,
                 tail_tokens: 0,
                 outputs: log::MeditationToolOutputs::Evict,
+                carry: crate::formats::log::MeditationCarry::Render,
                 render_budget: None,
                 window_off: false,
                 warm: false,
@@ -29685,6 +30270,8 @@ pub(in crate::drive) mod tests {
                 phase_document: None,
                 newest_turn_tokens: None,
                 refilled_anyway: None,
+                carry: Some(log::MeditationCarry::Render),
+                summary_tokens: None,
                 operator_changes: None,
                 unaddressed: None,
                 at_turn: 1,

@@ -4,6 +4,8 @@ A scenario (#760) is a drive written down as steps and expectations. `diet-drive
 
 `split-turn.jsonl` (#813) runs on the same windowed substrate: a turn whose own steps outgrow the window, split by the window meditation inside it, then a second ask whose request carries the split turn whole: the steps the split compacted rejoin the trunk when the turn settles (#884).
 
+`native-summary.jsonl` (#936) runs the native arm's refill: interviews off, so working memory stays empty, and `meditation_carry = "native_summary"`. A declared meditation asks for a summary on the `summary` lane, and the refill carries it, not a render.
+
 `refutation.jsonl` (#878) runs the refutation interview: turn 1's operator fork, cut as the message arrives (#904), answers `refute_beliefs` with `[]` and settles `decline`; a failed `cat` then refutes, at confidence 9, the note a scoping fork recorded, the same call's second item (a confidence of 11) refused beside it, and the next refill renders the note as it was held. `refutation-nothing.jsonl` asks it once and is answered in prose with no call, so the fork settles `unparseable`; turn 3's trunk calls `refute_beliefs` unprompted and writes its refutation on the `trunk` lane, pointing at the step's request.
 
 `--dry-run` rehearses a scenario under the regimen a live run would take, on `canned-scenario-hosted`, and reports the plan it would spend: requests by lane and fork kind, `sized_tokens` summed, output at `max_tokens`, and the worst case, labelled a bound (`diet/drive/BEGIN.md`, #555).
