@@ -514,6 +514,7 @@ pub fn project_in(
                 compaction_persists,
                 phase_document,
                 run,
+                rehearsing_as,
                 ..
             },
         ..
@@ -565,6 +566,8 @@ pub fn project_in(
         version: Some(crate::formats::record::VERSION),
         // Which repeat of which script, as `session.start` names it (#910).
         run: run.clone(),
+        // The rung a rehearsal ran under the declarations of (#926).
+        rehearsing_as: rehearsing_as.clone(),
     }];
     events.extend(walk.events);
     Ok(Projection {
@@ -2344,6 +2347,7 @@ mod tests {
             api_retries: None,
             api_retry_after_max_seconds: None,
             run: None,
+            rehearsing_as: None,
         }
     }
 

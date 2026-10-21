@@ -62,7 +62,11 @@ Only the surface's own tests (`npx --yes pnpm@11.20.0 -C exercise verify`) also 
     | `retry-after` | the agent's retry ignores it; the provider's, off by default, honours it to 60 s and fails past it | honoured, uncapped | honoured on 429 and 503 |
 
     Pi and OpenCode 2 agree that retries are on by default and start at 2 s, doubling: that is the backoff here. They disagree on the count and on `retry-after`. Qwen Code honours `retry-after`, which settles that tie. Nobody settles the count, so the regimen declares it, with no default.
-  - **A dry run before a live one** (#555): `diet-drive scenario FILE --dry-run [--regimen R] --out DIR` rehearses the script on `canned-scenario-hosted` under the regimen the live run would take, `--regimen` or the scenario's `live_regimen`. Only its `substrate` and `substrate_hardware` are swapped, so its limits, sampler, effort and levers run as written. The script's own replies answer, nothing leaves loopback, and no key but the rehearsal's is read. The report's `plan` names:
+  - **A dry run before a live one** (#555): `diet-drive scenario FILE --dry-run [--regimen R] --out DIR` rehearses the script on `canned-scenario-hosted` under the regimen the live run would take, `--regimen` or the scenario's `live_regimen`. Only its `substrate` and `substrate_hardware` are swapped, so its limits, sampler, effort and levers run as written. The script's own replies answer, nothing leaves loopback, and no key but the rehearsal's is read.
+    - **It rehearses under the rung's declarations** (#926): serve is told `--rehearse-as RUNG`. Its claim, transport, key and model stay the canned entry's. Its window, output cap, efforts, sampler, vision and thinking are the rung's, read from the rung's registry table. So the rehearsal is refused at start exactly where a live run on the rung would be, and admits an image exactly where the rung takes one. The log's `session.start` (v19) and the record's start (v4) name the rung as `rehearsing_as`.
+    - **A drive that fails or stops short still plans,** from what its log holds. The plan says `"complete": false`, with the failure as `stopped_by`. A log that does not read is `unplanned`, naming why.
+
+    The report's `plan` names:
     - the rung, its `weights_model_id`, and the regimen's limits;
     - the rehearsal's requests by lane, and within `interview` and `audit` by fork kind, with its retries and attempts;
     - its requests' `sized_tokens` summed, and their `max_tokens` summed, an upper bound on their output;

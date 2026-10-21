@@ -371,6 +371,9 @@ pub enum Event {
         /// Which repeat of which script the session is (#910), when serve
         /// was told with `--run`.
         run: Option<log::Run>,
+        /// The rung whose declarations a rehearsal ran under (#926), when
+        /// serve was told with `--rehearse-as`.
+        rehearsing_as: Option<String>,
     },
     /// An ask was accepted, and a turn begins on it.
     Asked {
@@ -3453,6 +3456,7 @@ impl<S: Streaming + 'static> Session<S> {
             phases,
             phase_document,
             run: None,
+            rehearsing_as: None,
         });
         Self::sharing(Shared {
             transport,
@@ -3513,6 +3517,21 @@ impl<S: Streaming + 'static> Session<S> {
     #[must_use]
     pub fn without_vision(self, substrate: &str) -> Self {
         self.shared.lock().blind = Some(substrate.to_owned());
+        self
+    }
+
+    /// This session, its `session.start` naming the rung a rehearsal runs
+    /// under the declarations of (#926): what serve was told with
+    /// `--rehearse-as`.
+    #[must_use]
+    pub fn rehearsing_as(self, rung: &str) -> Self {
+        if let Some(Logged {
+            event: Event::Started { rehearsing_as, .. },
+            ..
+        }) = self.shared.lock().log.first_mut()
+        {
+            *rehearsing_as = Some(rung.to_owned());
+        }
         self
     }
 
@@ -5046,8 +5065,10 @@ pub fn line_of(logged: &Logged) -> log::Line {
             build,
             hosted,
             run,
+            rehearsing_as,
         } => log::Event::SessionStart {
             run: run.clone(),
+            rehearsing_as: rehearsing_as.clone(),
             phase_document: phase_document.clone(),
             build_commit: build.as_ref().map(|(commit, _)| commit.clone()),
             build_dirty: build.as_ref().map(|(_, dirty)| *dirty),
@@ -16849,6 +16870,7 @@ pub(in crate::drive) mod tests {
             Event::Started {
                 phase_document: None,
                 run: None,
+                rehearsing_as: None,
                 bash_timeout_ms: None,
                 shown_roots: None,
                 opened: 1_790_000_000_000,
@@ -17455,6 +17477,7 @@ pub(in crate::drive) mod tests {
                 api_retries: None,
                 api_retry_after_max_seconds: None,
                 run: None,
+                rehearsing_as: None,
             },
             log::Event::Ask {
                 turn: 1,

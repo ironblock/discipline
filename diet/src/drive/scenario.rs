@@ -528,7 +528,7 @@ impl Drop for Rehearsal {
 }
 
 /// The canned hosted substrate a dry run rehearses on.
-const REHEARSED_ON: &str = "canned-scenario-hosted";
+pub const REHEARSED_ON: &str = "canned-scenario-hosted";
 
 /// `regimen`, the one a live run would take, as a dry run rehearses it: a
 /// copy in the temporary directory with its `substrate` and
@@ -2474,6 +2474,10 @@ fn running(
         .arg(&record)
         .stdin(std::process::Stdio::null())
         .stdout(std::process::Stdio::piped());
+    // A dry run rehearses under its rung's declarations (#926).
+    if let Some((intended, _)) = &intended {
+        serve.arg("--rehearse-as").arg(&intended.rung);
+    }
     if let Some(run) = &options.run {
         serve.arg("--run").arg(crate::formats::log::run_text(run));
     }
@@ -2591,15 +2595,27 @@ fn running(
     if !clean {
         said["void"] = serde_json::Value::String("serve".to_owned());
     }
+    // A dry run's plan, from whatever the log holds (#926): complete only
+    // when the drive ran its last step and serve exited cleanly.
+    if let Some((intended, _)) = &intended {
+        // A log that does not read has no plan, and says why.
+        let mut plan = std::fs::read_to_string(&log)
+            .map_err(|why| Failure(format!("the log cannot be read: {why}")))
+            .and_then(|written| intended.plan(&written))
+            .unwrap_or_else(|Failure(why)| serde_json::json!({"unplanned": why}));
+        plan["complete"] =
+            serde_json::Value::Bool(outcome.is_ok() && clean && plan.get("unplanned").is_none());
+        if let Err(Failure(why)) = &outcome {
+            plan["stopped_by"] = serde_json::Value::String(why.clone());
+        }
+        said["plan"] = plan;
+    }
     let bound = outcome?;
     if !clean {
         return Err(Failure(format!("serve did not exit cleanly: {exited:?}")));
     }
     let written = std::fs::read_to_string(&log)
         .map_err(|why| Failure(format!("the log cannot be read: {why}")))?;
-    if let Some((intended, _)) = &intended {
-        said["plan"] = intended.plan(&written)?;
-    }
     let missed = unmet(&scenario, &written, &bound);
     said["unmet"] = serde_json::json!(missed);
     let met = missed.is_empty() && unmatched.is_empty();

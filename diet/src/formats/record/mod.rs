@@ -45,14 +45,17 @@ use crate::formats::spelling;
 
 /// The version this module writes, as a record's `start` names it (#583):
 /// 2 was the first that names one, spelling the boundary `meditation`; 3
-/// (#910) adds the start's `run`.
-pub const VERSION: i64 = 3;
+/// (#910) adds the start's `run`; 4 (#926) its `rehearsing_as`.
+pub const VERSION: i64 = 4;
 
-/// Every version this module reads: 1, a start naming none, then 2 and 3.
-pub const READS: &[i64] = &[1, 2, 3];
+/// Every version this module reads: 1, a start naming none, then 2 to 4.
+pub const READS: &[i64] = &[1, 2, 3, 4];
 
 /// The version a start's `run` arrived in (#910).
 const RUN_ARRIVED_IN: i64 = 3;
+
+/// The version a start's `rehearsing_as` arrived in (#926).
+const REHEARSING_AS_ARRIVED_IN: i64 = 4;
 
 #[derive(Parser)]
 #[grammar = "../formats/record/grammar.pest"]
@@ -1203,6 +1206,10 @@ pub enum Event {
         /// Which repeat of which script the session was (v3, #910), as its
         /// log's `session.start` names it. Absent, it was no counted repeat.
         run: Option<log::Run>,
+        /// The rung whose declarations a rehearsal on a canned substrate ran
+        /// under (v4, #926): the claim is the canned one, and this says what
+        /// it was refused and admitted under. Absent, its own substrate's.
+        rehearsing_as: Option<String>,
     },
     /// A turn happened.
     Turn {
@@ -3915,6 +3922,7 @@ fn take_optional_word<T>(
 fn start(members: &mut BTreeMap<String, Value>, of: &'static str) -> Result<Event, ParseError> {
     Ok(Event::Start {
         run: take_run(members, of)?,
+        rehearsing_as: take_rehearsing_as(members, of)?,
         regime: Box::new(regime(&mut take_object(members, of, "regime")?, of)?),
         source: source(members, of)?,
         regimen_sha256: take_optional_digest(members, of, "regimen_sha256")?,
@@ -4162,6 +4170,30 @@ fn take_payload(
 /// `take_digests` gives one function up: a string that is not a digest is a
 /// shape error, because nothing downstream can compare it.
 /// A row's phase (#787): `phase` and `phase_sha256`, both or neither.
+/// A start's `rehearsing_as` (v4, #926): a rung's id, refused in a record
+/// of version 3 or less, so it is taken before `version` is.
+fn take_rehearsing_as(
+    members: &mut BTreeMap<String, Value>,
+    of: &'static str,
+) -> Result<Option<String>, ParseError> {
+    let version = match members.get("version") {
+        Some(Value::Integer(version)) => *version,
+        _ => 1,
+    };
+    let rung = take_optional_string(members, of, "rehearsing_as")?;
+    if rung.is_some() && version < REHEARSING_AS_ARRIVED_IN {
+        return Err(SchemaError::Inconsistent {
+            of,
+            why: format!(
+                "`rehearsing_as` arrived in version {REHEARSING_AS_ARRIVED_IN}: a version \
+                 {version} record carries none"
+            ),
+        }
+        .into());
+    }
+    Ok(rung)
+}
+
 /// A start's `run` (v3, #910): `script_sha256`, `repeat` from 1 to `of`,
 /// and a pair's `arm` and `pair`, both or neither, as the log's
 /// `session.start` carries it. Refused in a record of version 2 or less,
@@ -5350,8 +5382,10 @@ fn event_value(event: &Event) -> BTreeMap<String, Value> {
             phase,
             version,
             run,
+            rehearsing_as,
         } => {
             put_phase(&mut members, phase.as_ref());
+            members.put_optional("rehearsing_as", rehearsing_as.clone().map(Value::String));
             if let Some(run) = run {
                 let mut inner = BTreeMap::from([
                     (

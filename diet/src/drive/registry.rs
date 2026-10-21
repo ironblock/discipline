@@ -42,6 +42,114 @@ pub fn registry_sha256() -> String {
     crate::digest::sha256_hex(REGISTRY.as_bytes())
 }
 
+/// The keys a rehearsal takes from the rung it rehearses for (#926), each
+/// with its `_is` beside it: what the rung declares of its requests --
+/// window, output cap, efforts, sampler, vision, thinking -- and nothing
+/// that identifies the claim, its transport or its model.
+pub const REHEARSED: &[&str] = &[
+    "serving_context",
+    "max_output_tokens",
+    "efforts",
+    "api_temperature",
+    "api_top_p",
+    "api_top_k",
+    "api_temperature_with_top_p",
+    "api_sampler",
+    "served_vision",
+    "served_use_vision",
+    "thinking",
+];
+
+/// Whether `key` is one [`REHEARSED`] names, or its `_is`.
+fn rehearsed(key: &str) -> bool {
+    REHEARSED
+        .iter()
+        .any(|named| key == *named || key.strip_suffix("_is") == Some(*named))
+}
+
+/// A one-line binding's key, as the scan reads it.
+fn key_of(line: &str) -> Option<&str> {
+    let (key, _) = line.split_once('=')?;
+    let key = key.trim();
+    (!key.is_empty() && key.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'_')).then_some(key)
+}
+
+/// A header line's table name, as [`tables`] reads it.
+fn header_of(trimmed: &str) -> Option<String> {
+    let header = trimmed
+        .split_once('#')
+        .map_or(trimmed, |(header, _)| header)
+        .trim();
+    header
+        .strip_prefix('[')
+        .and_then(|rest| rest.strip_suffix(']'))
+        .map(|name| name.replace('"', ""))
+}
+
+/// `document` with `canned`'s table declaring what `rung`'s declares of
+/// its requests (#926): each [`REHEARSED`] binding of `canned` dropped and
+/// each of `rung`'s put at its table's end, line for line. Every other line,
+/// and every other table, as written. What a rehearsal on `canned` reads,
+/// so it is refused at start where a run on `rung` would be.
+///
+/// # Errors
+///
+/// When either table is missing, or `rung` declares nothing a rehearsal
+/// takes.
+pub fn rehearsing_as(document: &str, canned: &str, rung: &str) -> Result<String, String> {
+    let (canned_table, rung_table) = (format!("substrate.{canned}"), format!("substrate.{rung}"));
+    let present = tables(document);
+    for table in [&canned_table, &rung_table] {
+        if !present.contains_key(table) {
+            return Err(format!("the registry has no `[{table}]`"));
+        }
+    }
+    // Each line, with the table it sits in and whether it is a one-line
+    // binding the scan reads.
+    let mut placed: Vec<(&str, String, bool)> = Vec::new();
+    let (mut current, mut long) = (String::new(), false);
+    for line in document.lines() {
+        if line.matches("\"\"\"").count() % 2 == 1 {
+            long = !long;
+            placed.push((line, current.clone(), false));
+            continue;
+        }
+        if !long && let Some(name) = header_of(line.trim()) {
+            current = name;
+        }
+        placed.push((line, current.clone(), !long));
+    }
+    let taken: Vec<&str> = placed
+        .iter()
+        .filter(|(line, table, read)| {
+            *read && *table == rung_table && key_of(line).is_some_and(rehearsed)
+        })
+        .map(|(line, _, _)| *line)
+        .collect();
+    if taken.is_empty() {
+        return Err(format!("`{rung}` declares nothing a rehearsal takes"));
+    }
+    let last = placed
+        .iter()
+        .rposition(|(line, table, _)| *table == canned_table && !line.trim().is_empty())
+        .ok_or_else(|| format!("the registry's `[{canned_table}]` binds nothing"))?;
+    let mut out = String::new();
+    for (at, (line, table, read)) in placed.iter().enumerate() {
+        let dropped = *read && *table == canned_table && key_of(line).is_some_and(rehearsed);
+        if !dropped {
+            out.push_str(line);
+            out.push('\n');
+        }
+        if at == last {
+            for line in &taken {
+                out.push_str(line);
+                out.push('\n');
+            }
+        }
+    }
+    Ok(out)
+}
+
 /// One `[kind.id]` table, as the scan reads it.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct Table {
@@ -937,5 +1045,51 @@ mod tests {
         );
         assert!(!table.strings.contains_key("weights_main"));
         assert_eq!(table.strings["engine_name"], "e");
+    }
+
+    /// #926: a rehearsal's registry gives the canned table the rung's
+    /// declarations, and nothing else of the rung's: its window, output cap,
+    /// efforts, sampler and vision; its claim, model and transport stay the
+    /// canned entry's.
+    #[test]
+    fn a_rehearsals_registry_takes_the_rungs_declarations_alone() {
+        let (canned, rung) = ("canned-scenario-hosted", "anthropic-claude-haiku-5-5");
+        let rehearsal = rehearsing_as(REGISTRY, canned, rung).expect("overlaid");
+        let (was, now, of) = (
+            identity(REGISTRY, canned).expect("the canned entry"),
+            identity(&rehearsal, canned).expect("the rehearsal's entry"),
+            identity(REGISTRY, rung).expect("the rung"),
+        );
+        assert_eq!(now.api, of.api, "the rung's declarations");
+        assert_eq!(now.thinking, of.thinking);
+        assert_eq!(
+            crate::drive::served::takes_images(&now),
+            crate::drive::served::takes_images(&of)
+        );
+        assert_eq!(
+            serving_context(&rehearsal, canned),
+            serving_context(REGISTRY, rung)
+        );
+        assert_eq!(
+            (
+                now.weights,
+                now.model_id,
+                now.hardware_fingerprint,
+                now.engine
+            ),
+            (
+                was.weights,
+                was.model_id,
+                was.hardware_fingerprint,
+                was.engine
+            ),
+            "the canned claim"
+        );
+        assert_eq!(
+            identity(&rehearsal, rung),
+            identity(REGISTRY, rung),
+            "the rung as it was"
+        );
+        assert!(rehearsing_as(REGISTRY, canned, "no-such-rung").is_err());
     }
 }
