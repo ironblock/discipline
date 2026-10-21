@@ -362,6 +362,9 @@ export type TrunkWaited = V0.TrunkWaitedLine;
 /** A scenario runner's grade of an attempt, at the operator's word and never sent to the model (v18, #942). Folded,
  * not yet drawn. */
 export type Grade = V0.GradeLine;
+/** A meditation a session under compaction depth `none` was asked for and did not make (v21, #932). Folded, not yet
+ * drawn. */
+export type MeditationSkipped = V0.MeditationSkippedLine;
 
 export type LogLine =
   | SessionStart
@@ -395,6 +398,7 @@ export type LogLine =
   | ForkSkipped
   | RequestRetried
   | Grade
+  | MeditationSkipped
   | TrunkWaited
   | WarrantGated
   | Flag

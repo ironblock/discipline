@@ -1601,7 +1601,10 @@ fn serving_interview(
         || self_capture.is_some()
         || mechanical
         || refutation.is_some()
-        || native)
+        || native
+        // #932: a session that never meditates keeps its policy, so a
+        // declared meditation is skipped rather than refused.
+        || meditations.meditating == diet::meditation::policy::Meditating::Never)
         .then(|| Interview {
             rules,
             object,
