@@ -31,6 +31,11 @@ pub struct Scenario {
     /// Files the runner copies into the fresh worktree before serve starts:
     /// each path in the worktree, and its source beside the scenario.
     pub seed: BTreeMap<String, String>,
+    /// The asks, by their place among the asks, that are fixed (#908): an
+    /// operator script lists its first; every later ask was typed in answer
+    /// to what the model did, unless a person who knows it was written in
+    /// advance adds it. Empty for a scenario written by hand.
+    pub fixed_asks: Vec<u64>,
     /// The canned substrate's replies, in the file's order.
     pub replies: Vec<Reply>,
     /// Its canned classifier's rules, in the file's order (#862).
@@ -763,6 +768,17 @@ fn header(mut fields: Fields) -> Result<Scenario, ScenarioError> {
     let head = fields.text("head")?;
     let live_regimen = fields.maybe_text("live_regimen")?;
     let approvals = fields.maybe_text("approvals")?;
+    let fixed_asks = match fields.take("fixed_asks") {
+        None => Vec::new(),
+        Some(Value::Array(indices)) => indices
+            .into_iter()
+            .map(|index| match index {
+                Value::Integer(n) if n >= 0 => Ok(n.unsigned_abs()),
+                _ => Err(fields.wrong("each of `fixed_asks` an ask's place, 0 or more")),
+            })
+            .collect::<Result<_, _>>()?,
+        Some(_) => return Err(fields.wrong("`fixed_asks` a list")),
+    };
     let seed = match fields.take("seed") {
         None => BTreeMap::new(),
         Some(Value::Object(seed)) => seed
@@ -791,6 +807,7 @@ fn header(mut fields: Fields) -> Result<Scenario, ScenarioError> {
         head,
         approvals,
         seed,
+        fixed_asks,
         replies: Vec::new(),
         classified: Vec::new(),
         steps: Vec::new(),
@@ -893,6 +910,12 @@ fn reply_of(mut fields: Fields) -> Result<Reply, ScenarioError> {
 /// step that waits for the session to settle and on no other.
 fn step_of(mut fields: Fields) -> Result<(Step, Option<u64>), ScenarioError> {
     let patience = fields.maybe_count("patience")?;
+    // Where an operator script's move was made (#908): for a reader, never
+    // for the runner.
+    match fields.take("place") {
+        None | Some(Value::Object(_)) => {}
+        Some(_) => return Err(fields.wrong("`place` an object")),
+    }
     if patience == Some(0) {
         return Err(fields.wrong("`patience` whole seconds above 0"));
     }

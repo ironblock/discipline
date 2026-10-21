@@ -89,6 +89,9 @@ const SCENARIO: &str = "scenario";
 /// The subcommand that projects a finished log's record offline (#879).
 const RECORD: &str = "record";
 
+/// The subcommand that derives an operator script from a run's log (#908).
+const SCRIPT: &str = "script";
+
 /// The port `diet-drive replay` listens on unless told another.
 const REPLAY_PORT: u16 = 7902;
 
@@ -2839,6 +2842,158 @@ fn record_from_log(args: &[String]) -> ExitCode {
 
 /// `record`'s flags: the log, the regimen, the record's path, and the
 /// recording's directory when given; `None` on a usage error.
+fn script_usage() -> String {
+    String::from(
+        "usage: diet-drive script --log FILE --regimen FILE --out DIR [--name NAME]\n\
+         \x20                        [--canned SCENARIO] [--recording DIR]\n\
+         Derive an operator script from a run's log (#908): a scenario holding\n\
+         every move the operator made -- asks and their files, scoping marks,\n\
+         meditations, flags, edits, phase moves and rulings, tangents, the end --\n\
+         at DIR/NAME.jsonl (NAME `script` unless given), with the head beside it\n\
+         (head.md), the regimen (regimen.toml: --regimen, the one the run ran\n\
+         under) and each attached file (files/). `diet-drive scenario` plays it;\n\
+         the script fixes the inputs, not what comes back. --canned takes\n\
+         another scenario's `reply` and `classify` lines and its worktree `seed`\n\
+         (copied under seed/), for a replay on the canned substrate.\n\
+         --recording is where the run's attached files were kept, the log's\n\
+         directory unless given. A move the format cannot express is refused,\n\
+         naming its line. Exit 0 when written, 1 when an input is unusable or a\n\
+         move is refused, 2 on a usage error, 3 when an output cannot be written.\n",
+    )
+}
+
+/// `diet-drive record` (#879) and `diet-drive script` (#908), which read a
+/// finished log and write beside it; `None` for any other subcommand.
+fn offline(args: &[String]) -> Option<ExitCode> {
+    match args.first().map(String::as_str) {
+        Some(RECORD) if asks_for_help(&args[1..]) => {
+            print!("{}", record_usage());
+            Some(ExitCode::SUCCESS)
+        }
+        Some(RECORD) => Some(record_from_log(&args[1..])),
+        Some(SCRIPT) => Some(operator_script(&args[1..])),
+        _ => None,
+    }
+}
+
+/// `diet-drive script`'s flags, each once: `None` on one it does not take
+/// or one with no value.
+fn script_flags(args: &[String]) -> Option<std::collections::BTreeMap<&'static str, String>> {
+    const FLAGS: [&str; 6] = [
+        "--log",
+        "--regimen",
+        "--out",
+        "--name",
+        "--canned",
+        "--recording",
+    ];
+    let mut flags = std::collections::BTreeMap::new();
+    let mut rest = args.iter();
+    while let Some(flag) = rest.next() {
+        let key = FLAGS.into_iter().find(|key| key == flag)?;
+        flags.insert(key, rest.next()?.clone());
+    }
+    Some(flags)
+}
+
+/// `diet-drive script` (#908): a run's log read back into an operator
+/// script ([`diet::drive::operator_script`]), written beside its head, its
+/// regimen and its files. It starts no serve and reads no profile.
+fn operator_script(args: &[String]) -> ExitCode {
+    use diet::drive::operator_script as script;
+    if asks_for_help(args) {
+        print!("{}", script_usage());
+        return ExitCode::SUCCESS;
+    }
+    let flags = script_flags(args).unwrap_or_default();
+    let (Some(log_path), Some(regimen_path), Some(out)) = (
+        flags.get("--log"),
+        flags.get("--regimen"),
+        flags.get("--out"),
+    ) else {
+        eprint!("{}", script_usage());
+        return ExitCode::from(EXIT_USAGE);
+    };
+    let read = |path: &str| {
+        std::fs::read_to_string(path).map_err(|why| format!("{path} cannot be read: {why}"))
+    };
+    let (log, regimen_text) = match (read(log_path), read(regimen_path)) {
+        (Ok(log), Ok(regimen)) => (log, regimen),
+        (Err(why), _) | (_, Err(why)) => return fail(EXIT_INPUT, &why),
+    };
+    let regimen = match diet::formats::regimen::parse(&regimen_text) {
+        Ok(regimen) => regimen,
+        Err(why) => return fail(EXIT_INPUT, &format!("{regimen_path}: {why:?}")),
+    };
+    let derived = match script::derive(&log, diet::drive::session::priming(&regimen)) {
+        Ok(derived) => derived,
+        Err(why) => return fail(EXIT_INPUT, &format!("{log_path}: {why}")),
+    };
+    let canned = match flags.get("--canned") {
+        None => script::Canned::default(),
+        Some(path) => match read(path)
+            .and_then(|text| script::canned_of(&text).map_err(|why| format!("{path}: {why}")))
+        {
+            Ok(canned) => canned,
+            Err(why) => return fail(EXIT_INPUT, &why),
+        },
+    };
+    let canned_dir = flags
+        .get("--canned")
+        .and_then(|path| std::path::Path::new(path).parent())
+        .map_or_else(
+            || std::path::PathBuf::from("."),
+            std::path::Path::to_path_buf,
+        );
+    let recording = flags.get("--recording").map_or_else(
+        || {
+            std::path::Path::new(log_path).parent().map_or_else(
+                || std::path::PathBuf::from("."),
+                std::path::Path::to_path_buf,
+            )
+        },
+        std::path::PathBuf::from,
+    );
+    let name = flags.get("--name").map_or("script", String::as_str);
+    let dir = std::path::Path::new(out);
+    let written = (|| -> std::io::Result<()> {
+        std::fs::create_dir_all(dir.join("files"))?;
+        std::fs::write(dir.join("head.md"), &derived.head)?;
+        std::fs::write(dir.join("regimen.toml"), &regimen_text)?;
+        for (place, recorded) in &derived.files {
+            std::fs::copy(
+                recording.join(recorded),
+                dir.join("files").join(script::file_name(place)),
+            )?;
+        }
+        for (place, source) in &canned.seed {
+            let to = dir.join("seed").join(place);
+            if let Some(parent) = to.parent() {
+                std::fs::create_dir_all(parent)?;
+            }
+            std::fs::copy(canned_dir.join(source), to)?;
+        }
+        std::fs::write(
+            dir.join(format!("{name}.jsonl")),
+            script::scenario_text(name, &derived, &canned),
+        )
+    })();
+    if let Err(why) = written {
+        return fail(EXIT_OUTPUT, &format!("{out}: {why}"));
+    }
+    println!(
+        "{}",
+        serde_json::json!({
+            "script": dir.join(format!("{name}.jsonl")),
+            "steps": derived.steps.len(),
+            "fixed_asks": derived.fixed_asks,
+            "files": derived.files.len(),
+            "instruction_files": derived.instruction_files,
+        })
+    );
+    ExitCode::SUCCESS
+}
+
 fn record_flags(args: &[String]) -> Option<(String, String, String, Option<String>)> {
     let (mut log, mut regimen, mut out, mut recording) = (None, None, None, None);
     let mut rest = args.iter();
@@ -3287,13 +3442,10 @@ fn main() -> ExitCode {
     if args.first().map(String::as_str) == Some(SCENARIO) {
         return scenario(&args[1..]);
     }
-    // Nor does the offline projection: it reads a log and writes a record.
-    if args.first().map(String::as_str) == Some(RECORD) {
-        if asks_for_help(&args[1..]) {
-            print!("{}", record_usage());
-            return ExitCode::SUCCESS;
-        }
-        return record_from_log(&args[1..]);
+    // Nor do the offline readers of a log: the record's projection and the
+    // operator script.
+    if let Some(code) = offline(&args) {
+        return code;
     }
     if let Err(refused) = with_profile_flags(&mut args) {
         return refused;

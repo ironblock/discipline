@@ -765,3 +765,100 @@ fn a_step_that_outlives_its_patience_fails_the_drive_and_a_longer_patience_passe
     assert_eq!(said["ok"], true, "{said}");
     let _ = std::fs::remove_dir_all(&dir);
 }
+
+/// `diet-drive script` (#908) over `log`: its exit code, stdout and stderr.
+fn script(log: &Path, out: &Path, canned: Option<&Path>) -> (Option<i32>, String, String) {
+    let mut command = Command::new(DRIVE);
+    command
+        .current_dir(root())
+        .arg("script")
+        .arg("--log")
+        .arg(log)
+        .arg("--regimen")
+        .arg(root().join("diet/scenarios/kitchen-sink.toml"))
+        .arg("--out")
+        .arg(out);
+    if let Some(canned) = canned {
+        command.arg("--canned").arg(canned);
+    }
+    let ran = command.output().expect("diet-drive runs");
+    (
+        ran.status.code(),
+        String::from_utf8_lossy(&ran.stdout).into_owned(),
+        String::from_utf8_lossy(&ran.stderr).into_owned(),
+    )
+}
+
+/// #908: the round trip. The kitchen sink's log -- every step a scenario
+/// holds -- is derived into an operator script, which replays on the canned
+/// substrate with the kitchen sink's replies and seed; the replay's operator
+/// lines are the original's, line for line, apart from `seq` and `t`, and
+/// its trunk starts from the same head.
+#[test]
+fn an_operator_script_derived_from_a_log_replays_its_operator_lines() {
+    let dir = scratch("operator-script");
+    let original = dir.join("original");
+    let kitchen = root().join("diet/scenarios/kitchen-sink.jsonl");
+    let (code, said) = run(&kitchen, &original);
+    assert_eq!(code, Some(0), "{said}");
+    let (code, stdout, stderr) = script(
+        &original.join("session.log"),
+        &dir.join("script"),
+        Some(&kitchen),
+    );
+    assert_eq!(code, Some(0), "{stdout}{stderr}");
+    let report: serde_json::Value = serde_json::from_str(stdout.trim()).expect("the report");
+    assert_eq!(report["fixed_asks"], serde_json::json!([0]), "{report}");
+    let replayed = dir.join("replayed");
+    let (code, said) = run(&dir.join("script/script.jsonl"), &replayed);
+    assert_eq!(code, Some(0), "{said}");
+    let read = |path: &Path| std::fs::read_to_string(path).expect("a log");
+    let (before, after) = (
+        read(&original.join("session.log")),
+        read(&replayed.join("session.log")),
+    );
+    let lines = |log: &str| diet::drive::operator_script::operator_lines(log).expect("a log");
+    let (before_lines, after_lines) = (lines(&before), lines(&after));
+    assert!(
+        before_lines.len() > 30,
+        "the kitchen sink's moves: {}",
+        before_lines.len()
+    );
+    for (a, b) in before_lines.iter().zip(&after_lines) {
+        assert_eq!(a, b, "an operator line differs");
+    }
+    assert_eq!(before_lines.len(), after_lines.len());
+    let head = |log: &str| {
+        let start: serde_json::Value =
+            serde_json::from_str(log.lines().next().expect("a start")).expect("an object");
+        start["head"].clone()
+    };
+    assert_eq!(
+        head(&before),
+        head(&after),
+        "the trunk starts from the same head"
+    );
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// #908: a log holding a move the format cannot express -- here a stop --
+/// is refused, exit 1, the refusal naming its line; no script is written.
+#[test]
+fn an_operator_script_refuses_a_move_it_cannot_express_naming_its_line() {
+    let dir = scratch("operator-script-refused");
+    let (code, stdout, stderr) = script(
+        &root().join("diet/formats/log/fixtures/valid/a-cancelled-turn.jsonl"),
+        &dir.join("script"),
+        None,
+    );
+    assert_eq!(code, Some(1), "{stdout}{stderr}");
+    let refusal: serde_json::Value = serde_json::from_str(stdout.trim()).expect("the refusal");
+    assert!(
+        refusal["error"]
+            .as_str()
+            .is_some_and(|why| why.contains("line 5 (`stop.asked`)")),
+        "{refusal}{stderr}"
+    );
+    assert!(!dir.join("script/script.jsonl").exists());
+    let _ = std::fs::remove_dir_all(&dir);
+}

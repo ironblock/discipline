@@ -102,6 +102,7 @@ pub mod engine;
 pub mod hosted;
 pub mod instructions;
 pub mod mcp;
+pub mod operator_script;
 pub mod output;
 pub mod profile;
 pub mod projection;
