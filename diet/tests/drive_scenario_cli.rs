@@ -1127,3 +1127,220 @@ fn repeat_refuses_a_worktree_and_its_flags_refuse_to_go_without_it() {
     }
     let _ = std::fs::remove_dir_all(&dir);
 }
+
+/// The canned regimen with `extra` bound at its top level, written as
+/// `name` in `dir`.
+fn canned_with(dir: &Path, name: &str, extra: &str) -> PathBuf {
+    let canned = std::fs::read_to_string(root().join("diet/scenarios/canned.toml"))
+        .expect("the canned regimen");
+    let (top, sampler) = canned.split_once("[sampler]").expect("its sampler table");
+    let path = dir.join(name);
+    std::fs::write(&path, format!("{top}{extra}\n[sampler]{sampler}")).expect("the regimen");
+    path
+}
+
+/// #912: `pair` runs the scenario under each regimen twice, interleaved
+/// ABBA, each arm's repeats in `out/a/` and `out/b/`; every log and record
+/// start names its arm, the pair (the digest of the two regimens' digests),
+/// the script's digest and its repeat of its arm; the batch names the one
+/// lever.
+#[test]
+fn a_pair_runs_abba_and_every_record_names_its_arm_and_pair() {
+    let dir = scratch("pair");
+    let file = one_turn(
+        &dir,
+        "pair",
+        r#"{"expect":"turn.settled","where":{"reason":"final"}}"#,
+    );
+    let a = canned_with(&dir, "a.toml", "");
+    let b = canned_with(&dir, "b.toml", "max_output_tokens = 512");
+    let digest = |path: &Path| diet::digest::sha256_hex(&std::fs::read(path).expect("bytes"));
+    let pair = diet::digest::sha256_hex(format!("{}{}", digest(&a), digest(&b)).as_bytes());
+    let out = dir.join("out");
+    let ran = Command::new(DRIVE)
+        .current_dir(root())
+        .arg("pair")
+        .arg(&file)
+        .arg("--a")
+        .arg(&a)
+        .arg("--b")
+        .arg(&b)
+        .args(["--repeat", "2", "--no-assemble", "--out"])
+        .arg(&out)
+        .output()
+        .expect("diet-drive runs");
+    let stdout = String::from_utf8_lossy(&ran.stdout);
+    let lines: Vec<serde_json::Value> = stdout
+        .lines()
+        .map(|line| serde_json::from_str(line).expect("a JSON line"))
+        .collect();
+    assert_eq!(ran.status.code(), Some(0), "{stdout}");
+    assert_eq!(lines.len(), 5, "{stdout}");
+    let order: Vec<(&str, u64)> = lines[..4]
+        .iter()
+        .map(|line| {
+            (
+                line["arm"].as_str().unwrap_or(""),
+                line["repeat"].as_u64().unwrap_or(0),
+            )
+        })
+        .collect();
+    assert_eq!(order, [("a", 1), ("b", 1), ("b", 2), ("a", 2)], "{stdout}");
+    let script = digest(&file);
+    let mut opened = Vec::new();
+    for (arm, k) in order {
+        let repeat = out.join(arm).join(format!("repeat-{k:02}"));
+        let run = serde_json::json!({
+            "script_sha256": script, "repeat": k, "of": 2, "arm": arm, "pair": pair,
+        });
+        let start = first_line(&repeat.join("session.log"));
+        assert_eq!(start["run"], run, "{start}");
+        assert_eq!(first_line(&repeat.join("session.record.jsonl"))["run"], run);
+        opened.push(start["opened"].as_u64().expect("opened"));
+    }
+    assert!(opened.is_sorted(), "the runs ran in ABBA order: {opened:?}");
+    let batch = &lines[4];
+    assert_eq!(batch["ok"], true, "{batch}");
+    assert_eq!(batch["pair"], pair, "{batch}");
+    assert_eq!(batch["lever"]["name"], "step_and_output_limits", "{batch}");
+    assert_eq!(batch["ran"], serde_json::json!({"a": 2, "b": 2}), "{batch}");
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// #912: two regimens more than one lever apart are refused before any
+/// run, the refusal naming the levers and the keys.
+#[test]
+fn a_pair_more_than_one_lever_apart_is_refused_naming_the_levers_and_keys() {
+    let dir = scratch("pair-refused");
+    let file = one_turn(&dir, "pair", r#"{"expect":"turn.settled"}"#);
+    let a = canned_with(&dir, "a.toml", "");
+    let b = canned_with(
+        &dir,
+        "b.toml",
+        "max_output_tokens = 512\nmeditation_window = \"off\"",
+    );
+    let out = dir.join("out");
+    let ran = Command::new(DRIVE)
+        .current_dir(root())
+        .arg("pair")
+        .arg(&file)
+        .arg("--a")
+        .arg(&a)
+        .arg("--b")
+        .arg(&b)
+        .args(["--repeat", "2", "--no-assemble", "--out"])
+        .arg(&out)
+        .output()
+        .expect("diet-drive runs");
+    let stdout = String::from_utf8_lossy(&ran.stdout);
+    assert_eq!(ran.status.code(), Some(1), "{stdout}");
+    let said: serde_json::Value =
+        serde_json::from_str(stdout.lines().last().unwrap_or("")).expect("a JSON line");
+    assert_eq!(
+        said["keys"],
+        serde_json::json!(["max_output_tokens", "meditation_window"]),
+        "{said}"
+    );
+    assert_eq!(
+        said["levers"].as_object().map(serde_json::Map::len),
+        Some(2),
+        "{said}"
+    );
+    let why = said["refused"].as_str().unwrap_or("");
+    assert!(
+        why.contains("max_output_tokens") && why.contains("meditation_window"),
+        "{said}"
+    );
+    assert!(!out.join("a").exists(), "nothing ran");
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// `diet-drive pair` on `file` under `a` and `b`, once each, with `extra`:
+/// its exit code and every stdout line.
+fn paired(
+    file: &Path,
+    (a, b): (&Path, &Path),
+    out: &Path,
+    extra: &[&str],
+) -> (Option<i32>, Vec<serde_json::Value>) {
+    let ran = Command::new(DRIVE)
+        .current_dir(root())
+        .arg("pair")
+        .arg(file)
+        .arg("--a")
+        .arg(a)
+        .arg("--b")
+        .arg(b)
+        .args(["--repeat", "1", "--no-assemble", "--out"])
+        .arg(out)
+        .args(extra)
+        .output()
+        .expect("diet-drive runs");
+    let stdout = String::from_utf8_lossy(&ran.stdout);
+    let lines = stdout
+        .lines()
+        .map(|line| serde_json::from_str(line).expect("a JSON line"))
+        .collect();
+    (ran.status.code(), lines)
+}
+
+/// #912: `--contrast` declares what a pair differs in; it runs when the
+/// declared set is exactly what differs, and the batch names it; a member
+/// missing or extra is refused before any run, naming it.
+#[test]
+fn a_declared_contrast_runs_when_exact_and_is_refused_naming_a_missing_or_extra_member() {
+    let dir = scratch("contrast");
+    let file = one_turn(
+        &dir,
+        "contrast",
+        r#"{"expect":"turn.settled","where":{"reason":"final"}}"#,
+    );
+    let a = canned_with(&dir, "a.toml", "");
+    let b = canned_with(
+        &dir,
+        "b.toml",
+        "max_output_tokens = 512\nmeditation_window = \"off\"",
+    );
+    let (code, lines) = paired(
+        &file,
+        (&a, &b),
+        &dir.join("ran"),
+        &["--contrast", "max_output_tokens,meditation_window"],
+    );
+    assert_eq!(code, Some(0), "{lines:?}");
+    assert_eq!(lines.len(), 3, "{lines:?}");
+    let batch = &lines[2];
+    assert_eq!(
+        batch["contrast"]["declared"],
+        serde_json::json!(["max_output_tokens", "meditation_window"]),
+        "{batch}"
+    );
+    assert_eq!(
+        batch["contrast"]["levers"]
+            .as_object()
+            .map(serde_json::Map::len),
+        Some(2),
+        "{batch}"
+    );
+    for (contrast, missing, extra) in [
+        (
+            "max_output_tokens",
+            serde_json::json!(["meditation_trigger"]),
+            serde_json::json!([]),
+        ),
+        (
+            "max_output_tokens,meditation_window,note_dedupe",
+            serde_json::json!([]),
+            serde_json::json!(["note_dedupe"]),
+        ),
+    ] {
+        let out = dir.join(format!("refused-{}", contrast.len()));
+        let (code, lines) = paired(&file, (&a, &b), &out, &["--contrast", contrast]);
+        assert_eq!(code, Some(1), "{contrast}: {lines:?}");
+        assert_eq!(lines.len(), 1, "{contrast}: nothing ran: {lines:?}");
+        assert_eq!(lines[0]["missing"], missing, "{contrast}: {}", lines[0]);
+        assert_eq!(lines[0]["extra"], extra, "{contrast}: {}", lines[0]);
+        assert!(!out.join("a").exists(), "{contrast}: nothing ran");
+    }
+    let _ = std::fs::remove_dir_all(&dir);
+}

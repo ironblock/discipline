@@ -104,6 +104,7 @@ pub mod instructions;
 pub mod mcp;
 pub mod operator_script;
 pub mod output;
+pub mod pair;
 pub mod profile;
 pub mod projection;
 pub mod prune;

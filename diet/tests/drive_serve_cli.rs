@@ -1997,18 +1997,25 @@ fn a_drive_server_that_fails_to_bind_leaves_an_earlier_record_and_sidecar_as_the
 /// The bodies one asked turn sends, served with `extra` flags and, when
 /// given, the dev loop's regimen with `top` added at its top level.
 fn one_turns_bodies(extra: &[&str], top: Option<&str>) -> Vec<String> {
-    let stub = Stub::serving_with_props(
-        vec![Act::Raw(ANSWERED.to_vec())],
-        &diet::drive::canned::build_info(),
-    )
-    .expect("loopback");
     let regimen = top.map(|top| {
         let whole = std::fs::read_to_string(dev_loop()).expect("the dev loop's regimen");
         let (before, sampler) = whole
             .split_once("\n[sampler]\n")
             .expect("the dev loop declares a sampler table last");
-        file_holding("regimen", &format!("{before}\n{top}\n[sampler]\n{sampler}"))
+        format!("{before}\n{top}\n[sampler]\n{sampler}")
     });
+    one_turns_bodies_under(extra, regimen.as_deref())
+}
+
+/// The bodies one asked turn sends, served with `extra` flags and, when
+/// given, `regimen`'s text as its regimen.
+fn one_turns_bodies_under(extra: &[&str], regimen: Option<&str>) -> Vec<String> {
+    let stub = Stub::serving_with_props(
+        vec![Act::Raw(ANSWERED.to_vec())],
+        &diet::drive::canned::build_info(),
+    )
+    .expect("loopback");
+    let regimen = regimen.map(|text| file_holding("regimen", text));
     let path = regimen
         .as_ref()
         .map(|file| file.0.to_string_lossy().into_owned());
@@ -5811,4 +5818,26 @@ fn a_drive_server_takes_a_classifier_endpoint_only_on_a_canned_substrate_that_ga
     );
     assert_eq!(code, Some(2), "{said}");
     assert!(said.contains("gates no step by a classifier"), "{said}");
+}
+
+/// #912: a regimen's `arm` is only a label. Two regimens differing in
+/// nothing else send byte-identical request bodies, so a pair may differ in
+/// it; one differing in a lever (`max_output_tokens`) does not, so the
+/// comparison can tell.
+#[test]
+fn a_regimens_arm_reaches_no_request() {
+    let whole = std::fs::read_to_string(dev_loop()).expect("the dev loop's regimen");
+    assert!(
+        whole.contains("\narm = \"dev-loop\"\n"),
+        "the dev loop names its arm"
+    );
+    let renamed = whole.replace("\narm = \"dev-loop\"\n", "\narm = \"another-label\"\n");
+    let as_written = one_turns_bodies_under(&[], Some(&whole));
+    assert!(!as_written.is_empty(), "the turn sent a request");
+    assert_eq!(one_turns_bodies_under(&[], Some(&renamed)), as_written);
+    let (before, sampler) = whole
+        .split_once("\n[sampler]\n")
+        .expect("the dev loop declares a sampler table last");
+    let capped = format!("{before}\nmax_output_tokens = 512\n[sampler]\n{sampler}");
+    assert_ne!(one_turns_bodies_under(&[], Some(&capped)), as_written);
 }

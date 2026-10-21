@@ -1099,6 +1099,37 @@ fn meditation_audit_chunk_lever(regimen: &Regimen) -> String {
     }
 }
 
+/// How many requests the substrate's server batches, as its registry entry
+/// serves it: `max_batch_size`, when it is a positive count.
+#[must_use]
+pub fn served_batch(substrate: &str) -> Option<usize> {
+    crate::drive::registry::identity(crate::drive::registry::REGISTRY, substrate)
+        .ok()
+        .and_then(|identity| identity.served.get("max_batch_size")?.parse::<usize>().ok())
+        .filter(|batch| *batch > 0)
+}
+
+/// Each lever's state a session under `regimen` starts at, as its log's
+/// `session.start` and its record's start name them (#573): serve's
+/// reading, the audit's concurrency against what `substrate`'s server
+/// batches beside it. Serve and a pair's one-lever check (#912) read it
+/// here, so the two agree by construction.
+#[must_use]
+pub fn start_levers(
+    regimen: &Regimen,
+    output_cap: (u32, &str),
+    substrate: &str,
+) -> BTreeMap<String, String> {
+    let mut levers = serve_levers(regimen, output_cap);
+    // The audit's chunks in flight at once, against what the trunk's
+    // server batches.
+    levers.insert(
+        "meditation_audit_concurrency".to_owned(),
+        meditation_audit_concurrency_lever(regimen, served_batch(substrate)),
+    );
+    levers
+}
+
 /// The audit concurrency lever's word: `off` with the audit; otherwise the
 /// regimen's count (`:default` when it declares none), then `effective:` and
 /// the chunks in flight at most -- and what lowered it, when anything did:
