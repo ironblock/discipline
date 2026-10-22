@@ -123,7 +123,7 @@ fn serve_usage() -> String {
          \x20                       [--log FILE] [--record FILE]\n\
          \x20                       [--allow-origin URL]... [--max-output-tokens N]\n\
          \x20                       [--worktree DIR] [--sandbox-unix-socket PATH]...\n\
-         \x20                       [--sandbox-secret PATH]...\n\
+         \x20                       [--sandbox-secret PATH]... [--carry LOG]\n\
          \x20                       [--run JSON] [--rehearse-as RUNG]\n\
          \x20                       [--seat-endpoint URL --seat-model NAME [--seat-key-file FILE]]\n\
          \x20      diet-drive serve --profile NAME [--config FILE] [any flag above]\n\n",
@@ -203,6 +203,9 @@ fn serve_usage() -> String {
     out.push_str("--sandbox-secret PATH, absolute, each: a path of the run's own denied to\n");
     out.push_str("every command, beside the regimen's secrets; the receipt counts and digests\n");
     out.push_str("them, never naming one (#942).\n");
+    out.push_str("--carry LOG: start from the refilled trunk and working memory LOG's last\n");
+    out.push_str("meditation kept, each checked against its digest; the start line names\n");
+    out.push_str("where it came from (#948).\n");
     out.push_str("A regimen declaring `extraction_seat = \"offboard:<registry id>\"` runs its\n");
     out.push_str("interview forks on a second server: --seat-endpoint and --seat-model are\n");
     out.push_str("then required (--seat-key-file as --key-file), the seat's engine is checked\n");
@@ -244,6 +247,9 @@ struct ServeArgs {
     /// `--sandbox-secret PATH`, each: a path of the run's own denied to every
     /// command, beside the regimen's secrets (#942).
     sandbox_secrets: Vec<String>,
+    /// `--carry LOG`: the session starts from that log's last meditation's
+    /// kept trunk and working object (#948).
+    carry: Option<String>,
     /// `--rehearse-as`: the rung a rehearsal runs under the declarations of
     /// (#926).
     rehearse_as: Option<String>,
@@ -379,6 +385,7 @@ fn serve_args(args: &[String]) -> Option<ServeArgs> {
     let mut rehearse_as = None;
     let mut sandbox_unix_sockets = Vec::new();
     let mut sandbox_secrets = Vec::new();
+    let mut carry = None;
     let mut given = args.iter();
     while let Some(flag) = given.next() {
         let value = given.next()?;
@@ -438,6 +445,9 @@ fn serve_args(args: &[String]) -> Option<ServeArgs> {
         } else if flag == "--sandbox-secret" {
             sandbox_secrets.push(value.clone());
             std::path::Path::new(value).is_absolute()
+        } else if flag == "--carry" {
+            carry = Some(value.clone());
+            true
         } else if flag == "--allow-origin" {
             let origin = is_an_origin(value);
             if origin {
@@ -485,6 +495,7 @@ fn serve_args(args: &[String]) -> Option<ServeArgs> {
         rehearse_as,
         sandbox_unix_sockets,
         sandbox_secrets,
+        carry,
     })
 }
 
@@ -519,10 +530,22 @@ fn serve(args: &[String]) -> ExitCode {
         rehearse_as,
         sandbox_unix_sockets,
         sandbox_secrets,
+        carry,
     }) = serve_args(args)
     else {
         eprint!("{}", serve_usage());
         return ExitCode::from(EXIT_USAGE);
+    };
+    // The carry (#948), read and checked before anything starts: the run's
+    // own secrets are the roots a carried file is named sealed under.
+    let carry = match carry.as_deref() {
+        Some(path) => {
+            match diet::drive::carry::read(std::path::Path::new(path), &sandbox_secrets) {
+                Ok(carry) => Some(carry),
+                Err(why) => return fail(EXIT_INPUT, &format!("--carry: {why}")),
+            }
+        }
+        None => None,
     };
     let run = match run.as_deref().map(diet::formats::log::run_of).transpose() {
         Ok(run) => run,
@@ -1032,7 +1055,7 @@ fn serve(args: &[String]) -> ExitCode {
     let session = served_session(
         (transport, seat),
         (shape, dialect, blind),
-        (tools, run, rehearse_as, head_nonce),
+        (tools, run, rehearse_as, head_nonce, carry),
         (
             claim,
             interview,
@@ -1054,6 +1077,14 @@ fn serve(args: &[String]) -> ExitCode {
             ),
         ),
     );
+    let session = match session {
+        Ok(session) => session,
+        Err(why) => return fail(EXIT_INPUT, &format!("--carry: {why}")),
+    };
+    // Every session keeps its refills' carries beside its log (#948).
+    if let Some(dir) = &attaching.recording {
+        session.keep_recording_in(dir.clone());
+    }
     let opened = session.opened();
     let watching = std::sync::Arc::clone(&session);
     // Where the projection reads an attached file back from (#372): the
@@ -1245,20 +1276,25 @@ fn outputs(
     Ok((log, record))
 }
 
+/// What a served session is told at its start besides its shape: its tools,
+/// its run, the rung it rehearses as, its head's nonce and its carry (#948).
+type ServedStart = (
+    Option<Tools>,
+    Option<diet::formats::log::Run>,
+    Option<String>,
+    Option<String>,
+    Option<session::Carry>,
+);
+
 /// `serve`'s session, declaring what serves it in the log's `session.start`
 /// (#292): its transport speaks llama-server's dialect, and nobody declared
 /// how many streams the server serves.
 fn served_session(
     (transport, seat): (HttpStream, Option<session::Offboard<HttpStream>>),
     (mut shape, dialect, blind): (RequestShape, Dialect, Option<String>),
-    (tools, run, rehearse_as, head_nonce): (
-        Option<Tools>,
-        Option<diet::formats::log::Run>,
-        Option<String>,
-        Option<String>,
-    ),
+    (tools, run, rehearse_as, head_nonce, carry): ServedStart,
     declared: session::Declared,
-) -> std::sync::Arc<Session<HttpStream>> {
+) -> Result<std::sync::Arc<Session<HttpStream>>, String> {
     let forks = transport.for_forks();
     // A session that runs commands declares its surface's tools (#557):
     // `bash` alone, or `bash` and the standard set; then `prune_output`
@@ -1309,10 +1345,14 @@ fn served_session(
         Some(nonce) => session.with_head_nonce(&nonce),
         None => session,
     };
-    std::sync::Arc::new(match seat {
+    let session = match carry {
+        Some(carry) => session.with_carry(carry)?,
+        None => session,
+    };
+    Ok(std::sync::Arc::new(match seat {
         Some(seat) => session.seated(seat),
         None => session,
-    })
+    }))
 }
 
 /// An offboard seat, and the chat template its server reports.

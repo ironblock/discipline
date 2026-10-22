@@ -15,7 +15,7 @@
     {
       "approvals_off": true,
       "bash_timeout_ms": 120000,
-      "build_commit": "a051593e1692fc98af74b7cf58105574fd03bc4d",
+      "build_commit": "ad2e2e6e82257038e019f04ee9186d1e55d6cd1b",
       "build_dirty": false,
       "compaction_persists": true,
       "fork_asks": "v4",
@@ -70,6 +70,7 @@
         "phase_graph": "library:starter;start:plan;phases:plan,build,orient,quick,test;transitions:plan>build,plan>orient,build>plan,build>test,orient>plan,test>build",
         "reasoning_state": "off",
         "reconcile_gate": "refuse",
+        "refill_session": "same",
         "refutation_interview": "on:failed-cooldown-3-steps:default:operator-cooldown-112-steps:candidates-8:default",
         "render_budget": "120:tier",
         "self_capture": "on:every:3:c1:1726eab1c3bd4722",
@@ -85,7 +86,7 @@
       },
       "model": "scenario",
       "notes_in_the_ask": true,
-      "opened": 1792651538262,
+      "opened": 1792668710714,
       "opening_phase": "plan",
       "phase_document": {
         "digest": "c3c3afe17657994b1403ed749e7352bdf4ad1eb47c688b6e60bb0e122db95e8e",
@@ -177,7 +178,7 @@
         "propose_phase_transition",
         "refute_beliefs"
       ],
-      "version": 23
+      "version": 24
     },
     {
       "kind": "phase.started",
@@ -1752,6 +1753,7 @@
       "frame": "placeholder",
       "kind": "meditation",
       "native_reserve": 33000,
+      "object_sha256": "f5d226cf0bbfa5f72076bae478ac24aee2ddb33961f8420fcc7e4e27a2d9d879",
       "outputs": "\n# tool outputs\nThe following tool results were produced before context was compacted. They are listed as reference only: each was saved whole, and can be read at its path.\n\n- turn 3: bash args={\"command\":\"printf '\\\\211PNG\\\\r\\\\n\\\\032\\\\n0000' > shot.png && ls shot.png\"}: 9 bytes, sha256 d6378885937f9c1a137ed8ddf9b4b56039bb4df9d543d06f84c474b51856f765, saved at /scenario/recording/files/d6378885937f9c1a137ed8ddf9b4b56039bb4df9d543d06f84c474b51856f765\n",
       "phase_document": {
         "digest": "703ed3071af8e07b5783800ffcd39a0d73c95509b0e521b250ecd7b9292b96fb",
@@ -1780,6 +1782,7 @@
       "t": 26602,
       "tail_tokens": 400,
       "tool_outputs": "reference",
+      "trunk_sha256": "d75fe9185af00d481a955729ccb8480e06c1bf0c46632bfcbc563351224022ef",
       "turn_steps_compacted": 1,
       "turn_steps_kept": 1,
       "window": 37615
@@ -1982,6 +1985,7 @@
       "kind": "meditation",
       "native_reserve": 33000,
       "newest_turn_tokens": 16422,
+      "object_sha256": "f5d226cf0bbfa5f72076bae478ac24aee2ddb33961f8420fcc7e4e27a2d9d879",
       "outputs": "\n# tool outputs\nThe following tool results were produced before context was compacted. They are listed as reference only: each was saved whole, and can be read at its path.\n\n- turn 1: update_record args={\"field\": \"decision\", \"content\": \"notes.md holds one line per decision\"}: 29 bytes, sha256 e0037b3ae9fc0fe5c86e137864ab57be3420d42a71374c1752ea1531b9a58cb2, saved at /scenario/recording/files/e0037b3ae9fc0fe5c86e137864ab57be3420d42a71374c1752ea1531b9a58cb2\n- turn 2: write args={\"path\":\"notes.md\"}: 53 bytes, sha256 aedbc95c605c0418a73bfb45f686bb2a708c2e573278c7db19efbeb83e8c12cb, saved at /scenario/recording/files/aedbc95c605c0418a73bfb45f686bb2a708c2e573278c7db19efbeb83e8c12cb\n- turn 2: edit args={\"file_path\":\"notes.md\"}: 125 bytes, sha256 0ef9a1eaae866e2bd48eb4e64254cc89e9b1ccf393e79e1208c32c069affa06c, saved at /scenario/recording/files/0ef9a1eaae866e2bd48eb4e64254cc89e9b1ccf393e79e1208c32c069affa06c\n- turn 2: read args={\"path\":\"notes.md\"}: 37 bytes, sha256 d38d308c9cee552c75d8adf7f0fcf9a871c1b3df5791ad0f076bfd603282a4dd, saved at /scenario/recording/files/d38d308c9cee552c75d8adf7f0fcf9a871c1b3df5791ad0f076bfd603282a4dd\n- turn 3: read args={\"path\":\"shot.png\"}: 12 bytes, sha256 7343d363d427f598455ae5f102d2f7e8c95efa14a6f454b8acc352c9458cac11, saved at /scenario/recording/files/7343d363d427f598455ae5f102d2f7e8c95efa14a6f454b8acc352c9458cac11\n",
       "phase_document": {
         "digest": "703ed3071af8e07b5783800ffcd39a0d73c95509b0e521b250ecd7b9292b96fb",
@@ -2010,6 +2014,7 @@
       "t": 31337,
       "tail_tokens": 400,
       "tool_outputs": "reference",
+      "trunk_sha256": "e0fa748ee0fe08ac5dc11c3e65f5804be5a6b5b5896d01836cc71141da85fe2c",
       "window": 37615
     },
     {
@@ -2182,6 +2187,7 @@
       "frame": "placeholder",
       "kind": "meditation",
       "newest_turn_tokens": 16413,
+      "object_sha256": "f5d226cf0bbfa5f72076bae478ac24aee2ddb33961f8420fcc7e4e27a2d9d879",
       "phase_document": {
         "digest": "703ed3071af8e07b5783800ffcd39a0d73c95509b0e521b250ecd7b9292b96fb",
         "ground_rules": "Discuss the user's intent, consider possible approaches, and provide multiple options with trade-offs when possible. When finished with orientation, call for a phase transition with propose_phase_transition.",
@@ -2207,6 +2213,7 @@
       "t": 32803,
       "tail_tokens": 400,
       "tool_outputs": "reference",
+      "trunk_sha256": "00e3fba0fef49e92bb910cdb49b1476c130a66021b491255c701370841767690",
       "warm": {
         "cache_n": 0,
         "predicted_n": 7,
@@ -4228,6 +4235,7 @@
       "kind": "meditation",
       "native_reserve": 33000,
       "newest_turn_tokens": 416,
+      "object_sha256": "6debee205974519e5c26ec93549bc3678b9798a93fe212d68cf74766a6bd96ce",
       "outputs": "\n# tool outputs\nThe following tool results were produced before context was compacted. They are listed as reference only: each was saved whole, and can be read at its path.\n\n- turn 5: grep args={\"path\":\".\"}: 122 bytes, sha256 e2ac52d4dcfe32cadf2090f28e211140e33606a6d6b9b549487ba08f8e16fdfc, saved at /scenario/recording/files/e2ac52d4dcfe32cadf2090f28e211140e33606a6d6b9b549487ba08f8e16fdfc\n- turn 5: glob args={\"pattern\": \"*.md\"}: 164 bytes, sha256 a5888ea60691d90d952aa7cd54ef2138f31675e0e6de315c72fe4a507458a70b, saved at /scenario/recording/files/a5888ea60691d90d952aa7cd54ef2138f31675e0e6de315c72fe4a507458a70b\n- turn 6: bash args={\"command\":\"cat missing.txt\"}: 44 bytes, sha256 d9c819357969b391253af64a3451321c3942d71fbaf55dbdeb1c9b784995d7db, saved at /scenario/recording/files/d9c819357969b391253af64a3451321c3942d71fbaf55dbdeb1c9b784995d7db\n- turn 7: bash args={\"command\":\"sleep 5; echo built\"}: 593 bytes, sha256 98d489a06aac961b079dfae83e953c476a17325cb33dd372dd794b5acdb169e3, saved at /scenario/recording/files/98d489a06aac961b079dfae83e953c476a17325cb33dd372dd794b5acdb169e3\n- turn 7: bash args={\"command\":\"sleep 60\"}: 593 bytes, sha256 1374be6d9f9f05d62e3e392b52e623b9b11aadb1fae4ae0dd9cff609ca72799d, saved at /scenario/recording/files/1374be6d9f9f05d62e3e392b52e623b9b11aadb1fae4ae0dd9cff609ca72799d\n- turn 7: task_stop args={\"task_id\": \"bg_2\"}: 160 bytes, sha256 d5803609e239be1ef0d39263aaa0019cf1ab007d6ffecf77818698915325ec98, saved at /scenario/recording/files/d5803609e239be1ef0d39263aaa0019cf1ab007d6ffecf77818698915325ec98\n",
       "phase_document": {
         "digest": "703ed3071af8e07b5783800ffcd39a0d73c95509b0e521b250ecd7b9292b96fb",
@@ -4256,6 +4264,7 @@
       "t": 58977,
       "tail_tokens": 400,
       "tool_outputs": "reference",
+      "trunk_sha256": "7dcbc9de7347fac01e98cb1db59c9b36f4e34d8d92a54d182b48bd86b02287ee",
       "turn_steps_compacted": 0,
       "turn_steps_kept": 1,
       "window": 37615
@@ -6826,6 +6835,7 @@
       "carry": "render",
       "frame": "placeholder",
       "kind": "meditation",
+      "object_sha256": "8e5d6aec1e32834f6756855d73660d1a1e475ea6b1b0688e60d75b813c1cdbfe",
       "outputs": "\n# tool outputs\nThe following tool results were produced before context was compacted. They are listed as reference only: each was saved whole, and can be read at its path.\n\n- turn 8: bash args={\"command\":\"python3 -c \\\"print('x' * 20000)\\\"\"}: 20001 bytes, sha256 a168e7ecc1c0f191c22ad3221fd52fa3e5e4d8883d085099d3fbf500cadf3f8a, saved at /scenario/recording/files/a168e7ecc1c0f191c22ad3221fd52fa3e5e4d8883d085099d3fbf500cadf3f8a\n- turn 8: bash args={\"command\":\"seq 1 2000\"}: 8893 bytes, sha256 6251e5743b6fd6a7d606130bdf7c15077ce85ebd3a0fdee284d15a46df199e38, saved at /scenario/recording/files/6251e5743b6fd6a7d606130bdf7c15077ce85ebd3a0fdee284d15a46df199e38\n",
       "phase_document": {
         "digest": "703ed3071af8e07b5783800ffcd39a0d73c95509b0e521b250ecd7b9292b96fb",
@@ -6852,6 +6862,7 @@
       "t": 110291,
       "tail_tokens": 400,
       "tool_outputs": "reference",
+      "trunk_sha256": "6af66ee9d1720bc1959258465d8db4e1195b789fb86303b5658eed3fe21cff4e",
       "warm": {
         "cache_n": 0,
         "predicted_n": 7,
@@ -7287,6 +7298,7 @@
       "carry": "render",
       "frame": "placeholder",
       "kind": "meditation",
+      "object_sha256": "8e5d6aec1e32834f6756855d73660d1a1e475ea6b1b0688e60d75b813c1cdbfe",
       "outputs": "\n# tool outputs\nThe following tool results were produced before context was compacted. They are listed as reference only: each was saved whole, and can be read at its path.\n\n- turn 10: bash args={\"command\":\"sleep 30\"}: 98 bytes, sha256 982df996395efea89420c265324be791d77a83390a151782a20dd122403a949c, saved at /scenario/recording/files/982df996395efea89420c265324be791d77a83390a151782a20dd122403a949c\n- turn 11: bash args={\"command\":\"echo count-one\"}: 10 bytes, sha256 7e0143d929fe4a2f57413136aa502510f6dbddd21a06a6037c791b119ddb3983, saved at /scenario/recording/files/7e0143d929fe4a2f57413136aa502510f6dbddd21a06a6037c791b119ddb3983\n- turn 11: bash args={\"command\":\"echo count-two\"}: 10 bytes, sha256 710280b2b72f06ea698589dd7a570da98e7c33eed872b04c3869f53ff8944c1d, saved at /scenario/recording/files/710280b2b72f06ea698589dd7a570da98e7c33eed872b04c3869f53ff8944c1d\n- turn 11: bash args={\"command\":\"echo count-three\"}: 12 bytes, sha256 02b4be205d3db534b504e27651d49628a5b0f276e80bcbc2c73b67a28c254cb9, saved at /scenario/recording/files/02b4be205d3db534b504e27651d49628a5b0f276e80bcbc2c73b67a28c254cb9\n",
       "phase": {
         "from": "orient",
@@ -7321,6 +7333,7 @@
       "t": 116749,
       "tail_tokens": 400,
       "tool_outputs": "reference",
+      "trunk_sha256": "32fd223dca1f76b990d443abb16fa38769397e8a3eca414b144906fd65ba35fb",
       "warm": {
         "cache_n": 0,
         "predicted_n": 7,
@@ -9022,6 +9035,7 @@
       "carry": "render",
       "frame": "placeholder",
       "kind": "meditation",
+      "object_sha256": "dd33d87301569dec2a15ab6200ea0bfecf8125a1f889d78e41cf4d4a73208e7a",
       "operator_changes": [
         {
           "entry": "operator-548",
@@ -9054,6 +9068,7 @@
       "t": 149991,
       "tail_tokens": 400,
       "tool_outputs": "reference",
+      "trunk_sha256": "e65d2214eb505eeac1d90bd95e502c154476e4a013da41da1db2c34a0d424141",
       "unaddressed": [],
       "warm": {
         "cache_n": 0,
@@ -9681,6 +9696,7 @@
       "carry": "render",
       "frame": "placeholder",
       "kind": "meditation",
+      "object_sha256": "dd33d87301569dec2a15ab6200ea0bfecf8125a1f889d78e41cf4d4a73208e7a",
       "operator_changes": [
         {
           "entry": "operator-548",
@@ -9718,6 +9734,7 @@
       "t": 162086,
       "tail_tokens": 400,
       "tool_outputs": "reference",
+      "trunk_sha256": "017d5a3f80a08554132a833af3b5d4407da5386d100299c13571c1a84e658bff",
       "unaddressed": [
         "operator-548"
       ],

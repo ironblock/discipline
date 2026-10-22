@@ -131,6 +131,17 @@ pub const IMAGE_MIN_TOKENS: u64 = 1_024;
 pub const IMAGE_UNSIZED_TOKENS: u64 = 16_384;
 
 impl Image {
+    /// An image as a carried trunk kept it (#948): its media type, bytes
+    /// and pixels as [`messages_json`] wrote them. Only a carry builds one
+    /// this way; the bytes were checked when they were first attached.
+    pub(crate) fn carried(media_type: String, base64: String, pixels: Option<(u32, u32)>) -> Self {
+        Self {
+            media_type,
+            base64,
+            pixels,
+        }
+    }
+
     /// The `data:` URI the wire carries it as:
     /// `data:<media_type>;base64,<bytes>`.
     #[must_use]
@@ -738,6 +749,148 @@ pub struct RequestShape {
 // the drift the hand-rendered sampler pins already exist to avoid one level
 // down.
 
+/// `messages` as JSON (#948): every field of every message, so
+/// [`messages_of_json`] gives back exactly these messages. What a carried
+/// trunk is kept as, beside the meditation that refilled it.
+#[must_use]
+pub fn messages_json(messages: &[Message]) -> String {
+    let value: Vec<serde_json::Value> = messages
+        .iter()
+        .map(|message| {
+            serde_json::json!({
+                "role": message.role.tag(),
+                "content": message.content,
+                "reasoning": message.reasoning,
+                "tool_calls": message
+                    .tool_calls
+                    .iter()
+                    .map(|call| serde_json::json!({"id": call.id, "name": call.name, "arguments": call.arguments}))
+                    .collect::<Vec<_>>(),
+                "tool_call_id": message.tool_call_id,
+                "notes": message.notes,
+                "images": message
+                    .images
+                    .iter()
+                    .map(|image| serde_json::json!({
+                        "media_type": image.media_type,
+                        "base64": image.base64,
+                        "pixels": image.pixels.map(|(w, h)| [w, h]),
+                    }))
+                    .collect::<Vec<_>>(),
+                "reasoning_signature": message.reasoning_signature,
+                "redacted": message.redacted,
+                "tool_error": message.tool_error,
+            })
+        })
+        .collect();
+    serde_json::Value::Array(value).to_string()
+}
+
+/// The messages [`messages_json`] wrote.
+///
+/// # Errors
+///
+/// When `text` is not that JSON: a message's field missing, of the wrong
+/// kind, or a role this module does not name.
+pub fn messages_of_json(text: &str) -> Result<Vec<Message>, String> {
+    let read: serde_json::Value =
+        serde_json::from_str(text).map_err(|why| format!("not JSON: {why}"))?;
+    let messages = read.as_array().ok_or("not a list of messages")?;
+    messages
+        .iter()
+        .enumerate()
+        .map(|(at, value)| {
+            let wrong = |what: &str| format!("message {at}: {what}");
+            let text_of = |key: &str| {
+                value[key]
+                    .as_str()
+                    .map(str::to_owned)
+                    .ok_or_else(|| wrong(&format!("`{key}` is not text")))
+            };
+            let maybe = |key: &str| match &value[key] {
+                serde_json::Value::Null => Ok(None),
+                serde_json::Value::String(text) => Ok(Some(text.clone())),
+                _ => Err(wrong(&format!("`{key}` is neither text nor null"))),
+            };
+            let texts = |key: &str| {
+                value[key]
+                    .as_array()
+                    .ok_or_else(|| wrong(&format!("`{key}` is not a list")))?
+                    .iter()
+                    .map(|item| {
+                        item.as_str()
+                            .map(str::to_owned)
+                            .ok_or_else(|| wrong(&format!("`{key}` holds a non-text")))
+                    })
+                    .collect::<Result<Vec<_>, _>>()
+            };
+            let tag = text_of("role")?;
+            let role = *Role::ALL
+                .iter()
+                .find(|role| role.tag() == tag)
+                .ok_or_else(|| wrong("an unknown role"))?;
+            let tool_calls = value["tool_calls"]
+                .as_array()
+                .ok_or_else(|| wrong("`tool_calls` is not a list"))?
+                .iter()
+                .map(|call| {
+                    let part = |key: &str| {
+                        call[key]
+                            .as_str()
+                            .map(str::to_owned)
+                            .ok_or_else(|| wrong(&format!("a call's `{key}` is not text")))
+                    };
+                    Ok(ToolCall {
+                        id: part("id")?,
+                        name: part("name")?,
+                        arguments: part("arguments")?,
+                    })
+                })
+                .collect::<Result<Vec<_>, String>>()?;
+            let images = value["images"]
+                .as_array()
+                .ok_or_else(|| wrong("`images` is not a list"))?
+                .iter()
+                .map(|image| image_of(image).map_err(|why| wrong(&why)))
+                .collect::<Result<Vec<_>, String>>()?;
+            Ok(Message {
+                role,
+                content: text_of("content")?,
+                reasoning: maybe("reasoning")?,
+                tool_calls,
+                tool_call_id: maybe("tool_call_id")?,
+                notes: texts("notes")?,
+                images,
+                reasoning_signature: maybe("reasoning_signature")?,
+                redacted: texts("redacted")?,
+                tool_error: value["tool_error"]
+                    .as_bool()
+                    .ok_or_else(|| wrong("`tool_error` is not true or false"))?,
+            })
+        })
+        .collect()
+}
+
+/// An image as [`messages_json`] wrote it.
+fn image_of(image: &serde_json::Value) -> Result<Image, String> {
+    let part = |key: &str| {
+        image[key]
+            .as_str()
+            .map(str::to_owned)
+            .ok_or_else(|| format!("an image's `{key}` is not text"))
+    };
+    let side = |n: &serde_json::Value| n.as_u64().and_then(|n| u32::try_from(n).ok());
+    let pixels = match &image["pixels"] {
+        serde_json::Value::Null => None,
+        serde_json::Value::Array(sides) if sides.len() == 2 => Some((
+            side(&sides[0]).ok_or("an image's width is not a count")?,
+            side(&sides[1]).ok_or("an image's height is not a count")?,
+        )),
+        _ => return Err("an image's `pixels` is neither null nor two counts".to_owned()),
+    };
+    Ok(Image::carried(part("media_type")?, part("base64")?, pixels))
+}
+
 #[cfg(test)]
 mod tests {
     use std::time::Duration;
@@ -745,6 +898,43 @@ mod tests {
     use super::{Limits, Message, Pin, RequestShape, Role, SamplerCard, SamplerSetting};
 
     /// An image of `bytes`, attached as the log would name it.
+    /// #948: a carried trunk is every field of every message, written and
+    /// read back exactly: roles, text, reasoning and its signature, calls,
+    /// a tool result's id and error, notes, redacted blocks and an image.
+    #[test]
+    fn a_trunk_written_as_json_reads_back_exactly() {
+        let png = [
+            0x89, b'P', b'N', b'G', 0x0d, 0x0a, 0x1a, 0x0a, 0, 0, 0, 13, b'I', b'H', b'D', b'R', 0,
+            0, 0, 2, 0, 0, 0, 3, 8, 2, 0, 0, 0,
+        ];
+        let mut assistant = Message::new(Role::Assistant, "");
+        assistant.reasoning = Some("thinking \"aloud\"\n".to_owned());
+        assistant.reasoning_signature = Some("sig".to_owned());
+        assistant.redacted = vec!["opaque".to_owned()];
+        assistant.tool_calls = vec![super::ToolCall {
+            id: "c1".to_owned(),
+            name: "bash".to_owned(),
+            arguments: r#"{"command": "ls"}"#.to_owned(),
+        }];
+        let mut tool = Message::new(Role::Tool, "error: no such file");
+        tool.tool_call_id = Some("c1".to_owned());
+        tool.tool_error = true;
+        let mut user = Message::new(Role::User, "ask, with ünïcode");
+        user.notes = vec!["a note".to_owned(), "another".to_owned()];
+        user.images = vec![attached("image/png", &png)];
+        let trunk = vec![
+            Message::new(Role::System, "you are the trunk"),
+            user,
+            assistant,
+            tool,
+            Message::new(Role::Developer, ""),
+        ];
+        let read = super::messages_of_json(&super::messages_json(&trunk)).expect("it reads");
+        assert_eq!(read, trunk);
+        assert!(super::messages_of_json(r#"[{"role":"oracle"}]"#).is_err());
+        assert!(super::messages_of_json("{}").is_err());
+    }
+
     fn attached(media_type: &str, bytes: &[u8]) -> super::Image {
         let file = crate::formats::log::RecordedFile {
             path: "files/x".to_owned(),

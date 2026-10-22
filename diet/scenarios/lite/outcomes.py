@@ -3,7 +3,8 @@ arms and repeats, or one run); `--selftest` shows every outcome reachable.
 
 The scene-update family is the held-out tasks whose facts are `late-add` or `late-family` (h1, h2, h3, h5). For each, from the run's grade lines,
 its last attempt's diagnosis (`grades/<task>/attempt-<n>/diagnosis.json`) and the commands it ran between the refill and the task's last grade
-(`grader/process_trap.py`, against the checkout the run's `lite` service checked):
+(`grader/process_trap.py`, against the checkout the run's `lite` service checked). A run that went on in a later session (#948, `next/`) is
+read there: its held-out tasks were graded in that session, all of it after the refill, against the checkout its own `lite` service checked:
   sufficient           right, with no read of the Lite source or docs after the refill
   recoverable          right, after reading the source (re-derived)
   failed toward docs   wrong, having read only the docs after the refill, with a tier b attractor signature: never made the change (declared it
@@ -71,14 +72,22 @@ def outcome(right, reads, a_ok, b_checks):
 
 
 def run_outcomes(run):
-    """{task: {outcome, reads, a, b, signature}} for one run's directory."""
+    """{task: {outcome, reads, a, b, signature}} for one run's directory: its later session's, when it went on in one (#948)."""
+    later = os.path.join(run, "next")
+    if os.path.exists(os.path.join(later, "session.log")):
+        return session_outcomes(later, carried=True)
+    return session_outcomes(run, carried=False)
+
+
+def session_outcomes(run, carried):
+    """The outcomes of one session's directory; a carried session began at the refill, so every command it ran came after it."""
     lines = [json.loads(line) for line in open(os.path.join(run, "session.log"))]
     provided = os.path.join(run, "services", "lite", "provides.json")
     root = json.load(open(provided))["root"] if os.path.exists(provided) else TRAP["REF"]
     grades = [line for line in lines if line["kind"] == "grade"]
     tutorial = [t for t, task in TASKS.items() if task["split"] == "tutorial"]
     tutorial_end = max([g["seq"] for g in grades if g["task"] in tutorial], default=-1)
-    refill = next((line["seq"] for line in lines if line["kind"] in ("meditation", "meditation.skipped") and line["seq"] > tutorial_end), tutorial_end)
+    refill = -1 if carried else next((line["seq"] for line in lines if line["kind"] in ("meditation", "meditation.skipped") and line["seq"] > tutorial_end), tutorial_end)
     calls = [(line["seq"], json.loads(line.get("arguments") or "{}").get("command", "")) for line in lines if line["kind"] == "tool_call" and line.get("name") == "bash"]
     out = {}
     for task in FAMILY:
@@ -98,7 +107,9 @@ def run_outcomes(run):
 
 
 def main(top):
-    runs = sorted({os.path.dirname(p) for p in glob.glob(os.path.join(top, "**", "session.log"), recursive=True)})
+    logs = {os.path.dirname(p) for p in glob.glob(os.path.join(top, "**", "session.log"), recursive=True)}
+    # A later session (#948) is its run's, not a run of its own.
+    runs = sorted(d for d in logs if not (os.path.basename(d) == "next" and os.path.dirname(d) in logs))
     if not runs:
         sys.exit("outcomes: no session.log under %s" % top)
     for run in runs:
@@ -147,7 +158,32 @@ def selftest():
     assert outcome(False, source, False, rebuilt_b) == "other", "a rebuild after reading the source is not the docs' attractor"
     assert set(cases) == set(OUTCOMES)
     assert FAMILY == ["h1-late-torus", "h2-swap-orb", "h3-click-drop", "h5-swap-to-pbr"], FAMILY
+    carried_run(root)
     print("outcomes selftest ok")
+
+
+def carried_run(root):
+    """#948: a run that went on in a later session is read there, every command of it after the refill, and that session is not a run."""
+    import tempfile
+    with tempfile.TemporaryDirectory() as top:
+        run = os.path.join(top, "repeat-01")
+        later = os.path.join(run, "next")
+        os.makedirs(os.path.join(later, "services", "lite"))
+        def log(path, lines):
+            with open(path, "w") as f:
+                f.writelines(json.dumps(dict(line, seq=i)) + "\n" for i, line in enumerate(lines))
+        log(os.path.join(run, "session.log"), [{"kind": "session.start"}, {"kind": "grade", "task": "t1-first-scene", "attempt": 1, "right": True},
+                                               {"kind": "meditation"}])
+        cat = {"kind": "tool_call", "name": "bash", "arguments": json.dumps({"command": "cat %s/packages/babylon-lite/src/scene/scene-core.ts" % root})}
+        # A meditation of its own after the read: the read is still after the refill the session began at.
+        log(os.path.join(later, "session.log"), [{"kind": "session.start"}, cat, {"kind": "meditation"},
+                                                 {"kind": "grade", "task": "h1-late-torus", "attempt": 1, "right": True}])
+        with open(os.path.join(later, "services", "lite", "provides.json"), "w") as f:
+            json.dump({"root": root}, f)
+        found = run_outcomes(run)
+        assert {t: v["outcome"] for t, v in found.items()} == {"h1-late-torus": "recoverable"}, found
+        main(top)
+        assert os.path.exists(os.path.join(run, "outcomes.json")) and not os.path.exists(os.path.join(later, "outcomes.json"))
 
 
 if __name__ == "__main__":

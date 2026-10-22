@@ -1,8 +1,8 @@
-# The Lite pilot's four reachable arms (#932, #942) minus the reference, which runs as its own batch until #948 (heldout.jsonl):
-# `diet-drive arms lite.jsonl --arms ARMS.toml --repeat N --out DIR`. Every arm contrasts with the native baseline.
+# The Lite pilot's six arms (#932, #942, #948): `diet-drive arms lite.jsonl --arms ARMS.toml --repeat N --out DIR`. Every arm contrasts with
+# the native baseline.
 baseline = "native"
-# The first pilot is the plumbing check, not the headline (Planning's review, 2026-10-21): the four reachable arms of the six (three here, the reference its own batch), on the larger rung. The
-# headline runs later at the full arm count on the floor.
+# The first pilot is the plumbing check, not the headline (Planning's review, 2026-10-21), on the larger rung. The headline runs later on the
+# floor.
 purpose = "smoke"
 
 [arm.native]
@@ -15,3 +15,17 @@ contrast = ["interview_warrant", "refutation_interview", "meditation_carry"]
 [arm.golden]
 regimen = "golden.toml"
 contrast = ["meditation_tail_tokens", "meditation_carry"]
+
+# The held-out half in a session that never saw the tutorial: the floor.
+[arm.reference]
+regimen = "reference.toml"
+contrast = ["refill_session"]
+
+# The held-out half in a new session that cannot read Lite's source, from the refill as kept.
+[arm.sealed-native]
+regimen = "sealed-native.toml"
+contrast = ["refill_session"]
+
+[arm.sealed-interviews]
+regimen = "sealed-interviews.toml"
+contrast = ["interview_warrant", "refutation_interview", "meditation_carry", "refill_session"]

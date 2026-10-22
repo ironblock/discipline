@@ -141,7 +141,7 @@ pub fn scenario(
     regimen: &Path,
     head: &Path,
     roots: &[String],
-    (file, phrase, grep_in): (&str, &str, &[String]),
+    (files, phrase, grep_in): (&[String], &str, &[String]),
     canary: &str,
 ) -> String {
     let bash = |id: String, command: String, timeout: u64| {
@@ -162,11 +162,13 @@ pub fn scenario(
             )
         })
         .collect();
-    calls.push(bash(
-        "probe-cat".to_owned(),
-        format!("cat -- {}", quoted(file)),
-        30_000,
-    ));
+    calls.extend(files.iter().enumerate().map(|(at, file)| {
+        bash(
+            format!("probe-cat-{at}"),
+            format!("cat -- {}", quoted(file)),
+            30_000,
+        )
+    }));
     calls.push(bash(
         "probe-rg-version".to_owned(),
         "rg --version".to_owned(),
@@ -221,7 +223,7 @@ pub fn scenario(
 /// `ls` failed on, whether `cat` failed, whether `grep` finished finding
 /// nothing; `ok` when all three hold.
 #[must_use]
-pub fn verdict(log: &str, roots: usize, canary_file: &str) -> serde_json::Value {
+pub fn verdict(log: &str, (roots, files): (usize, usize), canary_file: &str) -> serde_json::Value {
     let calls: Vec<serde_json::Value> = log
         .lines()
         .filter_map(|line| serde_json::from_str::<serde_json::Value>(line).ok())
@@ -236,7 +238,7 @@ pub fn verdict(log: &str, roots: usize, canary_file: &str) -> serde_json::Value 
     let denied = (0..roots)
         .filter(|at| failed(&format!("probe-ls-{at}")))
         .count();
-    let file_denied = failed("probe-cat");
+    let file_denied = files > 0 && (0..files).all(|at| failed(&format!("probe-cat-{at}")));
     let grep = call("probe-grep");
     let grep_finished = grep.is_some_and(|call| call["outcome"] == "ran" && call["exit"].is_i64());
     let listed: Vec<&str> = grep
@@ -314,7 +316,7 @@ mod tests {
             Path::new("/r.toml"),
             Path::new("/h.md"),
             &[private],
-            ("/f", "trap phrase", &roots),
+            (&["/f".to_owned()], "trap phrase", &roots),
             "canary words",
         );
         assert!(
@@ -353,7 +355,7 @@ mod tests {
             [
                 line("probe-ls-0", Some(1), ""),
                 line("probe-ls-1", Some(ls1), "x"),
-                line("probe-cat", Some(cat), ""),
+                line("probe-cat-0", Some(cat), ""),
                 line("probe-rg-version", Some(0), "ripgrep 15.1.0\n"),
                 line("probe-grep", grep.0, grep.1),
             ]
@@ -361,39 +363,42 @@ mod tests {
         };
         let seen = "/t/probe/canary.txt\n";
         // rg exits 2 where a denied file is unreadable: what it lists decides.
-        let held = verdict(&log(1, 1, (Some(2), seen)), 2, canary);
+        let held = verdict(&log(1, 1, (Some(2), seen)), (2, 1), canary);
         assert_eq!(held["ok"], true, "{held}");
         assert_eq!(held["rg"], "ripgrep 15.1.0", "{held}");
         assert_eq!(
             held["max_filesize"], "64M",
             "the line says what the search skipped: {held}"
         );
-        let read = verdict(&log(0, 1, (Some(2), seen)), 2, canary);
+        let read = verdict(&log(0, 1, (Some(2), seen)), (2, 1), canary);
         assert_eq!(
             (read["ok"].clone(), read["paths_denied"].clone()),
             (serde_json::json!(false), serde_json::json!(1))
         );
-        assert_eq!(verdict(&log(1, 0, (Some(2), seen)), 2, canary)["ok"], false);
+        assert_eq!(
+            verdict(&log(1, 0, (Some(2), seen)), (2, 1), canary)["ok"],
+            false
+        );
         let leaked = verdict(
             &log(1, 1, (Some(0), "/x/TASKS.md\n/t/probe/canary.txt\n")),
-            2,
+            (2, 1),
             canary,
         );
         assert_eq!(
             (leaked["ok"].clone(), leaked["files_with_phrase"].clone()),
             (serde_json::json!(false), serde_json::json!(1))
         );
-        let blind = verdict(&log(1, 1, (Some(2), "")), 2, canary);
+        let blind = verdict(&log(1, 1, (Some(2), "")), (2, 1), canary);
         assert_eq!(
             (blind["ok"].clone(), blind["canary_seen"].clone()),
             (serde_json::json!(false), serde_json::json!(false)),
             "a search that found not even the canary searched nothing"
         );
         assert_eq!(
-            verdict(&log(1, 1, (None, seen)), 2, canary)["ok"],
+            verdict(&log(1, 1, (None, seen)), (2, 1), canary)["ok"],
             false,
             "a search killed before it finished proves nothing"
         );
-        assert_eq!(verdict("", 2, canary)["ok"], false);
+        assert_eq!(verdict("", (2, 1), canary)["ok"], false);
     }
 }

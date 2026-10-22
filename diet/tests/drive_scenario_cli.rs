@@ -2021,6 +2021,400 @@ fn logged(log: &Path, kind: &str) -> Vec<serde_json::Value> {
         .collect()
 }
 
+/// #948: under `refill_session = "fresh"` a declared meditation ends the
+/// session, and the next starts from its carry: its first trunk request
+/// carries exactly the refilled trunk, the same `head_sha256` as the
+/// meditation's `prefix_hash_after` and as the post-refill request of a run
+/// that went on (`same`); its `session.start` and record name the first
+/// log, the meditation and the trunk by digest. Under `blank` the next
+/// session starts from its head alone, as the first one's first request.
+#[test]
+#[allow(clippy::too_many_lines)]
+fn a_fresh_session_starts_from_the_refill_exactly_and_names_where_it_came_from() {
+    let dir = scratch("carry");
+    let canned = std::fs::read_to_string(root().join("diet/scenarios/canned.toml"))
+        .expect("the canned regimen");
+    let (top, sampler) = canned.split_once("[sampler]").expect("its sampler table");
+    let body = concat!(
+        r#"{"reply":{"when":"hello there","text":"Hello."}}"#,
+        "\n",
+        r#"{"reply":{"when":"and again","text":"Again."}}"#,
+        "\n",
+        r#"{"step":"ask","text":"hello there"}"#,
+        "\n",
+        r#"{"step":"declare-meditation"}"#,
+        "\n",
+        r#"{"step":"ask","text":"and again"}"#,
+        "\n",
+        r#"{"step":"end"}"#,
+        "\n",
+    );
+    let trunk_heads = |log: &Path| -> Vec<String> {
+        logged(log, "request")
+            .iter()
+            .filter(|request| request["lane"] == "trunk")
+            .map(|request| request["head_sha256"].as_str().unwrap_or("").to_owned())
+            .collect()
+    };
+    let mut runs = std::collections::BTreeMap::new();
+    for mode in ["same", "fresh", "blank"] {
+        let regimen = dir.join(format!("{mode}.toml"));
+        std::fs::write(
+            &regimen,
+            format!(
+                "{top}interview_warrant = [\"read\"]\nmeditation_empty = \"refill\"\n\
+                 refill_session = \"{mode}\"\n\n[sampler]{sampler}"
+            ),
+        )
+        .expect("the regimen");
+        let file = dir.join(format!("{mode}.jsonl"));
+        std::fs::write(
+            &file,
+            format!(
+                "{}\n{body}",
+                serde_json::json!({"scenario": "carry", "regimen": format!("{mode}.toml"), "head": root().join("diet/drive/heads/floor.md")})
+            ),
+        )
+        .expect("the scenario");
+        let out = dir.join(format!("out-{mode}"));
+        let (code, said) = run(&file, &out);
+        assert_eq!(code, Some(0), "{mode}: {said}");
+        runs.insert(mode, (out, said));
+    }
+    // The run that went on: the refill, then the next request on it.
+    let (same, _) = &runs["same"];
+    let refill = logged(&same.join("session.log"), "meditation");
+    let after = refill[0]["prefix_hash_after"]
+        .as_str()
+        .expect("a digest")
+        .to_owned();
+    let same_heads = trunk_heads(&same.join("session.log"));
+    assert_eq!(same_heads.len(), 2, "{same_heads:?}");
+    assert_eq!(
+        same_heads[1], after,
+        "the run that went on asked on the refilled trunk"
+    );
+    // The fresh run: its first session ends at the refill, and the next
+    // starts from exactly that trunk.
+    let (fresh, said) = &runs["fresh"];
+    let first_log = fresh.join("session.log");
+    let meditation = &logged(&first_log, "meditation")[0];
+    assert_eq!(
+        meditation["prefix_hash_after"],
+        after.as_str(),
+        "the same refill"
+    );
+    assert_eq!(
+        trunk_heads(&first_log).len(),
+        1,
+        "the first session asked once"
+    );
+    let next_log = fresh.join("next/session.log");
+    assert_eq!(
+        trunk_heads(&next_log),
+        std::slice::from_ref(&after),
+        "{said}"
+    );
+    let start = first_line(&next_log);
+    let log_sha256 = diet::digest::sha256_hex(&std::fs::read(&first_log).expect("the log"));
+    // Nothing was captured, so no object crossed: the trunk alone.
+    assert!(meditation.get("object_sha256").is_none(), "{meditation}");
+    assert_eq!(
+        start["carried_from"],
+        serde_json::json!({
+            "log_sha256": log_sha256,
+            "meditation_seq": meditation["seq"],
+            "trunk_sha256": meditation["trunk_sha256"],
+        }),
+        "{start}"
+    );
+    let trunk = fresh
+        .join("files")
+        .join(meditation["trunk_sha256"].as_str().expect("a digest"));
+    assert!(
+        trunk.is_file(),
+        "the refilled trunk is kept: {}",
+        trunk.display()
+    );
+    assert_eq!(
+        first_line(&fresh.join("next/session.record.jsonl"))["carried_from"]["log_sha256"],
+        log_sha256.as_str()
+    );
+    assert_eq!(start["levers"]["refill_session"], "fresh", "{start}");
+    // The blank run: the next session starts from its head alone.
+    let (blank, _) = &runs["blank"];
+    let head_only = trunk_heads(&blank.join("session.log"))[0].clone();
+    assert_eq!(trunk_heads(&blank.join("next/session.log")), [head_only]);
+    assert!(
+        first_line(&blank.join("next/session.log"))
+            .get("carried_from")
+            .is_none()
+    );
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// #948: what an interview captured before the refill crosses into the
+/// fresh session: the meditation keeps the working object by digest, the
+/// next start names the same digest, and the next session's working memory
+/// holds the entry.
+#[test]
+fn a_fresh_session_carries_the_working_memory_its_refill_kept() {
+    let dir = scratch("carry-memory");
+    let regimen = commanding(&dir, "base.toml", 4);
+    let base = std::fs::read_to_string(&regimen).expect("the regimen");
+    std::fs::write(
+        &regimen,
+        base.replace(
+            "[limits]",
+            "interview_warrant = [\"read\"]\nrefill_session = \"fresh\"\n[limits]",
+        ),
+    )
+    .expect("the regimen");
+    std::fs::write(dir.join("notes.txt"), "the config lives in ./app.toml\n").expect("a file");
+    let call = serde_json::json!([{"id": "c1", "name": "bash", "arguments": serde_json::json!({"command": format!("cat {}", dir.join("notes.txt").display())}).to_string()}]);
+    let lines = [
+        serde_json::json!({"scenario": "carry-memory", "regimen": "base.toml", "head": root().join("diet/drive/heads/floor.md")}),
+        serde_json::json!({"reply": {"when": "Read the notes", "text": "Reading.", "calls": call}}),
+        serde_json::json!({"reply": {"when": "You just read a document", "text": "LEARNED: the config lives in ./app.toml\nEVIDENCE: \"the config lives in ./app.toml\"\nSTUCK: NONE"}}),
+        serde_json::json!({"reply": {"when": "You just read source", "text": "API_SURFACE: NONE\nLEARNED: the config lives in ./app.toml\nSTUCK: NONE"}}),
+        serde_json::json!({"reply": {"text": "Read them."}}),
+        serde_json::json!({"reply": {"when": "Where is the config", "text": "In ./app.toml."}}),
+        serde_json::json!({"step": "ask", "text": "Read the notes."}),
+        serde_json::json!({"step": "declare-meditation"}),
+        serde_json::json!({"step": "ask", "text": "Where is the config?"}),
+        serde_json::json!({"step": "end"}),
+    ];
+    let file = dir.join("memory.jsonl");
+    let text: String = lines.iter().map(|line| line.to_string() + "\n").collect();
+    std::fs::write(&file, text).expect("the scenario");
+    let out = dir.join("out");
+    let (code, said) = run(&file, &out);
+    assert_eq!(code, Some(0), "{said}");
+    assert!(
+        !logged(&out.join("session.log"), "patch").is_empty(),
+        "the interview captured"
+    );
+    let meditation = &logged(&out.join("session.log"), "meditation")[0];
+    let object = meditation["object_sha256"]
+        .as_str()
+        .expect("the object was kept");
+    let start = first_line(&out.join("next/session.log"));
+    assert_eq!(start["carried_from"]["object_sha256"], object, "{start}");
+    let product = std::fs::read_to_string(out.join("next/session.record.jsonl.product.txt"))
+        .expect("the next session's product");
+    assert!(
+        product.contains("the config lives in ./app.toml"),
+        "the next session's working memory holds the entry: {product}"
+    );
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// #948: under `refill_session = "sealed"` the next session is also
+/// denied the scenario's `seal`: a file the first session read under it is
+/// refused to the second, inside serve's own sandbox, and its receipt
+/// counts the sealed path.
+#[test]
+#[cfg(target_os = "macos")]
+#[allow(clippy::too_many_lines)]
+fn a_sealed_session_is_refused_what_the_first_one_read() {
+    let dir = scratch("carry-sealed");
+    let sealed = dir.join("reference");
+    std::fs::create_dir_all(&sealed).expect("the sealed directory");
+    std::fs::write(sealed.join("source.ts"), "export const answer = 42;\n").expect("a file");
+    let canned = std::fs::read_to_string(root().join("diet/scenarios/canned.toml"))
+        .expect("the canned regimen");
+    let (top, sampler) = canned.split_once("[sampler]").expect("its sampler table");
+    std::fs::write(
+        dir.join("sealed.toml"),
+        format!(
+            "{top}allowed_commands = [\"cat\"]\nisolation = \"sandbox\"\nnetwork = \"none\"\n\
+             sandbox_reads = \"all\"\napproval = \"none\"\n\
+             approval_policy = \"approvals are off: every command runs without a gate decision or a prompt\"\n\
+             interview_warrant = [\"read\"]\nmeditation_empty = \"refill\"\nrefill_session = \"sealed\"\n\
+             [limits]\nmax_steps = 4\n\n[sampler]{sampler}"
+        ),
+    )
+    .expect("the regimen");
+    let read = |id: &str| serde_json::json!([{"id": id, "name": "bash", "arguments": serde_json::json!({"command": format!("cat {}", sealed.join("source.ts").display())}).to_string()}]);
+    let provides = format!(
+        "printf '{{\"root\": \"{}\"}}' > \"$DIET_SERVICE_DIR/provides.json\"; : > \"$DIET_SERVICE_DIR/pids\"",
+        sealed.display()
+    );
+    let lines = [
+        serde_json::json!({
+            "scenario": "carry-sealed",
+            "regimen": "sealed.toml",
+            "head": root().join("diet/drive/heads/floor.md"),
+            "services": [{"name": "box", "start": provides, "stop": "true", "ready": {"command": "test -s \"$DIET_SERVICE_DIR/provides.json\""}}],
+            "seal": ["service.box.root"],
+            "seal_probe": ["{service.box.root}/source.ts"],
+        }),
+        serde_json::json!({"reply": {"when": "Read it once", "text": "Reading.", "calls": read("c1")}}),
+        serde_json::json!({"reply": {"when": "Read it again", "text": "Reading.", "calls": read("c2")}}),
+        serde_json::json!({"step": "ask", "text": "Read it once."}),
+        serde_json::json!({"step": "declare-meditation"}),
+        serde_json::json!({"step": "ask", "text": "Read it again."}),
+        serde_json::json!({"step": "end"}),
+    ];
+    let file = dir.join("sealed.jsonl");
+    let mut text: String = lines.iter().map(|line| line.to_string() + "\n").collect();
+    // Whatever else either session asks is answered in text.
+    for _ in 0..12 {
+        text.push_str(&serde_json::json!({"reply": {"text": "Done."}}).to_string());
+        text.push('\n');
+    }
+    std::fs::write(&file, text).expect("the scenario");
+    // A dry run with a deny list, so both sessions probe: the first proves
+    // the deny list under the sealed regimen, the second the seal as well.
+    let home = dir.join("home");
+    let private = home.join("private-runs");
+    std::fs::create_dir_all(&private).expect("the private directory");
+    let phrase = format!(
+        "sealed-trap-phrase-{}-{}",
+        std::process::id(),
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map_or(0, |since| since.as_nanos())
+    );
+    let solution = private.join("solution.ts");
+    std::fs::write(&solution, format!("// {phrase}\n")).expect("a solution");
+    let out = dir.join("out");
+    let ran = Command::new(DRIVE)
+        .current_dir(root())
+        .arg("scenario")
+        .arg(&file)
+        .arg("--dry-run")
+        .arg("--regimen")
+        .arg(dir.join("sealed.toml"))
+        .arg("--out")
+        .arg(&out)
+        .arg("--no-assemble")
+        .env("HOME", &home)
+        .env("DIET_SANDBOX_SECRETS", &private)
+        .env("DIET_SANDBOX_PROBE_FILE", &solution)
+        .env("DIET_SANDBOX_PROBE_PHRASE", &phrase)
+        .output()
+        .expect("diet-drive runs");
+    let stdout = String::from_utf8_lossy(&ran.stdout);
+    let said: serde_json::Value =
+        serde_json::from_str(stdout.lines().last().unwrap_or("")).unwrap_or_default();
+    assert_eq!(
+        ran.status.code(),
+        Some(0),
+        "{stdout}{}",
+        String::from_utf8_lossy(&ran.stderr)
+    );
+    assert_eq!(
+        said["sandbox_probe"]["ok"], true,
+        "the first session's probe: {said}"
+    );
+    assert_eq!(
+        said["next"]["sandbox_probe"]["ok"], true,
+        "the sealed session's probe: {said}"
+    );
+    assert_eq!(
+        said["next"]["sandbox_probe"]["paths_denied"], 2,
+        "the deny list and the seal: {said}"
+    );
+    let exit_of = |log: &Path, id: &str| {
+        logged(log, "tool_call")
+            .into_iter()
+            .find(|call| call["id"] == id)
+            .and_then(|call| call["exit"].as_i64())
+    };
+    assert_eq!(
+        exit_of(&out.join("session.log"), "c1"),
+        Some(0),
+        "the first session read it"
+    );
+    assert!(
+        exit_of(&out.join("next/session.log"), "c2").is_some_and(|exit| exit != 0),
+        "the sealed session was refused it: {said}"
+    );
+    let receipt: serde_json::Value = serde_json::from_str(
+        &std::fs::read_to_string(out.join("next/session.record.jsonl.receipt.json"))
+            .expect("the receipt"),
+    )
+    .expect("JSON");
+    assert_eq!(receipt["run_secrets"]["count"], 2, "{receipt}");
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// #948: a native refill restores only files under the worktree, so a seal
+/// outside it (Lite's checkout) is never restored and `carried_source`
+/// reads nothing. A seal inside the worktree is restored when the first
+/// session read a file under it, and the carried start names that file,
+/// relative to its sealed root.
+#[test]
+#[cfg(target_os = "macos")]
+fn a_carried_start_names_the_sealed_file_its_refill_restored() {
+    let dir = scratch("carry-restored");
+    let canned = std::fs::read_to_string(root().join("diet/scenarios/canned.toml"))
+        .expect("the canned regimen");
+    let (top, sampler) = canned.split_once("[sampler]").expect("its sampler table");
+    std::fs::write(
+        dir.join("restored.toml"),
+        format!(
+            "{top}tool_surface = \"standard\"\nisolation = \"sandbox\"\nnetwork = \"none\"\n\
+             sandbox_reads = \"all\"\napproval = \"none\"\n\
+             approval_policy = \"approvals are off: every command runs without a gate decision or a prompt\"\n\
+             meditation_carry = \"native_summary\"\nrefill_session = \"sealed\"\n\
+             [limits]\nmax_steps = 4\n\n[sampler]{sampler}"
+        ),
+    )
+    .expect("the regimen");
+    // The service's root is inside the run's worktree, where a restore looks.
+    let provides = "mkdir -p \"$DIET_WORKTREE/reference\" && printf 'export const answer = 42;\\n' > \"$DIET_WORKTREE/reference/source.ts\" && \
+                    printf '{\"root\": \"%s/reference\"}' \"$DIET_WORKTREE\" > \"$DIET_SERVICE_DIR/provides.json\"; : > \"$DIET_SERVICE_DIR/pids\"";
+    let read = serde_json::json!([{"id": "r1", "name": "read", "arguments": serde_json::json!({"path": "reference/source.ts"}).to_string()}]);
+    let lines = [
+        serde_json::json!({
+            "scenario": "carry-restored",
+            "regimen": "restored.toml",
+            "head": root().join("diet/drive/heads/floor.md"),
+            "services": [{"name": "box", "start": provides, "stop": "true", "ready": {"command": "test -s \"$DIET_SERVICE_DIR/provides.json\""}}],
+            "seal": ["service.box.root"],
+        }),
+        serde_json::json!({"reply": {"when": "Read it once", "text": "Reading.", "calls": read}}),
+        serde_json::json!({"step": "ask", "text": "Read it once."}),
+        serde_json::json!({"step": "declare-meditation"}),
+        serde_json::json!({"step": "ask", "text": "Go on."}),
+        serde_json::json!({"step": "end"}),
+    ];
+    let file = dir.join("restored.jsonl");
+    let mut text: String = lines.iter().map(|line| line.to_string() + "\n").collect();
+    for _ in 0..12 {
+        text.push_str(
+            &serde_json::json!({"reply": {"text": "<state_snapshot>it reads 42</state_snapshot>"}})
+                .to_string(),
+        );
+        text.push('\n');
+    }
+    std::fs::write(&file, text).expect("the scenario");
+    let out = dir.join("out");
+    let (code, said) = run(&file, &out);
+    assert_eq!(code, Some(0), "{said}");
+    let meditation = logged(&out.join("session.log"), "meditation")
+        .into_iter()
+        .next()
+        .expect("the first session meditated");
+    assert!(
+        meditation["restored_files"]
+            .as_array()
+            .is_some_and(|files| files.iter().any(|f| f
+                .as_str()
+                .is_some_and(|f| f.ends_with("/reference/source.ts")))),
+        "the refill restored the file it read: {meditation}"
+    );
+    let start = first_line(&out.join("next/session.log"));
+    assert_eq!(
+        start["carried_source"],
+        serde_json::json!(["source.ts"]),
+        "{start}"
+    );
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
 /// #942: a declared meditation over an empty working memory is refused
 /// unless the regimen says `meditation_empty = "refill"`; then it refills,
 /// carrying nothing, the line says `empty: true`, the session goes on, and

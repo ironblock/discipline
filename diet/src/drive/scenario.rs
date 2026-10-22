@@ -59,6 +59,12 @@ pub struct Scenario {
     /// from the run's ports and values (#942): what a command sees of them
     /// is still the regimen's `env_passthrough`.
     pub serve_env: BTreeMap<String, String>,
+    /// What a sealed session is denied besides the deny list (#948,
+    /// `refill_session = "sealed"`): services' values, `service.NAME.KEY`.
+    pub seal: Vec<(String, String)>,
+    /// Files a sealed session's probe must fail to read (#948): texts filled
+    /// from the run's ports and values.
+    pub seal_probe: Vec<String>,
 }
 
 /// One canned reply: the text a request's last message must hold, or none
@@ -295,7 +301,12 @@ impl Scenario {
 
     /// Whether every placeholder names a declared port or service (#942).
     fn placeholders_are_declared(&mut self) -> Result<(), ScenarioError> {
-        let serve_env: Vec<String> = self.serve_env.values().cloned().collect();
+        let serve_env: Vec<String> = self
+            .serve_env
+            .values()
+            .chain(&self.seal_probe)
+            .cloned()
+            .collect();
         let (ports, services) = (
             self.ports.clone(),
             self.services
@@ -1039,6 +1050,41 @@ fn header(mut fields: Fields) -> Result<Scenario, ScenarioError> {
             .collect::<Result<_, _>>()?,
         Some(_) => return Err(fields.wrong("`sandbox_unix_sockets` a list")),
     };
+    let service_values = |fields: &Fields, key: &str, named: Vec<Value>| {
+        named
+            .into_iter()
+            .map(|named| match named {
+                Value::String(named) => match named.split('.').collect::<Vec<_>>().as_slice() {
+                    ["service", name, value]
+                        if services.iter().any(|service| service.name == *name)
+                            && crate::drive::services::is_a_name(value) =>
+                    {
+                        Ok(((*name).to_owned(), (*value).to_owned()))
+                    }
+                    _ => Err(fields.wrong(&format!(
+                        "each of `{key}` a declared service's value, `service.NAME.KEY`"
+                    ))),
+                },
+                _ => Err(fields.wrong(&format!("each of `{key}` text"))),
+            })
+            .collect::<Result<Vec<_>, _>>()
+    };
+    let seal = match fields.take("seal") {
+        None => Vec::new(),
+        Some(Value::Array(named)) => service_values(&fields, "seal", named)?,
+        Some(_) => return Err(fields.wrong("`seal` a list")),
+    };
+    let seal_probe = match fields.take("seal_probe") {
+        None => Vec::new(),
+        Some(Value::Array(texts)) => texts
+            .into_iter()
+            .map(|text| match text {
+                Value::String(text) => Ok(text),
+                _ => Err(fields.wrong("each of `seal_probe` text")),
+            })
+            .collect::<Result<_, _>>()?,
+        Some(_) => return Err(fields.wrong("`seal_probe` a list")),
+    };
     let serve_env = match fields.take("serve_env") {
         None => BTreeMap::new(),
         Some(Value::Object(named)) => named
@@ -1075,6 +1121,8 @@ fn header(mut fields: Fields) -> Result<Scenario, ScenarioError> {
         services,
         sandbox_unix_sockets,
         serve_env,
+        seal,
+        seal_probe,
     })
 }
 
@@ -1972,12 +2020,28 @@ impl Driver {
 /// refused, a pick that names no live entry, a prompt with no approvals to
 /// answer it, a wait that timed out, or a session that never settled.
 pub fn drive(scenario: &Scenario, driver: &Driver) -> Result<Bindings, Failure> {
+    drive_from(scenario, driver, (0, false)).map(|(bound, _)| bound)
+}
+
+/// [`drive`], from the step at `from`; with `reseat`, stopping after the
+/// first declared meditation it settles (#948), and naming the step after
+/// it, where the next session takes up the script.
+///
+/// # Errors
+///
+/// As [`drive`].
+#[allow(clippy::too_many_lines)]
+pub fn drive_from(
+    scenario: &Scenario,
+    driver: &Driver,
+    (from, reseat): (usize, bool),
+) -> Result<(Bindings, Option<usize>), Failure> {
     let approvals = scenario.approvals.as_deref();
     let mut bound = Bindings::new();
     let mut mark = driver.last_seq()?;
     let mut tangent: Option<&str> = None;
     let mut before: Option<String> = None;
-    for (at, step) in scenario.steps.iter().enumerate() {
+    for (at, step) in scenario.steps.iter().enumerate().skip(from) {
         let failed = |why: Failure| Failure(format!("step {}: {why}", at + 1));
         match step {
             Step::Ask {
@@ -2026,6 +2090,13 @@ pub fn drive(scenario: &Scenario, driver: &Driver) -> Result<Bindings, Failure> 
                     bound.insert(name.clone(), theirs);
                 }
             }
+            Step::DeclareMeditation if reseat => {
+                driver.command(&step.command()).map_err(failed)?;
+                driver
+                    .settle(approvals, scenario.patience(at))
+                    .map_err(failed)?;
+                return Ok((bound, Some(at + 1)));
+            }
             Step::DeclareMeditation
             | Step::RefillAnyway
             | Step::RulePhase { .. }
@@ -2066,7 +2137,7 @@ pub fn drive(scenario: &Scenario, driver: &Driver) -> Result<Bindings, Failure> 
             }
         }
     }
-    Ok(bound)
+    Ok((bound, None))
 }
 
 /// Each of `scenario`'s expectations `log` -- the session's log -- does not
@@ -2162,6 +2233,77 @@ pub struct RunOptions {
     /// `--run`. A counted repeat keeps its outputs, assembled, whether or
     /// not its expectations were met.
     pub run: Option<crate::formats::log::Run>,
+    /// The session this one is carried from (#948): the first session's
+    /// log, passed to serve as `--carry`. Absent, it starts from its head.
+    pub carry: Option<std::path::PathBuf>,
+    /// The step this session's drive starts at (#948): a carried session
+    /// takes up the script after the meditation the first one ended at.
+    pub from_step: usize,
+    /// Whether this is a later session of its run, which the regimen's
+    /// `refill_session` started (#948): it is never reseated again.
+    pub carried: bool,
+    /// Paths sealed from this session's commands besides the deny list
+    /// (#948, `refill_session = "sealed"`): passed to serve as
+    /// `--sandbox-secret`, and probed.
+    pub seal: Vec<String>,
+    /// Files the probe must fail to read besides `DIET_SANDBOX_PROBE_FILE`
+    /// (#948): the scenario's `seal_probe`, filled.
+    pub seal_probe: Vec<String>,
+}
+
+/// The regimen key for what a declared meditation does to its session
+/// (#948).
+pub const REFILL_SESSION: &str = "refill_session";
+
+/// What a declared meditation does to its session (#948).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RefillSession {
+    /// The session goes on: the refill replaces its trunk (the default).
+    Same,
+    /// The session ends at the refill, and the next starts from its carry:
+    /// the refilled trunk and the working object, exactly.
+    Fresh,
+    /// [`Self::Fresh`], the next session also denied the scenario's `seal`.
+    Sealed,
+    /// The session ends at the refill, and the next starts from its head
+    /// alone, carrying nothing.
+    Blank,
+}
+
+impl RefillSession {
+    /// Its word in a regimen and on the start's levers.
+    #[must_use]
+    pub fn tag(self) -> &'static str {
+        match self {
+            Self::Same => "same",
+            Self::Fresh => "fresh",
+            Self::Sealed => "sealed",
+            Self::Blank => "blank",
+        }
+    }
+}
+
+/// [`REFILL_SESSION`] as `regimen` declares it.
+///
+/// # Errors
+///
+/// When it names none of `same`, `fresh`, `sealed` and `blank`.
+pub fn refill_session(regimen: &crate::formats::regimen::Regimen) -> Result<RefillSession, String> {
+    match regimen.get(REFILL_SESSION) {
+        None => Ok(RefillSession::Same),
+        Some(crate::formats::regimen::Value::String(word)) => [
+            RefillSession::Same,
+            RefillSession::Fresh,
+            RefillSession::Sealed,
+            RefillSession::Blank,
+        ]
+        .into_iter()
+        .find(|state| state.tag() == word)
+        .ok_or_else(|| {
+            format!("`{REFILL_SESSION}` takes \"same\", \"fresh\", \"sealed\" or \"blank\", not {word:?}")
+        }),
+        Some(other) => Err(format!("`{REFILL_SESSION}` is a word, not {other:?}")),
+    }
 }
 
 /// Run a scenario (#760): `serve` started as a child of `drive` -- this
@@ -2437,6 +2579,11 @@ fn tallied(said: &serde_json::Value) -> serde_json::Value {
             line[key] = value.clone();
         }
     }
+    // The session the run went on in (#948), tallied as this one is: its
+    // void and failure are the run's to show.
+    if let Some(next) = said.get("next") {
+        line["next"] = tallied(next);
+    }
     let read = said["log"]
         .as_str()
         .and_then(|log| std::fs::read_to_string(log).ok())
@@ -2634,6 +2781,24 @@ fn running(
     let runs_commands = crate::drive::tool_loop::declared(&read)
         .map_err(|why| Failure(format!("{}: {why}", regimen.display())))?
         .is_some();
+    // What a declared meditation does to the session (#948).
+    let refill =
+        refill_session(&read).map_err(|why| Failure(format!("{}: {why}", regimen.display())))?;
+    // A seal matters only where a meditation ends the session: a scenario
+    // that declares none (a sandbox probe under the run's regimen) runs as
+    // `same` would.
+    let meditates = scenario
+        .steps
+        .iter()
+        .any(|step| matches!(step, Step::DeclareMeditation));
+    if refill == RefillSession::Sealed && meditates && scenario.seal.is_empty() {
+        return Err(Failure(format!(
+            "{} seals the session after the refill, and the scenario names no `seal`",
+            regimen.display()
+        )));
+    }
+    let reseat = refill != RefillSession::Same && !options.carried;
+    said["refill_session"] = serde_json::Value::String(refill.tag().to_owned());
     // The run's deny list (#942): every live run or dry run of a regimen that
     // runs commands names one, or waives it, and proves it before it starts.
     let deny =
@@ -2651,6 +2816,11 @@ fn running(
         (crate::drive::probe::Deny::Paths(paths), _) if runs_commands => paths.clone(),
         _ => Vec::new(),
     };
+    // A sealed session's seal (#948) is denied beside the deny list.
+    let denied: Vec<String> = denied
+        .into_iter()
+        .chain(options.seal.iter().cloned())
+        .collect();
     said["sandbox_secrets"] = match &deny {
         crate::drive::probe::Deny::Waived => serde_json::json!("waived"),
         _ => serde_json::json!({"count": denied.len()}),
@@ -2682,7 +2852,7 @@ fn running(
                 drive,
                 &regimen,
                 &beside(&options.file, &scenario.head),
-                &denied,
+                (&denied, &options.seal_probe),
                 &options.out,
             ),
         }
@@ -2811,6 +2981,10 @@ fn running(
     }
     if let Some(run) = &options.run {
         serve.arg("--run").arg(crate::formats::log::run_text(run));
+    }
+    // A carried session (#948) starts from the first one's kept carry.
+    if let Some(carry) = &options.carry {
+        serve.arg("--carry").arg(carry);
     }
     if let Some(key_file) = &options.key_file {
         serve.arg("--key-file").arg(key_file);
@@ -2972,12 +3146,13 @@ fn running(
     if let Some(worktree) = worktree {
         driver = driver.in_worktree(worktree);
     }
-    let outcome = self::drive(&scenario, &driver);
+    let outcome = self::drive_from(&scenario, &driver, (options.from_step, reseat));
+    let next = outcome.as_ref().ok().and_then(|(_, next)| *next);
     // A check that crashed (#942): void, whatever else the run says.
     if let Some(cause) = driver.voided() {
         said["void"] = serde_json::Value::String(cause.to_owned());
     }
-    if outcome.is_err() {
+    if outcome.is_err() || next.is_some() {
         let _ = driver.command(&serde_json::json!({"kind": "end"}));
     }
     // Serve exits once the session ends and its record is written.
@@ -2997,6 +3172,12 @@ fn running(
     };
     let _ = drained.join();
     let _ = std::fs::remove_dir_all(&secrets);
+    // A sealed next session's seal (#948), from this run's services' values,
+    // read before they stop: the same checkout the next one's will check.
+    let sealed = match (next, refill) {
+        (Some(_), RefillSession::Sealed) => Some(seal_of(&scenario, services.as_ref())?),
+        _ => None,
+    };
     if let Some(mut running) = services.take() {
         running.stop(&scenario_dir, &[]);
         said["services"] = running.said();
@@ -3042,13 +3223,48 @@ fn running(
         }
         said["plan"] = plan;
     }
-    let bound = outcome?;
+    let (bound, _) = outcome?;
     if !clean {
         return Err(Failure(format!("serve did not exit cleanly: {exited:?}")));
     }
+    // The next session of this run (#948): started from this one's log and
+    // recording, before they are assembled away, in `next/`, the script
+    // taken up after the meditation. Its outcome is the run's, and its log
+    // meets the scenario's expectations.
+    let next_met = match next {
+        Some(from_step) => {
+            let (seal, seal_probe) = sealed.unwrap_or_default();
+            let carried = RunOptions {
+                out: options.out.join("next"),
+                worktree: None,
+                carry: (refill != RefillSession::Blank).then(|| log.clone()),
+                from_step,
+                carried: true,
+                seal,
+                seal_probe,
+                ..options.clone()
+            };
+            let mut next_said = serde_json::json!({"ok": false});
+            let met = running(drive, &carried, &mut next_said).unwrap_or_else(|Failure(why)| {
+                next_said["failure"] = serde_json::Value::String(why);
+                false
+            });
+            next_said["ok"] = serde_json::Value::Bool(met);
+            if let Some(cause) = next_said.get("void").cloned() {
+                said["void"] = cause;
+            }
+            said["next"] = next_said;
+            Some(met)
+        }
+        None => None,
+    };
     let written = std::fs::read_to_string(&log)
         .map_err(|why| Failure(format!("the log cannot be read: {why}")))?;
-    let missed = unmet(&scenario, &written, &bound);
+    let missed = if next_met.is_some() {
+        Vec::new()
+    } else {
+        unmet(&scenario, &written, &bound)
+    };
     said["unmet"] = serde_json::json!(missed);
     let met = missed.is_empty() && unmatched.is_empty();
     // A counted repeat is data either way (#910): it is assembled.
@@ -3107,7 +3323,37 @@ fn running(
             serde_json::Value::String(options.out.join("record.jsonl").display().to_string());
         let _ = std::fs::remove_dir_all(&work);
     }
-    Ok(met)
+    Ok(next_met.unwrap_or(met))
+}
+
+/// A sealed session's seal (#948): the scenario's `seal`, each a service's
+/// value, and its `seal_probe`, filled, from this run's services.
+fn seal_of(
+    scenario: &Scenario,
+    services: Option<&crate::drive::services::Running>,
+) -> Result<(Vec<String>, Vec<String>), Failure> {
+    let running = services.ok_or_else(|| {
+        Failure("the scenario seals service values and starts no service".to_owned())
+    })?;
+    let seal = scenario
+        .seal
+        .iter()
+        .map(|(name, key)| {
+            running
+                .value(&["service", name, key])
+                .ok_or_else(|| Failure(format!("service `{name}` gave no `{key}` to seal")))
+        })
+        .collect::<Result<Vec<_>, _>>()?;
+    let probe = scenario
+        .seal_probe
+        .iter()
+        .map(|text| {
+            running
+                .filled(text)
+                .map_err(|why| Failure(format!("`seal_probe`: {why}")))
+        })
+        .collect::<Result<Vec<_>, _>>()?;
+    Ok((seal, probe))
 }
 
 /// The probes passed in this process (#942), by the digests of the
@@ -3123,7 +3369,7 @@ fn probed(
     drive: &std::path::Path,
     regimen: &std::path::Path,
     head: &std::path::Path,
-    secrets: &[String],
+    (secrets, sealed_files): (&[String], &[String]),
     kept_in: &std::path::Path,
 ) -> Result<serde_json::Value, Failure> {
     use crate::drive::probe::{PROBE_FILE, PROBE_PHRASE};
@@ -3165,7 +3411,13 @@ fn probed(
         &rehearsal.0,
         &std::path::absolute(head).unwrap_or_else(|_| head.to_path_buf()),
         secrets,
-        (&file, &phrase, &grep_in),
+        (
+            &std::iter::once(file.clone())
+                .chain(sealed_files.iter().cloned())
+                .collect::<Vec<_>>(),
+            &phrase,
+            &grep_in,
+        ),
         &canary,
     );
     std::fs::write(&file_path, text)
@@ -3190,8 +3442,11 @@ fn probed(
                 .unwrap_or("")
         ))
     })?;
-    let verdict =
-        crate::drive::probe::verdict(&log, secrets.len(), &canary_file.display().to_string());
+    let verdict = crate::drive::probe::verdict(
+        &log,
+        (secrets.len(), 1 + sealed_files.len()),
+        &canary_file.display().to_string(),
+    );
     // A failed probe's log is kept beside the run, for whoever reads why.
     if verdict["ok"] != true {
         let _ = std::fs::create_dir_all(kept_in);
@@ -3689,6 +3944,27 @@ mod tests {
             assert_eq!(line["turns"], 1, "{named}: {line}");
         }
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// #948: a run that went on in a second session shows it on its line,
+    /// tallied as the first is, with the void and failure that ended it.
+    #[test]
+    fn a_repeats_line_tallies_the_session_it_went_on_in() {
+        let line = tallied(&serde_json::json!({
+            "ok": false,
+            "void": "sandbox",
+            "next": {"ok": false, "void": "sandbox", "failure": "the sandbox probe needs a file"},
+        }));
+        assert_eq!(line["next"]["void"], "sandbox", "{line}");
+        assert_eq!(
+            line["next"]["failure"], "the sandbox probe needs a file",
+            "{line}"
+        );
+        assert!(
+            tallied(&serde_json::json!({"ok": true}))
+                .get("next")
+                .is_none()
+        );
     }
 
     /// #910: a void [`run`] marked at its cause stays void on the repeat's

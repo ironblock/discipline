@@ -2260,6 +2260,7 @@ fn synthesized_record(
                 version: None,
                 run: None,
                 rehearsing_as: None,
+                carried_from: None,
             },
             Event::Claim {
                 id: "c1".to_owned(),

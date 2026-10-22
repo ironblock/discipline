@@ -4,8 +4,8 @@
 // i64, and a JavaScript number is exact only to 2^53. A `timings`
 // millisecond may carry a fraction, written as the server wrote it.
 
-export const VERSION = 23;
-export const READS = [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23] as const;
+export const VERSION = 24;
+export const READS = [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24] as const;
 export const PRESENCE_WINDOW_MS = 2000;
 
 export type Kind =
@@ -321,6 +321,13 @@ export interface Run {
   arms?: string;
 }
 
+export interface CarriedFrom {
+  log_sha256: string;
+  meditation_seq: number;
+  trunk_sha256: string;
+  object_sha256?: string;
+}
+
 export interface TemplateKwargs {
   enable_thinking?: boolean;
   reasoning_effort?: string;
@@ -413,7 +420,7 @@ export type SessionStartLine = {
   seq: number;
   t: number;
   kind: "session.start";
-  version: 0 | 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9 | 10 | 11 | 12 | 13 | 14 | 15 | 16 | 17 | 18 | 19 | 20 | 21 | 22 | 23;
+  version: 0 | 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9 | 10 | 11 | 12 | 13 | 14 | 15 | 16 | 17 | 18 | 19 | 20 | 21 | 22 | 23 | 24;
   opened: number;
   model: string;
   head: HeadMessage[];
@@ -454,6 +461,8 @@ export type SessionStartLine = {
   run?: Run;
   rehearsing_as?: string;
   head_nonce?: string;
+  carried_from?: CarriedFrom;
+  carried_source?: string[];
 } & ({ substrate: string; registry_sha256: string } | { substrate?: never; registry_sha256?: never });
 
 export type AskLine = {
@@ -695,6 +704,9 @@ export type MeditationLine = {
   newest_turn_tokens?: number;
   refilled_anyway?: boolean;
   empty?: boolean;
+  trunk_sha256?: string;
+  object_sha256?: string;
+  restored_files?: string[];
   carry?: MeditationCarry;
   summary_tokens?: number;
   warm?: Timings;

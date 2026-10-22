@@ -126,6 +126,7 @@ impl Adapted {
             version: None,
             run: None,
             rehearsing_as: None,
+            carried_from: None,
         });
         events.extend(self.events);
         Record { events }

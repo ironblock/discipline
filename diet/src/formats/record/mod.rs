@@ -46,11 +46,12 @@ use crate::formats::spelling;
 /// The version this module writes, as a record's `start` names it (#583):
 /// 2 was the first that names one, spelling the boundary `meditation`; 3
 /// (#910) adds the start's `run`; 4 (#926) its `rehearsing_as`; 5 (#932)
-/// a k-arm batch's `run`: its `arm` a name, its digest `arms`.
-pub const VERSION: i64 = 5;
+/// a k-arm batch's `run`: its `arm` a name, its digest `arms`; 6 (#948)
+/// the start's `carried_from`, a session carried from another's meditation.
+pub const VERSION: i64 = 6;
 
-/// Every version this module reads: 1, a start naming none, then 2 to 5.
-pub const READS: &[i64] = &[1, 2, 3, 4, 5];
+/// Every version this module reads: 1, a start naming none, then 2 to 6.
+pub const READS: &[i64] = &[1, 2, 3, 4, 5, 6];
 
 /// The version a start's `run` arrived in (#910).
 const RUN_ARRIVED_IN: i64 = 3;
@@ -60,6 +61,9 @@ const REHEARSING_AS_ARRIVED_IN: i64 = 4;
 
 /// The version a start's `run` named its batch's digest `arms` in (#932).
 const ARMS_ARRIVED_IN: i64 = 5;
+
+/// The version a start's `carried_from` arrived in (#948).
+const CARRIED_FROM_ARRIVED_IN: i64 = 6;
 
 #[derive(Parser)]
 #[grammar = "../formats/record/grammar.pest"]
@@ -1214,6 +1218,11 @@ pub enum Event {
         /// under (v4, #926): the claim is the canned one, and this says what
         /// it was refused and admitted under. Absent, its own substrate's.
         rehearsing_as: Option<String>,
+        /// The meditation of another session this one was carried from (v6,
+        /// #948), as its log's `session.start` names it: the first log's
+        /// digest, the meditation's `seq`, and the trunk's and object's
+        /// digests. Absent, the session started from its head.
+        carried_from: Option<log::CarriedFrom>,
     },
     /// A turn happened.
     Turn {
@@ -3927,6 +3936,7 @@ fn start(members: &mut BTreeMap<String, Value>, of: &'static str) -> Result<Even
     Ok(Event::Start {
         run: take_run(members, of)?,
         rehearsing_as: take_rehearsing_as(members, of)?,
+        carried_from: take_carried_from(members, of)?,
         regime: Box::new(regime(&mut take_object(members, of, "regime")?, of)?),
         source: source(members, of)?,
         regimen_sha256: take_optional_digest(members, of, "regimen_sha256")?,
@@ -4196,6 +4206,69 @@ fn take_rehearsing_as(
         .into());
     }
     Ok(rung)
+}
+
+/// A start's `carried_from` (v6, #948): `log_sha256`, `meditation_seq`,
+/// `trunk_sha256` and, when working memory crossed, `object_sha256`. Refused
+/// in a record of version 5 or less, so it is taken before `version` is.
+fn take_carried_from(
+    members: &mut BTreeMap<String, Value>,
+    of: &'static str,
+) -> Result<Option<log::CarriedFrom>, ParseError> {
+    let version = match members.get("version") {
+        Some(Value::Integer(version)) => *version,
+        _ => 1,
+    };
+    let Some(carried) = members.remove("carried_from") else {
+        return Ok(None);
+    };
+    if version < CARRIED_FROM_ARRIVED_IN {
+        return Err(SchemaError::Inconsistent {
+            of,
+            why: format!(
+                "`carried_from` arrived in version {CARRIED_FROM_ARRIVED_IN}: a version \
+                 {version} record carries none"
+            ),
+        }
+        .into());
+    }
+    let Value::Object(mut inner) = carried else {
+        return Err(SchemaError::Inconsistent {
+            of,
+            why: "`carried_from` is not an object".to_owned(),
+        }
+        .into());
+    };
+    let log_sha256 = take_optional_digest(&mut inner, of, "log_sha256")?;
+    let trunk_sha256 = take_optional_digest(&mut inner, of, "trunk_sha256")?;
+    let object_sha256 = take_optional_digest(&mut inner, of, "object_sha256")?;
+    let meditation_seq = match inner.remove("meditation_seq") {
+        Some(Value::Integer(seq)) if seq >= 0 => Some(seq.unsigned_abs()),
+        _ => None,
+    };
+    let (Some(log_sha256), Some(trunk_sha256), Some(meditation_seq)) =
+        (log_sha256, trunk_sha256, meditation_seq)
+    else {
+        return Err(SchemaError::Inconsistent {
+            of,
+            why: "`carried_from` names its `log_sha256`, `meditation_seq` and `trunk_sha256`"
+                .to_owned(),
+        }
+        .into());
+    };
+    if let Some(key) = inner.keys().next() {
+        return Err(SchemaError::Inconsistent {
+            of,
+            why: format!("`carried_from` does not take `{key}`"),
+        }
+        .into());
+    }
+    Ok(Some(log::CarriedFrom {
+        log_sha256,
+        meditation_seq,
+        trunk_sha256,
+        object_sha256,
+    }))
 }
 
 /// A start's `run` (v3, #910): `script_sha256`, `repeat` from 1 to `of`,
@@ -5409,9 +5482,30 @@ fn event_value(event: &Event) -> BTreeMap<String, Value> {
             version,
             run,
             rehearsing_as,
+            carried_from,
         } => {
             put_phase(&mut members, phase.as_ref());
             members.put_optional("rehearsing_as", rehearsing_as.clone().map(Value::String));
+            if let Some(carried) = carried_from {
+                let mut inner = BTreeMap::from([
+                    (
+                        "log_sha256".to_owned(),
+                        Value::String(carried.log_sha256.clone()),
+                    ),
+                    (
+                        "meditation_seq".to_owned(),
+                        Value::Integer(i64::try_from(carried.meditation_seq).unwrap_or(i64::MAX)),
+                    ),
+                    (
+                        "trunk_sha256".to_owned(),
+                        Value::String(carried.trunk_sha256.clone()),
+                    ),
+                ]);
+                if let Some(object) = &carried.object_sha256 {
+                    inner.insert("object_sha256".to_owned(), Value::String(object.clone()));
+                }
+                members.put("carried_from", Value::Object(inner));
+            }
             if let Some(run) = run {
                 let mut inner = BTreeMap::from([
                     (
