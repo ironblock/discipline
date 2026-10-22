@@ -2252,6 +2252,46 @@ fn a_drive_server_with_a_regimen_that_runs_commands_needs_an_absolute_worktree()
     assert!(stub.received().is_empty(), "no request reached the server");
 }
 
+/// #942: `--sandbox-unix-socket` is a socket the model's commands may
+/// connect to: refused, before any request, when the regimen runs none, and
+/// when it is not absolute.
+#[test]
+fn a_run_socket_is_refused_where_no_command_could_use_it_or_it_is_relative() {
+    let stub = Stub::serving(Vec::new()).expect("loopback");
+    let (code, said) = run_briefly(
+        &stub.url(),
+        &["--sandbox-unix-socket", "/private/tmp/x.sock"],
+    );
+    assert_eq!(code, Some(2), "{said}");
+    assert!(said.contains("--sandbox-unix-socket"), "{said}");
+    let tree = Dir::new("socket-tree");
+    let regimen = commands_regimen(
+        "allowed_commands = []\n",
+        "isolation = \"none\"",
+        "[limits]\nmax_steps = 4\n",
+    );
+    let path = regimen.0.to_string_lossy().into_owned();
+    let secrets = Dir::new("socket-auth");
+    let auth = format!("{}/drive.auth", secrets.path());
+    std::fs::write(&auth, "u:p").expect("the auth file");
+    let (code, said) = run_briefly(
+        &stub.url(),
+        &[
+            "--regimen",
+            &path,
+            "--worktree",
+            &tree.path(),
+            "--auth-file",
+            &auth,
+            "--sandbox-unix-socket",
+            "x.sock",
+        ],
+    );
+    assert_eq!(code, Some(2), "a relative socket is a usage error: {said}");
+    assert!(said.contains("--sandbox-unix-socket"), "{said}");
+    assert!(stub.received().is_empty(), "no request reached the server");
+}
+
 #[test]
 fn a_drive_server_refuses_a_vm_regimen_with_commands_or_without_before_any_request() {
     let tree = Dir::new("vm-tree");

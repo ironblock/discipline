@@ -47,6 +47,14 @@ pub struct Scenario {
     pub patience: BTreeMap<usize, u64>,
     /// What the log must show.
     pub expects: Vec<Expect>,
+    /// The ports reserved for each run, by name (#942).
+    pub ports: Vec<String>,
+    /// What each run starts beside serve, outside the sandbox (#942).
+    pub services: Vec<crate::drive::services::Service>,
+    /// The Unix sockets the model's commands may connect to, each a
+    /// service's value, `service.NAME.KEY` (#942): serve's
+    /// `--sandbox-unix-socket`.
+    pub sandbox_unix_sockets: Vec<(String, String)>,
 }
 
 /// One canned reply: the text a request's last message must hold, or none
@@ -261,6 +269,64 @@ impl Scenario {
         self.patience.get(&at).map_or(STEP_PATIENCE, |seconds| {
             std::time::Duration::from_secs(*seconds)
         })
+    }
+
+    /// Every text a run fills from its services (#942): each ask's, and
+    /// each grade's feedback.
+    fn filled_texts(&mut self) -> Vec<&mut String> {
+        let mut texts = Vec::new();
+        for step in &mut self.steps {
+            match step {
+                Step::Ask { text, .. } => texts.push(text),
+                Step::Grade(grading) => {
+                    texts.push(&mut grading.wrong);
+                    texts.extend(grading.last.as_mut());
+                    texts.extend(grading.right.as_mut());
+                }
+                _ => {}
+            }
+        }
+        texts
+    }
+
+    /// Whether every placeholder names a declared port or service (#942).
+    fn placeholders_are_declared(&mut self) -> Result<(), ScenarioError> {
+        let (ports, services) = (
+            self.ports.clone(),
+            self.services
+                .iter()
+                .map(|service| service.name.clone())
+                .collect::<Vec<_>>(),
+        );
+        for text in self.filled_texts() {
+            for place in crate::drive::services::placeholders(text) {
+                let declared = match place.as_slice() {
+                    ["port", key] => ports.iter().any(|port| port == key),
+                    ["service", name, _] => services.iter().any(|service| service == name),
+                    _ => false,
+                };
+                if !declared {
+                    return Err(ScenarioError::Syntax(format!(
+                        "`{{{}}}` names a port or a service the header does not declare",
+                        place.join(".")
+                    )));
+                }
+            }
+        }
+        Ok(())
+    }
+
+    /// This scenario with every placeholder filled from `running` (#942).
+    ///
+    /// # Errors
+    ///
+    /// When a placeholder names a value no service gave.
+    pub fn filled(&self, running: &crate::drive::services::Running) -> Result<Self, String> {
+        let mut filled = self.clone();
+        for text in filled.filled_texts() {
+            *text = running.filled(text)?;
+        }
+        Ok(filled)
     }
 }
 
@@ -816,6 +882,7 @@ pub fn parse(text: &str) -> Result<Scenario, ScenarioError> {
             return Err(fields.wrong("a `reply`, `classify`, `step` or `expect` line"));
         }
     }
+    scenario.placeholders_are_declared()?;
     Ok(scenario)
 }
 
@@ -851,6 +918,51 @@ fn header(mut fields: Fields) -> Result<Scenario, ScenarioError> {
             .collect::<Result<_, _>>()?,
         Some(_) => return Err(fields.wrong("`seed` an object")),
     };
+    let ports = match fields.take("ports") {
+        None => Vec::new(),
+        Some(Value::Array(names)) => {
+            let mut ports: Vec<String> = Vec::new();
+            for name in names {
+                match name {
+                    Value::String(name)
+                        if crate::drive::services::is_a_name(&name) && !ports.contains(&name) =>
+                    {
+                        ports.push(name);
+                    }
+                    _ => return Err(fields.wrong("`ports` a list of distinct names")),
+                }
+            }
+            ports
+        }
+        Some(_) => return Err(fields.wrong("`ports` a list")),
+    };
+    let services = match fields.take("services") {
+        None => Vec::new(),
+        Some(Value::Array(declared)) => crate::drive::services::services_of(declared, &ports)
+            .map_err(|why| fields.wrong(&format!("`services` as declared: {why}")))?,
+        Some(_) => return Err(fields.wrong("`services` a list")),
+    };
+    let sandbox_unix_sockets = match fields.take("sandbox_unix_sockets") {
+        None => Vec::new(),
+        Some(Value::Array(named)) => named
+            .into_iter()
+            .map(|named| match named {
+                Value::String(named) => match named.split('.').collect::<Vec<_>>().as_slice() {
+                    ["service", name, key]
+                        if services.iter().any(|service| service.name == *name)
+                            && crate::drive::services::is_a_name(key) =>
+                    {
+                        Ok(((*name).to_owned(), (*key).to_owned()))
+                    }
+                    _ => Err(fields.wrong(
+                        "each of `sandbox_unix_sockets` a declared service's value,                          `service.NAME.KEY`",
+                    )),
+                },
+                _ => Err(fields.wrong("each of `sandbox_unix_sockets` text")),
+            })
+            .collect::<Result<_, _>>()?,
+        Some(_) => return Err(fields.wrong("`sandbox_unix_sockets` a list")),
+    };
     if let Some(scope) = &approvals
         && !crate::drive::tool_loop::Decision::ALL
             .iter()
@@ -872,6 +984,9 @@ fn header(mut fields: Fields) -> Result<Scenario, ScenarioError> {
         steps: Vec::new(),
         patience: BTreeMap::new(),
         expects: Vec::new(),
+        ports,
+        services,
+        sandbox_unix_sockets,
     })
 }
 
@@ -1219,6 +1334,10 @@ pub struct Driver {
     log: Option<std::path::PathBuf>,
     /// The scenario's directory, named to a grade's commands (#942).
     scenario_dir: Option<std::path::PathBuf>,
+    /// What a grade's commands are told of the run's services (#942).
+    services_env: Vec<(String, String)>,
+    /// Where each attempt's grading output is kept, when it is (#942).
+    grades_out: Option<std::path::PathBuf>,
     /// Why the drive failed void, when it did for a reason outside the
     /// model (#910, #942): a check that crashed.
     voided: std::cell::Cell<Option<&'static str>>,
@@ -1253,6 +1372,8 @@ impl Driver {
             worktree: None,
             log: None,
             scenario_dir: None,
+            services_env: Vec::new(),
+            grades_out: None,
             voided: std::cell::Cell::new(None),
         }
     }
@@ -1272,12 +1393,36 @@ impl Driver {
         self
     }
 
-    /// What every grade command is told: the scenario's directory.
-    fn grade_env(&self) -> Vec<(&'static str, String)> {
-        self.scenario_dir
+    /// This driver, telling a grade's commands of the run's services
+    /// (#942): their ports and values.
+    #[must_use]
+    pub fn telling(mut self, env: Vec<(String, String)>) -> Self {
+        self.services_env = env;
+        self
+    }
+
+    /// This driver, keeping each attempt's grading output under `dir`, as
+    /// `<task>/attempt-<n>/`, named to the check as `DIET_GRADE_OUT` (#942).
+    #[must_use]
+    pub fn grading_out_to(mut self, dir: std::path::PathBuf) -> Self {
+        self.grades_out = Some(dir);
+        self
+    }
+
+    /// What every grade command is told: the scenario's directory, and the
+    /// run's services' ports and values.
+    fn grade_env(&self) -> Vec<(&str, String)> {
+        let mut env: Vec<(&str, String)> = self
+            .scenario_dir
             .iter()
             .map(|dir| ("DIET_GRADE_SCENARIO_DIR", dir.display().to_string()))
-            .collect()
+            .collect();
+        env.extend(
+            self.services_env
+                .iter()
+                .map(|(key, value)| (key.as_str(), value.clone())),
+        );
+        env
     }
 
     /// Why the drive failed void, when it did (#942).
@@ -1373,6 +1518,12 @@ impl Driver {
                 ("DIET_GRADE_ATTEMPT", attempt.to_string()),
                 ("DIET_GRADE_TURN", turn_file.display().to_string()),
             ]);
+            if let Some(out) = &self.grades_out {
+                let kept = out.join(&grading.task).join(format!("attempt-{attempt}"));
+                std::fs::create_dir_all(&kept)
+                    .map_err(|why| Failure(format!("{} cannot be made: {why}", kept.display())))?;
+                env.push(("DIET_GRADE_OUT", kept.display().to_string()));
+            }
             if let Some(text) = &before {
                 let file = inputs.join("before.txt");
                 std::fs::write(&file, text)
@@ -2531,6 +2682,63 @@ fn running(
             .arg("--classifier-endpoint")
             .arg(format!("http://{}", stub.address()));
     }
+    // Its services (#942): started before serve, outside the sandbox, their
+    // ports and values in serve's environment and the run's texts.
+    let scenario_dir = std::path::absolute(&options.file)
+        .ok()
+        .and_then(|file| file.parent().map(std::path::Path::to_path_buf))
+        .unwrap_or_else(|| std::path::PathBuf::from("."));
+    let mut services = None;
+    let scenario = if scenario.services.is_empty() && scenario.ports.is_empty() {
+        scenario
+    } else {
+        let started = crate::drive::services::Running::start(
+            &scenario.services,
+            &scenario.ports,
+            (
+                &options.out.join("services"),
+                &scenario_dir,
+                worktree.as_deref(),
+            ),
+            &[],
+        );
+        let mut running = match started {
+            Ok(running) => running,
+            Err((did, why)) => {
+                said["services"] = did;
+                return Err(voided(said, "services", Failure(why)));
+            }
+        };
+        let mut sockets = Vec::new();
+        let mut refused = None;
+        for (name, key) in &scenario.sandbox_unix_sockets {
+            let Some(socket) = running.value(&["service", name, key]) else {
+                refused = Some(format!(
+                    "service `{name}` gave no `{key}` for the sandbox's socket"
+                ));
+                break;
+            };
+            sockets.push(socket);
+        }
+        let filled = match refused {
+            Some(why) => Err(why),
+            None => scenario.filled(&running),
+        };
+        let filled = match filled {
+            Ok(filled) => filled,
+            Err(why) => {
+                running.stop(&scenario_dir, &[]);
+                said["services"] = running.said();
+                return Err(voided(said, "services", Failure(why)));
+            }
+        };
+        for socket in sockets {
+            serve.arg("--sandbox-unix-socket").arg(socket);
+        }
+        serve.envs(running.env());
+        services = Some(running);
+        filled
+    };
     let mut child = serve
         .spawn()
         .map_err(|why| voided(said, "serve", Failure(format!("serve cannot start: {why}"))))?;
@@ -2544,18 +2752,22 @@ fn running(
         let _ = child.kill();
         let _ = child.wait();
         let _ = std::fs::remove_dir_all(&secrets);
+        if let Some(mut running) = services.take() {
+            running.stop(&scenario_dir, &[]);
+            said["services"] = running.said();
+        }
         return Err(voided(
             said,
             "serve",
             Failure(format!("serve did not start: {first}")),
         ));
     };
-    let mut driver = Driver::new(listening, Some(&user_password)).logging_to(log.clone());
-    if let Some(dir) = std::path::absolute(&options.file)
-        .ok()
-        .and_then(|file| file.parent().map(std::path::Path::to_path_buf))
-    {
-        driver = driver.for_scenario_in(dir);
+    let mut driver = Driver::new(listening, Some(&user_password))
+        .logging_to(log.clone())
+        .for_scenario_in(scenario_dir.clone())
+        .grading_out_to(options.out.join("grades"));
+    if let Some(running) = &services {
+        driver = driver.telling(running.env());
     }
     if let Some(worktree) = worktree {
         driver = driver.in_worktree(worktree);
@@ -2585,6 +2797,10 @@ fn running(
     };
     let _ = drained.join();
     let _ = std::fs::remove_dir_all(&secrets);
+    if let Some(mut running) = services.take() {
+        running.stop(&scenario_dir, &[]);
+        said["services"] = running.said();
+    }
     let unmatched = stub
         .as_ref()
         .map(crate::client::stub::Stub::unmatched)

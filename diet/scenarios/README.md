@@ -37,6 +37,40 @@ The format has no grammar of its own, so it has no directory under `diet/formats
 | `approvals` | optional | the `POST /approve` scope (`once`, `session`, `workspace`, `decline`) that answers each prompt; absent, a prompt fails the run |
 | `seed` | optional | `{worktree path: file}`: each file, relative to the scenario, copied into the fresh worktree before serve starts (an `AGENTS.md`, say). The regimen must run commands. |
 | `fixed_asks` | optional | the asks, by their place among the asks from 0, that are fixed: an operator script (below) lists `[0]`. Every later ask was typed in answer to what the model did, so a scripted run of it is not that answer. A person who knows a later ask was written in advance adds its index. |
+| `ports` | optional | names of loopback ports reserved for each run (below) |
+| `services` | optional | what each run starts beside serve, outside the sandbox (below) |
+| `sandbox_unix_sockets` | optional | services' values, each `service.NAME.KEY`, passed to serve as `--sandbox-unix-socket`: sockets the model's commands may connect to |
+
+## Services (#942)
+
+A run may need things beside serve: a dev server, a browser daemon, a grader's own browser. The header's `services` starts them for each run, outside the model's sandbox, before serve starts. They stop after serve exits, even when the run fails.
+```json
+"ports": ["model_vite"],
+"services": [
+  {"name": "model-vite", "run": "exec ./vite.sh", "ready": {"tcp": "model_vite"}},
+  {"name": "model-browser", "start": "./browser.sh start", "stop": "./browser.sh stop", "ready": {"command": "./browser.sh status"}}
+],
+"sandbox_unix_sockets": ["service.model-browser.socket"]
+```
+- **Ports:** each named port is reserved for the run on loopback, so runs side by side never collide.
+- **A service is one of two kinds:**
+  - `run`: a command that stays in the foreground. Its process group is stopped with TERM, then KILL after 10 s.
+  - `start` and `stop`: a daemon that detaches. `start` writes the PIDs it leaves, one per word, to `$DIET_SERVICE_DIR/pids`. After the run the runner runs `stop`, then ends any of those PIDs still alive, TERM then KILL. Nothing is stopped by a pattern.
+- **Ready:** `{"tcp": PORT}` (the port accepts a connection) or `{"command": TEXT}` (polled until it exits 0), within `ready_timeout_s` (60 unless given). A service not ready in time, or one that exits first, voids the run as `services`, and serve never starts.
+- **Values:** a service may write `$DIET_SERVICE_DIR/provides.json`, an object of strings: a socket's path, a session id.
+- **What each is told,** beside the runner's environment:
+  - `DIET_PORT_<KEY>` for each port;
+  - `DIET_SERVICE_<NAME>_<KEY>` for each value provided by a service started before it, upper-cased with `-` as `_`;
+  - `DIET_SERVICE_DIR`, its own directory;
+  - `DIET_WORKTREE`, the run's worktree, when it has one.
+
+  Its commands run under `bash -c` in the scenario's directory, each leading a process group of its own, their output appended to `DIR/services/<name>/out.log`.
+- **Where the values go:**
+  - serve's environment, which passes on to a command only what the regimen's `env_passthrough` names;
+  - every check's environment;
+  - each ask's text and each grade's `wrong`, `last` and `right`, as `{port.KEY}` and `{service.NAME.KEY}`. Other braces are text. A placeholder naming a port or service the header does not declare is refused when the scenario is read.
+- **Sockets:** `sandbox_unix_sockets` names the values serve is given as `--sandbox-unix-socket`. A socket's path differs per run, so it is a run's fact, as the worktree is, and the regimen's bytes stay the arm's. The receipt names it beside the regimen's own.
+- **What the run says:** its line names each service's `ready_ms` and what its stop did: `killed` for a foreground one that needed the KILL; `stop_exit` and `pids_left_after_stop` for a daemon.
 
 ## `reply`: what the canned substrate answers
 
@@ -107,6 +141,8 @@ A `grade` step comes right after the admitted `ask` of its task. That ask asks t
 - **The check** is the operator's command.
   - **Who runs it:** the runner, not serve, so it runs outside the model's sandbox, as `bash -c` in the session's worktree, in its own process group.
   - **Its environment:** the runner's, plus:
+    - the run's services' ports and values (above);
+    - `DIET_GRADE_OUT`, a directory kept for its attempt, `DIR/grades/<task>/attempt-<n>/`, outside the worktree: for dumps and screenshots;
     - `DIET_GRADE_TASK`;
     - `DIET_GRADE_ATTEMPT`;
     - `DIET_GRADE_SCENARIO_DIR`, the scenario file's directory;

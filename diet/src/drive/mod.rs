@@ -115,6 +115,7 @@ pub mod scenario;
 pub mod script;
 pub mod serve;
 pub mod served;
+pub mod services;
 pub mod session;
 pub mod shell_gate;
 pub mod shown;

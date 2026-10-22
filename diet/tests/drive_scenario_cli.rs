@@ -1765,6 +1765,200 @@ fn logged(log: &Path, kind: &str) -> Vec<serde_json::Value> {
         .collect()
 }
 
+/// #942: a scenario's services run beside serve, outside the sandbox. A
+/// foreground server waits on its reserved port; a daemon that detaches
+/// writes its PIDs and a value, and its `stop` leaves its PID alive, which
+/// the runner then ends. The ask is filled from both, the check is told
+/// both and keeps a file in its own directory, and serve is given the
+/// daemon's socket, which its receipt names. After the run nothing it
+/// started is alive.
+#[test]
+#[allow(clippy::too_many_lines)]
+fn services_start_before_serve_fill_the_run_and_stop_after_it() {
+    let dir = scratch("services");
+    commanding(&dir, "a.toml", 4);
+    // The model's commands are passed the web port: serve was given it.
+    let regimen = std::fs::read_to_string(dir.join("a.toml")).expect("the regimen");
+    std::fs::write(
+        dir.join("a.toml"),
+        regimen.replace(
+            "[limits]",
+            "env_passthrough = [\"DIET_PORT_WEB\"]\n[limits]",
+        ),
+    )
+    .expect("the regimen");
+    // A socket's address holds at most 103 bytes: the scratch dir's is too long.
+    let socket = PathBuf::from(format!("/private/tmp/diet-svc-{}.sock", std::process::id()));
+    let daemon_start = format!(
+        "bash -c 'trap \"echo term > $DIET_SERVICE_DIR/termed; exit 0\" TERM; while true; do sleep 0.1; done' \
+         > /dev/null 2>&1 & echo $! > \"$DIET_SERVICE_DIR/pids\"; \
+         printf '{{\"token\": \"t-42\", \"socket\": \"{}\"}}' > \"$DIET_SERVICE_DIR/provides.json\"",
+        socket.display()
+    );
+    let check = "python3 -c 'import json, os, urllib.request\n\
+        port = os.environ[\"DIET_PORT_WEB\"]\n\
+        body = urllib.request.urlopen(\"http://127.0.0.1:%s/\" % port).status\n\
+        echoed = json.load(open(os.environ[\"DIET_GRADE_TURN\"]))[\"calls\"][0][\"stdout\"][\"text\"].strip()\n\
+        open(os.path.join(os.environ[\"DIET_GRADE_OUT\"], \"seen.txt\"), \"w\").write(os.environ[\"DIET_SERVICE_DAEMON_TOKEN\"])\n\
+        print(json.dumps({\"right\": body == 200 and echoed == port, \"expected\": port, \"got\": echoed}))'";
+    let call = serde_json::json!([{"id": "c1", "name": "bash", "arguments": serde_json::json!({"command": "echo \"$DIET_PORT_WEB\""}).to_string()}]);
+    let lines = [
+        serde_json::json!({
+            "scenario": "services",
+            "regimen": "a.toml",
+            "head": root().join("diet/drive/heads/floor.md"),
+            "ports": ["web"],
+            "services": [
+                {"name": "web", "run": "exec python3 -m http.server --bind 127.0.0.1 \"$DIET_PORT_WEB\"", "ready": {"tcp": "web"}},
+                {"name": "daemon", "start": daemon_start, "stop": "true", "ready": {"command": "test -s \"$DIET_SERVICE_DIR/provides.json\""}},
+            ],
+            "sandbox_unix_sockets": ["service.daemon.socket"],
+        }),
+        serde_json::json!({"reply": {"when": "Open port", "text": "On it.", "calls": call}}),
+        serde_json::json!({"reply": {"text": "Done."}}),
+        serde_json::json!({"reply": {"when": "Graded: right", "text": "Thanks."}}),
+        serde_json::json!({"step": "ask", "text": "Open port {port.web} with token {service.daemon.token}."}),
+        serde_json::json!({"step": "grade", "task": "T1", "check": check, "wrong": "Graded: wrong.", "right": "Graded: right on {port.web}."}),
+        serde_json::json!({"step": "end"}),
+    ];
+    let file = dir.join("services.jsonl");
+    let text: String = lines.iter().map(|line| line.to_string() + "\n").collect();
+    std::fs::write(&file, text).expect("the scenario");
+    let out = dir.join("out");
+    let (code, said) = run(&file, &out);
+    assert_eq!(code, Some(0), "{said}");
+    assert!(said["services"]["web"]["ready_ms"].is_u64(), "{said}");
+    assert_eq!(
+        said["services"]["web"]["stopped"]["killed"], false,
+        "{said}"
+    );
+    assert_eq!(
+        said["services"]["daemon"]["stopped"]["stop_exit"], 0,
+        "{said}"
+    );
+    let left = said["services"]["daemon"]["stopped"]["pids_left_after_stop"]
+        .as_array()
+        .cloned()
+        .unwrap_or_default();
+    assert_eq!(left.len(), 1, "the daemon's stop left its sleep: {said}");
+    let pid = left[0].as_u64().expect("a pid");
+    let alive = Command::new("/bin/kill")
+        .args(["-0", &pid.to_string()])
+        .stderr(std::process::Stdio::null())
+        .status()
+        .expect("kill runs")
+        .success();
+    assert!(!alive, "the runner ended pid {pid}");
+    assert!(
+        out.join("services/daemon/termed").exists(),
+        "the runner asked it to end, TERM, before any KILL"
+    );
+    let asks = logged(&out.join("session.log"), "ask");
+    let first = asks[0]["text"].as_str().expect("text");
+    assert!(
+        first.starts_with("Open port ") && first.ends_with(" with token t-42."),
+        "{first}"
+    );
+    let port: u16 = first["Open port ".len()..]
+        .split(' ')
+        .next()
+        .and_then(|port| port.parse().ok())
+        .expect("a port");
+    assert!(
+        std::net::TcpStream::connect(("127.0.0.1", port)).is_err(),
+        "the web service stopped with the run"
+    );
+    assert_eq!(
+        asks[1]["text"].as_str(),
+        Some(format!("Graded: right on {port}.").as_str()),
+        "{asks:?}"
+    );
+    let grades = logged(&out.join("session.log"), "grade");
+    assert_eq!(grades[0]["right"], true, "{grades:?}");
+    assert_eq!(
+        std::fs::read_to_string(out.join("grades/T1/attempt-1/seen.txt")).expect("kept"),
+        "t-42"
+    );
+    let receipt: serde_json::Value = serde_json::from_str(
+        &std::fs::read_to_string(out.join("session.record.jsonl.receipt.json")).expect("receipt"),
+    )
+    .expect("JSON");
+    assert_eq!(
+        receipt["unix_sockets"],
+        serde_json::json!([socket.display().to_string()]),
+        "{receipt}"
+    );
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// #942: a service that never becomes ready voids the run as `services`
+/// before serve starts, and what it started is stopped.
+#[test]
+fn a_service_not_ready_in_time_voids_the_run() {
+    let dir = scratch("services-late");
+    commanding(&dir, "a.toml", 4);
+    let lines = [
+        serde_json::json!({
+            "scenario": "late",
+            "regimen": "a.toml",
+            "head": root().join("diet/drive/heads/floor.md"),
+            "services": [{"name": "never", "run": "exec sleep 300", "ready": {"command": "false"}, "ready_timeout_s": 1}],
+        }),
+        serde_json::json!({"reply": {"when": "hello", "text": "Hello."}}),
+        serde_json::json!({"step": "ask", "text": "hello"}),
+        serde_json::json!({"step": "end"}),
+    ];
+    let file = dir.join("late.jsonl");
+    let text: String = lines.iter().map(|line| line.to_string() + "\n").collect();
+    std::fs::write(&file, text).expect("the scenario");
+    let out = dir.join("out");
+    let (code, said) = run(&file, &out);
+    assert_eq!(code, Some(1), "{said}");
+    assert_eq!(said["void"], "services", "{said}");
+    assert!(
+        said["failure"]
+            .as_str()
+            .unwrap_or("")
+            .contains("not ready in 1 s"),
+        "{said}"
+    );
+    assert_eq!(
+        said["services"]["never"]["stopped"]["killed"], false,
+        "{said}"
+    );
+    assert!(!out.join("session.log").exists(), "serve never started");
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// #942: a placeholder naming a port or a service the header does not
+/// declare is refused when the scenario is read.
+#[test]
+fn a_placeholder_naming_nothing_declared_is_refused() {
+    let dir = scratch("services-undeclared");
+    let file = scenario(
+        &dir,
+        "undeclared",
+        concat!(
+            r#"{"reply":{"when":"x","text":"y"}}"#,
+            "\n",
+            r#"{"step":"ask","text":"open {port.web}"}"#,
+            "\n",
+            r#"{"step":"end"}"#,
+            "\n",
+        ),
+    );
+    let (code, said) = run(&file, &dir.join("out"));
+    assert_eq!(code, Some(1), "{said}");
+    assert!(
+        said["failure"]
+            .as_str()
+            .unwrap_or("")
+            .contains("`{port.web}` names a port or a service"),
+        "{said}"
+    );
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
 /// #942: a check that fails once and then passes logs two `grade` lines,
 /// sends the `wrong` ask and then the `right` one, then moves on; with
 /// `right` omitted, only the `wrong` ask. Every ask names its task.
