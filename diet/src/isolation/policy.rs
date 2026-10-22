@@ -406,18 +406,28 @@ impl Policy {
 /// The Unix sockets `regimen` names ([`SANDBOX_UNIX_SOCKETS`]): each
 /// absolute, and short enough resolved for a socket's address.
 fn unix_sockets(regimen: &Regimen) -> Result<Vec<String>, PolicyError> {
-    let mut out = Vec::new();
-    for path in paths(regimen, SANDBOX_UNIX_SOCKETS)? {
-        if !is_rooted(&path) {
-            return Err(PolicyError::NotAbsolute(path));
-        }
-        let bytes = canonical_prefix(&home_expanded(&path)).as_os_str().len();
-        if bytes > UNIX_SOCKET_PATH_MAX {
-            return Err(PolicyError::SocketPathTooLong { path, bytes });
-        }
-        out.push(path);
+    paths(regimen, SANDBOX_UNIX_SOCKETS)?
+        .into_iter()
+        .map(unix_socket)
+        .collect()
+}
+
+/// `path` as a Unix socket a command may connect to: absolute, and short
+/// enough resolved for a socket's address. A regimen's, or a run's own
+/// (`serve --sandbox-unix-socket`, #942).
+///
+/// # Errors
+///
+/// When it is not absolute, or too long.
+pub fn unix_socket(path: String) -> Result<String, PolicyError> {
+    if !is_rooted(&path) {
+        return Err(PolicyError::NotAbsolute(path));
     }
-    Ok(out)
+    let bytes = canonical_prefix(&home_expanded(&path)).as_os_str().len();
+    if bytes > UNIX_SOCKET_PATH_MAX {
+        return Err(PolicyError::SocketPathTooLong { path, bytes });
+    }
+    Ok(path)
 }
 
 /// Why a regimen does not describe an isolation policy.

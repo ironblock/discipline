@@ -122,7 +122,8 @@ fn serve_usage() -> String {
          \x20                       [--listen IP] [--port N] [--auth-file FILE] [--regimen FILE]\n\
          \x20                       [--log FILE] [--record FILE]\n\
          \x20                       [--allow-origin URL]... [--max-output-tokens N]\n\
-         \x20                       [--worktree DIR] [--run JSON] [--rehearse-as RUNG]\n\
+         \x20                       [--worktree DIR] [--sandbox-unix-socket PATH]...\n\
+         \x20                       [--run JSON] [--rehearse-as RUNG]\n\
          \x20                       [--seat-endpoint URL --seat-model NAME [--seat-key-file FILE]]\n\
          \x20      diet-drive serve --profile NAME [--config FILE] [any flag above]\n\n",
     );
@@ -195,6 +196,9 @@ fn serve_usage() -> String {
     out.push_str("\"decline\"}: 204, or 409 {\"refused\": \"nothing-waiting\"|\"stale\"|...}.\n");
     out.push_str("After the session the receipt is written beside the record (or the log),\n");
     out.push_str("as FILE.receipt.json.\n");
+    out.push_str("--sandbox-unix-socket PATH, absolute, each: a Unix socket of the run's\n");
+    out.push_str("own (a browser daemon's) the model's commands may connect to, beside the\n");
+    out.push_str("regimen's `sandbox_unix_sockets`; the receipt names it (#942).\n");
     out.push_str("A regimen declaring `extraction_seat = \"offboard:<registry id>\"` runs its\n");
     out.push_str("interview forks on a second server: --seat-endpoint and --seat-model are\n");
     out.push_str("then required (--seat-key-file as --key-file), the seat's engine is checked\n");
@@ -230,6 +234,9 @@ struct ServeArgs {
     classifier_endpoint: Option<String>,
     /// `--run`: which repeat of which script the session is (#910), as JSON.
     run: Option<String>,
+    /// `--sandbox-unix-socket PATH`, each: a socket of the run's own its
+    /// commands may connect to, beside the regimen's (#942).
+    sandbox_unix_sockets: Vec<String>,
     /// `--rehearse-as`: the rung a rehearsal runs under the declarations of
     /// (#926).
     rehearse_as: Option<String>,
@@ -363,6 +370,7 @@ fn serve_args(args: &[String]) -> Option<ServeArgs> {
     let mut classifier_endpoint = None;
     let mut run = None;
     let mut rehearse_as = None;
+    let mut sandbox_unix_sockets = Vec::new();
     let mut given = args.iter();
     while let Some(flag) = given.next() {
         let value = given.next()?;
@@ -416,6 +424,9 @@ fn serve_args(args: &[String]) -> Option<ServeArgs> {
         } else if flag == "--rehearse-as" {
             rehearse_as = Some(value.clone());
             true
+        } else if flag == "--sandbox-unix-socket" {
+            sandbox_unix_sockets.push(value.clone());
+            true
         } else if flag == "--allow-origin" {
             let origin = is_an_origin(value);
             if origin {
@@ -461,6 +472,7 @@ fn serve_args(args: &[String]) -> Option<ServeArgs> {
         classifier_endpoint,
         run,
         rehearse_as,
+        sandbox_unix_sockets,
     })
 }
 
@@ -493,6 +505,7 @@ fn serve(args: &[String]) -> ExitCode {
         classifier_endpoint,
         run,
         rehearse_as,
+        sandbox_unix_sockets,
     }) = serve_args(args)
     else {
         eprint!("{}", serve_usage());
@@ -697,7 +710,7 @@ fn serve(args: &[String]) -> ExitCode {
     // (#298 point 8).
     let tools = match serving_tools(
         regimen_file.as_deref(),
-        worktree.as_deref(),
+        (worktree.as_deref(), &sandbox_unix_sockets),
         (key_file.as_deref(), auth_file.as_deref()),
     ) {
         Ok(tools) => tools,
@@ -1665,7 +1678,7 @@ fn serving_interview(
 #[allow(clippy::too_many_lines)]
 fn serving_tools(
     regimen: Option<&str>,
-    worktree: Option<&str>,
+    (worktree, sockets): (Option<&str>, &[String]),
     (key_file, auth_file): (Option<&str>, Option<&str>),
 ) -> Result<Option<Tools>, (u8, String)> {
     let no_commands = |path: &str| {
@@ -1677,10 +1690,22 @@ fn serving_tools(
             ),
         ))
     };
+    // A socket is for commands to connect to (#942): none run, none is used.
+    let no_sockets = |path: &str| {
+        Err((
+            EXIT_USAGE,
+            format!(
+                "--sandbox-unix-socket names a socket the model's commands may connect to, and \
+                 {path} runs none (it declares no `{}`)",
+                tool_loop::ALLOWED_COMMANDS
+            ),
+        ))
+    };
     let Some(path) = regimen else {
-        return match worktree {
-            Some(_) => no_commands("no --regimen"),
-            None => Ok(None),
+        return match (worktree, sockets.is_empty()) {
+            (Some(_), _) => no_commands("no --regimen"),
+            (None, false) => no_sockets("no --regimen"),
+            (None, true) => Ok(None),
         };
     };
     let text = std::fs::read_to_string(path)
@@ -1701,9 +1726,10 @@ fn serving_tools(
     let Some(declared) =
         tool_loop::declared(&read).map_err(|why| (EXIT_INPUT, format!("{path}: {why}")))?
     else {
-        return match worktree {
-            Some(_) => no_commands(path),
-            None => Ok(None),
+        return match (worktree, sockets.is_empty()) {
+            (Some(_), _) => no_commands(path),
+            (None, false) => no_sockets(path),
+            (None, true) => Ok(None),
         };
     };
     let Some(worktree) = worktree.map(std::path::PathBuf::from) else {
@@ -1776,6 +1802,15 @@ fn serving_tools(
                 )
             },
         )?;
+    }
+    // The run's own sockets (#942), beside the regimen's: a per-run fact,
+    // as the worktree is, so the regimen's bytes stay the arm's.
+    for socket in sockets {
+        let socket = isolation::policy::unix_socket(socket.clone())
+            .map_err(|why| (EXIT_USAGE, format!("--sandbox-unix-socket: {why}")))?;
+        if !policy.unix_sockets.contains(&socket) {
+            policy.unix_sockets.push(socket);
+        }
     }
     // A TMPDIR of the session's own, writable: the drive's is not.
     if policy.isolation == isolation::Isolation::Sandbox {
