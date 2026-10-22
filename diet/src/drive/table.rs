@@ -46,6 +46,9 @@ pub struct Receipts {
     pub forks: u64,
     /// Patches written.
     pub captures: u64,
+    /// Meditations that refilled from an empty working memory, carrying
+    /// nothing (`meditation` with `empty: true`, #942).
+    pub empty_refills: u64,
     /// Commands refused.
     pub refusals: u64,
     /// Settled turns, by reason.
@@ -61,6 +64,9 @@ pub struct Receipts {
     /// Whether the run's head carried its own nonce (#932): `session.start`
     /// names one.
     pub nonced: bool,
+    /// Each task's derived outcome (#942), from the run's `outcomes.json`
+    /// when an analysis wrote one beside its log: `{"outcomes": {task: outcome}}`.
+    pub outcomes: BTreeMap<String, String>,
 }
 
 /// One lane's prefill in one run (#932).
@@ -178,6 +184,9 @@ impl Receipts {
                 }
                 Event::Fork { .. } => receipts.forks += 1,
                 Event::Patch { .. } => receipts.captures += 1,
+                Event::Meditation {
+                    empty: Some(true), ..
+                } => receipts.empty_refills += 1,
                 Event::Refused { .. } => receipts.refusals += 1,
                 _ => {}
             }
@@ -284,6 +293,11 @@ fn rows(
         row("forks", "`fork` lines", Box::new(|r| count(r.forks))),
         row("captures", "`patch` lines", Box::new(|r| count(r.captures))),
         row(
+            "empty refills",
+            "`meditation` lines with `empty: true`: a refill that carried nothing",
+            Box::new(|r| count(r.empty_refills)),
+        ),
+        row(
             "refusals",
             "`refused` lines",
             Box::new(|r| count(r.refusals)),
@@ -339,6 +353,56 @@ fn task_rows(tasks: &BTreeSet<String>) -> Vec<Row> {
         });
     }
     rows
+}
+
+/// One row per task and outcome a run's `outcomes.json` names (#942): 1 for
+/// a run whose task had that outcome, 0 for one whose had another, none for
+/// one that has no outcome for the task; an arm's runs sum to its count.
+fn outcome_rows<'a>(runs: impl Iterator<Item = &'a Receipts>) -> Vec<Row> {
+    let named: BTreeSet<(String, String)> = runs
+        .flat_map(|r| {
+            r.outcomes
+                .iter()
+                .map(|(task, outcome)| (task.clone(), outcome.clone()))
+        })
+        .collect();
+    named
+        .iter()
+        .map(|(task, outcome)| {
+            let (task_of, outcome_of) = (task.clone(), outcome.clone());
+            Row {
+                name: format!("outcome: {task}: {outcome}"),
+                source: "`outcomes.json` beside the run's log, written by an analysis of the run \
+                         (diet/scenarios/lite/outcomes.py): 1 when the task's outcome is this one"
+                    .to_owned(),
+                missing: "—",
+                note: None,
+                value: Box::new(move |r| match r.outcomes.get(&task_of) {
+                    Some(had) if *had == outcome_of => 1.0,
+                    Some(_) => 0.0,
+                    None => f64::NAN,
+                }),
+            }
+        })
+        .collect()
+}
+
+/// A run's outcomes (#942): its `outcomes.json`'s `outcomes`, or none.
+fn outcomes_in(dir: &Path) -> BTreeMap<String, String> {
+    std::fs::read_to_string(dir.join("outcomes.json"))
+        .ok()
+        .and_then(|text| serde_json::from_str::<serde_json::Value>(&text).ok())
+        .and_then(|read| {
+            read["outcomes"].as_object().map(|outcomes| {
+                outcomes
+                    .iter()
+                    .filter_map(|(task, outcome)| {
+                        Some((task.clone(), outcome.as_str()?.to_owned()))
+                    })
+                    .collect()
+            })
+        })
+        .unwrap_or_default()
 }
 
 /// Each lane's prefill rows (#932), cached and new.
@@ -730,10 +794,10 @@ pub fn table(dir: &Path, seed: u64) -> Result<(serde_json::Value, String), Strin
                 ));
             }
         }
-        receipts
-            .entry(run.arm)
-            .or_default()
-            .push(Receipts::of(&lines, run.unmet));
+        receipts.entry(run.arm).or_default().push(Receipts {
+            outcomes: outcomes_in(path.parent().unwrap_or_else(|| Path::new("."))),
+            ..Receipts::of(&lines, run.unmet)
+        });
     }
     if batches.len() > 1 {
         return Err(format!(
@@ -762,7 +826,10 @@ pub fn table(dir: &Path, seed: u64) -> Result<(serde_json::Value, String), Strin
     let mut draws = Draws(seed);
     let mut json_rows = Vec::new();
     let mut markdown = header(&arms, &baseline);
-    for row in rows(&reasons, &tasks, (&lanes, nonced)) {
+    for row in rows(&reasons, &tasks, (&lanes, nonced))
+        .into_iter()
+        .chain(outcome_rows(all()))
+    {
         let (json, line) = laid_out(&row, (&arms, base), &mut draws);
         json_rows.push(json);
         markdown.push_str(&line);
@@ -800,6 +867,21 @@ pub fn table(dir: &Path, seed: u64) -> Result<(serde_json::Value, String), Strin
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// #942: an empty refill is counted from the meditation line that says
+    /// so, and a refill that carried something is not.
+    #[test]
+    fn an_empty_refill_is_counted_from_its_line() {
+        let read = |text: &str| Receipts::of(&log::parse(text).expect("the fixture reads"), 0);
+        let empty = read(include_str!(
+            "../../formats/log/fixtures/valid/a-v23-meditation-refilled-from-an-empty-working-memory.jsonl"
+        ));
+        assert_eq!(empty.empty_refills, 1);
+        let carried = read(include_str!(
+            "../../formats/log/fixtures/valid/a-v16-meditation-carrying-a-native-summary.jsonl"
+        ));
+        assert_eq!(carried.empty_refills, 0);
+    }
 
     /// #932: a lane's prefill comes from the responses that report it --
     /// `timings` first, then a hosted `usage` -- and a lane where any

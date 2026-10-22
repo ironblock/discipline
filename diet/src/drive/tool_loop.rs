@@ -2320,6 +2320,22 @@ pub fn receipt(
             Value::Array(policy.unix_sockets.iter().map(|path| text(path)).collect()),
         );
     }
+    // The run's own secrets (#942): how many, and the digest of the sorted
+    // list, never the paths, which name the operator's private files.
+    if !policy.run_secrets.is_empty() {
+        let mut sorted = policy.run_secrets.clone();
+        sorted.sort();
+        fields.insert(
+            "run_secrets".to_owned(),
+            Value::Object(BTreeMap::from([
+                ("count".to_owned(), count(sorted.len() as u64)),
+                (
+                    "sha256".to_owned(),
+                    text(&crate::digest::sha256_hex(sorted.join("\n").as_bytes())),
+                ),
+            ])),
+        );
+    }
     // The session's own TMPDIR, where its commands' scratch went.
     if let Some(tmpdir) = &policy.tmpdir {
         fields.insert("tmpdir".to_owned(), text(tmpdir));

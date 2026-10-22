@@ -123,6 +123,7 @@ fn serve_usage() -> String {
          \x20                       [--log FILE] [--record FILE]\n\
          \x20                       [--allow-origin URL]... [--max-output-tokens N]\n\
          \x20                       [--worktree DIR] [--sandbox-unix-socket PATH]...\n\
+         \x20                       [--sandbox-secret PATH]...\n\
          \x20                       [--run JSON] [--rehearse-as RUNG]\n\
          \x20                       [--seat-endpoint URL --seat-model NAME [--seat-key-file FILE]]\n\
          \x20      diet-drive serve --profile NAME [--config FILE] [any flag above]\n\n",
@@ -199,6 +200,9 @@ fn serve_usage() -> String {
     out.push_str("--sandbox-unix-socket PATH, absolute, each: a Unix socket of the run's\n");
     out.push_str("own (a browser daemon's) the model's commands may connect to, beside the\n");
     out.push_str("regimen's `sandbox_unix_sockets`; the receipt names it (#942).\n");
+    out.push_str("--sandbox-secret PATH, absolute, each: a path of the run's own denied to\n");
+    out.push_str("every command, beside the regimen's secrets; the receipt counts and digests\n");
+    out.push_str("them, never naming one (#942).\n");
     out.push_str("A regimen declaring `extraction_seat = \"offboard:<registry id>\"` runs its\n");
     out.push_str("interview forks on a second server: --seat-endpoint and --seat-model are\n");
     out.push_str("then required (--seat-key-file as --key-file), the seat's engine is checked\n");
@@ -237,6 +241,9 @@ struct ServeArgs {
     /// `--sandbox-unix-socket PATH`, each: a socket of the run's own its
     /// commands may connect to, beside the regimen's (#942).
     sandbox_unix_sockets: Vec<String>,
+    /// `--sandbox-secret PATH`, each: a path of the run's own denied to every
+    /// command, beside the regimen's secrets (#942).
+    sandbox_secrets: Vec<String>,
     /// `--rehearse-as`: the rung a rehearsal runs under the declarations of
     /// (#926).
     rehearse_as: Option<String>,
@@ -371,6 +378,7 @@ fn serve_args(args: &[String]) -> Option<ServeArgs> {
     let mut run = None;
     let mut rehearse_as = None;
     let mut sandbox_unix_sockets = Vec::new();
+    let mut sandbox_secrets = Vec::new();
     let mut given = args.iter();
     while let Some(flag) = given.next() {
         let value = given.next()?;
@@ -427,6 +435,9 @@ fn serve_args(args: &[String]) -> Option<ServeArgs> {
         } else if flag == "--sandbox-unix-socket" {
             sandbox_unix_sockets.push(value.clone());
             true
+        } else if flag == "--sandbox-secret" {
+            sandbox_secrets.push(value.clone());
+            std::path::Path::new(value).is_absolute()
         } else if flag == "--allow-origin" {
             let origin = is_an_origin(value);
             if origin {
@@ -473,6 +484,7 @@ fn serve_args(args: &[String]) -> Option<ServeArgs> {
         run,
         rehearse_as,
         sandbox_unix_sockets,
+        sandbox_secrets,
     })
 }
 
@@ -506,6 +518,7 @@ fn serve(args: &[String]) -> ExitCode {
         run,
         rehearse_as,
         sandbox_unix_sockets,
+        sandbox_secrets,
     }) = serve_args(args)
     else {
         eprint!("{}", serve_usage());
@@ -710,7 +723,10 @@ fn serve(args: &[String]) -> ExitCode {
     // (#298 point 8).
     let tools = match serving_tools(
         regimen_file.as_deref(),
-        (worktree.as_deref(), &sandbox_unix_sockets),
+        (
+            worktree.as_deref(),
+            (&sandbox_unix_sockets, &sandbox_secrets),
+        ),
         (key_file.as_deref(), auth_file.as_deref()),
     ) {
         Ok(tools) => tools,
@@ -1678,7 +1694,7 @@ fn serving_interview(
 #[allow(clippy::too_many_lines)]
 fn serving_tools(
     regimen: Option<&str>,
-    (worktree, sockets): (Option<&str>, &[String]),
+    (worktree, (sockets, secrets)): (Option<&str>, (&[String], &[String])),
     (key_file, auth_file): (Option<&str>, Option<&str>),
 ) -> Result<Option<Tools>, (u8, String)> {
     let no_commands = |path: &str| {
@@ -1690,19 +1706,20 @@ fn serving_tools(
             ),
         ))
     };
+    let none_given = sockets.is_empty() && secrets.is_empty();
     // A socket is for commands to connect to (#942): none run, none is used.
     let no_sockets = |path: &str| {
         Err((
             EXIT_USAGE,
             format!(
-                "--sandbox-unix-socket names a socket the model's commands may connect to, and \
+                "--sandbox-unix-socket and --sandbox-secret are for the model's commands, and \
                  {path} runs none (it declares no `{}`)",
                 tool_loop::ALLOWED_COMMANDS
             ),
         ))
     };
     let Some(path) = regimen else {
-        return match (worktree, sockets.is_empty()) {
+        return match (worktree, none_given) {
             (Some(_), _) => no_commands("no --regimen"),
             (None, false) => no_sockets("no --regimen"),
             (None, true) => Ok(None),
@@ -1726,7 +1743,7 @@ fn serving_tools(
     let Some(declared) =
         tool_loop::declared(&read).map_err(|why| (EXIT_INPUT, format!("{path}: {why}")))?
     else {
-        return match (worktree, sockets.is_empty()) {
+        return match (worktree, none_given) {
             (Some(_), _) => no_commands(path),
             (None, false) => no_sockets(path),
             (None, true) => Ok(None),
@@ -1811,6 +1828,10 @@ fn serving_tools(
         if !policy.unix_sockets.contains(&socket) {
             policy.unix_sockets.push(socket);
         }
+    }
+    for secret in secrets {
+        isolation::policy::add_run_secret(&mut policy, secret.clone())
+            .map_err(|why| (EXIT_USAGE, format!("--sandbox-secret: {why}")))?;
     }
     // A TMPDIR of the session's own, writable: the drive's is not.
     if policy.isolation == isolation::Isolation::Sandbox {
@@ -2718,14 +2739,14 @@ fn usage() -> String {
         "       diet-drive pair FILE --a R1 --b R2 --repeat N --out DIR [--endpoint URL\n",
     );
     out.push_str("           --model NAME [--key-file FILE]] [--no-assemble] [--stop-file PATH]\n");
-    out.push_str("           [--void-cap K] [--contrast L1,L2,...]\n");
+    out.push_str("           [--void-cap K] [--contrast L1,L2,...] [--dry-run]\n");
     out.push_str("       (a scenario under two regimens one lever apart, N times each, ABBA;\n");
     out.push_str("       #912, diet/scenarios/README.md)\n");
     out.push_str(
         "       diet-drive arms FILE --arms ARMS.toml --repeat N --out DIR [--endpoint URL\n",
     );
     out.push_str("           --model NAME [--key-file FILE]] [--no-assemble] [--stop-file PATH]\n");
-    out.push_str("           [--void-cap K]\n");
+    out.push_str("           [--void-cap K] [--dry-run]\n");
     out.push_str("       (a scenario under k regimens, each one lever from the baseline, N\n");
     out.push_str("       times each, in a Williams order; #932, diet/scenarios/README.md)\n");
     out.push_str("       diet-drive table DIR [--seed S]\n");
@@ -2892,6 +2913,11 @@ fn batch_flags(args: &[String], own: &[&str]) -> Option<BatchFlags> {
             options.assemble = false;
             continue;
         }
+        // Each run rehearsed on the canned substrate its rung speaks (#942).
+        if flag == "--dry-run" {
+            options.dry_run = true;
+            continue;
+        }
         let value = flags.next()?;
         match flag.as_str() {
             "--out" => out = Some(value.into()),
@@ -2924,6 +2950,12 @@ fn batch_ran(
     if options.endpoint.is_some() != options.model.is_some() {
         return fail(EXIT_USAGE, "--endpoint and --model go together");
     }
+    if options.dry_run && options.endpoint.is_some() {
+        return fail(
+            EXIT_USAGE,
+            "--dry-run rehearses on a canned substrate: it takes no --endpoint",
+        );
+    }
     let drive = match std::env::current_exe() {
         Ok(drive) => drive,
         Err(why) => return fail(EXIT_HALT, &format!("this binary cannot be found: {why}")),
@@ -2946,7 +2978,7 @@ fn pair(args: &[String]) -> ExitCode {
             EXIT_USAGE,
             "usage: diet-drive pair FILE --a R1 --b R2 --repeat N --out DIR [--endpoint URL \
              --model NAME [--key-file FILE]] [--no-assemble] [--stop-file PATH] [--void-cap K] \
-             [--contrast L1,L2,...]",
+             [--contrast L1,L2,...] [--dry-run]",
         )
     };
     let Some((options, repeats, kept)) = batch_flags(args, &["--a", "--b", "--contrast"]) else {
@@ -2986,7 +3018,7 @@ fn arms(args: &[String]) -> ExitCode {
         fail(
             EXIT_USAGE,
             "usage: diet-drive arms FILE --arms ARMS.toml --repeat N --out DIR [--endpoint URL \
-             --model NAME [--key-file FILE]] [--no-assemble] [--stop-file PATH] [--void-cap K]",
+             --model NAME [--key-file FILE]] [--no-assemble] [--stop-file PATH] [--void-cap K] [--dry-run]",
         )
     };
     let Some((options, repeats, kept)) = batch_flags(args, &["--arms"]) else {
@@ -2995,14 +3027,21 @@ fn arms(args: &[String]) -> ExitCode {
     let Some(manifest) = kept.get("--arms") else {
         return usage();
     };
-    let (arms, baseline) = match diet::drive::pair::manifest(std::path::Path::new(manifest)) {
-        Ok(read) => read,
-        Err(why) => return fail(EXIT_INPUT, &why),
-    };
+    let (arms, baseline, purpose) =
+        match diet::drive::pair::manifest(std::path::Path::new(manifest)) {
+            Ok(read) => read,
+            Err(why) => return fail(EXIT_INPUT, &why),
+        };
     batch_ran(&options, |drive| {
-        diet::drive::pair::arms(drive, &options, (&arms, &baseline), &repeats, &mut |line| {
-            println!("{line}");
-        })
+        diet::drive::pair::arms(
+            drive,
+            &options,
+            (&arms, &baseline, purpose.as_deref()),
+            &repeats,
+            &mut |line| {
+                println!("{line}");
+            },
+        )
     })
 }
 

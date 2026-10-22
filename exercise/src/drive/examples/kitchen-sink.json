@@ -15,7 +15,7 @@
     {
       "approvals_off": true,
       "bash_timeout_ms": 120000,
-      "build_commit": "7e576aca6098b43884f397a203b00e605117558b",
+      "build_commit": "a051593e1692fc98af74b7cf58105574fd03bc4d",
       "build_dirty": false,
       "compaction_persists": true,
       "fork_asks": "v4",
@@ -61,6 +61,7 @@
         "meditation_audit_chunk": "notes:8",
         "meditation_audit_concurrency": "2:effective:2",
         "meditation_carry": "render",
+        "meditation_empty": "refuse",
         "meditation_trigger": "operator-declared+cadence+budget+window+model-proposed",
         "meditation_warm": "on",
         "model_pruning": "off",
@@ -84,7 +85,7 @@
       },
       "model": "scenario",
       "notes_in_the_ask": true,
-      "opened": 1792626489167,
+      "opened": 1792651538262,
       "opening_phase": "plan",
       "phase_document": {
         "digest": "c3c3afe17657994b1403ed749e7352bdf4ad1eb47c688b6e60bb0e122db95e8e",
@@ -176,7 +177,7 @@
         "propose_phase_transition",
         "refute_beliefs"
       ],
-      "version": 22
+      "version": 23
     },
     {
       "kind": "phase.started",

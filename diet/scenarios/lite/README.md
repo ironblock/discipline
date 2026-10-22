@@ -1,0 +1,50 @@
+# The Babylon Lite tasks (#932, #942)
+
+Twenty tasks on Babylon Lite, a WebGPU engine the model has not seen: eight tutorial tasks, then twelve held-out tasks, pre-registered. Lite's docs contradict its source in places, and the tasks are built on those contradictions: the tutorial lets the model find each one, and the held-out tasks need what it found. The pilot asks whether interview forks carry what the tutorial taught across a refill better than the native harness does (#932).
+
+Lite itself is not in this tree. It is the pinned reference checkout, `~/git/reference/Babylon/Babylon-Lite` at `a9cfda1b`, or `$LITE_REPO`, with its dependencies installed. `services/lite.py` refuses a run on any other commit or on a changed tracked file.
+
+## Running it
+
+```
+diet-drive arms lite.jsonl --arms ARMS.toml --repeat N --out DIR
+diet-drive scenario heldout.jsonl --repeat N --out DIR --endpoint URL --model NAME
+diet-drive table DIR
+```
+- **`lite.jsonl`:** t1–t8, a declared meditation, then h1–h12, in one session. Every arm crosses the refill. Golden, which never meditates, acknowledges it as skipped.
+- **`ARMS.toml`:** the reachable arms, each contrasting with the native baseline: `native`, `interviews` (the interview levers, and a rendered refill) and `golden` (compaction depth `none`).
+- **Every regimen sets `meditation_empty = "refill"`** (`../../README.md`): an interviews run that captured nothing by t8 still refills, carrying nothing, and its held-out half is graded. Without it that run would stop at the refill, and only the runs whose interviews captured something would have held-out scores.
+- **`lite-empty.jsonl`:** `lite.jsonl` whose canned interviews capture nothing, so a rehearsal of the interviews arm crosses an empty refill. In `lite.jsonl` the first task's canned answer reads its stub and the interview that read warrants records what it learned, so its rehearsal crosses a refill that carries it.
+- **`heldout.jsonl`:** h1–h12 alone, in a session that never saw the tutorial. This is the reference floor, a batch of its own under `native.toml` until #948 makes it an arm. Interleave its runs between arms blocks so drift is shared, and table it as a floor descriptor, not a contrast.
+- **A live run needs the deny list** (`../README.md`, "A live experiment needs the deny list"). The model's sandbox reads everything but the secrets, and this machine holds the tasks' private solutions, its graders and every agent's transcripts. `--dry-run` rehearses each arm on the local canned substrate, with real services and real graders.
+- **`make_scenario.py`** writes both scenarios from `grader/tasks_trap.py`, the prompts' one source; `--check` says when they are stale.
+
+## What a run starts
+
+The header's `services` (`../README.md`, "Services"), outside the sandbox, per run:
+- `lite`: the checkout, checked at its commit. It names the checkout's path, which the prompts give the model.
+- `model-vite` and `grader-vite`: two dev servers on the run's worktree, Lite's source aliased in read-only. The grader's carries `vite/lite-trace-plugin.mjs`, wrappers that record Lite's lifecycle calls into `window.__LT` without changing an argument or a result. The model's server never carries them.
+- `grader-browser`: a headless chrome-devtools daemon with real input (`--experimentalVision`), allowed both dev servers. The model's sandbox cannot reach it.
+- `model-browser`: the model's own daemon, allowed only its dev server, reached through one Unix socket (`sandbox_unix_sockets`) and its session id (`serve_env`). The regimens pass the session id on by name.
+
+## Grading
+
+`check.py` grades each attempt in the grader's browser, against the grader's dev server.
+- **Tier a, what the page does:** state dumps and screenshot pixels over the task's timeline. Pixel positions come from a hand-written camera model.
+- **Tier b, how it does it:** the mechanism the task's constraint states, read from the recorder at runtime and never from the model's source.
+- **Right** means both tiers pass.
+- **What the model is told is observations only:** each failing tier a check, expected against seen. A tier b failure is told only as the task's stated constraint, unmet. Never a cause: a cause would hand the model the fact the tutorial lets it find and the interviews capture (ruled 2026-10-21). Every check of both tiers, the dumps and the screenshots go to the attempt's `DIET_GRADE_OUT`.
+- **Tier c, the process:** defined in `grader/process_trap.py` and computed later from the session log. It records whether a fact was re-derived from the source before the last write to a task's `main.ts`.
+
+The graders were verified against 159 cases: each task's stub, its reference solution twice, and every wrong or alternative solution, each graded as expected. The references and alternatives stay private, outside this tree: worked solutions to pre-registered held-out tasks would teach any model trained on this tree.
+
+## Outcomes
+
+`python3 -I outcomes.py DIR` writes `outcomes.json` beside each run's log, and `diet-drive table DIR` then counts each outcome per arm, as `outcome: <task>: <outcome>` rows. It covers the scene-update family, the held-out tasks whose facts are `late-add` or `late-family` (h1, h2, h3, h5). Each task's outcome is derived from its grade lines, its last attempt's diagnosis, and the reads it made between the refill and its last grade:
+- **sufficient:** right, with no read of the Lite source or docs after the refill.
+- **recoverable:** right after reading the source.
+- **failed toward the docs:** wrong after reading only the docs, with a tier b attractor signature: it never made the change (declared it impossible), added before registration, rebuilt the scene, or replaced the mesh. In a sealed arm the docs are all that is left to read, and they are wrong.
+- **mechanism lost:** made the change the way the task asks, a late add or a swap, and tier a still fails.
+- **other:** anything else, a right answer after a docs-only read among them, with the tiers' results kept beside it.
+
+`python3 -I check.py --selftest`, `python3 -I grader/process_trap.py --selftest` and `python3 -I outcomes.py --selftest` run without a browser, in `./verify.sh`'s scenarios check. The last builds a case for each outcome from the graders' own checks.
