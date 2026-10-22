@@ -260,6 +260,15 @@
 //! that declares 23 or less and carries them is refused. For a reader of
 //! earlier logs, the migration is nothing: no session was carried.
 //!
+//! v25 (#932) names a run's batch: `run.batch`, an id the runner draws
+//! once per invocation, 16 hex digits, the same on every run of the batch
+//! and on a void attempt's re-run at its slot. It is part of what the head
+//! nonce is drawn from, so two batches of one manifest send different
+//! nonces, and a run's nonce still re-derives from its `run` alone. A log
+//! that declares 24 or less and carries it is refused. For a reader of
+//! earlier logs, the migration is nothing: their nonces were drawn without
+//! one, so two batches of one manifest shared them.
+//!
 //! v23 (#942) names an empty refill: a `meditation` that refilled from an
 //! empty working memory, carrying nothing (`meditation_empty = "refill"`),
 //! says `empty: true`. A log that declares 22 or less and carries it is
@@ -297,11 +306,11 @@ use super::record::vocabulary;
 struct LogParser;
 
 /// The version this module writes, as `session.start` states it.
-pub const VERSION: i64 = 24;
+pub const VERSION: i64 = 25;
 
 /// Every version this module reads.
 pub const READS: &[i64] = &[
-    0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24,
+    0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25,
 ];
 
 /// How recent an input event must be, at the moment a turn settles, for the
@@ -2402,6 +2411,18 @@ pub struct Run {
     /// `b` for a pair -- and the digest of every arm's regimen digest, in
     /// name order. Both or neither.
     pub paired: Option<(String, String)>,
+    /// The batch's id (v25, #932): drawn once per invocation of a repeating
+    /// runner, 16 hex digits, and part of what the head nonce is drawn from.
+    pub batch: Option<String>,
+}
+
+/// Whether `id` is a batch's id (v25, #932): 16 lowercase hex digits.
+#[must_use]
+pub fn is_a_batch_id(id: &str) -> bool {
+    id.len() == 16
+        && id
+            .bytes()
+            .all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b))
 }
 
 /// Whether `name` names an arm (#932): a directory a batch keeps its runs
@@ -2601,6 +2622,9 @@ fn run_value(run: &Run) -> Value {
     if let Some((arm, arms)) = &run.paired {
         object.insert("arm".to_owned(), Value::String(arm.clone()));
         object.insert("arms".to_owned(), Value::String(arms.clone()));
+    }
+    if let Some(batch) = &run.batch {
+        object.insert("batch".to_owned(), Value::String(batch.clone()));
     }
     Value::Object(object)
 }
@@ -5702,6 +5726,16 @@ const fn must_v8(key: &'static str, holds: Holds) -> Field {
     }
 }
 
+/// A key that arrived in v25, optional wherever its object is written.
+const fn may_v25(key: &'static str, holds: Holds) -> Field {
+    Field {
+        key,
+        holds,
+        required: false,
+        since: 25,
+    }
+}
+
 /// A key that arrived in v24, optional wherever its object is written.
 const fn may_v24(key: &'static str, holds: Holds) -> Field {
     Field {
@@ -5969,6 +6003,7 @@ pub const RUN: &[Field] = &[
     may_v17("arm", Holds::Text),
     may_v17("pair", Holds::Digest),
     may_v22("arms", Holds::Digest),
+    may_v25("batch", Holds::Text),
 ];
 
 /// Keys this module reads and no longer writes, each with the version that
@@ -9251,11 +9286,20 @@ impl Fields<'_> {
                 ));
             }
         };
+        let batch = inner.optional_string("batch").map_err(within)?;
+        if let Some(batch) = &batch
+            && !is_a_batch_id(batch)
+        {
+            return Err(format!(
+                "`{key}`: `batch` is `{batch}`, and a batch's id is 16 lowercase hex digits"
+            ));
+        }
         Ok(Run {
             script_sha256: inner.digest("script_sha256").map_err(within)?,
             repeat,
             of,
             paired,
+            batch,
         })
     }
 
@@ -9504,15 +9548,15 @@ mod tests {
         assert!(refused.why.contains("v8"), "{refused}");
     }
 
-    /// #583, #878, #904, #555, #931, #936, #910, #942, #926, #932, #948: this module writes v24.
+    /// #583, #878, #904, #555, #931, #936, #910, #942, #926, #932, #948: this module writes v25.
     #[test]
-    fn this_module_writes_v24_and_reads_every_version_before_it() {
-        assert_eq!(super::VERSION, 24);
+    fn this_module_writes_v25_and_reads_every_version_before_it() {
+        assert_eq!(super::VERSION, 25);
         assert_eq!(
             super::READS,
             &[
                 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22,
-                23, 24
+                23, 24, 25
             ]
         );
     }
@@ -9540,6 +9584,7 @@ mod tests {
                     repeat: 2,
                     of: 4,
                     paired: Some(("golden".to_owned(), "b".repeat(64))),
+                    batch: Some("fedcba9876543210".to_owned()),
                 }),
                 version: VERSION,
                 opened: 1_790_000_000_000,

@@ -1151,8 +1151,15 @@ fn repeats_run_one_after_another_each_naming_its_repeat() {
     let (code, lines) = repeated(&file, &out, &["--no-assemble", "--repeat", "3"]);
     assert_eq!(code, Some(0), "{lines:?}");
     assert_eq!(lines.len(), 4, "{lines:?}");
+    // The batch's id (#932), on its line and every run's.
+    let batch = lines[3]["batch"]
+        .as_str()
+        .expect("the batch's id")
+        .to_owned();
+    assert!(diet::formats::log::is_a_batch_id(&batch), "{batch}");
     let mut ended_before = 0;
     for (k, line) in (1..=3).zip(&lines) {
+        assert_eq!(line["batch"], batch.as_str(), "{line}");
         assert_eq!(line["repeat"], k, "{line}");
         assert_eq!(line["of"], 3, "{line}");
         assert_eq!(line["attempt"], 1, "{line}");
@@ -1168,7 +1175,8 @@ fn repeats_run_one_after_another_each_naming_its_repeat() {
             repeat.join("session.record.jsonl").display().to_string(),
             "{line}"
         );
-        let run = serde_json::json!({"script_sha256": digest, "repeat": k, "of": 3});
+        let run =
+            serde_json::json!({"script_sha256": digest, "repeat": k, "of": 3, "batch": batch});
         let start = first_line(&repeat.join("session.log"));
         assert_eq!(start["version"], diet::formats::log::VERSION, "{start}");
         assert_eq!(start["run"], run, "{start}");
@@ -1409,6 +1417,10 @@ fn a_pair_runs_abba_and_every_record_names_its_arm_and_pair() {
         .collect();
     assert_eq!(ran.status.code(), Some(0), "{stdout}");
     assert_eq!(lines.len(), 5, "{stdout}");
+    let batch = lines[4]["batch"]
+        .as_str()
+        .expect("the batch's id")
+        .to_owned();
     let order: Vec<(&str, u64)> = lines[..4]
         .iter()
         .map(|line| {
@@ -1425,6 +1437,7 @@ fn a_pair_runs_abba_and_every_record_names_its_arm_and_pair() {
         let repeat = out.join(arm).join(format!("repeat-{k:02}"));
         let run = serde_json::json!({
             "script_sha256": script, "repeat": k, "of": 2, "arm": arm, "arms": pair,
+            "batch": batch,
         });
         let start = first_line(&repeat.join("session.log"));
         assert_eq!(start["run"], run, "{start}");
@@ -1494,6 +1507,10 @@ fn arms_run_in_a_williams_order_and_table_against_the_baseline() {
         .map(|line| serde_json::from_str(line).expect("a JSON line"))
         .collect();
     assert_eq!(lines.len(), 7, "{stdout}");
+    let batch = lines[6]["batch"]
+        .as_str()
+        .expect("the batch's id")
+        .to_owned();
     let order: Vec<(&str, u64)> = lines[..6]
         .iter()
         .map(|line| {
@@ -1521,6 +1538,7 @@ fn arms_run_in_a_williams_order_and_table_against_the_baseline() {
         let repeat = out.join(arm).join(format!("repeat-{k:02}"));
         let run = serde_json::json!({
             "script_sha256": script, "repeat": k, "of": 2, "arm": arm, "arms": batch_digest,
+            "batch": batch,
         });
         let start = first_line(&repeat.join("session.log"));
         assert_eq!(start["run"], run, "{start}");
@@ -3186,6 +3204,72 @@ fn a_nonced_pairs_heads_are_each_their_own_and_its_table_says_so() {
     let said = String::from_utf8_lossy(&ran.stdout);
     assert_eq!(ran.status.code(), Some(1), "{said}");
     assert!(said.contains("head_nonce"), "{said}");
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// Two batches of one manifest send different nonces: each invocation
+/// draws a batch id, every run's `run` names it, and its runs.jsonl line
+/// says it too, so a server's cache of one batch is never a prefix of the
+/// next. Within a batch every run's nonce re-derives from its `run` alone.
+#[test]
+fn two_batches_of_one_manifest_send_different_nonces_each_derivable_from_its_run() {
+    let dir = scratch("batch-nonce");
+    let file = one_turn(
+        &dir,
+        "batch-nonce",
+        r#"{"expect":"turn.settled","where":{"reason":"final"}}"#,
+    );
+    let a = canned_with(&dir, "a.toml", "head_nonce = \"per_run\"");
+    let b = canned_with(
+        &dir,
+        "b.toml",
+        "head_nonce = \"per_run\"\nmax_output_tokens = 512",
+    );
+    let mut by_batch = Vec::new();
+    for out in ["first", "second"] {
+        let out = dir.join(out);
+        let (code, lines) = paired(&file, (&a, &b), &out, &["--repeat", "1"]);
+        assert_eq!(code, Some(0), "{lines:?}");
+        let kept = std::fs::read_to_string(out.join("runs.jsonl")).expect("runs.jsonl");
+        let mut nonces = Vec::new();
+        let mut batches = std::collections::BTreeSet::new();
+        for arm in ["a", "b"] {
+            let path = out.join(arm).join("repeat-01").join("session.log");
+            let text = std::fs::read_to_string(&path).expect("the log");
+            let read = diet::formats::log::parse(&text).expect("the log reads");
+            let Some(diet::formats::log::Event::SessionStart {
+                run: Some(run),
+                head_nonce: Some(nonce),
+                ..
+            }) = read.first().map(|line| line.event.clone())
+            else {
+                panic!("a start naming its run and nonce: {}", first_line(&path));
+            };
+            assert_eq!(
+                diet::drive::regimen::nonce_of(&diet::formats::log::run_text(&run)),
+                nonce,
+                "the nonce re-derives from the run"
+            );
+            let batch = run.batch.clone().expect("the run names its batch");
+            assert_eq!(batch.len(), 16, "{batch}");
+            batches.insert(batch);
+            nonces.push(nonce);
+        }
+        assert_eq!(batches.len(), 1, "one batch, one id: {batches:?}");
+        let batch = batches.into_iter().next().expect("the id");
+        for line in kept.lines() {
+            let line: serde_json::Value = serde_json::from_str(line).expect("JSON");
+            assert_eq!(line["batch"], batch.as_str(), "{line}");
+        }
+        by_batch.push((batch, nonces));
+    }
+    assert_ne!(
+        by_batch[0].0, by_batch[1].0,
+        "each invocation draws its own id"
+    );
+    for (first, second) in by_batch[0].1.iter().zip(&by_batch[1].1) {
+        assert_ne!(first, second, "the same arm's nonce differs across batches");
+    }
     let _ = std::fs::remove_dir_all(&dir);
 }
 
