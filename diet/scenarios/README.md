@@ -286,6 +286,7 @@ This runs the scenario N times. Each repeat ends before the next starts.
   - `captures`, the `patch` lines, and `refusals`, the `refused` lines;
   - `unmet`, the expectations the log did not meet, and `record`, its path.
 - **Unmet expectations are data.** A repeat that misses one is still assembled, and the batch still passes. So is a failed turn, a `summary_failed` and the API cap.
+- **What a run writes in its own directory stays beside its assembled run.** Its services' files (`services/`), its grader's (`grades/`) and a carried session's (`next/`) are set aside while the assembler builds the directory, then moved back in, whatever the assembler answered. The assembler refuses a directory that exists, and before this every run with services or grades was refused. These files are the run's raw outputs: unlike the assembled log and record, they are not scrubbed or hygiene-scanned.
 - **A void repeat is re-run at its slot.** Void means serve could not run the session to its end for a reason outside the model:
   - serve did not start, crashed or never exited, or the assembler crashed (a refusal is the assembler's answer, not a crash);
   - the worktree, its seed or the run's directories could not be made;
