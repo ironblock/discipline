@@ -2634,6 +2634,135 @@ fn services_start_before_serve_fill_the_run_and_stop_after_it() {
     let _ = std::fs::remove_dir_all(&dir);
 }
 
+/// An arms run with assembly on assembles every run whose services and
+/// grader wrote into its `--out` (`services/`, `grades/`), keeping what they
+/// wrote beside the assembled run; and a carried run's second session is
+/// assembled in its `next/` the same way. The Lite smoke's live batch, the
+/// first to assemble such runs, had every one refused: `--out` existed.
+#[test]
+#[allow(clippy::too_many_lines)]
+fn an_assembled_arms_run_keeps_what_its_services_and_grader_wrote() {
+    let dir = scratch("assemble-beside");
+    for (name, refill) in [("same.toml", "same"), ("fresh.toml", "fresh")] {
+        let path = commanding(&dir, name, 4);
+        let regimen = std::fs::read_to_string(&path).expect("the regimen");
+        std::fs::write(
+            &path,
+            regimen.replace(
+                "[limits]",
+                &format!(
+                    "interview_warrant = [\"read\"]\nmeditation_empty = \"refill\"\n\
+                     refill_session = \"{refill}\"\n[limits]"
+                ),
+            ),
+        )
+        .expect("the regimen");
+    }
+    let manifest = dir.join("ARMS.toml");
+    std::fs::write(
+        &manifest,
+        "baseline = \"same\"\npurpose = \"smoke\"\n[arm.same]\nregimen = \"same.toml\"\n\
+         [arm.fresh]\nregimen = \"fresh.toml\"\ncontrast = [\"refill_session\"]\n",
+    )
+    .expect("the manifest");
+    let provides = "printf '{\"root\": \"here\"}' > \"$DIET_SERVICE_DIR/provides.json\"; : > \"$DIET_SERVICE_DIR/pids\"";
+    let check = "python3 -c 'import json, os\n\
+        open(os.path.join(os.environ[\"DIET_GRADE_OUT\"], \"seen.txt\"), \"w\").write(\"graded\")\n\
+        print(json.dumps({\"right\": True, \"expected\": \"graded\", \"got\": \"graded\"}))'";
+    let lines = [
+        serde_json::json!({
+            "scenario": "assemble-beside",
+            "regimen": "same.toml",
+            "head": root().join("diet/drive/heads/floor.md"),
+            "services": [{"name": "box", "start": provides, "stop": "true", "ready": {"command": "test -s \"$DIET_SERVICE_DIR/provides.json\""}}],
+        }),
+        serde_json::json!({"step": "ask", "text": "First."}),
+        serde_json::json!({"step": "grade", "task": "T1", "check": check, "wrong": "Graded: wrong.", "right": "Graded: right."}),
+        serde_json::json!({"step": "declare-meditation"}),
+        serde_json::json!({"step": "ask", "text": "Second."}),
+        serde_json::json!({"step": "grade", "task": "T2", "check": check, "wrong": "Graded: wrong.", "right": "Graded: right."}),
+        serde_json::json!({"step": "end"}),
+    ];
+    let file = dir.join("assemble-beside.jsonl");
+    let mut text: String = lines.iter().map(|line| line.to_string() + "\n").collect();
+    for _ in 0..12 {
+        text.push_str(&serde_json::json!({"reply": {"text": "Done."}}).to_string());
+        text.push('\n');
+    }
+    std::fs::write(&file, text).expect("the scenario");
+    let out = dir.join("out");
+    let ran = Command::new(DRIVE)
+        .current_dir(root())
+        .arg("arms")
+        .arg(&file)
+        .arg("--arms")
+        .arg(&manifest)
+        .args(["--repeat", "1", "--out"])
+        .arg(&out)
+        .output()
+        .expect("diet-drive runs");
+    let stdout = String::from_utf8_lossy(&ran.stdout);
+    let runs: Vec<serde_json::Value> = stdout
+        .lines()
+        .map(|line| serde_json::from_str(line).expect("a JSON line"))
+        .filter(|line: &serde_json::Value| line.get("arm").is_some())
+        .collect();
+    assert_eq!(
+        runs.len(),
+        2,
+        "{stdout}{}",
+        String::from_utf8_lossy(&ran.stderr)
+    );
+    for line in &runs {
+        let arm = line["arm"].as_str().expect("an arm");
+        let run = out.join(arm).join("repeat-01");
+        assert_eq!(line["void"], serde_json::Value::Null, "{line}");
+        assert_eq!(line["ok"], true, "{arm} assembled: {line}");
+        assert_eq!(
+            line["record"],
+            run.join("record.jsonl").display().to_string(),
+            "{line}"
+        );
+        assert!(
+            run.join("record.jsonl").is_file(),
+            "{arm}: the assembled record"
+        );
+        assert!(
+            run.join("session.log").is_file(),
+            "{arm}: the assembled log"
+        );
+        assert!(
+            run.join("services/box/provides.json").is_file(),
+            "{arm}: what its service wrote, kept"
+        );
+        assert_eq!(
+            std::fs::read_to_string(run.join("grades/T1/attempt-1/seen.txt"))
+                .ok()
+                .as_deref(),
+            Some("graded"),
+            "{arm}: what its grader wrote, kept"
+        );
+    }
+    let carried = out.join("fresh/repeat-01/next");
+    assert!(
+        carried.join("record.jsonl").is_file(),
+        "the second session, assembled"
+    );
+    assert!(carried.join("session.log").is_file(), "its log");
+    assert_eq!(
+        std::fs::read_to_string(carried.join("grades/T2/attempt-1/seen.txt"))
+            .ok()
+            .as_deref(),
+        Some("graded"),
+        "what its grader wrote, kept"
+    );
+    assert!(
+        carried.join("services/box/provides.json").is_file(),
+        "its services' files, kept"
+    );
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
 /// #942: a service that never becomes ready voids the run as `services`
 /// before serve starts, and what it started is stopped.
 #[test]

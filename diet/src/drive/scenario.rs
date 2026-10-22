@@ -3300,6 +3300,11 @@ fn running(
                 scenario.replies_digest()
             );
         }
+        // What the run already wrote in `out` -- its services', its
+        // grader's, a carried session's -- waits beside it: the assembler
+        // builds `out` whole and refuses one that exists. It goes back in
+        // after, whatever the assembler answered.
+        let aside = set_aside(&options.out)?;
         let assembled = std::process::Command::new("python3")
             .arg("scripts/assemble-run.py")
             .arg("--log")
@@ -3312,14 +3317,15 @@ fn running(
             .arg(&options.out)
             .arg("--driven-by")
             .arg(&driven_by)
-            .output()
-            .map_err(|why| {
-                voided(
-                    said,
-                    "assembler",
-                    Failure(format!("the assembler cannot run: {why}")),
-                )
-            })?;
+            .output();
+        put_back(aside.as_deref(), &options.out)?;
+        let assembled = assembled.map_err(|why| {
+            voided(
+                said,
+                "assembler",
+                Failure(format!("the assembler cannot run: {why}")),
+            )
+        })?;
         let reply = String::from_utf8_lossy(&assembled.stdout);
         said["assembled"] = serde_json::from_str(reply.lines().last().unwrap_or(""))
             .unwrap_or_else(|_| serde_json::Value::String(reply.into_owned()));
@@ -3342,6 +3348,55 @@ fn running(
         let _ = std::fs::remove_dir_all(&work);
     }
     Ok(next_met.unwrap_or(met))
+}
+
+/// `out` moved aside, when the run has already written in it, to a sibling
+/// of its own; `None` when there is nothing to move.
+fn set_aside(out: &std::path::Path) -> Result<Option<std::path::PathBuf>, Failure> {
+    let holds = std::fs::read_dir(out).is_ok_and(|mut entries| entries.next().is_some());
+    if !holds {
+        // An empty `out` is the assembler's to make.
+        let _ = std::fs::remove_dir(out);
+        return Ok(None);
+    }
+    let aside = out.with_file_name(format!(
+        ".{}.parts",
+        out.file_name()
+            .map_or_else(String::new, |name| name.to_string_lossy().into_owned())
+    ));
+    std::fs::rename(out, &aside).map_err(|why| {
+        Failure(format!(
+            "{} cannot be set aside for the assembler: {why}",
+            out.display()
+        ))
+    })?;
+    Ok(Some(aside))
+}
+
+/// What [`set_aside`] moved, back into `out` beside what the assembler made
+/// there, or into `out` alone when it made nothing. A name both hold is
+/// refused rather than overwritten.
+fn put_back(aside: Option<&std::path::Path>, out: &std::path::Path) -> Result<(), Failure> {
+    let Some(aside) = aside else {
+        return Ok(());
+    };
+    let failed = |why: String| Failure(format!("the run's own outputs cannot go back in: {why}"));
+    std::fs::create_dir_all(out).map_err(|why| failed(format!("{}: {why}", out.display())))?;
+    let entries =
+        std::fs::read_dir(aside).map_err(|why| failed(format!("{}: {why}", aside.display())))?;
+    for entry in entries {
+        let entry = entry.map_err(|why| failed(why.to_string()))?;
+        let to = out.join(entry.file_name());
+        if to.exists() {
+            return Err(failed(format!(
+                "{} is both the run's and the assembler's",
+                to.display()
+            )));
+        }
+        std::fs::rename(entry.path(), &to)
+            .map_err(|why| failed(format!("{}: {why}", to.display())))?;
+    }
+    std::fs::remove_dir(aside).map_err(|why| failed(format!("{}: {why}", aside.display())))
 }
 
 /// A sealed session's seal (#948): the scenario's `seal`, each a service's
@@ -3961,6 +4016,45 @@ mod tests {
             assert_eq!(line["void"], void, "{named}: {line}");
             assert_eq!(line["turns"], 1, "{named}: {line}");
         }
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// A run's own outputs go back beside the assembled run; a name both
+    /// hold is refused, and the assembler's file is left as it made it.
+    #[test]
+    fn a_runs_own_outputs_go_back_beside_the_assembled_run_and_never_over_it() {
+        let dir = std::env::temp_dir().join(format!("diet-put-back-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        let out = dir.join("repeat-01");
+        std::fs::create_dir_all(out.join("grades")).expect("the run's outputs");
+        std::fs::write(out.join("grades").join("seen.txt"), "graded").expect("a grade's file");
+        let aside = set_aside(&out)
+            .expect("set aside")
+            .expect("something to set aside");
+        assert!(!out.exists(), "out is the assembler's to make");
+        std::fs::create_dir_all(&out).expect("the assembled run");
+        std::fs::write(out.join("record.jsonl"), "assembled").expect("its record");
+        put_back(Some(&aside), &out).expect("put back");
+        assert_eq!(
+            std::fs::read_to_string(out.join("grades").join("seen.txt"))
+                .ok()
+                .as_deref(),
+            Some("graded")
+        );
+        assert!(!aside.exists(), "nothing left aside");
+        std::fs::create_dir_all(&aside).expect("aside again");
+        std::fs::write(aside.join("record.jsonl"), "the run's").expect("a clash");
+        assert!(
+            put_back(Some(&aside), &out).is_err(),
+            "a name both hold is refused"
+        );
+        assert_eq!(
+            std::fs::read_to_string(out.join("record.jsonl"))
+                .ok()
+                .as_deref(),
+            Some("assembled"),
+            "the assembler's file is left as it made it"
+        );
         let _ = std::fs::remove_dir_all(&dir);
     }
 
