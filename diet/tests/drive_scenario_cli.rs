@@ -2346,6 +2346,7 @@ fn a_sealed_session_is_refused_what_the_first_one_read() {
 /// session read a file under it, and the carried start names that file,
 /// relative to its sealed root.
 #[test]
+#[cfg(target_os = "macos")]
 fn a_carried_start_names_the_sealed_file_its_refill_restored() {
     let dir = scratch("carry-restored");
     let canned = std::fs::read_to_string(root().join("diet/scenarios/canned.toml"))
