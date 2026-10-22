@@ -594,6 +594,8 @@ pub fn arms(
         runs.keep(line);
         emit(line);
     };
+    let batch = crate::drive::scenario::batch_id();
+    said["batch"] = serde_json::Value::String(batch.clone());
     let mut ran: BTreeMap<String, u64> = arms.iter().map(|arm| (arm.name.clone(), 0)).collect();
     let mut ok = true;
     'blocks: for block in 0..repeats.count {
@@ -605,6 +607,7 @@ pub fn arms(
                 repeat: ran[&arm.name] + 1,
                 of: repeats.count,
                 paired: Some((arm.name.clone(), digest.clone())),
+                batch: Some(batch.clone()),
             };
             let arm_options = RunOptions {
                 out: options.out.join(&arm.name),

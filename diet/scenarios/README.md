@@ -277,6 +277,7 @@ diet-drive scenario FILE --out DIR --repeat N [--stop-file PATH] [--void-cap K]
 This runs the scenario N times. Each repeat ends before the next starts.
 - **Each repeat is its own session.** It gets a fresh worktree, so `--worktree` is refused, and its own outputs in `DIR/repeat-NN/`, from `repeat-01`.
 - **Each repeat says which it is.** Serve is told with `--run`: the scenario file's `script_sha256`, the `repeat` and the count, `of`. Its log's `session.start` carries them as `run` (log v17), and so does its record's start (record v3).
+- **Each batch has an id** (#932): `batch`, 16 hex digits, drawn once per invocation and named in every run's `run` (log v25, record v7), on every `runs.jsonl` line and on the batch's line. A void attempt's re-run at its slot keeps it. A head nonce is drawn from the run, its `batch` included, so two batches of one manifest never send the same nonce, and a run's nonce re-derives from its `run` alone. Runs from before v25 have no `batch`, and two batches of one manifest shared their nonces.
 - **One JSON line per repeat** as it ends, then the batch's line. A repeat's line holds:
   - `repeat`, `of` and `attempt`;
   - `void`: why it was void, or `null`;

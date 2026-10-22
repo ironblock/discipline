@@ -48,10 +48,10 @@ use crate::formats::spelling;
 /// (#910) adds the start's `run`; 4 (#926) its `rehearsing_as`; 5 (#932)
 /// a k-arm batch's `run`: its `arm` a name, its digest `arms`; 6 (#948)
 /// the start's `carried_from`, a session carried from another's meditation.
-pub const VERSION: i64 = 6;
+pub const VERSION: i64 = 7;
 
 /// Every version this module reads: 1, a start naming none, then 2 to 6.
-pub const READS: &[i64] = &[1, 2, 3, 4, 5, 6];
+pub const READS: &[i64] = &[1, 2, 3, 4, 5, 6, 7];
 
 /// The version a start's `run` arrived in (#910).
 const RUN_ARRIVED_IN: i64 = 3;
@@ -64,6 +64,9 @@ const ARMS_ARRIVED_IN: i64 = 5;
 
 /// The version a start's `carried_from` arrived in (#948).
 const CARRIED_FROM_ARRIVED_IN: i64 = 6;
+
+/// The version whose start's `run` names its batch's id (#932).
+const BATCH_ARRIVED_IN: i64 = 7;
 
 #[derive(Parser)]
 #[grammar = "../formats/record/grammar.pest"]
@@ -4338,6 +4341,19 @@ fn take_run(
             ));
         }
     };
+    let batch = take_optional_string(&mut inner, of, "batch")?;
+    if let Some(batch) = &batch {
+        if version < BATCH_ARRIVED_IN {
+            return Err(wrong(format!(
+                "`run`'s `batch` arrived in version {BATCH_ARRIVED_IN}: a version {version} record carries none"
+            )));
+        }
+        if !log::is_a_batch_id(batch) {
+            return Err(wrong(format!(
+                "`run`'s `batch` is `{batch}`, and a batch's id is 16 lowercase hex digits"
+            )));
+        }
+    }
     if let Some(field) = inner.keys().next() {
         return Err(wrong(format!("`run` carries no `{field}`")));
     }
@@ -4346,6 +4362,7 @@ fn take_run(
         repeat,
         of: count,
         paired,
+        batch,
     }))
 }
 
@@ -5530,6 +5547,9 @@ fn event_value(event: &Event) -> BTreeMap<String, Value> {
                     };
                     inner.insert("arm".to_owned(), Value::String(arm.clone()));
                     inner.insert(spelled.to_owned(), Value::String(arms.clone()));
+                }
+                if let Some(batch) = &run.batch {
+                    inner.insert("batch".to_owned(), Value::String(batch.clone()));
                 }
                 members.put("run", Value::Object(inner));
             }

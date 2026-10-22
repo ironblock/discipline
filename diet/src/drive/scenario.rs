@@ -2397,6 +2397,8 @@ pub fn repeat(
         runs.keep(line);
         emit(line);
     };
+    let batch = batch_id();
+    said["batch"] = serde_json::Value::String(batch.clone());
     let mut ran = 0;
     let mut ok = true;
     for repeat in 1..=repeats.count {
@@ -2405,6 +2407,7 @@ pub fn repeat(
             repeat,
             of: repeats.count,
             paired: None,
+            batch: Some(batch.clone()),
         };
         match slot(
             drive,
@@ -2534,6 +2537,9 @@ pub(crate) fn slot(
         if let Some((arm, _)) = &run.paired {
             line["arm"] = serde_json::Value::String(arm.clone());
         }
+        if let Some(batch) = &run.batch {
+            line["batch"] = serde_json::Value::String(batch.clone());
+        }
         if line["void"].is_null() {
             emit(&line);
             return Slot::Ran;
@@ -2557,6 +2563,18 @@ pub(crate) fn slot(
             return Slot::Voided(voids);
         }
     }
+}
+
+/// A batch's id (v25, #932): drawn once per invocation of a repeating
+/// runner, from this process and the clock, so two batches of one manifest
+/// never share one. A void attempt's re-run at its slot is the same batch.
+#[must_use]
+pub fn batch_id() -> String {
+    crate::drive::regimen::nonce_of(&format!(
+        "batch-{}-{:?}",
+        std::process::id(),
+        std::time::SystemTime::now()
+    ))
 }
 
 /// One repeat's line (#910), from what [`run`] said and the log it names:
