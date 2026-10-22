@@ -251,6 +251,15 @@
 //! v17 to v21 logs, the migration is nothing: their `pair` reads as the
 //! batch's digest, and their `a` and `b` as arm names.
 //!
+//! v24 (#948) carries a session into the next. A `meditation` names the
+//! refilled trunk and the working object it kept in the recording,
+//! `trunk_sha256` and `object_sha256`, and a session started from that
+//! carry says so on its `session.start`: `carried_from`, the first log's
+//! digest, the meditation's `seq` and the two digests, and `carried_source`,
+//! the files the carry restored from under the run's sealed paths. A log
+//! that declares 23 or less and carries them is refused. For a reader of
+//! earlier logs, the migration is nothing: no session was carried.
+//!
 //! v23 (#942) names an empty refill: a `meditation` that refilled from an
 //! empty working memory, carrying nothing (`meditation_empty = "refill"`),
 //! says `empty: true`. A log that declares 22 or less and carries it is
@@ -288,11 +297,11 @@ use super::record::vocabulary;
 struct LogParser;
 
 /// The version this module writes, as `session.start` states it.
-pub const VERSION: i64 = 23;
+pub const VERSION: i64 = 24;
 
 /// Every version this module reads.
 pub const READS: &[i64] = &[
-    0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23,
+    0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24,
 ];
 
 /// How recent an input event must be, at the moment a turn settles, for the
@@ -1386,6 +1395,13 @@ pub enum Event {
         /// The nonce the head's first line carries (v20, #932), under the
         /// `head_nonce` lever.
         head_nonce: Option<String>,
+        /// The session's start from another's meditation (v24, #948): the
+        /// first log, the meditation and what it carried.
+        carried_from: Option<CarriedFrom>,
+        /// The files the carry restored that lie under the run's sealed paths
+        /// (v24, #948), relative to them: a sealed arm whose carry held
+        /// source, told apart from memory alone.
+        carried_source: Option<Vec<String>>,
     },
     /// An ask was admitted.
     Ask {
@@ -2210,6 +2226,15 @@ pub enum Event {
         /// It refilled from an empty working memory, carrying nothing (v23,
         /// #942, `meditation_empty = "refill"`): `true`, or absent.
         empty: Option<bool>,
+        /// The refilled trunk, exactly as sent, kept in the recording by its
+        /// sha256 (v24, #948): what a session carried from it starts from.
+        trunk_sha256: Option<String>,
+        /// The working object's dump, kept in the recording by its sha256
+        /// (v24, #948), when the session keeps working memory.
+        object_sha256: Option<String>,
+        /// The files a native refill embedded the content of (v24, #948), as
+        /// the worktree joined them.
+        restored_files: Option<Vec<String>>,
         /// What its refill carried (v16, #936): working memory's render, or
         /// a native summary; absent before v16, when it was always the
         /// render.
@@ -2346,6 +2371,21 @@ pub struct Usage {
     pub cache_creation_5m_tokens: Option<u64>,
     /// Of those, written for an hour (v7, #555).
     pub cache_creation_1h_tokens: Option<u64>,
+}
+
+/// Where a carried session started (v24, #948): what `serve --carry`
+/// read, by digest.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CarriedFrom {
+    /// The sha256 of the first session's log, as it stood at the start.
+    pub log_sha256: String,
+    /// The `seq` of the meditation it carried from.
+    pub meditation_seq: u64,
+    /// The sha256 of the refilled trunk it started from.
+    pub trunk_sha256: String,
+    /// The sha256 of the working object's dump it started from, when the
+    /// first session kept working memory.
+    pub object_sha256: Option<String>,
 }
 
 /// Which repeat of which script a session is (v17, #910): what
@@ -2527,6 +2567,28 @@ pub fn run_text(run: &Run) -> String {
 }
 
 /// `run` as `session.start` writes it (v17).
+/// A `carried_from` as the log writes it (v24, #948).
+fn carried_from_value(carried: &CarriedFrom) -> Value {
+    let mut members = BTreeMap::from([
+        (
+            "log_sha256".to_owned(),
+            Value::String(carried.log_sha256.clone()),
+        ),
+        (
+            "meditation_seq".to_owned(),
+            Value::Integer(i64::try_from(carried.meditation_seq).unwrap_or(i64::MAX)),
+        ),
+        (
+            "trunk_sha256".to_owned(),
+            Value::String(carried.trunk_sha256.clone()),
+        ),
+    ]);
+    if let Some(object) = &carried.object_sha256 {
+        members.insert("object_sha256".to_owned(), Value::String(object.clone()));
+    }
+    Value::Object(members)
+}
+
 fn run_value(run: &Run) -> Value {
     let mut object = BTreeMap::from([
         (
@@ -3942,6 +4004,12 @@ fn from_object(object: &BTreeMap<String, Value>) -> Result<Line, String> {
                 },
                 rehearsing_as: fields.optional_string("rehearsing_as")?,
                 head_nonce: fields.optional_string("head_nonce")?,
+                carried_from: if object.contains_key("carried_from") {
+                    Some(fields.carried_from("carried_from")?)
+                } else {
+                    None
+                },
+                carried_source: fields.optional_strings("carried_source")?,
                 phases: fields.optional_strings("phases")?,
                 phase_transitions: match object.get("phase_transitions") {
                     None => None,
@@ -4636,6 +4704,15 @@ fn from_object(object: &BTreeMap<String, Value>) -> Result<Line, String> {
             newest_turn_tokens: fields.optional_count("newest_turn_tokens")?,
             refilled_anyway: fields.optional_flag("refilled_anyway")?,
             empty: fields.optional_flag("empty")?,
+            trunk_sha256: match object.get("trunk_sha256") {
+                None => None,
+                Some(_) => Some(fields.digest("trunk_sha256")?),
+            },
+            object_sha256: match object.get("object_sha256") {
+                None => None,
+                Some(_) => Some(fields.digest("object_sha256")?),
+            },
+            restored_files: fields.optional_strings("restored_files")?,
             carry: fields.optional_tag("carry", MeditationCarry::from_tag)?,
             summary_tokens: fields.optional_count("summary_tokens")?,
             // Built only when its two keys are carried ([`all_or_none`]).
@@ -5341,6 +5418,9 @@ pub enum Holds {
     /// A `session.start`'s [`Run`]: an object of the keys [`RUN`] declares
     /// (v17, #910).
     Run,
+    /// A `session.start`'s [`CarriedFrom`]: an object of the keys
+    /// [`CARRIED_FROM`] declares (v24, #948).
+    CarriedFrom,
     /// A list of text (v3).
     Strings,
     /// An object of names to words (v7, #573): a `session.start`'s
@@ -5622,6 +5702,26 @@ const fn must_v8(key: &'static str, holds: Holds) -> Field {
     }
 }
 
+/// A key that arrived in v24, optional wherever its object is written.
+const fn may_v24(key: &'static str, holds: Holds) -> Field {
+    Field {
+        key,
+        holds,
+        required: false,
+        since: 24,
+    }
+}
+
+/// A key that arrived in v24 and is required wherever its object is written.
+const fn must_v24(key: &'static str, holds: Holds) -> Field {
+    Field {
+        key,
+        holds,
+        required: true,
+        since: 24,
+    }
+}
+
 /// A key that arrived in v23, optional wherever its object is written.
 const fn may_v23(key: &'static str, holds: Holds) -> Field {
     Field {
@@ -5854,6 +5954,14 @@ pub const SERVING: &[Field] = &[
 /// The keys a `session.start`'s `run` carries (v17, #910): its script's
 /// digest, its repeat and their count, and a batch's `arm` and its digest:
 /// `arms` (v22, #932), or `pair`, as v17 to v21 wrote it.
+/// A `session.start`'s `carried_from` (v24, #948).
+pub const CARRIED_FROM: &[Field] = &[
+    must_v24("log_sha256", Holds::Digest),
+    must_v24("meditation_seq", Holds::Count),
+    must_v24("trunk_sha256", Holds::Digest),
+    may_v24("object_sha256", Holds::Digest),
+];
+
 pub const RUN: &[Field] = &[
     must_v17("script_sha256", Holds::Digest),
     must_v17("repeat", Holds::Count),
@@ -5911,6 +6019,7 @@ pub fn object_fields(holds: Holds) -> Option<&'static [Field]> {
         Holds::Usage => Some(USAGE),
         Holds::Serving => Some(SERVING),
         Holds::Run => Some(RUN),
+        Holds::CarriedFrom => Some(CARRIED_FROM),
         Holds::TemplateKwargs => Some(TEMPLATE_KWARGS),
         Holds::Unsent => Some(UNSENT),
         Holds::PhaseMove | Holds::PhaseMoves => Some(PHASE_MOVE),
@@ -6184,6 +6293,8 @@ pub fn schema(kind: Kind) -> &'static [Field] {
                 may_v17("run", Holds::Run),
                 may_v19("rehearsing_as", Text),
                 may_v20("head_nonce", Text),
+                may_v24("carried_from", Holds::CarriedFrom),
+                may_v24("carried_source", Holds::Strings),
             ];
             F
         }
@@ -6476,6 +6587,9 @@ pub fn schema(kind: Kind) -> &'static [Field] {
                 may_v7("newest_turn_tokens", Count),
                 may_v7("refilled_anyway", Holds::Flag),
                 may_v23("empty", Holds::Flag),
+                may_v24("trunk_sha256", Holds::Digest),
+                may_v24("object_sha256", Holds::Digest),
+                may_v24("restored_files", Holds::Strings),
                 may_v16("carry", Tag(Tags::MeditationCarry)),
                 may_v16("summary_tokens", Count),
                 may_v7("warm", Holds::Timings),
@@ -6744,6 +6858,7 @@ fn ts_holds(holds: Holds) -> String {
         Holds::Usage => "Usage".to_owned(),
         Holds::Serving => "Serving".to_owned(),
         Holds::Run => "Run".to_owned(),
+        Holds::CarriedFrom => "CarriedFrom".to_owned(),
         Holds::TemplateKwargs => "TemplateKwargs".to_owned(),
         Holds::Unsent => "Unsent".to_owned(),
         Holds::PhaseMove => "PhaseMove".to_owned(),
@@ -6853,6 +6968,7 @@ pub fn typescript() -> String {
         ("Usage", USAGE),
         ("Serving", SERVING),
         ("Run", RUN),
+        ("CarriedFrom", CARRIED_FROM),
         ("TemplateKwargs", TEMPLATE_KWARGS),
         ("Unsent", UNSENT),
         ("PhaseMove", PHASE_MOVE),
@@ -6986,6 +7102,8 @@ fn to_value(line: &Line) -> Value {
             run,
             rehearsing_as,
             head_nonce,
+            carried_from,
+            carried_source,
             phases,
             phase_transitions,
             opening_phase,
@@ -7091,6 +7209,15 @@ fn to_value(line: &Line) -> Value {
             }
             if let Some(nonce) = head_nonce {
                 put("head_nonce", text(nonce));
+            }
+            if let Some(carried) = carried_from {
+                put("carried_from", carried_from_value(carried));
+            }
+            if let Some(paths) = carried_source {
+                put(
+                    "carried_source",
+                    Value::Array(paths.iter().map(|path| text(path)).collect()),
+                );
             }
             if let Some(keys) = api_unchecked {
                 put(
@@ -7781,6 +7908,9 @@ fn to_value(line: &Line) -> Value {
             newest_turn_tokens,
             refilled_anyway,
             empty,
+            trunk_sha256,
+            object_sha256,
+            restored_files,
             carry,
             summary_tokens,
             warm,
@@ -7896,6 +8026,18 @@ fn to_value(line: &Line) -> Value {
             }
             if let Some(empty) = empty {
                 put("empty", Value::Boolean(*empty));
+            }
+            if let Some(trunk) = trunk_sha256 {
+                put("trunk_sha256", text(trunk));
+            }
+            if let Some(object) = object_sha256 {
+                put("object_sha256", text(object));
+            }
+            if let Some(files) = restored_files {
+                put(
+                    "restored_files",
+                    Value::Array(files.iter().map(|file| text(file)).collect()),
+                );
             }
             if let Some(anyway) = refilled_anyway {
                 put("refilled_anyway", Value::Boolean(*anyway));
@@ -9055,6 +9197,21 @@ impl Fields<'_> {
 
     /// A `session.start`'s `run` (v17, #910): its script, repeat and count,
     /// and a pair's arm and digest, both or neither.
+    /// A `session.start`'s `carried_from` (v24, #948).
+    fn carried_from(&self, key: &str) -> Result<CarriedFrom, String> {
+        let inner = Fields(self.object(key, CARRIED_FROM)?);
+        let within = |why: String| format!("`{key}`: {why}");
+        Ok(CarriedFrom {
+            log_sha256: inner.digest("log_sha256").map_err(within)?,
+            meditation_seq: inner.count("meditation_seq").map_err(within)?,
+            trunk_sha256: inner.digest("trunk_sha256").map_err(within)?,
+            object_sha256: match inner.0.get("object_sha256") {
+                None => None,
+                Some(_) => Some(inner.digest("object_sha256").map_err(within)?),
+            },
+        })
+    }
+
     fn run(&self, key: &str) -> Result<Run, String> {
         let inner = Fields(self.object(key, RUN)?);
         let within = |why: String| format!("`{key}`: {why}");
@@ -9347,15 +9504,15 @@ mod tests {
         assert!(refused.why.contains("v8"), "{refused}");
     }
 
-    /// #583, #878, #904, #555, #931, #936, #910, #942, #926, #932: this module writes v23.
+    /// #583, #878, #904, #555, #931, #936, #910, #942, #926, #932, #948: this module writes v24.
     #[test]
-    fn this_module_writes_v23_and_reads_every_version_before_it() {
-        assert_eq!(super::VERSION, 23);
+    fn this_module_writes_v24_and_reads_every_version_before_it() {
+        assert_eq!(super::VERSION, 24);
         assert_eq!(
             super::READS,
             &[
                 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22,
-                23
+                23, 24
             ]
         );
     }
@@ -9422,6 +9579,8 @@ mod tests {
                 compaction_persists: Some(true),
                 build_commit: Some("a".repeat(40)),
                 build_dirty: Some(false),
+                carried_from: None,
+                carried_source: None,
             },
         }
     }
@@ -10078,6 +10237,7 @@ mod tests {
                 | Holds::Usage
                 | Holds::Serving
                 | Holds::Run
+                | Holds::CarriedFrom
                 | Holds::TemplateKwargs
                 | Holds::Unsent
                 | Holds::PhaseMove
@@ -10338,6 +10498,7 @@ mod tests {
             ("usage", USAGE),
             ("serving", SERVING),
             ("run", RUN),
+            ("carried_from", CARRIED_FROM),
             ("template_kwargs", TEMPLATE_KWARGS),
             ("unsent", UNSENT),
             ("phase", PHASE_MOVE),

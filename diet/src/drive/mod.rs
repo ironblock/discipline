@@ -98,6 +98,7 @@ pub mod archive;
 pub mod attach;
 pub mod background;
 pub mod canned;
+pub mod carry;
 pub mod engine;
 pub mod grade;
 pub mod hosted;
@@ -856,6 +857,7 @@ pub fn run<T: Transport>(script: &Script, gym: &Gym<'_, T>) -> Result<Drive, Hal
         version: Some(crate::formats::record::VERSION),
         run: None,
         rehearsing_as: None,
+        carried_from: None,
     }];
     let mut unspellable: Vec<Unspellable> = Vec::new();
     let mut uncaptured: Vec<Uncaptured> = Vec::new();

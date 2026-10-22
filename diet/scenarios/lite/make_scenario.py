@@ -1,15 +1,15 @@
-"""Write the Lite scenarios from the task definitions (#942): `python3 -I make_scenario.py` writes `lite.jsonl` and `heldout.jsonl` beside it;
+"""Write the Lite scenarios from the task definitions (#942): `python3 -I make_scenario.py` writes `lite.jsonl` and `lite-empty.jsonl` beside it;
 `--check` exits 1, naming the file, when either is not what it would write. The prompts' one source is grader/tasks_trap.py.
 
 - `lite.jsonl`: the eight tutorial tasks, a declared meditation (the refill every arm crosses; golden acknowledges it as skipped), then the twelve
   held-out tasks; each ask is graded by check.py, three attempts, the feedback observations only.
 - `lite-empty.jsonl`: `lite.jsonl` whose canned interviews capture nothing, so a rehearsal crosses an empty refill (`meditation_empty = "refill"`).
-- `heldout.jsonl`: the twelve held-out tasks alone, in a session that never saw the tutorial: the reference floor, its own batch until #948.
 
 Both start the same services: the pinned Lite checkout, the model's and the grader's dev servers, and the grader's and the model's browser daemons.
 The model's daemon is reached through its own socket (`sandbox_unix_sockets`) and its session id (`serve_env`). Their canned replies answer every
 request with text and no call, but for what the interviews need: a rehearsal of the plumbing, every attempt graded wrong, not a run of the
-tasks. In `lite.jsonl` the first task's canned answer reads its stub, so an interview fork is warranted, and that fork records what it learned: the
+tasks. The header's `seal` is the Lite checkout, which a sealed arm's next session cannot read (#948), and its `seal_probe` the source file
+the probe asks that session to read. In `lite.jsonl` the first task's canned answer reads its stub, so an interview fork is warranted, and that fork records what it learned: the
 interviews arm's working memory is not empty at the refill. Refutation forks, cut as each ask arrives and quoting it, decline first.
 """
 import json
@@ -56,6 +56,8 @@ def header(name):
              "ready": {"command": BROWSER + " status"}, "ready_timeout_s": 180},
         ],
         "sandbox_unix_sockets": ["service.model-browser.socket"],
+        "seal": ["service.lite.root"],
+        "seal_probe": ["{service.lite.root}/packages/babylon-lite/src/scene/scene-core.ts"],
         "serve_env": {
             "CD4A_INTERNAL_DAEMON_SESSION_ID": "{service.model-browser.session}",
             "CHROME_DEVTOOLS_MCP_NO_UPDATE_CHECKS": "1",
@@ -105,7 +107,6 @@ def written():
     return {
         "lite.jsonl": lines("lite", tutorial + held, meditate_after=tutorial[-1]["id"], capture=True),
         "lite-empty.jsonl": lines("lite", tutorial + held, meditate_after=tutorial[-1]["id"]),
-        "heldout.jsonl": lines("lite-heldout", held),
     }
 
 

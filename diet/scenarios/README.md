@@ -43,6 +43,8 @@ The format has no grammar of its own, so it has no directory under `diet/formats
 | `services` | optional | what each run starts beside serve, outside the sandbox (below) |
 | `sandbox_unix_sockets` | optional | services' values, each `service.NAME.KEY`, passed to serve as `--sandbox-unix-socket`: sockets the model's commands may connect to |
 | `serve_env` | optional | `{VAR: TEXT}`: variables added to serve's environment alone, each text filled as an ask's is |
+| `seal` | optional | services' values, each `service.NAME.KEY`: paths a sealed next session cannot read (below) |
+| `seal_probe` | optional | texts filled as an ask's are, each a file under the seal that the probe asks a sealed session to read |
 
 ## Services (#942)
 
@@ -251,6 +253,21 @@ Beside it the command writes:
   - a refused command that is not an ask;
   - a flag or edit whose entry's text does not pick it alone.
 
+## A session that goes on from its refill (#948)
+
+The regimen's `refill_session` says where a run goes after its declared meditation:
+- **`same`** (the default): the session goes on, as it always has.
+- **`fresh`:** the meditation ends the session. A second session starts from the refilled trunk exactly as sent, and from the working memory as it stood, and runs the scenario's remaining steps. The first request of each session after the refill has the same head digest.
+- **`sealed`:** `fresh`, and the second session's commands cannot read the header's `seal`: those paths join its deny list, and its probe asks it to `cat` each `seal_probe` file, which must fail. A regimen that says `sealed` under a scenario with no `seal` is refused. A seal is proved even where the deny list is waived (`none`), so a sealed run, a dry run included, needs `DIET_SANDBOX_PROBE_FILE` and `DIET_SANDBOX_PROBE_PHRASE`; without them its second session voids as `sandbox`, and the repeat's line says why under `next`.
+- **`blank`:** the second session starts from the head alone, carrying nothing: the run's floor.
+
+How it runs:
+- **The first session keeps what crosses.** At each meditation it writes the refilled trunk (`application/json`) and, when the working memory holds anything, its dump (`application/x-ndjson`) into the recording's `files/<sha256>`, and the meditation line names them as `trunk_sha256` and `object_sha256`, with the files a native refill restored as `restored_files` (log v24).
+- **The second session is `serve --carry LOG`.** Serve reads the log's last meditation that kept a trunk, checks each kept file against its digest, and starts from them. Nothing is re-derived. The working memory crosses as its dump, so merge bookkeeping beyond it does not cross, and the dedupe threshold is the second session's regimen's.
+- **Its start says where it came from:** `carried_from` (the log's digest, the meditation's `seq`, the trunk's and the object's digests), and, when the trunk restored a file under the seal, `carried_source`, each such file relative to its sealed root (log v24). A native refill restores only worktree files its file tools read, so only a seal inside the worktree can be named. Its record's start carries `carried_from` too (record v6).
+- **Its outputs are in `next/`,** beside the first session's: `repeat-NN/next/session.log` and the rest. Services restart for it, so the seal's paths are the second session's own.
+- **One run, two sessions:** the repeat's line is the first session's, with the second's under `next`; the second's void voids the run, and its log is the one the scenario's expectations are checked against. `table` reads both logs as one run, and `carried_source` gives the carried runs a row of their own.
+
 ## Repeating a scenario (#910)
 
 ```
@@ -335,7 +352,7 @@ diet-drive table DIR [--seed S]
 
 This reads a `pair` or `arms` batch and writes `DIR/table.md` and `DIR/table.json`. It is a table, not a claim.
 - **The baseline** is what `DIR/batch.json` names. A pair batch written before it was kept has arms `a` and `b`, and its baseline is `a`.
-- **What it reads:** the batch's `runs.jsonl`, skipping void attempts, and each run's log at `DIR/<arm>/repeat-NN/session.log`. Each log's `run` must be the run `runs.jsonl` names there. No model is asked.
+- **What it reads:** the batch's `runs.jsonl`, skipping void attempts, and each run's log at `DIR/<arm>/repeat-NN/session.log`. Each log's `run` must be the run `runs.jsonl` names there. A run that went on in a second session (#948) also has `next/session.log`: counts and times are summed over both, each turn's time kept, and a task's grades are wherever it was graded. No model is asked.
 - **Per arm:** each row's median, range and mean over the arm's runs. The JSON also holds every run's value.
 - **Per other arm:** two deltas against the baseline, the arm's minus the baseline's, of the medians and of the means. For a pair, B − A.
   - Each has a 95% percentile interval from the same draws: each arm's runs are resampled with replacement, independently, 10,000 times.
@@ -351,6 +368,7 @@ This reads a `pair` or `arms` batch and writes `DIR/table.md` and `DIR/table.jso
   - wall ms per turn: each `turn.settled`'s `t` less its `ask`'s, the run's median;
   - turns (`turn.settled`), forks (`fork`), captures (`patch`), refusals (`refused`), and settles, one row per `reason`;
   - unmet expectations: `runs.jsonl`'s `unmet`.
+  - **carried sealed source** (#948), only when a run of the batch went on in a second session: 1 for a run whose carry held a file under the seal (its second start's `carried_source`), 0 for one whose did not. Memory alone is told apart from memory carrying restored source.
   - **cached and new prefill, per lane** (#932): each `response`'s `timings` `cache_n` and `prompt_n` (llama.cpp, TabbyAPI), else its `usage` `cached_tokens` and the rest of `prompt_tokens` (a hosted API, cache writes counted new), summed by its `request`'s lane.
     - A run's lane value counts only when every response on the lane reported it. Otherwise it prints `not reported`, never 0, and the JSON's `notes` say `reported k of n`.
     - The rows are labelled carryover-free only when every run's head carried its own nonce (`head_nonce = "per_run"`). Otherwise they say the cached prefill may include the server's cache of the run before.

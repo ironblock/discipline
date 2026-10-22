@@ -77,6 +77,9 @@ pub struct Summary {
     pub text: String,
     /// The user message of restored files and images, when there are any.
     pub restored: Option<Message>,
+    /// The files whose content `restored` embeds, as the worktree joined
+    /// them (#948): what a carry from this refill holds of them.
+    pub embedded: Vec<String>,
 }
 
 /// The summary request: `history` -- the trunk past its head, and what rides
@@ -230,8 +233,19 @@ fn longest_backticks(text: &str) -> usize {
 /// (`postCompactAttachments.ts:385-488,837-845`).
 #[must_use]
 pub fn restored(history: &[Message], worktree: Option<&Path>) -> Option<Message> {
+    restored_embedding(history, worktree).0
+}
+
+/// [`restored`], and the files whose content it embeds, each as the
+/// worktree joined it (#948).
+#[must_use]
+pub fn restored_embedding(
+    history: &[Message],
+    worktree: Option<&Path>,
+) -> (Option<Message>, Vec<String>) {
     let mut references = Vec::new();
     let mut embeds = Vec::new();
+    let mut embedded = Vec::new();
     let mut used = 0;
     let files = worktree.map(|tree| (tree, touched(history, tree)));
     for (tree, path) in files
@@ -248,6 +262,7 @@ pub fn restored(history: &[Message], worktree: Option<&Path>) -> Option<Message>
                     references.push(path);
                 } else {
                     used += chars;
+                    embedded.push(worktree.join(&path).display().to_string());
                     embeds.push((path, content));
                 }
             }
@@ -313,11 +328,11 @@ pub fn restored(history: &[Message], worktree: Option<&Path>) -> Option<Message>
         parts.push(lines.join("\n"));
     }
     if parts.is_empty() {
-        return None;
+        return (None, embedded);
     }
     let mut message = Message::new(Role::User, parts.join("\n\n"));
     message.images = images;
-    Some(message)
+    (Some(message), embedded)
 }
 
 /// `path` with the characters that would break its line taken out

@@ -1,0 +1,48 @@
+# The Lite tasks' reference arm (#932, #948), the floor: native.toml whose held-out half runs in a session that never saw the tutorial. The
+# declared meditation ends the first session and the next starts from the head alone, carrying nothing.
+arm = "lite-reference"
+dogma_version = 0
+
+# The larger rung, the ceiling arm first (ruled 2026-10-21, #932); floor variants are a later regimen set differing only here.
+substrate = "ada48-tabbyapi-exl3-qwen38flashnext-2p05"
+substrate_reasoning = "on"
+# The registry's hardware_fingerprint for the entry's equipment.
+substrate_hardware = "19d9fa21007ab8fef48b62d9d8773ac241fa177b2f8b3de670ddd4128aa10c7b"
+
+# The model's commands run in the worktree under the OS's sandbox: reads everywhere but the secrets, writes in the worktree alone, and no
+# network. It reaches the page through its own chrome-devtools daemon, started by the scenario outside the sandbox: the daemon's socket is the
+# run's own (serve --sandbox-unix-socket, from the scenario's `sandbox_unix_sockets`) and its session id is serve's environment (`serve_env`),
+# passed on to commands by name here. Approvals are off, so `allowed_commands` is the pre-seeded set and gates nothing.
+allowed_commands = ["chrome-devtools", "ls", "cat"]
+isolation = "sandbox"
+network = "none"
+sandbox_reads = "all"
+sandbox_secrets = ["~/.config/git", "~/.git-credentials"]
+env_passthrough = ["CD4A_INTERNAL_DAEMON_SESSION_ID", "CHROME_DEVTOOLS_MCP_NO_UPDATE_CHECKS", "CHROME_DEVTOOLS_MCP_NO_USAGE_STATISTICS"]
+approval = "none"
+approval_policy = "approvals are off: every command runs without a gate decision or a prompt; the sandbox confines writes to the worktree"
+
+# No interviews and no working memory.
+interview_warrant = []
+refutation_interview = "off"
+self_capture = "off"
+meditation_carry = "native_summary"
+
+# A declared meditation over an empty working memory refills anyway, carrying nothing (#942): every arm crosses its refill, so an
+# interviews run that captured nothing pays the held-out cost in its own numbers. The same in every arm: never a contrast.
+meditation_empty = "refill"
+
+# The held-out half in a blank session (#948): what a model does on those tasks knowing nothing the tutorial taught.
+refill_session = "blank"
+
+# The level the template renders unless told (xhigh), declared so the record names what was sent; no budget.
+[reasoning]
+effort = "xhigh"
+budget_tokens = "none"
+
+# The registry's recommended thinking sampler for the line, every key declared.
+[sampler]
+temperature = 1.0
+top_k = 20
+top_p = 0.95
+min_p = 0.0

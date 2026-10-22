@@ -515,6 +515,7 @@ pub fn project_in(
                 phase_document,
                 run,
                 rehearsing_as,
+                carried_from,
                 ..
             },
         ..
@@ -568,6 +569,7 @@ pub fn project_in(
         run: run.clone(),
         // The rung a rehearsal ran under the declarations of (#926).
         rehearsing_as: rehearsing_as.clone(),
+        carried_from: carried_from.clone(),
     }];
     events.extend(walk.events);
     Ok(Projection {
@@ -2352,6 +2354,8 @@ mod tests {
             run: None,
             rehearsing_as: None,
             head_nonce: None,
+            carried_from: None,
+            carried_source: None,
         }
     }
 
@@ -2672,6 +2676,9 @@ mod tests {
             turn_steps: None,
             audit_notes: None,
             audit_notes_unreached: None,
+            trunk_sha256: None,
+            object_sha256: None,
+            restored_files: None,
         });
         let projection = project(
             &numbered(events),
@@ -2731,6 +2738,9 @@ mod tests {
             turn_steps: None,
             audit_notes: None,
             audit_notes_unreached: None,
+            trunk_sha256: None,
+            object_sha256: None,
+            restored_files: None,
         });
         let projection = project(
             &numbered(events),

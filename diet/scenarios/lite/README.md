@@ -8,14 +8,17 @@ Lite itself is not in this tree. It is the pinned reference checkout, `~/git/ref
 
 ```
 diet-drive arms lite.jsonl --arms ARMS.toml --repeat N --out DIR
-diet-drive scenario heldout.jsonl --repeat N --out DIR --endpoint URL --model NAME
 diet-drive table DIR
 ```
 - **`lite.jsonl`:** t1–t8, a declared meditation, then h1–h12, in one session. Every arm crosses the refill. Golden, which never meditates, acknowledges it as skipped.
-- **`ARMS.toml`:** the reachable arms, each contrasting with the native baseline: `native`, `interviews` (the interview levers, and a rendered refill) and `golden` (compaction depth `none`).
+- **`ARMS.toml`:** the six arms, each contrasting with the native baseline:
+  - `native`, the baseline;
+  - `interviews`: the interview levers, and a rendered refill;
+  - `golden`: compaction depth `none`;
+  - `reference`: native whose held-out half runs in a session that never saw the tutorial (`refill_session = "blank"`), the floor;
+  - `sealed-native` and `sealed-interviews`: native and interviews whose held-out half runs in a new session from the refill that cannot read Lite's source (`refill_session = "sealed"`, the header's `seal`). What the refill carried is all the model knows of the source, and the docs it can still read are wrong. A native refill restores only files under the worktree that the model's file tools read, and Lite's checkout is outside it, so a sealed arm's refill restores no Lite file by construction and the table's `carried sealed source` row reads 0: a guard. What the summary or the working memory says of the source in its own words is what memory is for, not a leak; the seal is against re-reading the source after the refill.
 - **Every regimen sets `meditation_empty = "refill"`** (`../../README.md`): an interviews run that captured nothing by t8 still refills, carrying nothing, and its held-out half is graded. Without it that run would stop at the refill, and only the runs whose interviews captured something would have held-out scores.
 - **`lite-empty.jsonl`:** `lite.jsonl` whose canned interviews capture nothing, so a rehearsal of the interviews arm crosses an empty refill. In `lite.jsonl` the first task's canned answer reads its stub and the interview that read warrants records what it learned, so its rehearsal crosses a refill that carries it.
-- **`heldout.jsonl`:** h1–h12 alone, in a session that never saw the tutorial. This is the reference floor, a batch of its own under `native.toml` until #948 makes it an arm. Interleave its runs between arms blocks so drift is shared, and table it as a floor descriptor, not a contrast.
 - **A live run needs the deny list** (`../README.md`, "A live experiment needs the deny list"). The model's sandbox reads everything but the secrets, and this machine holds the tasks' private solutions, its graders and every agent's transcripts. `--dry-run` rehearses each arm on the local canned substrate, with real services and real graders.
 - **`make_scenario.py`** writes both scenarios from `grader/tasks_trap.py`, the prompts' one source; `--check` says when they are stale.
 
@@ -40,7 +43,7 @@ The graders were verified against 159 cases: each task's stub, its reference sol
 
 ## Outcomes
 
-`python3 -I outcomes.py DIR` writes `outcomes.json` beside each run's log, and `diet-drive table DIR` then counts each outcome per arm, as `outcome: <task>: <outcome>` rows. It covers the scene-update family, the held-out tasks whose facts are `late-add` or `late-family` (h1, h2, h3, h5). Each task's outcome is derived from its grade lines, its last attempt's diagnosis, and the reads it made between the refill and its last grade:
+`python3 -I outcomes.py DIR` writes `outcomes.json` beside each run's log, and `diet-drive table DIR` then counts each outcome per arm, as `outcome: <task>: <outcome>` rows. It covers the scene-update family, the held-out tasks whose facts are `late-add` or `late-family` (h1, h2, h3, h5). Each task's outcome is derived from its grade lines, its last attempt's diagnosis, and the reads it made between the refill and its last grade. A run whose held-out half ran in a second session is read from that session, `next/`, every read of it after the refill:
 - **sufficient:** right, with no read of the Lite source or docs after the refill.
 - **recoverable:** right after reading the source.
 - **failed toward the docs:** wrong after reading only the docs, with a tier b attractor signature: it never made the change (declared it impossible), added before registration, rebuilt the scene, or replaced the mesh. In a sealed arm the docs are all that is left to read, and they are wrong.

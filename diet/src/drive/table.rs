@@ -67,6 +67,12 @@ pub struct Receipts {
     /// Each task's derived outcome (#942), from the run's `outcomes.json`
     /// when an analysis wrote one beside its log: `{"outcomes": {task: outcome}}`.
     pub outcomes: BTreeMap<String, String>,
+    /// Whether the run went on in a later session its regimen started at
+    /// the refill (#948): `refill_session` other than `same`.
+    pub carried: bool,
+    /// Whether that later session's carry held a file under the run's seal
+    /// (#948): its `session.start` names a `carried_source`.
+    pub carried_source: bool,
 }
 
 /// One lane's prefill in one run (#932).
@@ -109,6 +115,50 @@ fn prefill_of(timings: Option<&log::Timings>, usage: Option<&log::Usage>) -> Opt
 }
 
 impl Receipts {
+    /// One run's receipts from its two sessions' (#948): the first's, and the
+    /// later one's its regimen started at the refill. Counts and times add,
+    /// each turn's time is kept, a task's grades are wherever it was graded,
+    /// and a lane's prefill adds.
+    #[must_use]
+    pub fn merged(self, later: Self) -> Self {
+        let mut settles = self.settles;
+        for (reason, n) in later.settles {
+            *settles.entry(reason).or_default() += n;
+        }
+        let mut tasks = self.tasks;
+        tasks.extend(later.tasks);
+        let mut lanes = self.lanes;
+        for (lane, prefill) in later.lanes {
+            let held = lanes.entry(lane).or_default();
+            held.cached += prefill.cached;
+            held.new += prefill.new;
+            held.reported += prefill.reported;
+            held.responses += prefill.responses;
+        }
+        Self {
+            failed_commands: self.failed_commands + later.failed_commands,
+            signalled_commands: self.signalled_commands + later.signalled_commands,
+            confinement_failed: self.confinement_failed + later.confinement_failed,
+            prompt_tokens: self.prompt_tokens + later.prompt_tokens,
+            output_tokens: self.output_tokens + later.output_tokens,
+            wall_ms: self.wall_ms + later.wall_ms,
+            turn_ms: self.turn_ms.into_iter().chain(later.turn_ms).collect(),
+            turns: self.turns + later.turns,
+            forks: self.forks + later.forks,
+            captures: self.captures + later.captures,
+            empty_refills: self.empty_refills + later.empty_refills,
+            refusals: self.refusals + later.refusals,
+            settles,
+            unmet: self.unmet,
+            tasks,
+            lanes,
+            nonced: self.nonced && later.nonced,
+            outcomes: self.outcomes,
+            carried: true,
+            carried_source: later.carried_source,
+        }
+    }
+
     /// A run's receipts from its log's lines, its unmet expectations given.
     #[must_use]
     pub fn of(lines: &[log::Line], unmet: u64) -> Self {
@@ -385,6 +435,55 @@ fn outcome_rows<'a>(runs: impl Iterator<Item = &'a Receipts>) -> Vec<Row> {
             }
         })
         .collect()
+}
+
+/// A run's receipts merged with the later session's it went on in (#948),
+/// read from its `next/session.log`; as they were when it did not go on.
+fn with_later_session(held: Receipts, dir_of_run: &Path) -> Result<Receipts, String> {
+    let path = dir_of_run.join("next").join("session.log");
+    if !path.exists() {
+        return Ok(held);
+    }
+    let text = std::fs::read_to_string(&path)
+        .map_err(|why| format!("{} cannot be read: {why}", path.display()))?;
+    let lines = log::parse(&text).map_err(|why| format!("{}: {why}", path.display()))?;
+    let carried_source = matches!(
+        lines.first().map(|line| &line.event),
+        Some(Event::SessionStart {
+            carried_source: Some(files),
+            ..
+        }) if !files.is_empty()
+    );
+    Ok(held.merged(Receipts {
+        carried_source,
+        ..Receipts::of(&lines, 0)
+    }))
+}
+
+/// The carried runs' row (#948), when any run of the batch went on in a
+/// later session: 1 for a run whose carry held a file under the run's
+/// seal, so memory alone is told apart from memory with restored source.
+fn carried_rows(carried: bool) -> Vec<Row> {
+    if !carried {
+        return Vec::new();
+    }
+    vec![Row {
+        name: "carried sealed source".to_owned(),
+        source: "the later session's `session.start` `carried_source`: 1 when its carry held a \
+                 file under the run's seal, 0 when it did not"
+            .to_owned(),
+        missing: "—",
+        note: None,
+        value: Box::new(|r| {
+            if !r.carried {
+                f64::NAN
+            } else if r.carried_source {
+                1.0
+            } else {
+                0.0
+            }
+        }),
+    }]
 }
 
 /// A run's outcomes (#942): its `outcomes.json`'s `outcomes`, or none.
@@ -794,10 +893,15 @@ pub fn table(dir: &Path, seed: u64) -> Result<(serde_json::Value, String), Strin
                 ));
             }
         }
-        receipts.entry(run.arm).or_default().push(Receipts {
-            outcomes: outcomes_in(path.parent().unwrap_or_else(|| Path::new("."))),
+        let dir_of_run = path.parent().unwrap_or_else(|| Path::new("."));
+        let held = Receipts {
+            outcomes: outcomes_in(dir_of_run),
             ..Receipts::of(&lines, run.unmet)
-        });
+        };
+        receipts
+            .entry(run.arm)
+            .or_default()
+            .push(with_later_session(held, dir_of_run)?);
     }
     if batches.len() > 1 {
         return Err(format!(
@@ -828,6 +932,7 @@ pub fn table(dir: &Path, seed: u64) -> Result<(serde_json::Value, String), Strin
     let mut markdown = header(&arms, &baseline);
     for row in rows(&reasons, &tasks, (&lanes, nonced))
         .into_iter()
+        .chain(carried_rows(all().any(|r| r.carried)))
         .chain(outcome_rows(all()))
     {
         let (json, line) = laid_out(&row, (&arms, base), &mut draws);
@@ -867,6 +972,56 @@ pub fn table(dir: &Path, seed: u64) -> Result<(serde_json::Value, String), Strin
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// #948: a run that went on in a second session is one run: its turns
+    /// and times are both sessions', a turn's time kept from each, and its
+    /// carry is flagged, with the sealed source the second start names. A
+    /// run with no `next/` is as its one log says, and the carried row is
+    /// shown only when some run carried.
+    #[test]
+    fn a_carried_run_is_both_its_sessions_and_says_what_its_carry_held() {
+        const FIRST: &str = include_str!(
+            "../../formats/log/fixtures/valid/a-v16-meditation-carrying-a-native-summary.jsonl"
+        );
+        const LATER: &str = include_str!(
+            "../../formats/log/fixtures/valid/a-v24-carried-session-whose-meditation-kept-its-trunk.jsonl"
+        );
+        let dir = std::env::temp_dir().join(format!("diet-table-carried-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(dir.join("next")).expect("the run's directories");
+        let first = Receipts::of(&log::parse(FIRST).expect("a log"), 0);
+        let alone = with_later_session(first.clone(), &dir).expect("no later session");
+        assert!(!alone.carried && !alone.carried_source);
+        assert_eq!(alone.turns, first.turns);
+        std::fs::write(dir.join("next").join("session.log"), LATER).expect("the later log");
+        let later = Receipts::of(&log::parse(LATER).expect("a log"), 0);
+        let both = with_later_session(first.clone(), &dir).expect("both sessions");
+        assert!(both.carried && both.carried_source);
+        assert_eq!(both.turns, first.turns + later.turns);
+        assert_eq!(both.wall_ms, first.wall_ms + later.wall_ms);
+        assert_eq!(
+            both.turn_ms.len(),
+            first.turn_ms.len() + later.turn_ms.len()
+        );
+        let unsealed = LATER.replace(
+            r#""carried_source":["packages/lite/src/scene-core.ts"],"#,
+            "",
+        );
+        assert_ne!(unsealed, LATER, "the later start names its sealed source");
+        std::fs::write(dir.join("next").join("session.log"), &unsealed).expect("the later log");
+        let memory_alone = with_later_session(first, &dir).expect("both sessions");
+        assert!(memory_alone.carried && !memory_alone.carried_source);
+        let row = |carried| carried_rows(carried).len();
+        assert_eq!((row(false), row(true)), (0, 1));
+        let value = &carried_rows(true)[0].value;
+        assert!(
+            value(&alone).is_nan(),
+            "a run that did not carry has no value"
+        );
+        assert!((value(&both) - 1.0).abs() < f64::EPSILON);
+        assert!(value(&memory_alone).abs() < f64::EPSILON);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
 
     /// #942: an empty refill is counted from the meditation line that says
     /// so, and a refill that carried something is not.

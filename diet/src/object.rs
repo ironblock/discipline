@@ -1066,6 +1066,111 @@ impl WorkingObject {
             .collect()
     }
 
+    /// The TF-IDF cosine at or above which a new entry merges into a live
+    /// one, as written, when this object merges ([`Self::merging_similar`]).
+    #[must_use]
+    pub fn similar(&self) -> Option<&str> {
+        self.similar.as_deref()
+    }
+
+    /// The object a [`Self::dump`] wrote, opened under `regime` (#948): a
+    /// session carried from another's meditation starts from exactly the
+    /// working memory it carried. Every entry crosses as dumped -- its state,
+    /// links, provenances, refutation and aliases -- and the version. What
+    /// the dump does not hold does not cross: the record of which ids were
+    /// merged for their likeness, and the dedupe threshold, which the new
+    /// session's regimen sets. Where two entries hold one content, the live
+    /// one answers for it, else the last in id order.
+    ///
+    /// # Errors
+    ///
+    /// When `text` is not a dump: no `dump` header first, or an entry whose
+    /// fields do not read.
+    pub fn from_dump(regime: Regime, text: &str) -> Result<Self, String> {
+        let lines = json::objects(text).map_err(|why| format!("not a dump: {why}"))?;
+        let mut lines = lines.into_iter();
+        let header = lines.next().ok_or("an empty dump")?;
+        if header.get("object") != Some(&Value::String("dump".to_owned())) {
+            return Err("its first line is not a dump's header".to_owned());
+        }
+        let version = match header.get("version") {
+            Some(Value::Integer(n)) => u32::try_from(*n).map_err(|_| "a version out of range")?,
+            _ => return Err("its header names no version".to_owned()),
+        };
+        let mut object = Self::open(regime);
+        object.version = version;
+        for (at, line) in lines.enumerate() {
+            let wrong = |what: &str| format!("entry {}: {what}", at + 1);
+            let text = |key: &str| match line.get(key) {
+                Some(Value::String(text)) => Ok(text.clone()),
+                _ => Err(wrong(&format!("`{key}` is not text"))),
+            };
+            let id_of = |text: &str| EntryId::new(text).map_err(|why| wrong(&why.to_string()));
+            let id = id_of(&text("id")?)?;
+            let state = match text("state")?.as_str() {
+                "live" => EntryState::Live,
+                "voided" => EntryState::Voided {
+                    by: id_of(&text("voided_by")?)?,
+                },
+                "resolved" => EntryState::Resolved,
+                "retired" => EntryState::Retired,
+                "parked" => EntryState::Parked,
+                other => return Err(wrong(&format!("an unknown state `{other}`"))),
+            };
+            let supersedes = match line.get("supersedes") {
+                None => None,
+                Some(Value::String(text)) => Some(id_of(text)?),
+                Some(_) => return Err(wrong("`supersedes` is not text")),
+            };
+            let Some(Value::Array(provenances)) = line.get("provenances") else {
+                return Err(wrong("`provenances` is not a list"));
+            };
+            let provenances = provenances
+                .iter()
+                .map(|provenance| provenance_of(provenance).map_err(|why| wrong(&why)))
+                .collect::<Result<Vec<_>, String>>()?;
+            let refuted = match line.get("refuted") {
+                None => None,
+                Some(refuted) => Some(refutation_of(refuted).map_err(|why| wrong(&why))?),
+            };
+            match line.get("aliases") {
+                None => {}
+                Some(Value::Array(aliases)) => {
+                    for alias in aliases {
+                        let Value::String(alias) = alias else {
+                            return Err(wrong("an alias is not text"));
+                        };
+                        object.aliases.insert(id_of(alias)?, id.clone());
+                    }
+                }
+                Some(_) => return Err(wrong("`aliases` is not a list")),
+            }
+            let content = text("content")?;
+            let key = normalise(&content);
+            let live = state.is_live();
+            let holder_live = object
+                .by_content
+                .get(&key)
+                .and_then(|held| object.entries.get(held))
+                .is_some_and(|held| held.state.is_live());
+            if live || !holder_live {
+                object.by_content.insert(key, id.clone());
+            }
+            object.entries.insert(
+                id.clone(),
+                Entry {
+                    id,
+                    content,
+                    state,
+                    supersedes,
+                    provenances,
+                    refuted,
+                },
+            );
+        }
+        Ok(object)
+    }
+
     /// The object as JSONL, one entry per line, in id order.
     ///
     /// Rendered through the record's own value layer, so the object and the
@@ -1184,6 +1289,55 @@ fn provenance_value(provenance: &Provenance) -> Value {
     Value::Object(members)
 }
 
+/// A provenance as [`provenance_value`] wrote it (#948).
+fn provenance_of(value: &Value) -> Result<Provenance, String> {
+    let Value::Object(fields) = value else {
+        return Err("a provenance is not an object".to_owned());
+    };
+    let count = |key: &str| match fields.get(key) {
+        Some(Value::Integer(n)) => {
+            u32::try_from(*n).map_err(|_| format!("a provenance's `{key}` is out of range"))
+        }
+        _ => Err(format!("a provenance's `{key}` is not a count")),
+    };
+    let maybe = |key: &str| match fields.get(key) {
+        None => Ok(None),
+        Some(Value::String(text)) => Ok(Some(text.clone())),
+        Some(_) => Err(format!("a provenance's `{key}` is not text")),
+    };
+    Ok(Provenance {
+        turn: count("turn")?,
+        lane: match fields.get("lane") {
+            Some(Value::String(lane)) => lane.clone(),
+            _ => return Err("a provenance's `lane` is not text".to_owned()),
+        },
+        fork: maybe("fork")?,
+        tangent: maybe("tangent")?,
+        index: count("index")?,
+    })
+}
+
+/// A refutation as [`entry_value`] wrote it (#948).
+fn refutation_of(value: &Value) -> Result<Refutation, String> {
+    let Value::Object(fields) = value else {
+        return Err("`refuted` is not an object".to_owned());
+    };
+    let part = |key: &str| match fields.get(key) {
+        Some(Value::String(text)) => Ok(text.clone()),
+        _ => Err(format!("a refutation's `{key}` is not text")),
+    };
+    let confidence = match fields.get("confidence") {
+        Some(Value::Integer(n)) => Confidence::new(*n)
+            .ok_or_else(|| "a refutation's confidence is not 1 to 10".to_owned())?,
+        _ => return Err("a refutation's confidence is not a count".to_owned()),
+    };
+    Ok(Refutation {
+        confidence,
+        because: part("because")?,
+        pointer: part("pointer")?,
+    })
+}
+
 /// Whitespace runs collapse to one space, and the ends are trimmed. Two forks
 /// wrapping the same sentence differently said the same thing.
 fn normalise(content: &str) -> String {
@@ -1250,6 +1404,71 @@ mod tests {
             content: content.to_owned(),
             provenance,
         }
+    }
+
+    /// #948: a dump read back is the object that wrote it, on an object
+    /// with an alias, a supersede that refutes, a retired entry and one made
+    /// under a tangent; and the two take the next patches alike, the one
+    /// read back folding a restated fact into the entry the original does.
+    #[test]
+    fn a_dump_read_back_is_the_object_that_wrote_it() {
+        let mut object = object();
+        object
+            .apply(&add("e1", "a fact", from(1, "interview", Some("f1"))))
+            .expect("applies");
+        object
+            .apply(&add("e2", "a  fact", from(1, "interview", Some("f2"))))
+            .expect("an alias");
+        object
+            .apply(&add(
+                "e3",
+                "an old belief",
+                from(1, "interview", Some("f1")),
+            ))
+            .expect("applies");
+        object
+            .apply(&Patch::Supersede {
+                id: id("e4"),
+                content: "a corrected belief".to_owned(),
+                voids: id("e3"),
+                provenance: from(2, "refutation", Some("f3")),
+                refuted: Some(super::Refutation {
+                    confidence: super::Confidence::new(9).expect("1 to 10"),
+                    because: "the build failed".to_owned(),
+                    pointer: "call c7".to_owned(),
+                }),
+            })
+            .expect("applies");
+        object
+            .apply(&add("e5", "obsolete", from(2, "interview", Some("f4"))))
+            .expect("applies");
+        object
+            .apply(&Patch::Retire {
+                target: id("e5"),
+                provenance: from(3, "interview", Some("f5")),
+            })
+            .expect("applies");
+        object
+            .apply(&add(
+                "e6",
+                "a tangent's fact",
+                under("t1", from(3, "interview", Some("f6"))),
+            ))
+            .expect("applies");
+        let dumped = object.dump();
+        let mut read = WorkingObject::from_dump(regime(), &dumped).expect("it reads");
+        assert_eq!(read.dump(), dumped);
+        assert_eq!(read.version(), object.version());
+        assert_eq!(read.canonical(&id("e2")), object.canonical(&id("e2")));
+        for each in [&mut object, &mut read] {
+            each.apply(&add("e7", "a fact", from(4, "interview", Some("f7"))))
+                .expect("folds");
+            each.apply(&add("e8", "a new fact", from(4, "interview", Some("f7"))))
+                .expect("applies");
+        }
+        assert_eq!(read.dump(), object.dump(), "the next patches land alike");
+        assert!(WorkingObject::from_dump(regime(), "").is_err());
+        assert!(WorkingObject::from_dump(regime(), "{\"object\":\"record\"}\n").is_err());
     }
 
     // Acceptance: the voided entry is retained, linked, and marked -- not

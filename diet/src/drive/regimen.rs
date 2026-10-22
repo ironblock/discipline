@@ -751,6 +751,12 @@ pub fn serve_levers(regimen: &Regimen, output_cap: (u32, &str)) -> BTreeMap<Stri
                 .tag()
                 .to_owned(),
         ),
+        // #948: what a declared meditation does to its session.
+        (
+            "refill_session".to_owned(),
+            crate::drive::scenario::refill_session(regimen)
+                .map_or_else(|_| undeclared(), |state| state.tag().to_owned()),
+        ),
         // #942: whether a declared meditation refills from an empty working
         // memory.
         (

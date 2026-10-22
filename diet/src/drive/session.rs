@@ -377,6 +377,11 @@ pub enum Event {
         /// The nonce the head's first line carries (#932), under the
         /// `head_nonce` lever.
         head_nonce: Option<String>,
+        /// Where a carried session started (#948): `serve --carry`'s log,
+        /// meditation and digests.
+        carried_from: Option<log::CarriedFrom>,
+        /// The carried files under the run's sealed paths (#948).
+        carried_source: Option<Vec<String>>,
     },
     /// An ask was accepted, and a turn begins on it.
     Asked {
@@ -753,6 +758,12 @@ pub enum Event {
         /// It refilled from an empty working memory, carrying nothing
         /// (`meditation_empty = "refill"`, #942): `Some(true)`, or `None`.
         empty: Option<bool>,
+        /// The refilled trunk and the working object's dump, kept in the
+        /// recording by sha256, and the files a native refill embedded
+        /// (#948): what a session carried from it starts from.
+        trunk_sha256: Option<String>,
+        object_sha256: Option<String>,
+        restored_files: Option<Vec<String>>,
         /// What its refill carried (#936): the render, or a native summary.
         carry: log::MeditationCarry,
         /// The native summary's estimated tokens, under `native_summary`.
@@ -3290,6 +3301,20 @@ impl<S> Shared<S> {
     }
 }
 
+/// What a session carried from another's meditation starts from (#948):
+/// read by `serve --carry` from the first session's log and recording.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Carry {
+    /// The refilled trunk, exactly as the meditation sent it.
+    pub trunk: Vec<Message>,
+    /// The working object's dump, when the first session kept one.
+    pub object: Option<String>,
+    /// What the new `session.start` names it carried from.
+    pub from: log::CarriedFrom,
+    /// The carried files under the run's sealed paths, when there are any.
+    pub source: Option<Vec<String>>,
+}
+
 /// An interactive session on one trunk.
 ///
 /// Each turn's call runs on a thread of its own, DETACHED: nothing here
@@ -3474,6 +3499,8 @@ impl<S: Streaming + 'static> Session<S> {
             run: None,
             rehearsing_as: None,
             head_nonce: None,
+            carried_from: None,
+            carried_source: None,
         });
         Self::sharing(Shared {
             transport,
@@ -3535,6 +3562,68 @@ impl<S: Streaming + 'static> Session<S> {
     pub fn without_vision(self, substrate: &str) -> Self {
         self.shared.lock().blind = Some(substrate.to_owned());
         self
+    }
+
+    /// Keep this session's recording in `dir` when its tools named none
+    /// (#948): a session that runs no commands still keeps each refill's
+    /// trunk and working object, which a carry starts from.
+    pub fn keep_recording_in(&self, dir: std::path::PathBuf) {
+        let mut state = self.shared.lock();
+        if state.recording.is_none() {
+            state.recording = Some(dir);
+        }
+    }
+
+    /// This session, started from another's meditation (#948): its trunk the
+    /// refilled trunk that meditation kept, and its working memory the
+    /// object it kept, loaded under this session's own regime and dedupe
+    /// threshold. Its trunk's growth counts from the carried trunk, and its
+    /// `session.start` names what it carried.
+    ///
+    /// # Errors
+    ///
+    /// When the object's dump does not read, or a dump is carried into a
+    /// session that keeps no working memory.
+    pub fn with_carry(self, carry: Carry) -> Result<Self, String> {
+        {
+            let mut state = self.shared.lock();
+            state.trunk = carry.trunk;
+            match (&carry.object, state.interview.as_mut()) {
+                (Some(dump), Some(interview)) => {
+                    let threshold = interview.object.similar().map(str::to_owned);
+                    let mut object =
+                        WorkingObject::from_dump(interview.object.regime().clone(), dump)?;
+                    if let Some(threshold) = threshold {
+                        object = object.merging_similar(&threshold);
+                    }
+                    interview.object = object;
+                }
+                (Some(_), None) => {
+                    return Err(
+                        "the carry holds working memory, and this session keeps none".to_owned(),
+                    );
+                }
+                (None, _) => {}
+            }
+            state.trunk_tokens = None;
+            let floor = trunk_now(&state, &self.shared.template);
+            state.meditation_floor = floor;
+            state.phase_floor = floor;
+            if let Some(Logged {
+                event:
+                    Event::Started {
+                        carried_from,
+                        carried_source,
+                        ..
+                    },
+                ..
+            }) = state.log.first_mut()
+            {
+                *carried_from = Some(carry.from);
+                *carried_source = carry.source;
+            }
+        }
+        Ok(self)
     }
 
     /// This session, its `session.start` naming the nonce its head's first
@@ -5098,7 +5187,11 @@ pub fn line_of(logged: &Logged) -> log::Line {
             run,
             rehearsing_as,
             head_nonce,
+            carried_from,
+            carried_source,
         } => log::Event::SessionStart {
+            carried_from: carried_from.clone(),
+            carried_source: carried_source.clone(),
             run: run.clone(),
             rehearsing_as: rehearsing_as.clone(),
             head_nonce: head_nonce.clone(),
@@ -5807,6 +5900,9 @@ pub fn line_of(logged: &Logged) -> log::Line {
             newest_turn_tokens,
             refilled_anyway,
             empty,
+            trunk_sha256,
+            object_sha256,
+            restored_files,
             carry,
             summary_tokens,
             warm,
@@ -5855,6 +5951,9 @@ pub fn line_of(logged: &Logged) -> log::Line {
             newest_turn_tokens: *newest_turn_tokens,
             refilled_anyway: *refilled_anyway,
             empty: *empty,
+            trunk_sha256: trunk_sha256.clone(),
+            object_sha256: object_sha256.clone(),
+            restored_files: restored_files.clone(),
         },
         Event::MeditationHeld {
             at_turn,
@@ -8403,6 +8502,31 @@ fn refilled(
     refilled.extend(kept);
     let prefix_hash_after = digest(&refilled);
     state.trunk = refilled;
+    // What a session carried from this refill starts from (#948): the
+    // trunk exactly as sent and the working object's dump, kept in the
+    // recording by digest, and the files a native refill embedded.
+    let kept_by_digest = |bytes: &[u8], media_type: &str| {
+        state
+            .recording
+            .as_deref()
+            .and_then(|dir| super::attach::kept_whole(dir, bytes, media_type).ok())
+            .map(|file| file.sha256)
+    };
+    let trunk_sha256 = kept_by_digest(
+        crate::client::shape::messages_json(&state.trunk).as_bytes(),
+        "application/json",
+    );
+    let object_sha256 = state
+        .interview
+        .as_ref()
+        // An object with no entry carries nothing; one with entries is kept
+        // as its own dump, what `WorkingObject::from_dump` reads back.
+        .filter(|interview| interview.object.entries().next().is_some())
+        .map(|interview| interview.object.dump())
+        .and_then(|dump| kept_by_digest(dump.as_bytes(), "application/x-ndjson"));
+    let restored_files = native
+        .map(|summary| summary.embedded.clone())
+        .filter(|files| !files.is_empty());
     // The refill is where the trunk's growth counts from again (#788), and
     // a move made by this meditation enters its phase here.
     state.trunk_tokens = None;
@@ -8444,6 +8568,9 @@ fn refilled(
         newest_turn_tokens,
         refilled_anyway: None,
         empty: (native.is_none() && carried_entries == 0).then_some(true),
+        trunk_sha256,
+        object_sha256,
+        restored_files,
         carry: if native.is_some() {
             log::MeditationCarry::NativeSummary
         } else {
@@ -9193,12 +9320,14 @@ fn summarize<'a, S: Streaming>(
         return (state, Err("the summary was empty".to_owned()));
     }
     let worktree = shared.tools.as_ref().map(|tools| tools.worktree.clone());
-    let restored = crate::meditation::native::restored(history, worktree.as_deref());
+    let (restored, embedded) =
+        crate::meditation::native::restored_embedding(history, worktree.as_deref());
     (
         state,
         Ok(crate::meditation::native::Summary {
             text: summary,
             restored,
+            embedded,
         }),
     )
 }
@@ -16944,6 +17073,8 @@ pub(in crate::drive) mod tests {
                 run: None,
                 rehearsing_as: None,
                 head_nonce: None,
+                carried_from: None,
+                carried_source: None,
                 bash_timeout_ms: None,
                 shown_roots: None,
                 opened: 1_790_000_000_000,
@@ -17229,6 +17360,9 @@ pub(in crate::drive) mod tests {
                 turn_steps: None,
                 audit_notes: None,
                 audit_unreached: None,
+                trunk_sha256: None,
+                object_sha256: None,
+                restored_files: None,
             },
             Event::Recalled {
                 turn: 2,
@@ -17559,6 +17693,8 @@ pub(in crate::drive) mod tests {
                 run: None,
                 rehearsing_as: None,
                 head_nonce: None,
+                carried_from: None,
+                carried_source: None,
             },
             log::Event::Ask {
                 turn: 1,
@@ -17830,6 +17966,9 @@ pub(in crate::drive) mod tests {
                 turn_steps: None,
                 audit_notes: None,
                 audit_notes_unreached: None,
+                trunk_sha256: None,
+                object_sha256: None,
+                restored_files: None,
             },
             log::Event::Recalled {
                 turn: 2,
@@ -28510,6 +28649,61 @@ pub(in crate::drive) mod tests {
             .count()
     }
 
+    /// #948: a carried session starts from its carry -- the trunk as kept,
+    /// its start naming where it came from and the sealed source it holds
+    /// -- and its growth since the meditation counts from that trunk, not
+    /// from an empty one.
+    #[test]
+    fn a_carried_session_counts_its_growth_from_the_carried_trunk() {
+        let trunk = vec![
+            crate::client::shape::Message::new(
+                crate::client::shape::Role::System,
+                "you are the trunk",
+            ),
+            crate::client::shape::Message::new(
+                crate::client::shape::Role::User,
+                "<state_snapshot>a tracker</state_snapshot> ".repeat(200),
+            ),
+        ];
+        let from = log::CarriedFrom {
+            log_sha256: "c".repeat(64),
+            meditation_seq: 16,
+            trunk_sha256: "d".repeat(64),
+            object_sha256: None,
+        };
+        let session = Session::open_with(Canned::new(vec![]), template(), None, None, None, None)
+            .with_carry(Carry {
+                trunk: trunk.clone(),
+                object: None,
+                from: from.clone(),
+                source: Some(vec!["src/scene-core.ts".to_owned()]),
+            })
+            .expect("it carries");
+        let state = session.shared.lock();
+        assert_eq!(state.trunk, trunk);
+        assert_eq!(
+            evidence(&state, &session.shared.template).tokens_since_meditation,
+            0
+        );
+        let Some(Logged {
+            event:
+                Event::Started {
+                    carried_from,
+                    carried_source,
+                    ..
+                },
+            ..
+        }) = state.log.first()
+        else {
+            panic!("a start line");
+        };
+        assert_eq!(carried_from.as_ref(), Some(&from));
+        assert_eq!(
+            carried_source.as_deref(),
+            Some(&["src/scene-core.ts".to_owned()][..])
+        );
+    }
+
     /// #788: the model's proposal ends its turn -- one trunk request, the
     /// tool's result saying so, the turn settled -- and is logged with its
     /// evidence; it waits for the operator, whose `keep` moves the phase.
@@ -30551,6 +30745,9 @@ pub(in crate::drive) mod tests {
                 turn_steps: None,
                 audit_notes: None,
                 audit_notes_unreached: None,
+                trunk_sha256: None,
+                object_sha256: None,
+                restored_files: None,
             }
         );
 
