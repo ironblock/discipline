@@ -32,6 +32,11 @@ meditation_carry = "native_summary"
 # interviews run that captured nothing pays the held-out cost in its own numbers. The same in every arm: never a contrast.
 meditation_empty = "refill"
 
+# A nonce of the run's own first in the head (#932), drawn from the run, so no run's prefix is a prefix the server cached for the run
+# before, and the table can label cached prefill carryover-free. The same in every arm: never a contrast. A run's later session (#948)
+# draws the same nonce from the same run; under `fresh` and `sealed` it is the one in the trunk carried exactly as sent.
+head_nonce = "per_run"
+
 # The held-out half in a blank session (#948): what a model does on those tasks knowing nothing the tutorial taught.
 refill_session = "blank"
 
