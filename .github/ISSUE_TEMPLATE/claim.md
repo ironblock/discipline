@@ -32,6 +32,23 @@ labels: claim
      availability is a fact about the machine ("reserved", "down", "restored
      at <time>"), never about a person's time. -->
 
+## Instrument validity
+
+<!-- Filled before the run, from AGENTS.md's MEASUREMENT rules. A refuted
+     result needs every row passing; a null on a failing row is
+     inconclusive (instrument-limited). -->
+
+| check | result |
+| ----- | ------ |
+| known positive caught, on the real interface | |
+| known null passed, on the real interface | |
+| ceiling and floor from the labels; the bar | |
+| smallest detectable effect at this N | |
+| label agreement | |
+| real vs planted positives | |
+| second-reader ceiling (same input) | |
+| pre-run review: could this come out positive? | |
+
 ## Reproduction
 
 ```

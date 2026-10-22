@@ -37,3 +37,12 @@
 - A verdict through `grep` is not a gate. `cargo test | tee` returns tee's status, not cargo's; a `&&` following a `grep` passed on nothing.
 - An injection's verdict reads the tree delta AND the exit status. A mutation that exits 1 after changing the tree is BROKEN, not a green accusation against a working check. *Specimen: an injection that edited a record and then died reported `GREEN <-- THE GATE DID NOT FIRE` against `check-results.py`, which was working; both readers of "did the injection take" had discarded `$?`.*
 - Any fixture text that exists twice has one source. Two copies of the same four lines is one fix and one survivor, and the survivor is found by a seventeen-minute selftest rather than by review.
+
+# MEASUREMENT
+- A measurement that cannot come out positive is not a measurement: the mirror of a test that cannot fail. *Specimen: an audit of 27 small-model verdicts found 14 instrument-limited and 11 partly so.*
+- Controls first, on the real interface: before scoring, show the instrument catching a known positive and staying quiet on a known null, through the exact path it will run on (model, endpoint, prompt, output mode, labels).
+- The ceiling comes before the bar: compute the ceiling and the floor from the labels before choosing a bar. A bar above the ceiling is a verdict written in advance.
+- Declare the smallest effect it can see, from N and label agreement. If that is larger than any plausible effect, the result is instrument-limited before it runs.
+- Check the input can carry the signal: a second reader given only what the detector sees sets the detector's real ceiling.
+- Three verdicts: measured; not like this, not today (a measured negative); instrument-limited. A null from an instrument that failed any rule above is instrument-limited, whatever the number says.
+- Review before the run, not after: a separate reviewer gets the plan and one question, "could this come out positive, and what result would show the instrument broken?"
