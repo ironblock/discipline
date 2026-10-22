@@ -45,17 +45,21 @@ use crate::formats::spelling;
 
 /// The version this module writes, as a record's `start` names it (#583):
 /// 2 was the first that names one, spelling the boundary `meditation`; 3
-/// (#910) adds the start's `run`; 4 (#926) its `rehearsing_as`.
-pub const VERSION: i64 = 4;
+/// (#910) adds the start's `run`; 4 (#926) its `rehearsing_as`; 5 (#932)
+/// a k-arm batch's `run`: its `arm` a name, its digest `arms`.
+pub const VERSION: i64 = 5;
 
-/// Every version this module reads: 1, a start naming none, then 2 to 4.
-pub const READS: &[i64] = &[1, 2, 3, 4];
+/// Every version this module reads: 1, a start naming none, then 2 to 5.
+pub const READS: &[i64] = &[1, 2, 3, 4, 5];
 
 /// The version a start's `run` arrived in (#910).
 const RUN_ARRIVED_IN: i64 = 3;
 
 /// The version a start's `rehearsing_as` arrived in (#926).
 const REHEARSING_AS_ARRIVED_IN: i64 = 4;
+
+/// The version a start's `run` named its batch's digest `arms` in (#932).
+const ARMS_ARRIVED_IN: i64 = 5;
 
 #[derive(Parser)]
 #[grammar = "../formats/record/grammar.pest"]
@@ -4228,14 +4232,36 @@ fn take_run(
             "`run` is repeat {repeat} of {count}, and a repeat counts from 1 to its `of`"
         )));
     }
-    let arm = take_optional_word(&mut inner, of, "arm", log::RunArm::from_tag)?;
+    let arm = take_optional_string(&mut inner, of, "arm")?;
+    if let Some(arm) = &arm
+        && !log::is_an_arm(arm)
+    {
+        return Err(wrong(format!(
+            "`run`'s `arm` is `{arm}`, and an arm's name is lowercase letters, digits, `-` and `_`"
+        )));
+    }
+    let arms = take_optional_digest(&mut inner, of, "arms")?;
+    if arms.is_some() && version < ARMS_ARRIVED_IN {
+        return Err(wrong(format!(
+            "`run`'s `arms` arrived in version {ARMS_ARRIVED_IN}: a version {version} record names its pair's digest `pair`"
+        )));
+    }
     let pair = take_optional_digest(&mut inner, of, "pair")?;
-    let paired = match (arm, pair) {
-        (Some(arm), Some(pair)) => Some((arm, pair)),
+    let batch = match (arms, pair) {
+        (Some(_), Some(_)) => {
+            return Err(wrong(
+                "`run`'s `arms` and `pair` name one batch's digest: one or the other".to_owned(),
+            ));
+        }
+        (arms, pair) => arms.or(pair),
+    };
+    let paired = match (arm, batch) {
+        (Some(arm), Some(batch)) => Some((arm, batch)),
         (None, None) => None,
         _ => {
             return Err(wrong(
-                "`run`'s `arm` and `pair` name one pair's side: both or neither".to_owned(),
+                "`run`'s `arm` and its batch's digest name one arm of one batch: both or neither"
+                    .to_owned(),
             ));
         }
     };
@@ -5401,9 +5427,15 @@ fn event_value(event: &Event) -> BTreeMap<String, Value> {
                         Value::Integer(i64::try_from(run.of).unwrap_or(i64::MAX)),
                     ),
                 ]);
-                if let Some((arm, pair)) = &run.paired {
-                    inner.insert("arm".to_owned(), Value::String(arm.tag().to_owned()));
-                    inner.insert("pair".to_owned(), Value::String(pair.clone()));
+                if let Some((arm, arms)) = &run.paired {
+                    // A record before v5 names its pair's digest `pair`.
+                    let spelled = if version.unwrap_or(1) < ARMS_ARRIVED_IN {
+                        "pair"
+                    } else {
+                        "arms"
+                    };
+                    inner.insert("arm".to_owned(), Value::String(arm.clone()));
+                    inner.insert(spelled.to_owned(), Value::String(arms.clone()));
                 }
                 members.put("run", Value::Object(inner));
             }

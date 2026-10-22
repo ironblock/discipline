@@ -244,6 +244,13 @@
 //! carries one is refused. For a reader of v20 logs, the migration is
 //! nothing: no v20 session declined a meditation.
 //!
+//! v22 (#932) widens `run` to a k-arm batch: its `arm` is the arm's name,
+//! not `a` or `b` alone, and the batch's digest -- of every arm's regimen
+//! digest, in name order -- is `arms`, where v17 to v21 wrote `pair`. A log
+//! that declares 21 or less and carries `arms` is refused. For a reader of
+//! v17 to v21 logs, the migration is nothing: their `pair` reads as the
+//! batch's digest, and their `a` and `b` as arm names.
+//!
 //! # A torn final line
 //!
 //! A writer killed mid-write leaves the start of an event with no line break
@@ -275,11 +282,11 @@ use super::record::vocabulary;
 struct LogParser;
 
 /// The version this module writes, as `session.start` states it.
-pub const VERSION: i64 = 21;
+pub const VERSION: i64 = 22;
 
 /// Every version this module reads.
 pub const READS: &[i64] = &[
-    0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21,
+    0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22,
 ];
 
 /// How recent an input event must be, at the moment a turn settles, for the
@@ -499,16 +506,6 @@ vocabulary! {
         Salient => "salient",
         /// Each output as the trunk had it, after the cap.
         Keep => "keep",
-    }
-}
-
-vocabulary! {
-    /// Which of a pair's two regimens a repeat ran under (v17, #912).
-    RunArm {
-        /// The pair's first regimen, `--a`.
-        A => "a",
-        /// Its second, `--b`.
-        B => "b",
     }
 }
 
@@ -2352,9 +2349,25 @@ pub struct Run {
     pub repeat: u64,
     /// How many repeats were asked for.
     pub of: u64,
-    /// A paired run's arm and pair (#912): `a` or `b`, and the digest of
-    /// the two regimens' digests. Both or neither.
-    pub paired: Option<(RunArm, String)>,
+    /// A batch's arm and digest (#912, #932): the arm's name -- `a` and
+    /// `b` for a pair -- and the digest of every arm's regimen digest, in
+    /// name order. Both or neither.
+    pub paired: Option<(String, String)>,
+}
+
+/// Whether `name` names an arm (#932): a directory a batch keeps its runs
+/// in, so lowercase letters, digits, `-` and `_`, from a letter or digit,
+/// at most 32.
+#[must_use]
+pub fn is_an_arm(name: &str) -> bool {
+    (1..=32).contains(&name.len())
+        && name
+            .bytes()
+            .next()
+            .is_some_and(|b| b.is_ascii_lowercase() || b.is_ascii_digit())
+        && name
+            .bytes()
+            .all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || b == b'-' || b == b'_')
 }
 
 /// What serves a session, as the client declares it (v2, #30 D7/N10).
@@ -2514,9 +2527,9 @@ fn run_value(run: &Run) -> Value {
         ("repeat".to_owned(), count(run.repeat)),
         ("of".to_owned(), count(run.of)),
     ]);
-    if let Some((arm, pair)) = &run.paired {
-        object.insert("arm".to_owned(), Value::String(arm.tag().to_owned()));
-        object.insert("pair".to_owned(), Value::String(pair.clone()));
+    if let Some((arm, arms)) = &run.paired {
+        object.insert("arm".to_owned(), Value::String(arm.clone()));
+        object.insert("arms".to_owned(), Value::String(arms.clone()));
     }
     Value::Object(object)
 }
@@ -3469,6 +3482,22 @@ fn beyond(line: &Line, declared: i64) -> Option<String> {
             )
         {
             return Some(why);
+        }
+        // A run's keys arrived after the run: `arms` in v22 (#932).
+        if let (Holds::Run, Value::Object(inner)) = (field.holds, value) {
+            for nested in RUN.iter().filter(|nested| inner.contains_key(nested.key)) {
+                if let Some(why) = arrived(
+                    nested.since,
+                    format!(
+                        "`{}`'s `{}` carries `{}`",
+                        kind.tag(),
+                        field.key,
+                        nested.key
+                    ),
+                ) {
+                    return Some(why);
+                }
+            }
         }
         // One object down: a tag that arrived after its object did (the
         // approval scope `off`, v7).
@@ -5125,8 +5154,6 @@ pub enum Tags {
     MeditationToolOutputs,
     /// [`MeditationCarry`] (v16).
     MeditationCarry,
-    /// [`RunArm`] (v17).
-    RunArm,
     /// [`RenderPlacement`] (v7).
     RenderPlacement,
     /// [`BackgroundStatus`] (v7).
@@ -5162,7 +5189,6 @@ impl Tags {
         Self::ToolOutputState,
         Self::MeditationToolOutputs,
         Self::MeditationCarry,
-        Self::RunArm,
         Self::RenderPlacement,
         Self::BackgroundStatus,
     ];
@@ -5197,7 +5223,6 @@ impl Tags {
             Self::ToolOutputState => "ToolOutputState",
             Self::MeditationToolOutputs => "MeditationToolOutputs",
             Self::MeditationCarry => "MeditationCarry",
-            Self::RunArm => "RunArm",
             Self::RenderPlacement => "RenderPlacement",
             Self::BackgroundStatus => "BackgroundStatus",
         }
@@ -5238,7 +5263,6 @@ impl Tags {
                 of(MeditationToolOutputs::ALL, MeditationToolOutputs::tag)
             }
             Self::MeditationCarry => of(MeditationCarry::ALL, MeditationCarry::tag),
-            Self::RunArm => of(RunArm::ALL, RunArm::tag),
             Self::RenderPlacement => of(RenderPlacement::ALL, RenderPlacement::tag),
             Self::BackgroundStatus => of(BackgroundStatus::ALL, BackgroundStatus::tag),
         }
@@ -5588,6 +5612,16 @@ const fn must_v8(key: &'static str, holds: Holds) -> Field {
     }
 }
 
+/// A key that arrived in v22, optional wherever its object is written.
+const fn may_v22(key: &'static str, holds: Holds) -> Field {
+    Field {
+        key,
+        holds,
+        required: false,
+        since: 22,
+    }
+}
+
 /// A key that arrived in v21, optional wherever its object is written.
 const fn may_v21(key: &'static str, holds: Holds) -> Field {
     Field {
@@ -5798,14 +5832,21 @@ pub const SERVING: &[Field] = &[
 ];
 
 /// The keys a `session.start`'s `run` carries (v17, #910): its script's
-/// digest, its repeat and their count, and a pair's `arm` and `pair`.
+/// digest, its repeat and their count, and a batch's `arm` and its digest:
+/// `arms` (v22, #932), or `pair`, as v17 to v21 wrote it.
 pub const RUN: &[Field] = &[
     must_v17("script_sha256", Holds::Digest),
     must_v17("repeat", Holds::Count),
     must_v17("of", Holds::Count),
-    may_v17("arm", Holds::Tag(Tags::RunArm)),
+    may_v17("arm", Holds::Text),
     may_v17("pair", Holds::Digest),
+    may_v22("arms", Holds::Digest),
 ];
+
+/// Keys this module reads and no longer writes, each with the version that
+/// stopped writing it: a pair's `run.pair`, which v22 writes as `run.arms`
+/// (#932). The schema test asks every other declared key to be written.
+pub const READ_ONLY: &[(&str, &str, i64)] = &[("run", "pair", 22)];
 
 /// Whether `text` is a sha256 as this format writes one.
 /// A start's build (#757): `build_commit`, 40 lowercase hex digits, and
@@ -8999,19 +9040,32 @@ impl Fields<'_> {
                 "`{key}`: repeat {repeat} of {of}, and a repeat counts from 1 to its `of`"
             ));
         }
-        let arm = inner
-            .optional_tag("arm", RunArm::from_tag)
-            .map_err(within)?;
-        let pair = match inner.0.get("pair") {
-            None => None,
-            Some(_) => Some(inner.digest("pair").map_err(within)?),
+        let arm = inner.optional_string("arm").map_err(within)?;
+        if let Some(arm) = &arm
+            && !is_an_arm(arm)
+        {
+            return Err(format!(
+                "`{key}`: `arm` is `{arm}`, and an arm's name is lowercase letters, digits, `-` and `_`"
+            ));
+        }
+        let digest = |field: &str| match inner.0.get(field) {
+            None => Ok(None),
+            Some(_) => inner.digest(field).map(Some).map_err(within),
         };
-        let paired = match (arm, pair) {
-            (Some(arm), Some(pair)) => Some((arm, pair)),
+        let batch = match (digest("arms")?, digest("pair")?) {
+            (Some(_), Some(_)) => {
+                return Err(format!(
+                    "`{key}`: `arms` and `pair` name one batch's digest: one or the other"
+                ));
+            }
+            (arms, pair) => arms.or(pair),
+        };
+        let paired = match (arm, batch) {
+            (Some(arm), Some(batch)) => Some((arm, batch)),
             (None, None) => None,
             _ => {
                 return Err(format!(
-                    "`{key}`: `arm` and `pair` name one pair's side: both or neither"
+                    "`{key}`: `arm` and its batch's digest name one arm of one batch: both or neither"
                 ));
             }
         };
@@ -9268,14 +9322,14 @@ mod tests {
         assert!(refused.why.contains("v8"), "{refused}");
     }
 
-    /// #583, #878, #904, #555, #931, #936, #910, #942, #926, #932: this module writes v21.
+    /// #583, #878, #904, #555, #931, #936, #910, #942, #926, #932: this module writes v22.
     #[test]
-    fn this_module_writes_v21_and_reads_every_version_before_it() {
-        assert_eq!(super::VERSION, 21);
+    fn this_module_writes_v22_and_reads_every_version_before_it() {
+        assert_eq!(super::VERSION, 22);
         assert_eq!(
             super::READS,
             &[
-                0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21
+                0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22
             ]
         );
     }
@@ -9302,7 +9356,7 @@ mod tests {
                     script_sha256: "a".repeat(64),
                     repeat: 2,
                     of: 4,
-                    paired: Some((RunArm::B, "b".repeat(64))),
+                    paired: Some(("golden".to_owned(), "b".repeat(64))),
                 }),
                 version: VERSION,
                 opened: 1_790_000_000_000,
@@ -10273,10 +10327,18 @@ mod tests {
             ("served", SERVED_FIELD),
         ] {
             for inner in inner_fields {
+                let read_only = READ_ONLY
+                    .iter()
+                    .any(|(holder, key, _)| *holder == outer && *key == inner.key);
                 assert!(
-                    nested_written.contains(&(outer, inner.key)),
-                    "`{outer}.{}` is declared and no line writes it",
-                    inner.key
+                    nested_written.contains(&(outer, inner.key)) != read_only,
+                    "`{outer}.{}` is {}",
+                    inner.key,
+                    if read_only {
+                        "read-only and a line writes it"
+                    } else {
+                        "declared and no line writes it"
+                    }
                 );
                 assert_eq!(
                     nested_omitted.contains(&(outer, inner.key)),

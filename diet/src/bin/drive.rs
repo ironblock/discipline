@@ -101,7 +101,10 @@ fn registry() -> &'static str {
 /// The paired runner's subcommand (#912).
 const PAIR: &str = "pair";
 
-/// The subcommand that writes a pair batch's table (#914).
+/// The k-arm runner's subcommand (#932).
+const ARMS: &str = "arms";
+
+/// The subcommand that writes a batch's table (#914).
 const TABLE: &str = "table";
 
 /// The subcommand that projects a finished log's record offline (#879).
@@ -144,8 +147,8 @@ fn serve_usage() -> String {
     out.push_str("efforts, sampler, vision, thinking -- its claim the canned one, and\n");
     out.push_str("names RUNG as `rehearsing_as` on session.start and the record (#926).\n");
     out.push_str("--run JSON names which repeat of which script the session is, as\n");
-    out.push_str("`scenario --repeat` passes it: {script_sha256, repeat, of}, and a pair's\n");
-    out.push_str("arm and pair; session.start and the record's start carry it (#910).\n");
+    out.push_str("`scenario --repeat` passes it: {script_sha256, repeat, of}, and a batch's\n");
+    out.push_str("arm and arms; session.start and the record's start carry it (#910, #932).\n");
     out.push_str("--classifier-endpoint URL (a canned substrate's only, as `scenario` passes\n");
     out.push_str("it) scores the warrant gate's steps on the scenario's canned classifier.\n");
     out.push_str("--key-file names a file holding the endpoint's key, sent as a bearer\n");
@@ -2683,8 +2686,16 @@ fn usage() -> String {
     out.push_str("           [--void-cap K] [--contrast L1,L2,...]\n");
     out.push_str("       (a scenario under two regimens one lever apart, N times each, ABBA;\n");
     out.push_str("       #912, diet/scenarios/README.md)\n");
+    out.push_str(
+        "       diet-drive arms FILE --arms ARMS.toml --repeat N --out DIR [--endpoint URL\n",
+    );
+    out.push_str("           --model NAME [--key-file FILE]] [--no-assemble] [--stop-file PATH]\n");
+    out.push_str("           [--void-cap K]\n");
+    out.push_str("       (a scenario under k regimens, each one lever from the baseline, N\n");
+    out.push_str("       times each, in a Williams order; #932, diet/scenarios/README.md)\n");
     out.push_str("       diet-drive table DIR [--seed S]\n");
-    out.push_str("       (a pair batch's receipts per arm and its B - A deltas, as DIR/table.md\n");
+    out.push_str("       (a batch's receipts per arm and each arm's deltas against the\n");
+    out.push_str("       baseline, as DIR/table.md\n");
     out.push_str("       and DIR/table.json; #914, diet/scenarios/README.md)\n");
     out.push_str("       diet-drive replay [--answers] [--port N]\n");
     out.push_str("       (substrate `canned-replay-tools` on loopback: captured llama.cpp\n");
@@ -2805,10 +2816,84 @@ fn scenario(args: &[String]) -> ExitCode {
                 stop_file,
                 void_cap: void_cap.unwrap_or(VOID_CAP),
             },
-            &mut |line| println!("{line}"),
+            &mut |line| {
+                println!("{line}");
+            },
         ),
         None => run(&drive, &options),
     };
+    println!("{said}");
+    if passed {
+        ExitCode::SUCCESS
+    } else {
+        ExitCode::from(EXIT_INPUT)
+    }
+}
+
+/// What `pair` and `arms` were told: the run's options, the batch's
+/// repeats, and the flags only one of them takes, by name.
+type BatchFlags = (
+    diet::drive::scenario::RunOptions,
+    diet::drive::scenario::Repeats,
+    BTreeMap<String, String>,
+);
+
+/// `pair`'s and `arms`' flags (#912, #932): FILE, then `--repeat N --out DIR`,
+/// the endpoint's, `--no-assemble`, `--stop-file`, `--void-cap`, and any of
+/// `own` kept by name for the caller. `None` when they do not read.
+fn batch_flags(args: &[String], own: &[&str]) -> Option<BatchFlags> {
+    use diet::drive::scenario::{Repeats, RunOptions, VOID_CAP};
+    let (file, rest) = args.split_first()?;
+    let mut options = RunOptions {
+        file: file.into(),
+        assemble: true,
+        ..RunOptions::default()
+    };
+    let (mut out, mut count, mut stop_file, mut void_cap) = (None, None, None, VOID_CAP);
+    let mut kept = BTreeMap::new();
+    let mut flags = rest.iter();
+    while let Some(flag) = flags.next() {
+        if flag == "--no-assemble" {
+            options.assemble = false;
+            continue;
+        }
+        let value = flags.next()?;
+        match flag.as_str() {
+            "--out" => out = Some(value.into()),
+            "--endpoint" => options.endpoint = Some(value.clone()),
+            "--model" => options.model = Some(value.clone()),
+            "--key-file" => options.key_file = Some(value.clone()),
+            "--repeat" => count = Some(value.parse::<u64>().ok().filter(|n| *n > 0)?),
+            "--stop-file" => stop_file = Some(value.into()),
+            "--void-cap" => void_cap = value.parse::<u64>().ok()?,
+            flag if own.contains(&flag) => {
+                kept.insert(flag.to_owned(), value.clone());
+            }
+            _ => return None,
+        }
+    }
+    options.out = out?;
+    let repeats = Repeats {
+        count: count?,
+        stop_file,
+        void_cap,
+    };
+    Some((options, repeats, kept))
+}
+
+/// A batch's line printed, and its exit: 0 when it ran to its end.
+fn batch_ran(
+    options: &diet::drive::scenario::RunOptions,
+    run: impl FnOnce(&std::path::Path) -> (serde_json::Value, bool),
+) -> ExitCode {
+    if options.endpoint.is_some() != options.model.is_some() {
+        return fail(EXIT_USAGE, "--endpoint and --model go together");
+    }
+    let drive = match std::env::current_exe() {
+        Ok(drive) => drive,
+        Err(why) => return fail(EXIT_HALT, &format!("this binary cannot be found: {why}")),
+    };
+    let (said, passed) = run(&drive);
     println!("{said}");
     if passed {
         ExitCode::SUCCESS
@@ -2821,7 +2906,6 @@ fn scenario(args: &[String]) -> ExitCode {
 /// under two regimens one lever apart, N times each, interleaved ABBA ABBA
 /// (#912). One line per run, then the batch's.
 fn pair(args: &[String]) -> ExitCode {
-    use diet::drive::scenario::{Repeats, RunOptions, VOID_CAP};
     let usage = || {
         fail(
             EXIT_USAGE,
@@ -2830,83 +2914,64 @@ fn pair(args: &[String]) -> ExitCode {
              [--contrast L1,L2,...]",
         )
     };
-    let Some((file, rest)) = args.split_first() else {
+    let Some((options, repeats, kept)) = batch_flags(args, &["--a", "--b", "--contrast"]) else {
         return usage();
     };
-    let mut options = RunOptions {
-        file: file.into(),
-        assemble: true,
-        ..RunOptions::default()
-    };
-    let (mut a, mut b, mut out, mut count, mut stop_file, mut void_cap) =
-        (None, None, None, None, None, None);
-    let mut contrast: Option<Vec<String>> = None;
-    let mut flags = rest.iter();
-    while let Some(flag) = flags.next() {
-        if flag == "--no-assemble" {
-            options.assemble = false;
-            continue;
-        }
-        let Some(value) = flags.next() else {
-            return usage();
-        };
-        match flag.as_str() {
-            "--a" => a = Some(std::path::PathBuf::from(value)),
-            "--b" => b = Some(std::path::PathBuf::from(value)),
-            "--out" => out = Some(value.into()),
-            "--endpoint" => options.endpoint = Some(value.clone()),
-            "--model" => options.model = Some(value.clone()),
-            "--key-file" => options.key_file = Some(value.clone()),
-            "--repeat" => match value.parse::<u64>() {
-                Ok(n) if n > 0 => count = Some(n),
-                _ => return usage(),
-            },
-            "--stop-file" => stop_file = Some(value.into()),
-            "--void-cap" => match value.parse::<u64>() {
-                Ok(k) => void_cap = Some(k),
-                Err(_) => return usage(),
-            },
-            "--contrast" => {
-                let members: Vec<String> = value.split(',').map(str::to_owned).collect();
-                if members.iter().any(String::is_empty) {
-                    return usage();
-                }
-                contrast = Some(members);
-            }
-            _ => return usage(),
-        }
-    }
-    let (Some(a), Some(b), Some(out), Some(count)) = (a, b, out, count) else {
+    let (Some(a), Some(b)) = (kept.get("--a"), kept.get("--b")) else {
         return usage();
     };
-    options.out = out;
-    if options.endpoint.is_some() != options.model.is_some() {
-        return fail(EXIT_USAGE, "--endpoint and --model go together");
+    let contrast: Option<Vec<String>> = kept
+        .get("--contrast")
+        .map(|value| value.split(',').map(str::to_owned).collect());
+    if contrast
+        .as_ref()
+        .is_some_and(|members| members.iter().any(String::is_empty))
+    {
+        return usage();
     }
-    let drive = match std::env::current_exe() {
-        Ok(drive) => drive,
-        Err(why) => return fail(EXIT_HALT, &format!("this binary cannot be found: {why}")),
-    };
-    let (said, passed) = diet::drive::pair::pair(
-        &drive,
-        &options,
-        (&a, &b, contrast.as_deref()),
-        &Repeats {
-            count,
-            stop_file,
-            void_cap: void_cap.unwrap_or(VOID_CAP),
-        },
-        &mut |line| println!("{line}"),
-    );
-    println!("{said}");
-    if passed {
-        ExitCode::SUCCESS
-    } else {
-        ExitCode::from(EXIT_INPUT)
-    }
+    let (a, b) = (std::path::PathBuf::from(a), std::path::PathBuf::from(b));
+    batch_ran(&options, |drive| {
+        diet::drive::pair::pair(
+            drive,
+            &options,
+            (&a, &b, contrast.as_deref()),
+            &repeats,
+            &mut |line| {
+                println!("{line}");
+            },
+        )
+    })
 }
 
-/// `diet-drive table DIR [--seed S]`: a pair batch's table (#914), written
+/// `diet-drive arms FILE --arms ARMS.toml --repeat N --out DIR`: the
+/// scenario under each of a manifest's regimens, N times each, in a
+/// Williams order (#932). One line per run, then the batch's.
+fn arms(args: &[String]) -> ExitCode {
+    let usage = || {
+        fail(
+            EXIT_USAGE,
+            "usage: diet-drive arms FILE --arms ARMS.toml --repeat N --out DIR [--endpoint URL \
+             --model NAME [--key-file FILE]] [--no-assemble] [--stop-file PATH] [--void-cap K]",
+        )
+    };
+    let Some((options, repeats, kept)) = batch_flags(args, &["--arms"]) else {
+        return usage();
+    };
+    let Some(manifest) = kept.get("--arms") else {
+        return usage();
+    };
+    let (arms, baseline) = match diet::drive::pair::manifest(std::path::Path::new(manifest)) {
+        Ok(read) => read,
+        Err(why) => return fail(EXIT_INPUT, &why),
+    };
+    batch_ran(&options, |drive| {
+        diet::drive::pair::arms(drive, &options, (&arms, &baseline), &repeats, &mut |line| {
+            println!("{line}");
+        })
+    })
+}
+
+/// `diet-drive table DIR [--seed S]`: a batch's table (#914, #932), written
 /// beside its runs as `table.md` and `table.json`. One line on stdout names
 /// them and the seed.
 fn table(args: &[String]) -> ExitCode {
@@ -2941,7 +3006,7 @@ fn table(args: &[String]) -> ExitCode {
             "table": markdown_path.display().to_string(),
             "json": json_path.display().to_string(),
             "seed": seed,
-            "pair": json["pair"],
+            "arms": json["arms"],
         })
     );
     ExitCode::SUCCESS
@@ -3719,6 +3784,7 @@ fn main() -> ExitCode {
     match args.first().map(String::as_str) {
         Some(SCENARIO) => return scenario(&args[1..]),
         Some(PAIR) => return pair(&args[1..]),
+        Some(ARMS) => return arms(&args[1..]),
         Some(TABLE) => return table(&args[1..]),
         _ => {}
     }

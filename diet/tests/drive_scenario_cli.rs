@@ -1214,7 +1214,7 @@ fn a_pair_runs_abba_and_every_record_names_its_arm_and_pair() {
     for (arm, k) in order {
         let repeat = out.join(arm).join(format!("repeat-{k:02}"));
         let run = serde_json::json!({
-            "script_sha256": script, "repeat": k, "of": 2, "arm": arm, "pair": pair,
+            "script_sha256": script, "repeat": k, "of": 2, "arm": arm, "arms": pair,
         });
         let start = first_line(&repeat.join("session.log"));
         assert_eq!(start["run"], run, "{start}");
@@ -1227,6 +1227,199 @@ fn a_pair_runs_abba_and_every_record_names_its_arm_and_pair() {
     assert_eq!(batch["pair"], pair, "{batch}");
     assert_eq!(batch["lever"]["name"], "step_and_output_limits", "{batch}");
     assert_eq!(batch["ran"], serde_json::json!({"a": 2, "b": 2}), "{batch}");
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// #932: `arms` runs the scenario under each of a manifest's regimens, in
+/// a Williams order: three arms in name order (limits, native, window),
+/// two blocks, rows [0, 1, 2] and [1, 2, 0]. Every log and record start
+/// names its arm by name and the batch's digest (of the regimens' digests,
+/// in name order); the batch names what each arm differs from the baseline
+/// in, says two blocks of a six-row cycle do not balance, and keeps its line
+/// as `batch.json`, from which `table` reads the baseline: one delta per
+/// other arm.
+#[test]
+#[allow(clippy::too_many_lines)]
+fn arms_run_in_a_williams_order_and_table_against_the_baseline() {
+    let dir = scratch("arms");
+    let file = one_turn(
+        &dir,
+        "arms",
+        r#"{"expect":"turn.settled","where":{"reason":"final"}}"#,
+    );
+    let native = canned_with(&dir, "native.toml", "");
+    let limits = canned_with(&dir, "limits.toml", "max_output_tokens = 512");
+    let window = canned_with(&dir, "window.toml", "meditation_window = \"off\"");
+    let manifest = dir.join("ARMS.toml");
+    std::fs::write(
+        &manifest,
+        "baseline = \"native\"\n[arm.native]\nregimen = \"native.toml\"\n\
+         [arm.limits]\nregimen = \"limits.toml\"\n[arm.window]\nregimen = \"window.toml\"\n",
+    )
+    .expect("the manifest");
+    let digest = |path: &Path| diet::digest::sha256_hex(&std::fs::read(path).expect("bytes"));
+    let batch_digest = diet::digest::sha256_hex(
+        format!("{}{}{}", digest(&limits), digest(&native), digest(&window)).as_bytes(),
+    );
+    let out = dir.join("out");
+    let ran = Command::new(DRIVE)
+        .current_dir(root())
+        .arg("arms")
+        .arg(&file)
+        .arg("--arms")
+        .arg(&manifest)
+        .args(["--repeat", "2", "--no-assemble", "--out"])
+        .arg(&out)
+        .output()
+        .expect("diet-drive runs");
+    let stdout = String::from_utf8_lossy(&ran.stdout);
+    assert_eq!(
+        ran.status.code(),
+        Some(0),
+        "{stdout}{}",
+        String::from_utf8_lossy(&ran.stderr)
+    );
+    let lines: Vec<serde_json::Value> = stdout
+        .lines()
+        .map(|line| serde_json::from_str(line).expect("a JSON line"))
+        .collect();
+    assert_eq!(lines.len(), 7, "{stdout}");
+    let order: Vec<(&str, u64)> = lines[..6]
+        .iter()
+        .map(|line| {
+            (
+                line["arm"].as_str().unwrap_or(""),
+                line["repeat"].as_u64().unwrap_or(0),
+            )
+        })
+        .collect();
+    assert_eq!(
+        order,
+        [
+            ("limits", 1),
+            ("native", 1),
+            ("window", 1),
+            ("native", 2),
+            ("window", 2),
+            ("limits", 2)
+        ],
+        "{stdout}"
+    );
+    let script = digest(&file);
+    let mut opened = Vec::new();
+    for (arm, k) in order {
+        let repeat = out.join(arm).join(format!("repeat-{k:02}"));
+        let run = serde_json::json!({
+            "script_sha256": script, "repeat": k, "of": 2, "arm": arm, "arms": batch_digest,
+        });
+        let start = first_line(&repeat.join("session.log"));
+        assert_eq!(start["run"], run, "{start}");
+        assert_eq!(first_line(&repeat.join("session.record.jsonl"))["run"], run);
+        opened.push(start["opened"].as_u64().expect("opened"));
+    }
+    assert!(
+        opened.is_sorted(),
+        "the runs ran in the Williams order: {opened:?}"
+    );
+    let batch = &lines[6];
+    assert_eq!(batch["ok"], true, "{batch}");
+    assert_eq!(batch["arms"], batch_digest, "{batch}");
+    assert_eq!(batch["baseline"], "native", "{batch}");
+    assert_eq!(
+        batch["against"]["limits"]["lever"]["name"], "step_and_output_limits",
+        "{batch}"
+    );
+    assert!(
+        batch["against"]["window"]["lever"]["name"].is_string(),
+        "{batch}"
+    );
+    assert_eq!(
+        batch["ran"],
+        serde_json::json!({"limits": 2, "native": 2, "window": 2}),
+        "{batch}"
+    );
+    assert_eq!(batch["order"]["design"], "williams", "{batch}");
+    assert_eq!(batch["order"]["rows"], 6, "{batch}");
+    assert_eq!(batch["order"]["balanced"], false, "{batch}");
+    let kept: serde_json::Value =
+        serde_json::from_str(&std::fs::read_to_string(out.join("batch.json")).expect("batch.json"))
+            .expect("JSON");
+    assert_eq!(&kept, batch, "batch.json is the batch's line");
+    let tabled = Command::new(DRIVE)
+        .arg("table")
+        .arg(&out)
+        .output()
+        .expect("diet-drive runs");
+    assert_eq!(
+        tabled.status.code(),
+        Some(0),
+        "{}",
+        String::from_utf8_lossy(&tabled.stderr)
+    );
+    let table: serde_json::Value =
+        serde_json::from_str(&std::fs::read_to_string(out.join("table.json")).expect("table.json"))
+            .expect("JSON");
+    assert_eq!(table["baseline"], "native", "{table}");
+    assert_eq!(table["arms"], batch_digest, "{table}");
+    for row in table["rows"].as_array().expect("rows") {
+        let deltas: Vec<&String> = row["deltas"].as_object().expect("deltas").keys().collect();
+        assert_eq!(deltas, ["limits", "window"], "{row}");
+        let by_arm: Vec<&String> = row["by_arm"].as_object().expect("by_arm").keys().collect();
+        assert_eq!(by_arm, ["limits", "native", "window"], "{row}");
+    }
+    let markdown = std::fs::read_to_string(out.join("table.md")).expect("table.md");
+    assert!(
+        markdown.contains(
+            "| row | limits median [min, max] | native median [min, max] | window median [min, max] \
+             | limits − native median [95%] | limits − native mean [95%] \
+             | window − native median [95%] | window − native mean [95%] | source |"
+        ),
+        "{markdown}"
+    );
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// #932: an arm more than one lever from the baseline is refused before
+/// any run, the refusal naming the arm, its levers and its keys.
+#[test]
+fn an_arm_more_than_one_lever_from_the_baseline_is_refused_naming_it() {
+    let dir = scratch("arms-refused");
+    let file = one_turn(&dir, "arms", r#"{"expect":"turn.settled"}"#);
+    canned_with(&dir, "native.toml", "");
+    canned_with(&dir, "limits.toml", "max_output_tokens = 512");
+    canned_with(
+        &dir,
+        "both.toml",
+        "max_output_tokens = 512\nmeditation_window = \"off\"",
+    );
+    let manifest = dir.join("ARMS.toml");
+    std::fs::write(
+        &manifest,
+        "baseline = \"native\"\n[arm.native]\nregimen = \"native.toml\"\n\
+         [arm.limits]\nregimen = \"limits.toml\"\n[arm.both]\nregimen = \"both.toml\"\n",
+    )
+    .expect("the manifest");
+    let out = dir.join("out");
+    let ran = Command::new(DRIVE)
+        .current_dir(root())
+        .arg("arms")
+        .arg(&file)
+        .arg("--arms")
+        .arg(&manifest)
+        .args(["--repeat", "2", "--no-assemble", "--out"])
+        .arg(&out)
+        .output()
+        .expect("diet-drive runs");
+    let stdout = String::from_utf8_lossy(&ran.stdout);
+    assert_eq!(ran.status.code(), Some(1), "{stdout}");
+    let said: serde_json::Value = serde_json::from_str(stdout.trim()).expect("one JSON line");
+    assert_eq!(said["arm"], "both", "{said}");
+    assert_eq!(
+        said["levers"].as_object().map(serde_json::Map::len),
+        Some(2),
+        "{said}"
+    );
+    assert!(!out.exists(), "nothing ran: {}", out.display());
     let _ = std::fs::remove_dir_all(&dir);
 }
 
@@ -1473,11 +1666,19 @@ fn a_pair_batchs_table_holds_the_numbers_its_scenario_set() {
         ("unmet expectations", 0.0, 1.0),
     ] {
         let row = row(name);
-        assert_eq!(row["a"]["runs"], serde_json::json!([a, a]), "{row}");
-        assert_eq!(row["b"]["runs"], serde_json::json!([b, b]), "{row}");
+        assert_eq!(
+            row["by_arm"]["a"]["runs"],
+            serde_json::json!([a, a]),
+            "{row}"
+        );
+        assert_eq!(
+            row["by_arm"]["b"]["runs"],
+            serde_json::json!([b, b]),
+            "{row}"
+        );
         let delta = serde_json::json!({"value": b - a, "low": b - a, "high": b - a});
-        assert_eq!(row["delta_median"], delta, "{row}");
-        assert_eq!(row["delta_mean"], delta, "{row}");
+        assert_eq!(row["deltas"]["b"]["delta_median"], delta, "{row}");
+        assert_eq!(row["deltas"]["b"]["delta_mean"], delta, "{row}");
     }
     let markdown = std::fs::read_to_string(out.join("table.md")).expect("table.md");
     assert!(
@@ -1698,20 +1899,28 @@ fn a_graded_pairs_table_shows_attempts_to_right_and_never_right() {
     };
     let to_right = row("attempts to right: T1");
     assert_eq!(
-        to_right["a"]["runs"],
+        to_right["by_arm"]["a"]["runs"],
         serde_json::json!([2.0]),
         "{to_right}"
     );
     assert_eq!(
-        to_right["b"]["runs"],
+        to_right["by_arm"]["b"]["runs"],
         serde_json::json!([null]),
         "{to_right}"
     );
     let never = row("never right: T1");
-    assert_eq!(never["a"]["runs"], serde_json::json!([0.0]), "{never}");
-    assert_eq!(never["b"]["runs"], serde_json::json!([1.0]), "{never}");
     assert_eq!(
-        never["delta_median"]["value"],
+        never["by_arm"]["a"]["runs"],
+        serde_json::json!([0.0]),
+        "{never}"
+    );
+    assert_eq!(
+        never["by_arm"]["b"]["runs"],
+        serde_json::json!([1.0]),
+        "{never}"
+    );
+    assert_eq!(
+        never["deltas"]["b"]["delta_median"]["value"],
         serde_json::json!(1.0),
         "{never}"
     );

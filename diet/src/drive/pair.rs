@@ -8,7 +8,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::path::Path;
 
 use crate::drive::scenario::{Repeats, RunOptions, Runs, Slot, script_digest, slot};
-use crate::formats::log::{Run, RunArm};
+use crate::formats::log::Run;
 use crate::formats::regimen::{self, Regimen, Value};
 
 /// The one lever two regimens differ in, and its state under each.
@@ -266,20 +266,154 @@ pub fn contrast_of(
     })
 }
 
-/// A pair's digest (#912): the sha256 of its two regimens' sha256s, `a`'s
-/// then `b`'s, as lowercase hex with nothing between.
+/// A batch's digest (#912, #932): the sha256 of every arm's regimen
+/// sha256, in arm-name order, as lowercase hex with nothing between. A
+/// pair's arms are `a` and `b`, so it is `a`'s then `b`'s.
 #[must_use]
-pub fn pair_digest(a_sha256: &str, b_sha256: &str) -> String {
-    crate::digest::sha256_hex(format!("{a_sha256}{b_sha256}").as_bytes())
+pub fn batch_digest(regimen_sha256s: &[&str]) -> String {
+    crate::digest::sha256_hex(regimen_sha256s.concat().as_bytes())
 }
 
-/// Which arm the `index`th run of a pair runs, from 0: ABBA ABBA.
+/// A pair's digest: [`batch_digest`] of `a`'s and `b`'s.
 #[must_use]
-pub fn arm_at(index: u64) -> RunArm {
-    match index % 4 {
-        0 | 3 => RunArm::A,
-        _ => RunArm::B,
+pub fn pair_digest(a_sha256: &str, b_sha256: &str) -> String {
+    batch_digest(&[a_sha256, b_sha256])
+}
+
+/// The rows of a Williams design for `k` arms (#932), each a block's order
+/// of the arms by index. Over a whole cycle of rows, every arm sits in
+/// every position equally often and follows every other arm once, so a
+/// linear drift and a first-order carryover from the run before (the
+/// server's cache) balance across arms. `k` rows when `k` is even, and
+/// `2k` when it is odd, each row then mirrored. For two arms the rows are
+/// AB and BA: ABBA ABBA.
+#[must_use]
+pub fn williams(k: usize) -> Vec<Vec<usize>> {
+    let first: Vec<usize> = (0..k)
+        .map(|j| match j {
+            0 => 0,
+            j if j % 2 == 1 => j.div_ceil(2),
+            j => k - j / 2,
+        })
+        .collect();
+    let mut rows: Vec<Vec<usize>> = (0..k)
+        .map(|shift| first.iter().map(|arm| (arm + shift) % k).collect())
+        .collect();
+    if k % 2 == 1 {
+        let mirrored: Vec<Vec<usize>> = rows
+            .iter()
+            .map(|row| row.iter().rev().copied().collect())
+            .collect();
+        rows.extend(mirrored);
     }
+    rows
+}
+
+/// One arm of a batch (#932): its name, its regimen, and the contrast it
+/// declares against the baseline, when it declares one.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Arm {
+    /// Its name: a directory its runs are kept in.
+    pub name: String,
+    /// Its regimen.
+    pub regimen: std::path::PathBuf,
+    /// The levers and keys it differs from the baseline in, when declared;
+    /// else exactly one.
+    pub contrast: Option<Vec<String>>,
+}
+
+/// A batch's arms, in name order, and its baseline, from an arms manifest
+/// (#932): `baseline = "NAME"`, then one `[arm.NAME]` table each, holding
+/// `regimen` (relative to the manifest) and, optionally, `contrast`.
+///
+/// # Errors
+///
+/// When it does not read, names an arm badly, names a baseline that is no
+/// arm, gives the baseline a contrast, holds fewer than two arms, or holds
+/// a key it does not take.
+pub fn manifest(path: &Path) -> Result<(Vec<Arm>, String), String> {
+    let text = std::fs::read_to_string(path)
+        .map_err(|why| format!("{} cannot be read: {why}", path.display()))?;
+    let read = regimen::parse(&text)
+        .map_err(|why| format!("{} is not an arms manifest: {why:?}", path.display()))?;
+    let wrong = |why: String| format!("{}: {why}", path.display());
+    for (key, _) in read.iter() {
+        if key != "baseline" && key != "arm" {
+            return Err(wrong(format!(
+                "an arms manifest takes `baseline` and `[arm.NAME]`, not `{key}`"
+            )));
+        }
+    }
+    let Some(Value::String(baseline)) = read.get("baseline") else {
+        return Err(wrong("names no `baseline`".to_owned()));
+    };
+    let Some(Value::Table(tables)) = read.get("arm") else {
+        return Err(wrong("declares no `[arm.NAME]`".to_owned()));
+    };
+    let dir = path.parent().unwrap_or_else(|| Path::new("."));
+    let mut arms = Vec::new();
+    for (name, table) in tables {
+        if !crate::formats::log::is_an_arm(name) {
+            return Err(wrong(format!(
+                "`{name}` is no arm's name: lowercase letters, digits, `-` and `_`"
+            )));
+        }
+        let Value::Table(table) = table else {
+            return Err(wrong(format!("`arm.{name}` is not a table")));
+        };
+        if let Some(key) = table
+            .keys()
+            .find(|key| *key != "regimen" && *key != "contrast")
+        {
+            return Err(wrong(format!(
+                "`[arm.{name}]` takes `regimen` and `contrast`, not `{key}`"
+            )));
+        }
+        let Some(Value::String(regimen)) = table.get("regimen") else {
+            return Err(wrong(format!("`[arm.{name}]` names no `regimen`")));
+        };
+        let contrast = match table.get("contrast") {
+            None => None,
+            Some(Value::Array(members)) => Some(
+                members
+                    .iter()
+                    .map(|member| match member {
+                        Value::String(member) if !member.is_empty() => Ok(member.clone()),
+                        _ => Err(wrong(format!(
+                            "`[arm.{name}]`'s `contrast` is a list of names"
+                        ))),
+                    })
+                    .collect::<Result<Vec<_>, _>>()?,
+            ),
+            Some(_) => {
+                return Err(wrong(format!(
+                    "`[arm.{name}]`'s `contrast` is a list of names"
+                )));
+            }
+        };
+        if name == baseline && contrast.is_some() {
+            return Err(wrong(format!(
+                "the baseline `{name}` is what the others contrast with: it declares no contrast"
+            )));
+        }
+        arms.push(Arm {
+            name: name.clone(),
+            regimen: dir.join(regimen),
+            contrast,
+        });
+    }
+    if arms.len() < 2 {
+        return Err(wrong(format!(
+            "holds {} arm(s): a batch compares two or more",
+            arms.len()
+        )));
+    }
+    if !arms.iter().any(|arm| arm.name == *baseline) {
+        return Err(wrong(format!(
+            "its baseline `{baseline}` is none of its arms"
+        )));
+    }
+    Ok((arms, baseline.clone()))
 }
 
 /// Levers by name, each with its state under `a` and under `b`.
@@ -322,72 +456,105 @@ fn checked(
     })
 }
 
-/// What a pair is read from: the script's digest, and each regimen read
-/// with its bytes' digest.
-type Read = (String, Regimen, String, Regimen, String);
-
-fn read_pair(file: &Path, a: &Path, b: &Path) -> Result<Read, String> {
-    let read = |path: &Path| -> Result<(Regimen, String), String> {
-        let text = std::fs::read_to_string(path)
-            .map_err(|why| format!("{} cannot be read: {why}", path.display()))?;
-        let regimen = regimen::parse(&text)
-            .map_err(|why| format!("{} is not a regimen: {why:?}", path.display()))?;
-        Ok((regimen, crate::digest::sha256_hex(text.as_bytes())))
-    };
-    let script = script_digest(file)?;
-    let (a_read, a_sha256) = read(a)?;
-    let (b_read, b_sha256) = read(b)?;
-    Ok((script, a_read, a_sha256, b_read, b_sha256))
+/// A regimen read, with its bytes' digest.
+fn regimen_read(path: &Path) -> Result<(Regimen, String), String> {
+    let text = std::fs::read_to_string(path)
+        .map_err(|why| format!("{} cannot be read: {why}", path.display()))?;
+    let regimen = regimen::parse(&text)
+        .map_err(|why| format!("{} is not a regimen: {why:?}", path.display()))?;
+    Ok((regimen, crate::digest::sha256_hex(text.as_bytes())))
 }
 
-/// Run `options.file` under `a` and under `b`, `repeats.count` times each
-/// (#912), interleaved ABBA ABBA, each arm's repeats in `--out/a/` and
-/// `--out/b/`, and each run's `run` naming its arm, the pair, the script's
-/// digest and its repeat of its arm. Refused before any run unless the two
-/// regimens differ in exactly one lever, or, with `contrast` declared, in
-/// exactly the levers and keys it names. `emit` is given one line per run.
+/// Run `options.file` under each of `arms`' regimens, `repeats.count` times
+/// each (#932), in a Williams order ([`williams`]), each arm's repeats in
+/// `--out/<arm>/`, each run's `run` naming its arm, the batch's digest
+/// ([`batch_digest`]), the script's digest and its repeat of its arm.
+/// Refused before any run unless every other arm differs from `baseline` in
+/// exactly one lever, or in exactly its declared contrast. `emit` is given
+/// one line per run; the batch's line is also kept as `--out/batch.json`.
 /// The batch's line, and whether it ran to its end.
-pub fn pair(
+#[allow(clippy::too_many_lines)]
+pub fn arms(
     drive: &Path,
     options: &RunOptions,
-    (a, b, contrast): (&Path, &Path, Option<&[String]>),
+    (arms, baseline): (&[Arm], &str),
     repeats: &Repeats,
     emit: &mut dyn FnMut(&serde_json::Value),
 ) -> (serde_json::Value, bool) {
     let mut said = serde_json::json!({
         "batch": options.file.display().to_string(),
-        "a": a.display().to_string(),
-        "b": b.display().to_string(),
+        "baseline": baseline,
+        "regimens": arms
+            .iter()
+            .map(|arm| (arm.name.clone(), arm.regimen.display().to_string()))
+            .collect::<BTreeMap<_, _>>(),
         "of": repeats.count,
         "ok": false,
     });
-    let read = read_pair(&options.file, a, b);
-    let (script_sha256, a_read, a_sha256, b_read, b_sha256) = match read {
+    let mut arms: Vec<Arm> = arms.to_vec();
+    arms.sort_by(|left, right| left.name.cmp(&right.name));
+    let read = script_digest(&options.file).and_then(|script| {
+        arms.iter()
+            .map(|arm| regimen_read(&arm.regimen))
+            .collect::<Result<Vec<_>, _>>()
+            .map(|reads| (script, reads))
+    });
+    let (script_sha256, reads) = match read {
         Ok(read) => read,
         Err(why) => {
             said["failure"] = serde_json::Value::String(why);
             return (said, false);
         }
     };
-    let named = match checked(&a_read, &b_read, contrast) {
-        Ok(named) => named,
-        Err(refused) => {
-            if let serde_json::Value::Object(refused) = refused {
-                for (key, value) in refused {
-                    said[key] = value;
-                }
-            }
-            return (said, false);
-        }
+    let Some(base) = arms.iter().position(|arm| arm.name == baseline) else {
+        said["failure"] =
+            serde_json::Value::String(format!("the baseline `{baseline}` is none of the arms"));
+        return (said, false);
     };
-    let digest = pair_digest(&a_sha256, &b_sha256);
-    said["script_sha256"] = serde_json::Value::String(script_sha256.clone());
-    said["pair"] = serde_json::Value::String(digest.clone());
-    if let serde_json::Value::Object(named) = named {
-        for (key, value) in named {
-            said[key] = value;
+    let mut against = serde_json::Map::new();
+    for (at, arm) in arms.iter().enumerate().filter(|(at, _)| *at != base) {
+        match checked(&reads[base].0, &reads[at].0, arm.contrast.as_deref()) {
+            Ok(named) => {
+                against.insert(arm.name.clone(), named);
+            }
+            Err(refused) => {
+                said["arm"] = serde_json::Value::String(arm.name.clone());
+                if let serde_json::Value::Object(refused) = refused {
+                    for (key, value) in refused {
+                        said[key] = value;
+                    }
+                }
+                return (said, false);
+            }
         }
     }
+    let digest = batch_digest(
+        &reads
+            .iter()
+            .map(|(_, sha)| sha.as_str())
+            .collect::<Vec<_>>(),
+    );
+    said["script_sha256"] = serde_json::Value::String(script_sha256.clone());
+    said["arms"] = serde_json::Value::String(digest.clone());
+    said["against"] = serde_json::Value::Object(against);
+    let rows = williams(arms.len());
+    let balanced = repeats.count.is_multiple_of(rows.len() as u64);
+    said["order"] = serde_json::json!({
+        "design": "williams",
+        "rows": rows.len(),
+        "blocks": repeats.count,
+        "balanced": balanced,
+        "is": if balanced {
+            "every arm in every position equally often, after every other arm once per cycle".to_owned()
+        } else {
+            format!(
+                "not balanced: {} block(s) of a {}-row cycle; positions and carryover balance only at a multiple of {}",
+                repeats.count,
+                rows.len(),
+                rows.len()
+            )
+        },
+    });
     if let Err(why) = std::fs::create_dir_all(&options.out) {
         said["failure"] =
             serde_json::Value::String(format!("{} cannot be made: {why}", options.out.display()));
@@ -408,55 +575,191 @@ pub fn pair(
         runs.keep(line);
         emit(line);
     };
-    let mut ran: BTreeMap<&str, u64> = BTreeMap::from([("a", 0), ("b", 0)]);
+    let mut ran: BTreeMap<String, u64> = arms.iter().map(|arm| (arm.name.clone(), 0)).collect();
     let mut ok = true;
-    for index in 0..repeats.count * 2 {
-        let arm = arm_at(index);
-        let (regimen, tag) = match arm {
-            RunArm::A => (a, "a"),
-            RunArm::B => (b, "b"),
-        };
-        let run = Run {
-            script_sha256: script_sha256.clone(),
-            repeat: ran[tag] + 1,
-            of: repeats.count,
-            paired: Some((arm, digest.clone())),
-        };
-        let arm_options = RunOptions {
-            out: options.out.join(tag),
-            regimen: Some(regimen.to_path_buf()),
-            ..options.clone()
-        };
-        match slot(
-            drive,
-            &arm_options,
-            &run,
-            (&stop_file, repeats.void_cap),
-            &mut kept,
-        ) {
-            Slot::Ran => *ran.entry(tag).or_default() += 1,
-            Slot::Stopped => {
-                said["stopped_at"] = serde_json::json!({"arm": tag, "repeat": run.repeat});
-                said["stopped_by"] = serde_json::Value::String(stop_file.display().to_string());
-                break;
-            }
-            Slot::Voided(voids) => {
-                said["void_cap_reached"] =
-                    serde_json::json!({"arm": tag, "repeat": run.repeat, "voids": voids});
-                ok = false;
-                break;
+    'blocks: for block in 0..repeats.count {
+        let row = &rows[usize::try_from(block).unwrap_or(0) % rows.len()];
+        for &at in row {
+            let arm = &arms[at];
+            let run = Run {
+                script_sha256: script_sha256.clone(),
+                repeat: ran[&arm.name] + 1,
+                of: repeats.count,
+                paired: Some((arm.name.clone(), digest.clone())),
+            };
+            let arm_options = RunOptions {
+                out: options.out.join(&arm.name),
+                regimen: Some(arm.regimen.clone()),
+                ..options.clone()
+            };
+            match slot(
+                drive,
+                &arm_options,
+                &run,
+                (&stop_file, repeats.void_cap),
+                &mut kept,
+            ) {
+                Slot::Ran => *ran.entry(arm.name.clone()).or_default() += 1,
+                Slot::Stopped => {
+                    said["stopped_at"] = serde_json::json!({"arm": arm.name, "repeat": run.repeat});
+                    said["stopped_by"] = serde_json::Value::String(stop_file.display().to_string());
+                    break 'blocks;
+                }
+                Slot::Voided(voids) => {
+                    said["void_cap_reached"] =
+                        serde_json::json!({"arm": arm.name, "repeat": run.repeat, "voids": voids});
+                    ok = false;
+                    break 'blocks;
+                }
             }
         }
     }
     let ok = runs.report(&mut said) && ok;
     said["ran"] = serde_json::json!(ran);
     said["ok"] = serde_json::Value::Bool(ok);
+    let kept_as = options.out.join(BATCH);
+    if let Err(why) = std::fs::write(&kept_as, format!("{said:#}\n")) {
+        said["batch_failed"] =
+            serde_json::Value::String(format!("{} cannot be written: {why}", kept_as.display()));
+        said["ok"] = serde_json::Value::Bool(false);
+        return (said, false);
+    }
+    (said, ok)
+}
+
+/// The file a batch keeps its line in, under its `--out` (#932): what
+/// `table` reads the baseline from.
+pub const BATCH: &str = "batch.json";
+
+/// Run `options.file` under `a` and under `b`, `repeats.count` times each
+/// (#912): [`arms`] with two arms, `a` the baseline, so ABBA ABBA. Refused
+/// before any run unless the two regimens differ in exactly one lever, or,
+/// with `contrast` declared, in exactly the levers and keys it names. The
+/// batch's line names the pair as `pair` and its lever or contrast at the
+/// top, as before.
+pub fn pair(
+    drive: &Path,
+    options: &RunOptions,
+    (a, b, contrast): (&Path, &Path, Option<&[String]>),
+    repeats: &Repeats,
+    emit: &mut dyn FnMut(&serde_json::Value),
+) -> (serde_json::Value, bool) {
+    let two = [
+        Arm {
+            name: "a".to_owned(),
+            regimen: a.to_path_buf(),
+            contrast: None,
+        },
+        Arm {
+            name: "b".to_owned(),
+            regimen: b.to_path_buf(),
+            contrast: contrast.map(<[String]>::to_vec),
+        },
+    ];
+    let (mut said, ok) = arms(drive, options, (&two, "a"), repeats, emit);
+    said["a"] = serde_json::Value::String(a.display().to_string());
+    said["b"] = serde_json::Value::String(b.display().to_string());
+    if let Some(digest) = said.get("arms").cloned() {
+        said["pair"] = digest;
+    }
+    if let Some(serde_json::Value::Object(named)) = said
+        .get("against")
+        .and_then(|against| against.get("b"))
+        .cloned()
+    {
+        for (key, value) in named {
+            said[key] = value;
+        }
+    }
     (said, ok)
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A manifest's text, read from its own file under the temp directory.
+    fn manifest_of(case: &str, text: &str) -> Result<(Vec<Arm>, String), String> {
+        let dir =
+            std::env::temp_dir().join(format!("diet-arms-manifest-{case}-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).expect("the directory");
+        let path = dir.join("ARMS.toml");
+        std::fs::write(&path, text).expect("the manifest");
+        let read = manifest(&path);
+        let _ = std::fs::remove_dir_all(&dir);
+        read
+    }
+
+    /// #932: a manifest's arms come back in name order, each regimen beside
+    /// the manifest, each contrast as declared.
+    #[test]
+    fn a_manifest_reads_its_arms_in_name_order() {
+        let (arms, baseline) = manifest_of(
+            "read",
+            "baseline = \"native\"\n[arm.native]\nregimen = \"n.toml\"\n\
+             [arm.limits]\nregimen = \"l.toml\"\ncontrast = [\"max_steps\"]\n",
+        )
+        .expect("it reads");
+        assert_eq!(baseline, "native");
+        let names: Vec<&str> = arms.iter().map(|arm| arm.name.as_str()).collect();
+        assert_eq!(names, ["limits", "native"]);
+        assert!(arms[0].regimen.ends_with("l.toml"), "{arms:?}");
+        assert_eq!(arms[0].contrast, Some(vec!["max_steps".to_owned()]));
+        assert_eq!(arms[1].contrast, None);
+    }
+
+    /// #932: what a manifest is refused for, each refusal saying why.
+    #[test]
+    fn a_manifest_is_refused_naming_what_is_wrong() {
+        let two = "[arm.native]\nregimen = \"n.toml\"\n[arm.limits]\nregimen = \"l.toml\"\n";
+        for (case, text, says) in [
+            ("no-baseline", two.to_owned(), "names no `baseline`"),
+            (
+                "stranger",
+                format!("baseline = \"other\"\n{two}"),
+                "is none of its arms",
+            ),
+            (
+                "one-arm",
+                "baseline = \"native\"\n[arm.native]\nregimen = \"n.toml\"\n".to_owned(),
+                "a batch compares two or more",
+            ),
+            (
+                "bad-name",
+                format!("baseline = \"native\"\n{two}[arm.Upper]\nregimen = \"u.toml\"\n"),
+                "is no arm's name",
+            ),
+            (
+                "baseline-contrast",
+                "baseline = \"native\"\n[arm.native]\nregimen = \"n.toml\"\ncontrast = [\"x\"]\n\
+                 [arm.limits]\nregimen = \"l.toml\"\n"
+                    .to_owned(),
+                "declares no contrast",
+            ),
+            (
+                "unknown-key",
+                format!("baseline = \"native\"\nrepeat = 3\n{two}"),
+                "not `repeat`",
+            ),
+            (
+                "arm-key",
+                "baseline = \"native\"\n[arm.native]\nregimen = \"n.toml\"\nseed = 1\n\
+                 [arm.limits]\nregimen = \"l.toml\"\n"
+                    .to_owned(),
+                "not `seed`",
+            ),
+            (
+                "no-regimen",
+                "baseline = \"native\"\n[arm.native]\nregimen = \"n.toml\"\n[arm.limits]\n\
+                 contrast = [\"x\"]\n"
+                    .to_owned(),
+                "names no `regimen`",
+            ),
+        ] {
+            let refused = manifest_of(case, &text).expect_err(case);
+            assert!(refused.contains(says), "{case}: {refused}");
+        }
+    }
 
     fn regimen(text: &str) -> Regimen {
         regimen::parse(text).expect("a regimen")
@@ -607,15 +910,31 @@ mod tests {
         assert!(extra.why().contains("note_dedupe"), "{}", extra.why());
     }
 
-    /// #912: ABBA ABBA.
+    /// #912, #932: two arms' Williams rows are AB and BA, so ABBA ABBA; four
+    /// arms' are the standard square, each arm once in each place and once
+    /// after each other arm; three arms' are six rows, mirrored.
     #[test]
-    fn the_arms_interleave_abba() {
-        let order: String = (0..8)
-            .map(|index| match arm_at(index) {
-                RunArm::A => 'A',
-                RunArm::B => 'B',
-            })
-            .collect();
-        assert_eq!(order, "ABBAABBA");
+    fn the_williams_rows_balance_place_and_predecessor() {
+        assert_eq!(williams(2), [vec![0, 1], vec![1, 0]]);
+        for k in [2, 3, 4, 5, 6] {
+            let rows = williams(k);
+            assert_eq!(rows.len(), if k % 2 == 0 { k } else { 2 * k }, "k = {k}");
+            let cycle = rows.len() / k;
+            for place in 0..k {
+                for arm in 0..k {
+                    let times = rows.iter().filter(|row| row[place] == arm).count();
+                    assert_eq!(times, cycle, "k = {k}: arm {arm} in place {place}");
+                }
+            }
+            for before in 0..k {
+                for after in (0..k).filter(|after| *after != before) {
+                    let times = rows
+                        .iter()
+                        .filter(|row| row.windows(2).any(|pair| pair == [before, after]))
+                        .count();
+                    assert_eq!(times, cycle, "k = {k}: {after} after {before}");
+                }
+            }
+        }
     }
 }
