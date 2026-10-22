@@ -669,7 +669,9 @@ fn a_local_rungs_dry_run_plans_its_requests_without_a_spend() {
             .replace("interview_warrant", "# interview_warrant")
             .replace("fork_asks", "# fork_asks")
             .replace("capture_modality", "# capture_modality")
-            .replace("self_capture = \"on\"", "self_capture = \"off\""),
+            .replace("self_capture = \"on\"", "self_capture = \"off\"")
+            // It runs no commands: no sandbox, and none Linux refuses.
+            .replace("sandbox_reads", "# sandbox_reads"),
     )
     .expect("the regimen");
     let (code, said) = dry_run(&file, &regimen, &dir.join("out"));
