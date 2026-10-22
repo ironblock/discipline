@@ -230,6 +230,20 @@ check_scenarios() {
     echo "verify: no scenario under diet/scenarios/ ran" >&2
     return 1
   fi
+  # The Lite tasks (#942) run only against the pinned checkout and real
+  # browsers, never here; what runs without them does: the scenarios are
+  # what their one source writes, the model is told no cause, the process
+  # tier's definition holds, and every outcome is reachable.
+  local lite
+  for lite in "make_scenario.py --check" "check.py --selftest" "grader/process_trap.py --selftest" "outcomes.py --selftest"; do
+    code=0
+    # shellcheck disable=SC2086 # the script and its one flag
+    python3 -I diet/scenarios/lite/${lite} || code=$?
+    if [[ "$code" -ne 0 ]]; then
+      echo "verify: diet/scenarios/lite/${lite} failed (exit ${code})" >&2
+      rc=1
+    fi
+  done
   return "$rc"
 }
 

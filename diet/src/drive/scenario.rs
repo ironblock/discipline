@@ -55,6 +55,10 @@ pub struct Scenario {
     /// service's value, `service.NAME.KEY` (#942): serve's
     /// `--sandbox-unix-socket`.
     pub sandbox_unix_sockets: Vec<(String, String)>,
+    /// Variables added to serve's environment alone, each a text filled
+    /// from the run's ports and values (#942): what a command sees of them
+    /// is still the regimen's `env_passthrough`.
+    pub serve_env: BTreeMap<String, String>,
 }
 
 /// One canned reply: the text a request's last message must hold, or none
@@ -291,6 +295,7 @@ impl Scenario {
 
     /// Whether every placeholder names a declared port or service (#942).
     fn placeholders_are_declared(&mut self) -> Result<(), ScenarioError> {
+        let serve_env: Vec<String> = self.serve_env.values().cloned().collect();
         let (ports, services) = (
             self.ports.clone(),
             self.services
@@ -298,7 +303,14 @@ impl Scenario {
                 .map(|service| service.name.clone())
                 .collect::<Vec<_>>(),
         );
-        for text in self.filled_texts() {
+        let mut texts: Vec<&str> = serve_env.iter().map(String::as_str).collect();
+        let filled: Vec<String> = self
+            .filled_texts()
+            .into_iter()
+            .map(|text| text.clone())
+            .collect();
+        texts.extend(filled.iter().map(String::as_str));
+        for text in texts {
             for place in crate::drive::services::placeholders(text) {
                 let declared = match place.as_slice() {
                     ["port", key] => ports.iter().any(|port| port == key),
@@ -577,8 +589,11 @@ struct Intended {
     rung: String,
     /// The model its requests would be billed as: `weights_model_id`.
     model: Option<String>,
-    /// The regimen's request limits.
-    limits: crate::drive::hosted::RequestLimits,
+    /// The regimen's request limits: a hosted rung's, none for a local one.
+    limits: Option<crate::drive::hosted::RequestLimits>,
+    /// What the rehearsal ran on: [`REHEARSED_ON`] for a hosted rung,
+    /// [`CANNED_LOCAL`] for a local one (#942).
+    rehearsed_on: &'static str,
     /// What the entry declares its API refuses.
     api: crate::drive::registry::ApiDeclared,
 }
@@ -615,15 +630,37 @@ fn rehearsing(regimen: &std::path::Path) -> Result<(Rehearsal, Intended), Failur
         return Err(Failure(format!("{} names no substrate", regimen.display())));
     };
     let entry = identity(REGISTRY, rung).map_err(Failure)?;
-    if entry.server_kind.as_deref() != Some("api") {
-        return Err(Failure(format!(
-            "a dry run plans a hosted API's spend, and `{rung}`'s entry is not \
-             `server_kind = \"api\"`"
-        )));
-    }
-    let limits = crate::drive::hosted::request_limits(&read)
-        .map_err(|why| Failure(format!("{}: {why}", regimen.display())))?;
-    let canned = identity(REGISTRY, REHEARSED_ON).map_err(Failure)?;
+    // A hosted rung's rehearsal plans its spend under its limits; a local
+    // rung's (#942) counts its requests, on the local canned substrate.
+    let (limits, rehearsed_on) = if entry.server_kind.as_deref() == Some("api") {
+        let limits = crate::drive::hosted::request_limits(&read)
+            .map_err(|why| Failure(format!("{}: {why}", regimen.display())))?;
+        (Some(limits), REHEARSED_ON)
+    } else {
+        (None, CANNED_LOCAL)
+    };
+    let copy = swapped_onto(&text, rehearsed_on)?;
+    Ok((
+        copy,
+        Intended {
+            rung: rung.clone(),
+            model: entry.model_id.clone(),
+            limits,
+            rehearsed_on,
+            api: entry.api,
+        },
+    ))
+}
+
+/// The local routed canned substrate: what a rehearsal of a local rung's
+/// regimen runs on (#942).
+pub const CANNED_LOCAL: &str = "canned-scenario";
+
+/// A copy of the regimen `text` with its substrate alone swapped for the
+/// canned substrate `onto`, and that substrate's hardware fingerprint.
+fn swapped_onto(text: &str, onto: &str) -> Result<Rehearsal, Failure> {
+    use crate::drive::registry::{REGISTRY, identity};
+    let canned = identity(REGISTRY, onto).map_err(Failure)?;
     let mut top = true;
     let swapped: String = text
         .lines()
@@ -631,7 +668,7 @@ fn rehearsing(regimen: &std::path::Path) -> Result<(Rehearsal, Intended), Failur
             top &= !line.trim_start().starts_with('[');
             let key = line.split('=').next().map(str::trim);
             match key {
-                Some("substrate") if top => format!("substrate = \"{REHEARSED_ON}\""),
+                Some("substrate") if top => format!("substrate = \"{onto}\""),
                 Some("substrate_hardware") if top => {
                     format!("substrate_hardware = \"{}\"", canned.hardware_fingerprint)
                 }
@@ -649,15 +686,34 @@ fn rehearsing(regimen: &std::path::Path) -> Result<(Rehearsal, Intended), Failur
     ));
     std::fs::write(&copy, swapped)
         .map_err(|why| Failure(format!("the rehearsal's regimen cannot be written: {why}")))?;
-    Ok((
-        Rehearsal(copy),
-        Intended {
-            rung: rung.clone(),
-            model: entry.model_id.clone(),
-            limits,
-            api: entry.api,
-        },
-    ))
+    Ok(Rehearsal(copy))
+}
+
+/// A copy of the regimen at `regimen` on the canned substrate its rung's
+/// kind speaks: the hosted one for an `api` entry, else the local one, and
+/// a canned substrate as it is (#942, the sandbox probe).
+fn on_canned(regimen: &std::path::Path) -> Result<Rehearsal, Failure> {
+    use crate::drive::registry::{REGISTRY, identity};
+    let text = std::fs::read_to_string(regimen)
+        .map_err(|why| Failure(format!("{} cannot be read: {why}", regimen.display())))?;
+    let read = crate::formats::regimen::parse(&text)
+        .map_err(|why| Failure(format!("{}: {why:?}", regimen.display())))?;
+    let Some(crate::formats::regimen::Value::String(rung)) = read.get("substrate") else {
+        return Err(Failure(format!("{} names no substrate", regimen.display())));
+    };
+    let onto = if rung == REHEARSED_ON || rung == CANNED_LOCAL {
+        rung.as_str()
+    } else if identity(REGISTRY, rung)
+        .map_err(Failure)?
+        .server_kind
+        .as_deref()
+        == Some("api")
+    {
+        REHEARSED_ON
+    } else {
+        CANNED_LOCAL
+    };
+    swapped_onto(&text, onto)
 }
 
 impl Intended {
@@ -670,6 +726,7 @@ impl Intended {
     /// # Errors
     ///
     /// A log that does not read.
+    #[allow(clippy::too_many_lines)]
     fn plan(&self, written: &str) -> Result<serde_json::Value, Failure> {
         use crate::formats::log::{Event, FailReason};
         let lines = crate::formats::log::parse(written)
@@ -685,6 +742,7 @@ impl Intended {
         let mut by_lane: BTreeMap<String, (u64, u64, u64)> = BTreeMap::new();
         let mut by_fork_kind: BTreeMap<String, BTreeMap<String, u64>> = BTreeMap::new();
         let mut capped = false;
+        let mut widest = 0_u64;
         for line in &lines {
             match &line.event {
                 Event::Request {
@@ -695,6 +753,7 @@ impl Intended {
                     ..
                 } => {
                     requests += 1;
+                    widest = widest.max(max_tokens.unwrap_or(0));
                     sized += sized_tokens.unwrap_or(0);
                     output += max_tokens.unwrap_or(0);
                     let lane_total = by_lane.entry(lane.tag().to_owned()).or_default();
@@ -716,9 +775,24 @@ impl Intended {
                 _ => {}
             }
         }
-        let bound = match (self.api.serving_context, self.api.max_output_tokens) {
-            (Some(window), Some(cap)) => serde_json::json!({
-                "tokens": self.limits.max_api_requests.saturating_mul(window + cap),
+        let bound = match (
+            &self.limits,
+            self.api.serving_context,
+            self.api.max_output_tokens,
+        ) {
+            // A local rung (#942): what the rehearsal sent, each at its fullest.
+            (None, Some(window), _) => serde_json::json!({
+                "tokens": requests.saturating_mul(window + widest),
+                "is": "a bound, not an estimate: the rehearsal's requests x (the rung's window + \
+                       the widest max_tokens they asked), every request at its fullest; a local \
+                       rung spends no money",
+            }),
+            (None, None, _) => serde_json::json!({
+                "tokens": null,
+                "is": "no bound: the rung declares no window",
+            }),
+            (Some(limits), Some(window), Some(cap)) => serde_json::json!({
+                "tokens": limits.max_api_requests.saturating_mul(window + cap),
                 "is": "a bound, not an estimate: max_api_requests x (the rung's window + its \
                        output cap), every request at its fullest",
             }),
@@ -729,13 +803,14 @@ impl Intended {
         };
         Ok(serde_json::json!({
             "rung": self.rung,
+            "rung_kind": if self.limits.is_some() { "api" } else { "local" },
             "model": self.model,
-            "rehearsed_on": REHEARSED_ON,
-            "limits": {
-                "max_api_requests": self.limits.max_api_requests,
-                "api_retries": self.limits.api_retries,
-                "api_retry_after_max_seconds": self.limits.api_retry_after_max_seconds,
-            },
+            "rehearsed_on": self.rehearsed_on,
+            "limits": self.limits.as_ref().map(|limits| serde_json::json!({
+                "max_api_requests": limits.max_api_requests,
+                "api_retries": limits.api_retries,
+                "api_retry_after_max_seconds": limits.api_retry_after_max_seconds,
+            })),
             "rehearsal": {
                 "requests": requests,
                 "retries": retries,
@@ -888,6 +963,7 @@ pub fn parse(text: &str) -> Result<Scenario, ScenarioError> {
 
 /// The first line: `scenario`, `regimen`, `head`, and optionally
 /// `live_regimen` and `approvals`.
+#[allow(clippy::too_many_lines)]
 fn header(mut fields: Fields) -> Result<Scenario, ScenarioError> {
     let name = fields.text("scenario")?;
     let regimen = fields.text("regimen")?;
@@ -963,6 +1039,17 @@ fn header(mut fields: Fields) -> Result<Scenario, ScenarioError> {
             .collect::<Result<_, _>>()?,
         Some(_) => return Err(fields.wrong("`sandbox_unix_sockets` a list")),
     };
+    let serve_env = match fields.take("serve_env") {
+        None => BTreeMap::new(),
+        Some(Value::Object(named)) => named
+            .into_iter()
+            .map(|(name, text)| match text {
+                Value::String(text) if is_an_environment_name(&name) => Ok((name, text)),
+                _ => Err(fields.wrong("`serve_env` mapping environment variable names to text")),
+            })
+            .collect::<Result<_, _>>()?,
+        Some(_) => return Err(fields.wrong("`serve_env` an object")),
+    };
     if let Some(scope) = &approvals
         && !crate::drive::tool_loop::Decision::ALL
             .iter()
@@ -987,7 +1074,17 @@ fn header(mut fields: Fields) -> Result<Scenario, ScenarioError> {
         ports,
         services,
         sandbox_unix_sockets,
+        serve_env,
     })
+}
+
+/// A variable's name: a letter or `_`, then letters, digits and `_`.
+fn is_an_environment_name(name: &str) -> bool {
+    let mut chars = name.chars();
+    chars
+        .next()
+        .is_some_and(|first| first.is_ascii_alphabetic() || first == '_')
+        && chars.all(|c| c.is_ascii_alphanumeric() || c == '_')
 }
 
 /// A path that stays where it is put: relative, with no `..`.
@@ -2334,6 +2431,12 @@ fn tallied(said: &serde_json::Value) -> serde_json::Value {
     if let Some(failure) = said.get("failure") {
         line["failure"] = failure.clone();
     }
+    // The run's deny list and its probe (#942): counts, never a path.
+    for key in ["sandbox_secrets", "sandbox_probe"] {
+        if let Some(value) = said.get(key) {
+            line[key] = value.clone();
+        }
+    }
     let read = said["log"]
         .as_str()
         .and_then(|log| std::fs::read_to_string(log).ok())
@@ -2531,6 +2634,81 @@ fn running(
     let runs_commands = crate::drive::tool_loop::declared(&read)
         .map_err(|why| Failure(format!("{}: {why}", regimen.display())))?
         .is_some();
+    // The run's deny list (#942): every live run or dry run of a regimen that
+    // runs commands names one, or waives it, and proves it before it starts.
+    let deny =
+        crate::drive::probe::deny_of(std::env::var(crate::drive::probe::SECRETS).ok().as_deref())
+            .map_err(|why| voided(said, "sandbox", Failure(why)))?;
+    let denied = match (&deny, runs_commands && (live || options.dry_run)) {
+        (crate::drive::probe::Deny::Unset, true) => {
+            return Err(Failure(format!(
+                "a live run or a dry run whose regimen runs commands needs {}: the paths its \
+                 commands must not read (the private runs, the checkout container, the agents' \
+                 transcripts and memory, the operator's keys), colon-separated, or `none`",
+                crate::drive::probe::SECRETS
+            )));
+        }
+        (crate::drive::probe::Deny::Paths(paths), _) if runs_commands => paths.clone(),
+        _ => Vec::new(),
+    };
+    said["sandbox_secrets"] = match &deny {
+        crate::drive::probe::Deny::Waived => serde_json::json!("waived"),
+        _ => serde_json::json!({"count": denied.len()}),
+    };
+    if !denied.is_empty() && (live || options.dry_run) {
+        // Once per batch (#942): a regimen and a deny list already proven
+        // in this process are not probed again, and the line says so.
+        let key = (
+            crate::digest::sha256_hex(&std::fs::read(&regimen).unwrap_or_default()),
+            crate::digest::sha256_hex(
+                {
+                    let mut sorted = denied.clone();
+                    sorted.sort();
+                    sorted.join("\n")
+                }
+                .as_bytes(),
+            ),
+        );
+        let cached = PROBED
+            .lock()
+            .ok()
+            .and_then(|probed| probed.get(&key).cloned());
+        let probed = match cached {
+            Some(mut verdict) => {
+                verdict["reused"] = serde_json::Value::Bool(true);
+                Ok(verdict)
+            }
+            None => probed(
+                drive,
+                &regimen,
+                &beside(&options.file, &scenario.head),
+                &denied,
+                &options.out,
+            ),
+        }
+        .map_err(|failure| voided(said, "sandbox", failure))?;
+        let mut probed = probed;
+        // Which regimen it proved (its bytes as probed), so a batch's line
+        // shows one proof per regimen and list.
+        probed["regimen_sha256"] = serde_json::Value::String(key.0.clone());
+        let ok = probed["ok"] == true;
+        if ok
+            && probed.get("reused").is_none()
+            && let Ok(mut cache) = PROBED.lock()
+        {
+            cache.insert(key, probed.clone());
+        }
+        said["sandbox_probe"] = probed;
+        if !ok {
+            return Err(voided(
+                said,
+                "sandbox",
+                Failure(
+                    "the sandbox probe read what the deny list denies: refusing the run".to_owned(),
+                ),
+            ));
+        }
+    }
     // The warrant gate's classifier, when the regimen gates by one: on the
     // canned substrate, the scenario's own (#862), reporting the model and
     // compute units the regimen declares.
@@ -2626,7 +2804,9 @@ fn running(
         .stdin(std::process::Stdio::null())
         .stdout(std::process::Stdio::piped());
     // A dry run rehearses under its rung's declarations (#926).
-    if let Some((intended, _)) = &intended {
+    if let Some((intended, _)) = &intended
+        && intended.limits.is_some()
+    {
         serve.arg("--rehearse-as").arg(&intended.rung);
     }
     if let Some(run) = &options.run {
@@ -2653,6 +2833,9 @@ fn running(
         seeded(&dir, &options.file, &scenario.seed)
             .map_err(|failure| voided(said, "worktree", failure))?;
         serve.arg("--worktree").arg(&dir);
+        for secret in &denied {
+            serve.arg("--sandbox-secret").arg(secret);
+        }
         worktree = Some(dir);
     } else if !scenario.seed.is_empty() {
         return Err(Failure(
@@ -2689,7 +2872,10 @@ fn running(
         .and_then(|file| file.parent().map(std::path::Path::to_path_buf))
         .unwrap_or_else(|| std::path::PathBuf::from("."));
     let mut services = None;
-    let scenario = if scenario.services.is_empty() && scenario.ports.is_empty() {
+    let scenario = if scenario.services.is_empty()
+        && scenario.ports.is_empty()
+        && scenario.serve_env.is_empty()
+    {
         scenario
     } else {
         let started = crate::drive::services::Running::start(
@@ -2720,6 +2906,15 @@ fn running(
             };
             sockets.push(socket);
         }
+        let mut serve_env = Vec::new();
+        for (name, text) in &scenario.serve_env {
+            match running.filled(text) {
+                Ok(value) => serve_env.push((name.clone(), value)),
+                Err(why) => {
+                    refused.get_or_insert(format!("`serve_env` `{name}`: {why}"));
+                }
+            }
+        }
         let filled = match refused {
             Some(why) => Err(why),
             None => scenario.filled(&running),
@@ -2736,6 +2931,11 @@ fn running(
             serve.arg("--sandbox-unix-socket").arg(socket);
         }
         serve.envs(running.env());
+        // Named with their sources, never their values: a run's facts.
+        serve.envs(serve_env);
+        if !scenario.serve_env.is_empty() {
+            said["serve_env"] = serde_json::json!(scenario.serve_env);
+        }
         services = Some(running);
         filled
     };
@@ -2821,6 +3021,22 @@ fn running(
             .unwrap_or_else(|Failure(why)| serde_json::json!({"unplanned": why}));
         plan["complete"] =
             serde_json::Value::Bool(outcome.is_ok() && clean && plan.get("unplanned").is_none());
+        // Its grades (#942): the graders graded canned replies, so every
+        // attempt ran; they bound the requests and say nothing of a task.
+        let grades: Vec<serde_json::Value> = std::fs::read_to_string(&log)
+            .unwrap_or_default()
+            .lines()
+            .filter_map(|line| serde_json::from_str::<serde_json::Value>(line).ok())
+            .filter(|line| line["kind"] == "grade")
+            .collect();
+        if !grades.is_empty() {
+            plan["grades"] = serde_json::json!({
+                "graded": grades.len(),
+                "right": grades.iter().filter(|grade| grade["right"] == true).count(),
+                "is": "canned: the graders graded the canned replies, so every attempt ran; an \
+                       upper bound on the requests, not a result",
+            });
+        }
         if let Err(Failure(why)) = &outcome {
             plan["stopped_by"] = serde_json::Value::String(why.clone());
         }
@@ -2892,6 +3108,97 @@ fn running(
         let _ = std::fs::remove_dir_all(&work);
     }
     Ok(met)
+}
+
+/// The probes passed in this process (#942), by the digests of the
+/// regimen they ran under and of the sorted deny list: a batch probes each
+/// pair once.
+static PROBED: std::sync::Mutex<BTreeMap<(String, String), serde_json::Value>> =
+    std::sync::Mutex::new(BTreeMap::new());
+
+/// Run the sandbox probe (#942) under `regimen`, its substrate swapped for
+/// the canned hosted one unless it is a rehearsal already, with `secrets`
+/// denied: its verdict ([`crate::drive::probe::verdict`]).
+fn probed(
+    drive: &std::path::Path,
+    regimen: &std::path::Path,
+    head: &std::path::Path,
+    secrets: &[String],
+    kept_in: &std::path::Path,
+) -> Result<serde_json::Value, Failure> {
+    use crate::drive::probe::{PROBE_FILE, PROBE_PHRASE};
+    let needed = |name: &str| {
+        std::env::var(name).map_err(|_| {
+            Failure(format!(
+                "the sandbox probe needs {name}: {}",
+                if name == PROBE_FILE {
+                    "a file the model must not read"
+                } else {
+                    "text only the denied files hold"
+                }
+            ))
+        })
+    };
+    let (file, phrase) = (needed(PROBE_FILE)?, needed(PROBE_PHRASE)?);
+    let home = std::env::var("HOME")
+        .map_err(|_| Failure("the probe greps from $HOME, and it is unset".to_owned()))?;
+    let grep_in = crate::drive::probe::grep_roots(
+        std::path::Path::new(&home),
+        secrets,
+        Some(&std::env::temp_dir()),
+    );
+    let rehearsal = on_canned(regimen)?;
+    let dir = fresh("probe")?;
+    // The canary (#942): a string only this file holds, in the temporary
+    // directory the search covers, which a search that ran must list.
+    let canary = format!(
+        "diet-probe-canary-{}",
+        crate::digest::sha256_hex(
+            format!("{:?}{}", std::time::SystemTime::now(), std::process::id()).as_bytes()
+        )
+    );
+    let canary_file = dir.join("canary.txt");
+    std::fs::write(&canary_file, &canary)
+        .map_err(|why| Failure(format!("the probe's canary cannot be written: {why}")))?;
+    let file_path = dir.join("probe.jsonl");
+    let text = crate::drive::probe::scenario(
+        &rehearsal.0,
+        &std::path::absolute(head).unwrap_or_else(|_| head.to_path_buf()),
+        secrets,
+        (&file, &phrase, &grep_in),
+        &canary,
+    );
+    std::fs::write(&file_path, text)
+        .map_err(|why| Failure(format!("the probe cannot be written: {why}")))?;
+    let out = dir.join("out");
+    let ran = std::process::Command::new(drive)
+        .arg("scenario")
+        .arg(&file_path)
+        .arg("--out")
+        .arg(&out)
+        .arg("--no-assemble")
+        .env(crate::drive::probe::SECRETS, secrets.join(":"))
+        .stdin(std::process::Stdio::null())
+        .output()
+        .map_err(|why| Failure(format!("the probe cannot run: {why}")))?;
+    let log = std::fs::read_to_string(out.join("session.log")).map_err(|why| {
+        Failure(format!(
+            "the probe left no log ({why}): {}",
+            String::from_utf8_lossy(&ran.stdout)
+                .lines()
+                .last()
+                .unwrap_or("")
+        ))
+    })?;
+    let verdict =
+        crate::drive::probe::verdict(&log, secrets.len(), &canary_file.display().to_string());
+    // A failed probe's log is kept beside the run, for whoever reads why.
+    if verdict["ok"] != true {
+        let _ = std::fs::create_dir_all(kept_in);
+        let _ = std::fs::write(kept_in.join("sandbox-probe.log"), &log);
+    }
+    let _ = std::fs::remove_dir_all(&dir);
+    Ok(verdict)
 }
 
 #[cfg(test)]
@@ -3113,11 +3420,12 @@ mod tests {
         let intended = Intended {
             rung: "a-rung".to_owned(),
             model: Some("a-model".to_owned()),
-            limits: crate::drive::hosted::RequestLimits {
+            limits: Some(crate::drive::hosted::RequestLimits {
                 max_api_requests: 9,
                 api_retries: 1,
                 api_retry_after_max_seconds: 5,
-            },
+            }),
+            rehearsed_on: REHEARSED_ON,
             api: crate::drive::registry::ApiDeclared {
                 serving_context: Some(1_000),
                 max_output_tokens: Some(100),

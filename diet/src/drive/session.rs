@@ -750,6 +750,9 @@ pub enum Event {
         /// The operator refilled it over the changes it was held for
         /// (#150's gate): `Some(true)`, or `None`.
         refilled_anyway: Option<bool>,
+        /// It refilled from an empty working memory, carrying nothing
+        /// (`meditation_empty = "refill"`, #942): `Some(true)`, or `None`.
+        empty: Option<bool>,
         /// What its refill carried (#936): the render, or a native summary.
         carry: log::MeditationCarry,
         /// The native summary's estimated tokens, under `native_summary`.
@@ -5803,6 +5806,7 @@ pub fn line_of(logged: &Logged) -> log::Line {
             unaddressed,
             newest_turn_tokens,
             refilled_anyway,
+            empty,
             carry,
             summary_tokens,
             warm,
@@ -5850,6 +5854,7 @@ pub fn line_of(logged: &Logged) -> log::Line {
             unaddressed: unaddressed.clone(),
             newest_turn_tokens: *newest_turn_tokens,
             refilled_anyway: *refilled_anyway,
+            empty: *empty,
         },
         Event::MeditationHeld {
             at_turn,
@@ -8438,6 +8443,7 @@ fn refilled(
         unaddressed,
         newest_turn_tokens,
         refilled_anyway: None,
+        empty: (native.is_none() && carried_entries == 0).then_some(true),
         carry: if native.is_some() {
             log::MeditationCarry::NativeSummary
         } else {
@@ -9097,6 +9103,8 @@ fn nothing_to_refill(state: &State) -> bool {
             && state.interview.as_ref().is_none_or(|interview| {
                 interview.meditations.carry == log::MeditationCarry::Render
                     && interview.object.live().next().is_none()
+                    // An experiment refills anyway, carrying nothing (#942).
+                    && !interview.meditations.refill_empty
             }))
 }
 
@@ -17196,6 +17204,7 @@ pub(in crate::drive) mod tests {
                 phase_document: None,
                 newest_turn_tokens: None,
                 refilled_anyway: None,
+                empty: None,
                 carry: log::MeditationCarry::Render,
                 summary_tokens: None,
                 operator_changes: None,
@@ -17792,6 +17801,7 @@ pub(in crate::drive) mod tests {
                 phase_document: None,
                 newest_turn_tokens: None,
                 refilled_anyway: None,
+                empty: None,
                 carry: Some(log::MeditationCarry::Render),
                 summary_tokens: None,
                 operator_changes: None,
@@ -22069,6 +22079,7 @@ pub(in crate::drive) mod tests {
             logged.event,
             Event::Meditated {
                 refilled_anyway: Some(true),
+                empty: None,
                 ..
             }
         )));
@@ -29616,6 +29627,7 @@ pub(in crate::drive) mod tests {
             Some(Interview {
                 meditations: crate::meditation::policy::Served {
                     reconcile_gate: crate::meditation::policy::ReconcileGate::Carry,
+                    refill_empty: false,
                     every_turns: Some(every),
                     at_trunk_tokens: None,
                     tail_tokens,
@@ -29959,6 +29971,7 @@ pub(in crate::drive) mod tests {
             None,
             Some(meditating(crate::meditation::policy::Served {
                 reconcile_gate: crate::meditation::policy::ReconcileGate::Carry,
+                refill_empty: false,
                 every_turns: Some(1),
                 at_trunk_tokens: None,
                 tail_tokens: 0,
@@ -30032,6 +30045,7 @@ pub(in crate::drive) mod tests {
                 None,
                 Some(meditating(crate::meditation::policy::Served {
                     reconcile_gate: crate::meditation::policy::ReconcileGate::Carry,
+                    refill_empty: false,
                     every_turns: Some(1),
                     at_trunk_tokens: None,
                     tail_tokens,
@@ -30137,6 +30151,7 @@ pub(in crate::drive) mod tests {
             None,
             Some(meditating(crate::meditation::policy::Served {
                 reconcile_gate: crate::meditation::policy::ReconcileGate::Carry,
+                refill_empty: false,
                 every_turns: Some(5),
                 at_trunk_tokens: Some(200),
                 tail_tokens: 0,
@@ -30178,6 +30193,7 @@ pub(in crate::drive) mod tests {
             None,
             Some(meditating(crate::meditation::policy::Served {
                 reconcile_gate: crate::meditation::policy::ReconcileGate::Carry,
+                refill_empty: false,
                 every_turns: None,
                 at_trunk_tokens: Some(245),
                 tail_tokens: 0,
@@ -30231,6 +30247,7 @@ pub(in crate::drive) mod tests {
             None,
             Some(meditating(crate::meditation::policy::Served {
                 reconcile_gate: crate::meditation::policy::ReconcileGate::Carry,
+                refill_empty: false,
                 every_turns: None,
                 at_trunk_tokens: Some(100),
                 tail_tokens: 0,
@@ -30286,6 +30303,7 @@ pub(in crate::drive) mod tests {
             None,
             Some(meditating(crate::meditation::policy::Served {
                 reconcile_gate: crate::meditation::policy::ReconcileGate::Carry,
+                refill_empty: false,
                 every_turns: Some(1),
                 at_trunk_tokens: None,
                 tail_tokens: 0,
@@ -30330,6 +30348,7 @@ pub(in crate::drive) mod tests {
             None,
             Some(meditating(crate::meditation::policy::Served {
                 reconcile_gate: crate::meditation::policy::ReconcileGate::Carry,
+                refill_empty: false,
                 every_turns: Some(2),
                 at_trunk_tokens: None,
                 tail_tokens: 0,
@@ -30503,6 +30522,7 @@ pub(in crate::drive) mod tests {
                 phase_document: None,
                 newest_turn_tokens: None,
                 refilled_anyway: None,
+                empty: None,
                 carry: Some(log::MeditationCarry::Render),
                 summary_tokens: None,
                 operator_changes: None,

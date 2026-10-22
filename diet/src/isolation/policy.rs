@@ -165,6 +165,9 @@ pub struct Policy {
     /// The Unix sockets a sandboxed command may connect to, as declared
     /// ([`SANDBOX_UNIX_SOCKETS`]).
     pub unix_sockets: Vec<String>,
+    /// The secrets a run adds of its own (`serve --sandbox-secret`, #942),
+    /// also in `secrets`: what the receipt counts and digests, never names.
+    pub run_secrets: Vec<String>,
 }
 
 impl Policy {
@@ -246,6 +249,7 @@ impl Policy {
                 .collect(),
             tmpdir: None,
             unix_sockets: Vec::new(),
+            run_secrets: Vec::new(),
         }
     }
 
@@ -270,6 +274,7 @@ impl Policy {
                 .collect(),
             tmpdir: None,
             unix_sockets: Vec::new(),
+            run_secrets: Vec::new(),
         }
     }
 
@@ -410,6 +415,25 @@ fn unix_sockets(regimen: &Regimen) -> Result<Vec<String>, PolicyError> {
         .into_iter()
         .map(unix_socket)
         .collect()
+}
+
+/// Deny `path` to every command, reads and writes alike, as a run's own
+/// secret (`serve --sandbox-secret`, #942): absolute.
+///
+/// # Errors
+///
+/// When it is not absolute.
+pub fn add_run_secret(policy: &mut Policy, path: String) -> Result<(), PolicyError> {
+    if !std::path::Path::new(&path).is_absolute() {
+        return Err(PolicyError::NotAbsolute(path));
+    }
+    if !policy.secrets.contains(&path) {
+        policy.secrets.push(path.clone());
+    }
+    if !policy.run_secrets.contains(&path) {
+        policy.run_secrets.push(path);
+    }
+    Ok(())
 }
 
 /// `path` as a Unix socket a command may connect to: absolute, and short

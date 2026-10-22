@@ -251,6 +251,12 @@
 //! v17 to v21 logs, the migration is nothing: their `pair` reads as the
 //! batch's digest, and their `a` and `b` as arm names.
 //!
+//! v23 (#942) names an empty refill: a `meditation` that refilled from an
+//! empty working memory, carrying nothing (`meditation_empty = "refill"`),
+//! says `empty: true`. A log that declares 22 or less and carries it is
+//! refused. For a reader of earlier logs, the migration is nothing: before
+//! v23 a declared meditation over an empty working memory was refused.
+//!
 //! # A torn final line
 //!
 //! A writer killed mid-write leaves the start of an event with no line break
@@ -282,11 +288,11 @@ use super::record::vocabulary;
 struct LogParser;
 
 /// The version this module writes, as `session.start` states it.
-pub const VERSION: i64 = 22;
+pub const VERSION: i64 = 23;
 
 /// Every version this module reads.
 pub const READS: &[i64] = &[
-    0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22,
+    0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23,
 ];
 
 /// How recent an input event must be, at the moment a turn settles, for the
@@ -2201,6 +2207,9 @@ pub enum Event {
         /// The operator refilled this meditation over the changes it was held for
         /// (v7, #150's gate): `true`, or absent.
         refilled_anyway: Option<bool>,
+        /// It refilled from an empty working memory, carrying nothing (v23,
+        /// #942, `meditation_empty = "refill"`): `true`, or absent.
+        empty: Option<bool>,
         /// What its refill carried (v16, #936): working memory's render, or
         /// a native summary; absent before v16, when it was always the
         /// render.
@@ -4626,6 +4635,7 @@ fn from_object(object: &BTreeMap<String, Value>) -> Result<Line, String> {
             unaddressed: fields.optional_strings("unaddressed")?,
             newest_turn_tokens: fields.optional_count("newest_turn_tokens")?,
             refilled_anyway: fields.optional_flag("refilled_anyway")?,
+            empty: fields.optional_flag("empty")?,
             carry: fields.optional_tag("carry", MeditationCarry::from_tag)?,
             summary_tokens: fields.optional_count("summary_tokens")?,
             // Built only when its two keys are carried ([`all_or_none`]).
@@ -5612,6 +5622,16 @@ const fn must_v8(key: &'static str, holds: Holds) -> Field {
     }
 }
 
+/// A key that arrived in v23, optional wherever its object is written.
+const fn may_v23(key: &'static str, holds: Holds) -> Field {
+    Field {
+        key,
+        holds,
+        required: false,
+        since: 23,
+    }
+}
+
 /// A key that arrived in v22, optional wherever its object is written.
 const fn may_v22(key: &'static str, holds: Holds) -> Field {
     Field {
@@ -6455,6 +6475,7 @@ pub fn schema(kind: Kind) -> &'static [Field] {
                 may_v7("unaddressed", Holds::Strings),
                 may_v7("newest_turn_tokens", Count),
                 may_v7("refilled_anyway", Holds::Flag),
+                may_v23("empty", Holds::Flag),
                 may_v16("carry", Tag(Tags::MeditationCarry)),
                 may_v16("summary_tokens", Count),
                 may_v7("warm", Holds::Timings),
@@ -7759,6 +7780,7 @@ fn to_value(line: &Line) -> Value {
             unaddressed,
             newest_turn_tokens,
             refilled_anyway,
+            empty,
             carry,
             summary_tokens,
             warm,
@@ -7871,6 +7893,9 @@ fn to_value(line: &Line) -> Value {
             }
             if let Some(tokens) = newest_turn_tokens {
                 put("newest_turn_tokens", count(*tokens));
+            }
+            if let Some(empty) = empty {
+                put("empty", Value::Boolean(*empty));
             }
             if let Some(anyway) = refilled_anyway {
                 put("refilled_anyway", Value::Boolean(*anyway));
@@ -9322,14 +9347,15 @@ mod tests {
         assert!(refused.why.contains("v8"), "{refused}");
     }
 
-    /// #583, #878, #904, #555, #931, #936, #910, #942, #926, #932: this module writes v22.
+    /// #583, #878, #904, #555, #931, #936, #910, #942, #926, #932: this module writes v23.
     #[test]
-    fn this_module_writes_v22_and_reads_every_version_before_it() {
-        assert_eq!(super::VERSION, 22);
+    fn this_module_writes_v23_and_reads_every_version_before_it() {
+        assert_eq!(super::VERSION, 23);
         assert_eq!(
             super::READS,
             &[
-                0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22
+                0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22,
+                23
             ]
         );
     }

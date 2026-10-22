@@ -331,14 +331,14 @@ pub struct Arm {
 /// When it does not read, names an arm badly, names a baseline that is no
 /// arm, gives the baseline a contrast, holds fewer than two arms, or holds
 /// a key it does not take.
-pub fn manifest(path: &Path) -> Result<(Vec<Arm>, String), String> {
+pub fn manifest(path: &Path) -> Result<(Vec<Arm>, String, Option<String>), String> {
     let text = std::fs::read_to_string(path)
         .map_err(|why| format!("{} cannot be read: {why}", path.display()))?;
     let read = regimen::parse(&text)
         .map_err(|why| format!("{} is not an arms manifest: {why:?}", path.display()))?;
     let wrong = |why: String| format!("{}: {why}", path.display());
     for (key, _) in read.iter() {
-        if key != "baseline" && key != "arm" {
+        if key != "baseline" && key != "arm" && key != "purpose" {
             return Err(wrong(format!(
                 "an arms manifest takes `baseline` and `[arm.NAME]`, not `{key}`"
             )));
@@ -413,7 +413,14 @@ pub fn manifest(path: &Path) -> Result<(Vec<Arm>, String), String> {
             "its baseline `{baseline}` is none of its arms"
         )));
     }
-    Ok((arms, baseline.clone()))
+    // What the batch is for, when it says (#942): a `smoke` test of the
+    // plumbing is not the headline, and its line says so.
+    let purpose = match read.get("purpose") {
+        None => None,
+        Some(Value::String(purpose)) if !purpose.is_empty() => Some(purpose.clone()),
+        Some(_) => return Err(wrong("`purpose` is text, such as `smoke`".to_owned())),
+    };
+    Ok((arms, baseline.clone(), purpose))
 }
 
 /// Levers by name, each with its state under `a` and under `b`.
@@ -477,13 +484,14 @@ fn regimen_read(path: &Path) -> Result<(Regimen, String), String> {
 pub fn arms(
     drive: &Path,
     options: &RunOptions,
-    (arms, baseline): (&[Arm], &str),
+    (arms, baseline, purpose): (&[Arm], &str, Option<&str>),
     repeats: &Repeats,
     emit: &mut dyn FnMut(&serde_json::Value),
 ) -> (serde_json::Value, bool) {
     let mut said = serde_json::json!({
         "batch": options.file.display().to_string(),
         "baseline": baseline,
+        "purpose": purpose,
         "regimens": arms
             .iter()
             .map(|arm| (arm.name.clone(), arm.regimen.display().to_string()))
@@ -571,7 +579,18 @@ pub fn arms(
             return (said, false);
         }
     };
+    // The sandbox probes the batch's runs passed (#942), each once.
+    let mut probes: Vec<serde_json::Value> = Vec::new();
     let mut kept = |line: &serde_json::Value| {
+        if let Some(probe) = line.get("sandbox_probe").filter(|probe| !probe.is_null()) {
+            let mut probe = probe.clone();
+            if let Some(probe) = probe.as_object_mut() {
+                probe.remove("reused");
+            }
+            if !probes.contains(&probe) {
+                probes.push(probe);
+            }
+        }
         runs.keep(line);
         emit(line);
     };
@@ -613,6 +632,9 @@ pub fn arms(
                 }
             }
         }
+    }
+    if !probes.is_empty() {
+        said["sandbox_probes"] = serde_json::Value::Array(probes);
     }
     let ok = runs.report(&mut said) && ok;
     said["ran"] = serde_json::json!(ran);
@@ -656,7 +678,7 @@ pub fn pair(
             contrast: contrast.map(<[String]>::to_vec),
         },
     ];
-    let (mut said, ok) = arms(drive, options, (&two, "a"), repeats, emit);
+    let (mut said, ok) = arms(drive, options, (&two, "a", None), repeats, emit);
     said["a"] = serde_json::Value::String(a.display().to_string());
     said["b"] = serde_json::Value::String(b.display().to_string());
     if let Some(digest) = said.get("arms").cloned() {
@@ -679,7 +701,7 @@ mod tests {
     use super::*;
 
     /// A manifest's text, read from its own file under the temp directory.
-    fn manifest_of(case: &str, text: &str) -> Result<(Vec<Arm>, String), String> {
+    fn manifest_of(case: &str, text: &str) -> Result<(Vec<Arm>, String, Option<String>), String> {
         let dir =
             std::env::temp_dir().join(format!("diet-arms-manifest-{case}-{}", std::process::id()));
         std::fs::create_dir_all(&dir).expect("the directory");
@@ -694,13 +716,14 @@ mod tests {
     /// the manifest, each contrast as declared.
     #[test]
     fn a_manifest_reads_its_arms_in_name_order() {
-        let (arms, baseline) = manifest_of(
+        let (arms, baseline, purpose) = manifest_of(
             "read",
-            "baseline = \"native\"\n[arm.native]\nregimen = \"n.toml\"\n\
+            "baseline = \"native\"\npurpose = \"smoke\"\n[arm.native]\nregimen = \"n.toml\"\n\
              [arm.limits]\nregimen = \"l.toml\"\ncontrast = [\"max_steps\"]\n",
         )
         .expect("it reads");
         assert_eq!(baseline, "native");
+        assert_eq!(purpose.as_deref(), Some("smoke"));
         let names: Vec<&str> = arms.iter().map(|arm| arm.name.as_str()).collect();
         assert_eq!(names, ["limits", "native"]);
         assert!(arms[0].regimen.ends_with("l.toml"), "{arms:?}");

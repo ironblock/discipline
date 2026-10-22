@@ -10,6 +10,8 @@ A scenario (#760) is a drive written down as steps and expectations. `diet-drive
 
 `--dry-run` rehearses a scenario under the regimen a live run would take, on `canned-scenario-hosted` under the rung's own declarations (`--rehearse-as`, #926), and reports the plan it would spend: requests by lane and fork kind, `sized_tokens` summed, output at `max_tokens`, and the worst case, labelled a bound. A drive that fails partway still plans what its log holds, `"complete": false` (`diet/drive/BEGIN.md`, #555).
 
+A local rung's dry run (#942) rehearses on `canned-scenario`, its substrate alone swapped and no `--rehearse-as`. Its plan says `"rung_kind": "local"` and carries no limits. Its bound is the rehearsal's requests at the rung's window plus the widest `max_tokens` they asked, labelled a bound: a local rung spends no money. A graded dry run's plan counts its grades and labels them `canned`: the graders graded canned replies, so every attempt ran.
+
 `background-wait.jsonl` starts two background jobs: one that fails at once, and one that runs longer than its turn. It then waits for the longer job to end, `wait` with `where` waiting past the failed job's line, before the next ask, whose notice reports it completed. Without the wait, or with a `where` ignored, the job has not ended by then, and the run fails.
 
 `hosted.jsonl` (#555) rehearses a hosted API on `canned-scenario-hosted`, the scenario substrate whose `server_kind` is `api`: its replies are served as Anthropic's Messages API streams them, at `/v1/messages`. Turn 1 thinks, signs the thinking, calls `bash` and writes the cache; its second request reads it. Turn 2 is answered `529` with a `retry-after` of 1 s: the session logs `request.retried`, waits, sends the retry and is answered. Turn 3 is answered `429` asking for 120 s, more than the regimen's `api_retry_after_max_seconds`, so it is not retried: `request.failed`, and the turn settles `failed`. A canned hosted run sends a rehearsal key, written beside the run's credential, and withholds `ANTHROPIC_API_KEY` from serve, so no rehearsal can carry an operator's key.
@@ -40,6 +42,7 @@ The format has no grammar of its own, so it has no directory under `diet/formats
 | `ports` | optional | names of loopback ports reserved for each run (below) |
 | `services` | optional | what each run starts beside serve, outside the sandbox (below) |
 | `sandbox_unix_sockets` | optional | services' values, each `service.NAME.KEY`, passed to serve as `--sandbox-unix-socket`: sockets the model's commands may connect to |
+| `serve_env` | optional | `{VAR: TEXT}`: variables added to serve's environment alone, each text filled as an ask's is |
 
 ## Services (#942)
 
@@ -70,7 +73,34 @@ A run may need things beside serve: a dev server, a browser daemon, a grader's o
   - every check's environment;
   - each ask's text and each grade's `wrong`, `last` and `right`, as `{port.KEY}` and `{service.NAME.KEY}`. Other braces are text. A placeholder naming a port or service the header does not declare is refused when the scenario is read.
 - **Sockets:** `sandbox_unix_sockets` names the values serve is given as `--sandbox-unix-socket`. A socket's path differs per run, so it is a run's fact, as the worktree is, and the regimen's bytes stay the arm's. The receipt names it beside the regimen's own.
+- **`serve_env`** adds variables to serve's environment alone, such as a daemon's session id that a command-line tool finds it by: `{"CD4A_INTERNAL_DAEMON_SESSION_ID": "{service.model-browser.session}"}`. Each text is filled as an ask's is. A command still sees only what the regimen's `env_passthrough` names. The run's line names each variable with its source text, never its value.
 - **What the run says:** its line names each service's `ready_ms` and what its stop did: `killed` for a foreground one that needed the KILL; `stop_exit` and `pids_left_after_stop` for a daemon.
+
+## A live experiment needs the deny list (#942)
+
+Under `sandbox_reads = "all"` the model's commands read everything but the secrets. A machine that runs experiments holds what encodes them, and a live run's model must read none of it. The standard entries:
+- the private runs, with their solutions and notes;
+- the checkout container: the whole bare-repo container, with its graders and planning, but not the reference checkouts a task reads;
+- the agents' transcripts and memory (`~/.claude`);
+- every agent session's scratchpad (`/private/tmp/claude-<uid>`), which is outside `$HOME`;
+- the desktop app's data (`~/Library/Application Support/Claude`, `~/Library/Caches/claude-cli-nodejs`, `~/Library/Caches/com.anthropic.claudefordesktop*`);
+- the operator's keys and configuration (`~/.config/discipline`, git's credentials).
+- the operator's personal folders: `~/Documents`, `~/Desktop`, `~/Downloads`, `~/Pictures`, `~/Movies`, `~/Music`;
+- browser and credential stores under `~/Library`: Chrome's and Firefox's profiles (`Application Support/Google/Chrome`, `Application Support/Firefox`), `Safari`, `Cookies`, `Keychains`, `Mail`, `Messages`.
+
+The model's tools keep working with all of these denied: node, rg and git, and its chrome-devtools daemon, which runs outside the sandbox with its own profile in the run's directory and is reached through its socket.
+
+What the deny list does:
+- **`DIET_SANDBOX_SECRETS`** is the deny list: colon-separated absolute paths. The runner passes each to serve as `--sandbox-secret`, a per-run fact beside the regimen's own secrets, so the regimen's bytes stay the arm's. The receipt counts the paths and digests the sorted list; it never names one.
+- **A live run or a dry run whose regimen runs commands refuses to start with it unset.** `none` waives it, for CI and machines that hold nothing.
+- **The probe proves it,** from inside serve's own sandbox: a short session on the canned substrate, under the run's regimen with its substrate alone swapped and the same secrets. Its canned replies run:
+  - `ls` on each denied path, which must fail;
+  - `cat` of `DIET_SANDBOX_PROBE_FILE`, a file the model must not read, which must fail;
+  - ripgrep (`rg --no-ignore --hidden --fixed-strings --files-with-matches --no-messages --max-filesize 64M`, `node_modules`, `Library` and `.Trash` skipped) for `DIET_SANDBOX_PROBE_PHRASE`, text only the denied files hold. **A file over 64 MB is not searched:** a leaked solution, task note or brief is small text, and the transcripts that grow large sit in a denied `~/.claude`. The probe line records the cap.
+- **Where the search looks:** `$HOME`'s top level but the denied paths, then `/private/tmp` and `$TMPDIR`.
+- **What the search proves:** rg exits 2 wherever a file is unreadable, as a denied one is, so its exit says nothing. What it lists does. It also looks for a canary, a string only a file the probe wrote holds, and must list that file and no other: a search that found not even the canary searched nothing. The phrase and the canary go hex-escaped through `printf`, so no file the probe writes holds either.
+- **What the run records:** its line carries the verdict, counts and the rg version only. A probe that read anything voids the run as `sandbox`, nothing else starts, and the failed probe's log is kept beside the run.
+- **Once per batch:** a batch probes once for each regimen and deny list, and its later runs say they reused that proof.
 
 ## `reply`: what the canned substrate answers
 

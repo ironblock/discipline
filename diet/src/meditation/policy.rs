@@ -45,6 +45,12 @@ pub const MEDITATION_TOOL_OUTPUTS: &str = "meditation_tool_outputs";
 /// model writes with the vote's prompt, and what Qwen Code puts beside it
 /// ([`super::native`]). Read leniently: any other value is the default.
 pub const MEDITATION_CARRY: &str = "meditation_carry";
+/// What a declared meditation does with an empty working memory (#942):
+/// `refuse` (the default), the product's own, which keeps a person's session
+/// from a refill that carries nothing; or `refill`, an experiment's, which
+/// refills anyway, carrying nothing, so a run whose interviews captured
+/// nothing still crosses its refill.
+pub const MEDITATION_EMPTY: &str = "meditation_empty";
 /// The automatic meditation (#617): on unless the regimen says `"off"`. Before
 /// every trunk request a served session that keeps working memory and knows
 /// its window refills the trunk when the prompt would leave less than the
@@ -193,6 +199,8 @@ pub enum PolicyError {
     NotServed(&'static str),
     /// [`RECONCILE_GATE`] holds a word other than `carry` or `refuse`.
     NotAGate,
+    /// [`MEDITATION_EMPTY`] is neither `refuse` nor `refill`.
+    NotAnEmptyRule,
     /// [`RECONCILE_GATE`] is `refuse` with the audit off: nothing could
     /// address a change, so every meditation with one would hold.
     GateWithoutAudit,
@@ -264,6 +272,10 @@ impl fmt::Display for PolicyError {
             Self::NotAGate => write!(
                 f,
                 "`{RECONCILE_GATE}` takes \"carry\" (the default) or \"refuse\""
+            ),
+            Self::NotAnEmptyRule => write!(
+                f,
+                "`{MEDITATION_EMPTY}` takes \"refuse\" (the default) or \"refill\""
             ),
             Self::NeverMeditates(key) => write!(
                 f,
@@ -435,6 +447,9 @@ pub struct Served {
     /// Whether a meditation refills over an unaddressed operator change
     /// ([`RECONCILE_GATE`], #150).
     pub reconcile_gate: ReconcileGate,
+    /// Whether a declared meditation refills from an empty working memory,
+    /// carrying nothing ([`MEDITATION_EMPTY`] `refill`, #942).
+    pub refill_empty: bool,
     /// The notes one audit fork asks over
     /// ([`MEDITATION_AUDIT_CHUNK_NOTES`]), when declared.
     pub audit_chunk_notes: Option<usize>,
@@ -591,8 +606,15 @@ impl Served {
         if reconcile_gate == ReconcileGate::Refuse && !on(regimen, MEDITATION_AUDIT) {
             return Err(PolicyError::GateWithoutAudit);
         }
+        let refill_empty = match regimen.get(MEDITATION_EMPTY) {
+            None => false,
+            Some(Value::String(word)) if word == "refuse" => false,
+            Some(Value::String(word)) if word == "refill" => true,
+            Some(_) => return Err(PolicyError::NotAnEmptyRule),
+        };
         Ok(Self {
             reconcile_gate,
+            refill_empty,
             every_turns,
             at_trunk_tokens,
             tail_tokens,
@@ -773,6 +795,7 @@ mod tests {
             ),
             Ok(Served {
                 reconcile_gate: ReconcileGate::Carry,
+                refill_empty: false,
                 every_turns: Some(4),
                 at_trunk_tokens: Some(96_000),
                 tail_tokens: 0,
@@ -790,6 +813,7 @@ mod tests {
             served("meditation_at_context_fraction = 1\n", Some(8192)),
             Ok(Served {
                 reconcile_gate: ReconcileGate::Carry,
+                refill_empty: false,
                 every_turns: None,
                 at_trunk_tokens: Some(8192),
                 tail_tokens: 0,
@@ -833,6 +857,7 @@ mod tests {
     fn the_budget_outranks_the_cadence_and_each_fires_only_when_reached() {
         let policy = Served {
             reconcile_gate: ReconcileGate::Carry,
+            refill_empty: false,
             every_turns: Some(3),
             at_trunk_tokens: Some(1000),
             tail_tokens: 0,

@@ -751,6 +751,16 @@ pub fn serve_levers(regimen: &Regimen, output_cap: (u32, &str)) -> BTreeMap<Stri
                 .tag()
                 .to_owned(),
         ),
+        // #942: whether a declared meditation refills from an empty working
+        // memory.
+        (
+            "meditation_empty".to_owned(),
+            match regimen.get(crate::meditation::policy::MEDITATION_EMPTY) {
+                None => "refuse".to_owned(),
+                Some(regimen::Value::String(word)) => word.clone(),
+                Some(_) => undeclared(),
+            },
+        ),
         ("phase_graph".to_owned(), phase_graph_lever(regimen)),
         // #788: whether the operator may move the phase alone.
         (

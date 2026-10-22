@@ -400,6 +400,8 @@ fn a_dry_run_prints_the_plan_a_live_run_would_spend() {
         .arg("--out")
         .arg(dir.join("out"))
         .arg("--no-assemble")
+        // It runs commands, so a dry run names its deny list (#942): none here.
+        .env("DIET_SANDBOX_SECRETS", "none")
         .env_remove("ANTHROPIC_API_KEY")
         .env("TMPDIR", &temp)
         .output()
@@ -493,15 +495,221 @@ fn rehearsals_in(temp: &Path) -> usize {
         .count()
 }
 
-/// #555 step 4c: a dry run plans a hosted rung's spend, so a regimen on any
-/// other substrate is refused; and no rehearsal's copy of its regimen is
-/// left in the temporary directory, however a run ended.
+/// #942: before a dry run (or a live one) whose regimen runs commands, the
+/// probe proves the deny list from inside serve's own sandbox. With the
+/// private directory denied, `ls` on it and `cat` of its file fail and a
+/// `grep -r` from `$HOME` for its phrase finds nothing: the run goes on, its
+/// line naming counts and no path. With an unrelated directory denied
+/// instead, the probe reads the file and the run is refused, void
+/// `sandbox`. Unset, a dry run is refused before anything starts.
 #[test]
-fn a_dry_run_refuses_a_rung_that_is_not_hosted_and_leaves_no_copy() {
+#[cfg(target_os = "macos")]
+#[allow(clippy::too_many_lines)]
+fn the_sandbox_probe_proves_the_deny_list_or_refuses_the_run() {
+    let dir = scratch("probe");
+    let home = dir.join("home");
+    let private = home.join("private-runs");
+    std::fs::create_dir_all(&private).expect("the private directory");
+    std::fs::create_dir_all(home.join("elsewhere")).expect("another directory");
+    let solution = private.join("solution.ts");
+    // A phrase of this run's own: an earlier run's leftovers hold theirs.
+    let phrase = format!(
+        "distinctive-trap-phrase-{}-{}",
+        std::process::id(),
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map_or(0, |since| since.as_nanos())
+    );
+    std::fs::write(&solution, format!("// {phrase}\n")).expect("a solution");
+    let file = one_turn(&dir, "probe", r#"{"expect":"turn.settled"}"#);
+    let regimen = dir.join("local.toml");
+    std::fs::write(
+        &regimen,
+        std::fs::read_to_string(root().join("diet/drive/floor.toml"))
+            .expect("the floor regimen")
+            .replace("interview_warrant", "# interview_warrant")
+            .replace("fork_asks", "# fork_asks")
+            .replace("capture_modality", "# capture_modality")
+            .replace("self_capture = \"on\"", "self_capture = \"off\"")
+            .replace("network = \"host\"", "network = \"none\""),
+    )
+    .expect("the regimen");
+    let probe = |secrets: Option<&Path>, out: &str, extra: &[&str]| {
+        let mut command = Command::new(DRIVE);
+        command
+            .current_dir(root())
+            .arg("scenario")
+            .arg(&file)
+            .arg("--dry-run")
+            .arg("--regimen")
+            .arg(&regimen)
+            .arg("--out")
+            .arg(dir.join(out))
+            .arg("--no-assemble")
+            .args(extra)
+            .env("HOME", &home)
+            .env("DIET_SANDBOX_PROBE_FILE", &solution)
+            .env("DIET_SANDBOX_PROBE_PHRASE", &phrase)
+            .env_remove("DIET_SANDBOX_SECRETS");
+        if let Some(secrets) = secrets {
+            command.env("DIET_SANDBOX_SECRETS", secrets);
+        }
+        let ran = command.output().expect("diet-drive runs");
+        let stdout = String::from_utf8_lossy(&ran.stdout).into_owned();
+        let said: serde_json::Value =
+            serde_json::from_str(stdout.lines().last().unwrap_or("")).unwrap_or_default();
+        (ran.status.code(), said, stdout)
+    };
+    let (code, said, _) = probe(None, "unset", &[]);
+    assert_eq!(code, Some(1), "{said}");
+    assert!(
+        said["failure"]
+            .as_str()
+            .unwrap_or("")
+            .contains("DIET_SANDBOX_SECRETS"),
+        "{said}"
+    );
+    let (code, said, stdout) = probe(Some(&private), "denied", &[]);
+    assert_eq!(code, Some(0), "{said}");
+    let probed = &said["sandbox_probe"];
+    for (key, value) in [
+        ("ok", serde_json::json!(true)),
+        ("paths", serde_json::json!(1)),
+        ("paths_denied", serde_json::json!(1)),
+        ("file_denied", serde_json::json!(true)),
+        ("grep_finished", serde_json::json!(true)),
+        ("canary_seen", serde_json::json!(true)),
+        ("phrase_found", serde_json::json!(false)),
+    ] {
+        assert_eq!(probed[key], value, "{key}: {said}");
+    }
+    assert!(
+        probed["rg"]
+            .as_str()
+            .is_some_and(|rg| rg.starts_with("ripgrep ")),
+        "the probe names its search's version: {said}"
+    );
+    assert!(
+        !stdout.contains("private-runs"),
+        "the line names no denied path: {stdout}"
+    );
+    let receipt = std::fs::read_to_string(dir.join("denied/session.record.jsonl.receipt.json"))
+        .expect("the run's receipt");
+    let receipt: serde_json::Value = serde_json::from_str(&receipt).expect("JSON");
+    assert_eq!(
+        receipt["run_secrets"]["count"], 1,
+        "serve was given the deny list: {receipt}"
+    );
+    assert!(
+        !receipt.to_string().contains("private-runs"),
+        "the receipt names no denied path: {receipt}"
+    );
+    // A batch probes once: the second repeat reuses the first's proof.
+    let (code, _, stdout) = probe(Some(&private), "repeated", &["--repeat", "2"]);
+    assert_eq!(code, Some(0), "{stdout}");
+    let runs: Vec<serde_json::Value> = std::fs::read_to_string(dir.join("repeated/runs.jsonl"))
+        .expect("runs.jsonl")
+        .lines()
+        .map(|line| serde_json::from_str(line).expect("a JSON line"))
+        .collect();
+    assert_eq!(runs.len(), 2, "{runs:?}");
+    assert_eq!(runs[0]["sandbox_probe"]["ok"], true, "{runs:?}");
+    assert!(runs[0]["sandbox_probe"].get("reused").is_none(), "{runs:?}");
+    assert_eq!(runs[1]["sandbox_probe"]["reused"], true, "{runs:?}");
+    // Under a regimen that interviews, its forks take their own answers and
+    // the commands still reach the trunk.
+    let interviewing = dir.join("interviewing.toml");
+    std::fs::write(
+        &interviewing,
+        std::fs::read_to_string(root().join("diet/drive/floor.toml"))
+            .expect("the floor regimen")
+            .replace("fork_asks", "# fork_asks")
+            .replace("capture_modality", "# capture_modality")
+            .replace(
+                "self_capture = \"on\"",
+                "self_capture = \"off\"\nrefutation_interview = \"on\"",
+            )
+            .replace("network = \"host\"", "network = \"none\""),
+    )
+    .expect("the regimen");
+    let interviewing = interviewing.display().to_string();
+    // (The one-turn scenario itself writes no fork answers: only the probe's
+    // verdict is this case's.)
+    let (_, said, _) = probe(
+        Some(&private),
+        "interviewing",
+        &["--regimen", &interviewing],
+    );
+    assert_eq!(said["sandbox_probe"]["ok"], true, "{said}");
+    assert_ne!(said["void"], "sandbox", "{said}");
+    // Last: a probe that read the file keeps its log here, which a later
+    // probe's grep would find.
+    let (code, said, _) = probe(Some(&home.join("elsewhere")), "undenied", &[]);
+    assert_eq!(code, Some(1), "{said}");
+    assert_eq!(said["void"], "sandbox", "{said}");
+    assert_eq!(said["sandbox_probe"]["file_denied"], false, "{said}");
+    assert_eq!(said["sandbox_probe"]["phrase_found"], true, "{said}");
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// #942: a local rung's dry run rehearses on `canned-scenario`, with no
+/// `--rehearse-as` and no request limits, and plans what it sent: the plan
+/// says the rung is local, and its bound is the requests at the rung's
+/// fullest, labelled a bound.
+#[test]
+fn a_local_rungs_dry_run_plans_its_requests_without_a_spend() {
+    let dir = scratch("dry-run-local");
+    let file = one_turn(&dir, "local", r#"{"expect":"turn.settled"}"#);
+    let regimen = dir.join("local.toml");
+    std::fs::write(
+        &regimen,
+        std::fs::read_to_string(root().join("diet/drive/floor.toml"))
+            .expect("the floor regimen")
+            .replace("allowed_commands", "# allowed_commands")
+            .replace("interview_warrant", "# interview_warrant")
+            .replace("fork_asks", "# fork_asks")
+            .replace("capture_modality", "# capture_modality")
+            .replace("self_capture = \"on\"", "self_capture = \"off\""),
+    )
+    .expect("the regimen");
+    let (code, said) = dry_run(&file, &regimen, &dir.join("out"));
+    assert_eq!(code, Some(0), "{said}");
+    let plan = &said["plan"];
+    assert_eq!(
+        plan["rung"], "accel24-tabbyapi-exl3-qwen38-27b-3p00",
+        "{plan}"
+    );
+    assert_eq!(plan["rung_kind"], "local", "{plan}");
+    assert_eq!(plan["rehearsed_on"], "canned-scenario", "{plan}");
+    assert_eq!(plan["limits"], serde_json::Value::Null, "{plan}");
+    assert_eq!(plan["rehearsal"]["requests"], 1, "{plan}");
+    assert!(
+        plan["bound"]["tokens"]
+            .as_u64()
+            .is_some_and(|tokens| tokens > 0),
+        "{plan}"
+    );
+    assert!(
+        plan["bound"]["is"]
+            .as_str()
+            .unwrap_or("")
+            .starts_with("a bound, not an estimate"),
+        "{plan}"
+    );
+    assert_eq!(plan["complete"], true, "{plan}");
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// #555 step 4c, #942: a local rung's dry run rehearses on the local canned
+/// substrate, so a scenario whose replies only a hosted wire carries is
+/// refused there, naming it; and no rehearsal's copy of its regimen is left
+/// in the temporary directory, however a run ended.
+#[test]
+fn a_local_rungs_dry_run_refuses_hosted_replies_and_leaves_no_copy() {
     let dir = scratch("dry-run-refused");
     let temp = dir.join("temp");
     std::fs::create_dir_all(&temp).expect("a scratch directory");
-    // A dry run plans a hosted rung's spend: another regimen is refused.
+    // A local rung rehearses on `canned-scenario`, which speaks no hosted wire.
     let refused = Command::new(DRIVE)
         .current_dir(root())
         .arg("scenario")
@@ -520,7 +728,7 @@ fn a_dry_run_refuses_a_rung_that_is_not_hosted_and_leaves_no_copy() {
     assert!(
         said["failure"]
             .as_str()
-            .is_some_and(|why| why.contains("server_kind")),
+            .is_some_and(|why| why.contains("canned-scenario is not one")),
         "{said}"
     );
     // And no rehearsal's regimen copy is left, however the run ended.
@@ -1253,7 +1461,7 @@ fn arms_run_in_a_williams_order_and_table_against_the_baseline() {
     let manifest = dir.join("ARMS.toml");
     std::fs::write(
         &manifest,
-        "baseline = \"native\"\n[arm.native]\nregimen = \"native.toml\"\n\
+        "baseline = \"native\"\npurpose = \"smoke\"\n[arm.native]\nregimen = \"native.toml\"\n\
          [arm.limits]\nregimen = \"limits.toml\"\n[arm.window]\nregimen = \"window.toml\"\n",
     )
     .expect("the manifest");
@@ -1326,6 +1534,10 @@ fn arms_run_in_a_williams_order_and_table_against_the_baseline() {
     assert_eq!(batch["arms"], batch_digest, "{batch}");
     assert_eq!(batch["baseline"], "native", "{batch}");
     assert_eq!(
+        batch["purpose"], "smoke",
+        "the manifest's purpose is the batch's: {batch}"
+    );
+    assert_eq!(
         batch["against"]["limits"]["lever"]["name"], "step_and_output_limits",
         "{batch}"
     );
@@ -1345,6 +1557,24 @@ fn arms_run_in_a_williams_order_and_table_against_the_baseline() {
         serde_json::from_str(&std::fs::read_to_string(out.join("batch.json")).expect("batch.json"))
             .expect("JSON");
     assert_eq!(&kept, batch, "batch.json is the batch's line");
+    // An analysis's outcomes beside each run's log (#942): limits' runs'
+    // task is sufficient, every other run's is other.
+    for arm in ["limits", "native", "window"] {
+        for k in 1..=2 {
+            let outcome = if arm == "limits" {
+                "sufficient"
+            } else {
+                "other"
+            };
+            std::fs::write(
+                out.join(arm)
+                    .join(format!("repeat-{k:02}"))
+                    .join("outcomes.json"),
+                serde_json::json!({"outcomes": {"h1-late-torus": outcome}}).to_string(),
+            )
+            .expect("outcomes.json");
+        }
+    }
     let tabled = Command::new(DRIVE)
         .arg("table")
         .arg(&out)
@@ -1367,6 +1597,30 @@ fn arms_run_in_a_williams_order_and_table_against_the_baseline() {
         let by_arm: Vec<&String> = row["by_arm"].as_object().expect("by_arm").keys().collect();
         assert_eq!(by_arm, ["limits", "native", "window"], "{row}");
     }
+    let outcome_row = |name: &str| {
+        table["rows"]
+            .as_array()
+            .and_then(|rows| rows.iter().find(|row| row["row"] == name))
+            .cloned()
+            .unwrap_or_else(|| panic!("no row {name}: {table}"))
+    };
+    let sufficient = outcome_row("outcome: h1-late-torus: sufficient");
+    assert_eq!(
+        sufficient["by_arm"]["limits"]["runs"],
+        serde_json::json!([1.0, 1.0]),
+        "{sufficient}"
+    );
+    assert_eq!(
+        sufficient["by_arm"]["native"]["runs"],
+        serde_json::json!([0.0, 0.0]),
+        "{sufficient}"
+    );
+    let other = outcome_row("outcome: h1-late-torus: other");
+    assert_eq!(
+        other["by_arm"]["window"]["runs"],
+        serde_json::json!([1.0, 1.0]),
+        "{other}"
+    );
     let markdown = std::fs::read_to_string(out.join("table.md")).expect("table.md");
     assert!(
         markdown.contains(
@@ -1765,6 +2019,75 @@ fn logged(log: &Path, kind: &str) -> Vec<serde_json::Value> {
         .collect()
 }
 
+/// #942: a declared meditation over an empty working memory is refused
+/// unless the regimen says `meditation_empty = "refill"`; then it refills,
+/// carrying nothing, the line says `empty: true`, the session goes on, and
+/// the table counts the empty refill.
+#[test]
+fn an_empty_refill_is_refused_unless_the_regimen_refills_anyway() {
+    let dir = scratch("empty-refill");
+    let canned = std::fs::read_to_string(root().join("diet/scenarios/canned.toml"))
+        .expect("the canned regimen");
+    let (top, sampler) = canned.split_once("[sampler]").expect("its sampler table");
+    for (name, extra) in [
+        ("refuse.toml", "interview_warrant = [\"read\"]\n"),
+        (
+            "refill.toml",
+            "interview_warrant = [\"read\"]\nmeditation_empty = \"refill\"\n",
+        ),
+    ] {
+        std::fs::write(dir.join(name), format!("{top}{extra}\n[sampler]{sampler}"))
+            .expect("the regimen");
+    }
+    let body = concat!(
+        r#"{"reply":{"when":"hello there","text":"Hello."}}"#,
+        "\n",
+        r#"{"reply":{"when":"and again","text":"Again."}}"#,
+        "\n",
+        r#"{"step":"ask","text":"hello there"}"#,
+        "\n",
+        r#"{"step":"declare-meditation"}"#,
+        "\n",
+        r#"{"step":"ask","text":"and again"}"#,
+        "\n",
+        r#"{"step":"end"}"#,
+        "\n",
+    );
+    let header = |regimen: &str| serde_json::json!({"scenario": "empty", "regimen": regimen, "head": root().join("diet/drive/heads/floor.md")});
+    for (regimen, refills) in [("refuse.toml", false), ("refill.toml", true)] {
+        let file = dir.join(format!("{regimen}.jsonl"));
+        std::fs::write(&file, format!("{}\n{body}", header(regimen))).expect("the scenario");
+        let out = dir.join(format!("out-{regimen}"));
+        let (code, said) = run(&file, &out);
+        let log = out.join("session.log");
+        let start = first_line(&log);
+        assert_eq!(
+            start["levers"]["meditation_empty"],
+            if refills { "refill" } else { "refuse" },
+            "{start}"
+        );
+        if refills {
+            assert_eq!(code, Some(0), "{said}");
+            let meditations = logged(&log, "meditation");
+            assert_eq!(meditations.len(), 1, "{meditations:?}");
+            assert_eq!(meditations[0]["empty"], true, "{meditations:?}");
+            assert_eq!(meditations[0]["carried_entries"], 0, "{meditations:?}");
+            assert_eq!(logged(&log, "turn.settled").len(), 2, "the session went on");
+        } else {
+            assert_eq!(code, Some(1), "{said}");
+            assert!(
+                said["failure"]
+                    .as_str()
+                    .unwrap_or("")
+                    .contains("nothing-to-meditate"),
+                "{said}"
+            );
+            assert!(logged(&log, "meditation").is_empty());
+        }
+    }
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
 /// #942: a scenario's services run beside serve, outside the sandbox. A
 /// foreground server waits on its reserved port; a daemon that detaches
 /// writes its PIDs and a value, and its `stop` leaves its PID alive, which
@@ -1783,7 +2106,7 @@ fn services_start_before_serve_fill_the_run_and_stop_after_it() {
         dir.join("a.toml"),
         regimen.replace(
             "[limits]",
-            "env_passthrough = [\"DIET_PORT_WEB\"]\n[limits]",
+            "env_passthrough = [\"DIET_PORT_WEB\", \"LITE_TOKEN\"]\n[limits]",
         ),
     )
     .expect("the regimen");
@@ -1800,8 +2123,8 @@ fn services_start_before_serve_fill_the_run_and_stop_after_it() {
         body = urllib.request.urlopen(\"http://127.0.0.1:%s/\" % port).status\n\
         echoed = json.load(open(os.environ[\"DIET_GRADE_TURN\"]))[\"calls\"][0][\"stdout\"][\"text\"].strip()\n\
         open(os.path.join(os.environ[\"DIET_GRADE_OUT\"], \"seen.txt\"), \"w\").write(os.environ[\"DIET_SERVICE_DAEMON_TOKEN\"])\n\
-        print(json.dumps({\"right\": body == 200 and echoed == port, \"expected\": port, \"got\": echoed}))'";
-    let call = serde_json::json!([{"id": "c1", "name": "bash", "arguments": serde_json::json!({"command": "echo \"$DIET_PORT_WEB\""}).to_string()}]);
+        print(json.dumps({\"right\": body == 200 and echoed == port + \" token t-42\", \"expected\": port, \"got\": echoed}))'";
+    let call = serde_json::json!([{"id": "c1", "name": "bash", "arguments": serde_json::json!({"command": "echo \"$DIET_PORT_WEB $LITE_TOKEN\""}).to_string()}]);
     let lines = [
         serde_json::json!({
             "scenario": "services",
@@ -1813,6 +2136,7 @@ fn services_start_before_serve_fill_the_run_and_stop_after_it() {
                 {"name": "daemon", "start": daemon_start, "stop": "true", "ready": {"command": "test -s \"$DIET_SERVICE_DIR/provides.json\""}},
             ],
             "sandbox_unix_sockets": ["service.daemon.socket"],
+            "serve_env": {"LITE_TOKEN": "token {service.daemon.token}"},
         }),
         serde_json::json!({"reply": {"when": "Open port", "text": "On it.", "calls": call}}),
         serde_json::json!({"reply": {"text": "Done."}}),
@@ -1828,6 +2152,11 @@ fn services_start_before_serve_fill_the_run_and_stop_after_it() {
     let (code, said) = run(&file, &out);
     assert_eq!(code, Some(0), "{said}");
     assert!(said["services"]["web"]["ready_ms"].is_u64(), "{said}");
+    assert_eq!(
+        said["serve_env"],
+        serde_json::json!({"LITE_TOKEN": "token {service.daemon.token}"}),
+        "serve_env is named with its source, not its value: {said}"
+    );
     assert_eq!(
         said["services"]["web"]["stopped"]["killed"], false,
         "{said}"
@@ -1954,6 +2283,30 @@ fn a_placeholder_naming_nothing_declared_is_refused() {
             .as_str()
             .unwrap_or("")
             .contains("`{port.web}` names a port or a service"),
+        "{said}"
+    );
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// #942: a dry run's grades are the graders' verdicts on canned replies:
+/// its plan counts them and labels them canned, an upper bound on the
+/// requests and not a result.
+#[test]
+fn a_dry_runs_grades_are_labelled_canned() {
+    let dir = scratch("dry-run-graded");
+    let regimen = commanding(&dir, "a.toml", 4);
+    let file = graded(
+        &dir,
+        "graded",
+        &serde_json::json!({"check": stdout_check()}),
+    );
+    let (code, said) = dry_run(&file, &regimen, &dir.join("out"));
+    assert_eq!(code, Some(0), "{said}");
+    let grades = &said["plan"]["grades"];
+    assert_eq!(grades["graded"], 2, "{said}");
+    assert_eq!(grades["right"], 1, "{said}");
+    assert!(
+        grades["is"].as_str().unwrap_or("").starts_with("canned:"),
         "{said}"
     );
     let _ = std::fs::remove_dir_all(&dir);
@@ -2213,6 +2566,8 @@ fn dry_run(file: &Path, regimen: &Path, out: &Path) -> (Option<i32>, serde_json:
         .arg("--out")
         .arg(out)
         .arg("--no-assemble")
+        // It runs commands, so a dry run names its deny list (#942): none here.
+        .env("DIET_SANDBOX_SECRETS", "none")
         .env_remove("ANTHROPIC_API_KEY")
         .output()
         .expect("diet-drive runs");

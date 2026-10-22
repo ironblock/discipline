@@ -1,0 +1,27 @@
+# The Lite scenario's canned regimen (#942): the routed scenario substrate, the arms' sandbox and commands, no interviews. A batch passes
+# each arm's own regimen; this is what `scenario lite.jsonl` runs under by itself.
+arm = "lite-canned"
+dogma_version = 0
+
+substrate = "canned-scenario"
+substrate_reasoning = "off"
+# The `hardware_fingerprint` of equipment `canned-loopback-scenario` in `substrates/registry.toml`.
+substrate_hardware = "b6bc80e9e8e4bc2342219f064dab89a8d17c02535600b32b84895fc0b9ba6513"
+
+allowed_commands = ["chrome-devtools", "ls", "cat"]
+isolation = "sandbox"
+network = "none"
+sandbox_reads = "all"
+sandbox_secrets = ["~/.config/git", "~/.git-credentials"]
+env_passthrough = ["CD4A_INTERNAL_DAEMON_SESSION_ID", "CHROME_DEVTOOLS_MCP_NO_UPDATE_CHECKS", "CHROME_DEVTOOLS_MCP_NO_USAGE_STATISTICS"]
+approval = "none"
+approval_policy = "approvals are off: every command runs without a gate decision or a prompt; the sandbox confines writes to the worktree"
+
+# A declared meditation over an empty working memory refills anyway, carrying nothing (#942): every arm crosses its refill, so an
+# interviews run that captured nothing pays the held-out cost in its own numbers. The same in every arm: never a contrast.
+meditation_empty = "refill"
+
+[sampler]
+temperature = 0.6
+top_p = 0.95
+seed = 7
