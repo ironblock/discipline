@@ -2056,8 +2056,14 @@ mod tests {
         );
 
         let rendered = render::render(&object, None);
-        assert!(rendered.contains("arm: an-arm"));
-        assert!(rendered.contains("substrate: a-substrate"));
+        // The arm and the substrate are the experiment's bookkeeping, never the
+        // model's to read (the maintainer's ruling, 2026-10-23).
+        assert!(!rendered.contains("an-arm"), "{rendered}");
+        assert!(!rendered.contains("a-substrate"), "{rendered}");
+        assert!(
+            !rendered.contains("arm:") && !rendered.contains("substrate:"),
+            "{rendered}"
+        );
         assert!(rendered.contains("dogma_version: 1"));
         assert!(rendered.contains("phase: -"));
     }

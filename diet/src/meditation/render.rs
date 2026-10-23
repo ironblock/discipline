@@ -263,29 +263,11 @@ fn head(object: &WorkingObject, phase: Option<&str>) -> String {
     let mut out = String::new();
 
     out.push_str("# regime\n");
-    out.push_str("arm: ");
-    out.push_str(&regime.arm);
-    out.push_str("\nsubstrate: ");
-    // THE DECLARED IDS, in declaration order, and all of them. A regime can
-    // now carry several -- a drive whose interview fork runs on a small local
-    // model while the main lane runs a large one is the arrangement this
-    // repository exists to measure -- so a frame naming one of them would be
-    // naming whichever happened to be first.
-    //
-    // This CHANGES THE RENDERED BYTES of every meditation, and there was no option
-    // that did not: the field this line used to read, `substrate.name`, no
-    // longer exists. Prose identity was what the digest replaced. The frame's
-    // shape is unchanged -- one line, one label, one value -- which is what
-    // the byte-identity claim below is about.
-    out.push_str(
-        &regime
-            .substrates
-            .iter()
-            .map(|s| s.id.as_str())
-            .collect::<Vec<_>>()
-            .join(", "),
-    );
-    out.push_str("\ndogma_version: ");
+    // No arm and no substrate (the maintainer's ruling, 2026-10-23): the
+    // model reads this header, and an arm's name or a substrate's id is the
+    // experiment's own bookkeeping, not anything the model works from. Both
+    // stay in the log and the record, beside the render.
+    out.push_str("dogma_version: ");
     out.push_str(&regime.dogma_version.to_string());
     out.push_str("\nphase: ");
     // A session with no phase graph renders `-` rather than omitting the
