@@ -22,7 +22,14 @@
   {"why": "a tilde cd, then a relative search", "root": "~/git/reference/Babylon/Babylon-Lite", "cmd": "cd ~/git/reference/Babylon/Babylon-Lite && grep -rn maxDevicePixelRatio packages/babylon-lite/src", "reads": ["packages/babylon-lite/src"]},
   {"why": "a page's /@fs/ import in an assembled log, where the scrub leaves `/@fs~/`", "root": "~/git/reference/Babylon/Babylon-Lite", "cmd": "chrome-devtools evaluate_script \"() => import('/@fs~/git/reference/Babylon/Babylon-Lite/packages/babylon-lite/src/engine/engine.ts')\"", "reads": ["packages/babylon-lite/src/engine/engine.ts"]},
   {"why": "a raw log's /@fs/ import, graded against a tilde root", "root": "~/git/reference/Babylon/Babylon-Lite", "cmd": "chrome-devtools evaluate_script \"() => import('/@fsHOME/git/reference/Babylon/Babylon-Lite/packages/babylon-lite/src/engine/engine.ts')\"", "reads": ["packages/babylon-lite/src/engine/engine.ts"]},
-  {"why": "an assembled log's /@fs~/ import, graded against an absolute root", "root": "HOME/git/reference/Babylon/Babylon-Lite", "cmd": "chrome-devtools evaluate_script \"() => import('/@fs~/git/reference/Babylon/Babylon-Lite/packages/babylon-lite/src/engine/engine.ts')\"", "reads": ["packages/babylon-lite/src/engine/engine.ts"]}
+  {"why": "an assembled log's /@fs~/ import, graded against an absolute root", "root": "HOME/git/reference/Babylon/Babylon-Lite", "cmd": "chrome-devtools evaluate_script \"() => import('/@fs~/git/reference/Babylon/Babylon-Lite/packages/babylon-lite/src/engine/engine.ts')\"", "reads": ["packages/babylon-lite/src/engine/engine.ts"]},
+  {"why": "a listing whose errors are discarded: the redirection is no operand, so ls still lists where it stands", "cmd": "cd ROOT && ls 2>/dev/null", "reads": [""]},
+  {"why": "a search written to a file: the redirection's target is written, never read", "cmd": "cd ROOT && grep -rn setMeshVisible packages > out.txt", "reads": ["packages"]},
+  {"why": "a cat whose errors go to a file, the target spaced from its operator", "cmd": "cd ROOT && cat docs/lite/01-getting-started.md 2> err.txt", "reads": ["docs/lite/01-getting-started.md"]},
+  {"why": "an input redirection is a read of its file", "cmd": "cd ROOT && wc -l < docs/lite/01-getting-started.md", "reads": ["docs/lite/01-getting-started.md"]},
+  {"why": "errors folded into the pipe", "cmd": "cd ROOT && ls packages 2>&1 | head", "reads": ["packages"]},
+  {"why": "a cat appended to a file", "cmd": "cd ROOT && cat docs/lite/01-getting-started.md >> notes.txt", "reads": ["docs/lite/01-getting-started.md"]},
+  {"why": "an input redirection with its file attached", "cmd": "cd ROOT && wc -l <docs/lite/01-getting-started.md", "reads": ["docs/lite/01-getting-started.md"]}
  ],
  "non_reads": [
   {"why": "a heredoc writing main.ts whose code names Lite's API and a pngjs path (the audit's 42278 and 53481)", "cmd": "cat > h5-swap-to-pbr/main.ts <<'EOF'\nimport { addToScene, removeFromScene, enqueueMaterialSwap } from \"babylon-lite\";\n// see ROOT/packages/babylon-lite/src/scene/scene-core.ts\naddToScene(scene, mesh);\nEOF\nls ROOT/node_modules/.bin | grep chrome", "reads": []},
