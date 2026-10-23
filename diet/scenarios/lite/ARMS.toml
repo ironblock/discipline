@@ -1,4 +1,4 @@
-# The Lite pilot's six arms (#932, #942, #948): `diet-drive arms lite.jsonl --arms ARMS.toml --repeat N --out DIR`. Every arm contrasts with
+# The Lite pilot's eight arms (#932, #942, #948): `diet-drive arms lite.jsonl --arms ARMS.toml --repeat N --out DIR`. Every arm contrasts with
 # the native baseline.
 baseline = "native"
 # The first pilot is the plumbing check, not the headline (Planning's review, 2026-10-21), on the larger rung. The headline runs later on the
@@ -21,11 +21,20 @@ contrast = ["meditation_tail_tokens", "meditation_carry"]
 regimen = "reference.toml"
 contrast = ["refill_session"]
 
-# The held-out half in a new session that cannot read Lite's source, from the refill as kept.
+# The held-out half in a new session, from the refill as kept, that cannot read Lite's source and docs (docs sealed), or its source alone
+# (docs readable); told so at its first ask, and served a built bundle in the source's place (#948).
 [arm.sealed-native]
 regimen = "sealed-native.toml"
-contrast = ["refill_session"]
+contrast = ["refill_session", "sealed", "sealed_notice"]
 
 [arm.sealed-interviews]
 regimen = "sealed-interviews.toml"
-contrast = ["interview_warrant", "refutation_interview", "meditation_carry", "refill_session"]
+contrast = ["interview_warrant", "refutation_interview", "meditation_carry", "refill_session", "sealed", "sealed_notice"]
+
+[arm.sealed-native-src]
+regimen = "sealed-native-src.toml"
+contrast = ["refill_session", "sealed", "sealed_notice"]
+
+[arm.sealed-interviews-src]
+regimen = "sealed-interviews-src.toml"
+contrast = ["interview_warrant", "refutation_interview", "meditation_carry", "refill_session", "sealed", "sealed_notice"]

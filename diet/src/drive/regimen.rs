@@ -757,6 +757,32 @@ pub fn serve_levers(regimen: &Regimen, output_cap: (u32, &str)) -> BTreeMap<Stri
             crate::drive::scenario::refill_session(regimen)
                 .map_or_else(|_| undeclared(), |state| state.tag().to_owned()),
         ),
+        // #948: the parts a sealed session seals, and the notice it is told:
+        // `none` outside a sealed session.
+        (
+            "sealed".to_owned(),
+            crate::drive::scenario::sealed_of(regimen).map_or_else(
+                |_| undeclared(),
+                |sealed| sealed.map_or_else(|| "none".to_owned(), |(parts, _)| parts.join("+")),
+            ),
+        ),
+        (
+            "sealed_notice".to_owned(),
+            crate::drive::scenario::sealed_of(regimen).map_or_else(
+                |_| undeclared(),
+                |sealed| {
+                    sealed.map_or_else(
+                        || "none".to_owned(),
+                        |(_, notice)| {
+                            format!(
+                                "sha256:{}",
+                                &crate::digest::sha256_hex(notice.as_bytes())[..16]
+                            )
+                        },
+                    )
+                },
+            ),
+        ),
         // #942: whether a declared meditation refills from an empty working
         // memory.
         (

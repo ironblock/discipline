@@ -2,7 +2,8 @@
 
 `start` starts one headless chrome-devtools daemon with its own profile under $DIET_SERVICE_DIR, its workspace DIR (else $DIET_SERVICE_DIR/workspace),
 and only the run's dev servers allowed (each PORT_KEY names $DIET_PORT_<KEY>). `--vision` gives it --experimentalVision, so `click_at` sends real
-input. It writes `provides.json` (`session`, the id the CLI selects it by; `socket`, the Unix socket it listens on; `workspace`) and `pids`: every
+input. It writes `provides.json` (`session`, the id the CLI selects it by; `socket`, the Unix socket it listens on; `workspace`; `profile`;
+`allowed`, the ports it may load, comma-separated; `vision`, "1" or empty: what a twin needs to be configured as it is) and `pids`: every
 process whose command line names its own profile, which is the run's alone. `stop` stops the daemon by its session id and then ends what still names
 its profile; the runner then ends any PID in `pids` still alive. `status` exits 0 while the daemon answers.
 """
@@ -39,7 +40,8 @@ def start(args):
     if not daemon.socket:
         sys.exit("browser: the daemon named no socket")
     with open(os.path.join(here, "provides.json"), "w") as f:
-        json.dump({"session": daemon.sid, "socket": daemon.socket, "workspace": daemon.workspace, "profile": daemon.profile}, f)
+        json.dump({"session": daemon.sid, "socket": daemon.socket, "workspace": daemon.workspace, "profile": daemon.profile,
+                   "allowed": ",".join(str(p) for p in ports), "vision": "1" if vision else ""}, f)
 
 
 def provided():

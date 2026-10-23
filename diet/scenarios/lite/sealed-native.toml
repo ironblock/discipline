@@ -1,5 +1,5 @@
 # The Lite tasks' sealed native arm (#932, #948): native.toml whose held-out half runs in a new session, started from the refill, that cannot
-# read Lite's source: the scenario's `seal`. What the summary carried is all it knows of the source; the docs, which are wrong, are left.
+# read Lite's source or its docs: the scenario's `seal`, both parts. What the summary carried is all it knows of Lite.
 arm = "lite-sealed-native"
 dogma_version = 0
 
@@ -39,6 +39,11 @@ head_nonce = "per_run"
 
 # The held-out half in a sealed session (#948): the refill as sent, Lite's source denied to every command.
 refill_session = "sealed"
+# The parts it seals (#948): the source (every top-level entry of the checkout but docs, its git objects among them) and the docs.
+sealed = ["source", "docs"]
+# What it is told at its first ask, the user's intent stated (#948): a DRAFT for the maintainer's approval. It reconciles the ask, which still
+# names the checkout and says babylon-lite resolves to its source.
+sealed_notice = "From here on, please don't read or inspect Babylon Lite's code in any form: not its source or docs on disk, not its git history, and not the built copy your pages now load. The task below still says where Lite's source and docs are on disk; leave them closed. Importing babylon-lite still works in your pages, through that built copy, which you shouldn't open either. Work only from the notes in your working memory; that's how I want these done."
 
 # The level the template renders unless told (xhigh), declared so the record names what was sent; no budget.
 [reasoning]

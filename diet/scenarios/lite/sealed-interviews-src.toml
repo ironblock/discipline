@@ -1,0 +1,59 @@
+# The Lite tasks' sealed interviews arm (#932, #948): interviews.toml whose held-out half runs in a new session, started from the refill and
+# its working memory, that cannot read Lite's source: the scenario's `seal`, its source part. Its docs stay readable.
+arm = "lite-sealed-interviews-src"
+dogma_version = 0
+
+# The larger rung, the ceiling arm first (ruled 2026-10-21, #932); floor variants are a later regimen set differing only here.
+substrate = "ada48-tabbyapi-exl3-qwen38flashnext-2p05"
+substrate_reasoning = "on"
+# The registry's hardware_fingerprint for the entry's equipment.
+substrate_hardware = "19d9fa21007ab8fef48b62d9d8773ac241fa177b2f8b3de670ddd4128aa10c7b"
+
+# The model's commands run in the worktree under the OS's sandbox: reads everywhere but the secrets, writes in the worktree alone, and no
+# network. It reaches the page through its own chrome-devtools daemon, started by the scenario outside the sandbox: the daemon's socket is the
+# run's own (serve --sandbox-unix-socket, from the scenario's `sandbox_unix_sockets`) and its session id is serve's environment (`serve_env`),
+# passed on to commands by name here. Approvals are off, so `allowed_commands` is the pre-seeded set and gates nothing.
+allowed_commands = ["chrome-devtools", "ls", "cat"]
+isolation = "sandbox"
+network = "none"
+sandbox_reads = "all"
+sandbox_secrets = ["~/.config/git", "~/.git-credentials"]
+env_passthrough = ["CD4A_INTERNAL_DAEMON_SESSION_ID", "CHROME_DEVTOOLS_MCP_NO_UPDATE_CHECKS", "CHROME_DEVTOOLS_MCP_NO_USAGE_STATISTICS"]
+approval = "none"
+approval_policy = "approvals are off: every command runs without a gate decision or a prompt; the sandbox confines writes to the worktree"
+
+# Interview forks on reads and scoping asks, and the refutation interview; working memory from forks alone (no self-capture).
+interview_warrant = ["read", "scoping"]
+refutation_interview = "on"
+self_capture = "off"
+meditation_carry = "render"
+
+# A declared meditation over an empty working memory refills anyway, carrying nothing (#942): every arm crosses its refill, so an
+# interviews run that captured nothing pays the held-out cost in its own numbers. The same in every arm: never a contrast.
+meditation_empty = "refill"
+
+# A nonce of the run's own first in the head (#932), drawn from the run, so no run's prefix is a prefix the server cached for the run
+# before, and the table can label cached prefill carryover-free. The same in every arm: never a contrast. A run's later session (#948)
+# draws the same nonce from the same run; under `fresh` and `sealed` it is the one in the trunk carried exactly as sent.
+head_nonce = "per_run"
+
+# The held-out half in a sealed session (#948): the refill and working memory as kept, Lite's source denied to every command.
+refill_session = "sealed"
+# The parts it seals (#948): the source alone (every top-level entry of the checkout but docs, its git objects among them); the docs,
+# which are wrong, stay readable.
+sealed = ["source"]
+# What it is told at its first ask, the user's intent stated (#948): a DRAFT for the maintainer's approval. It reconciles the ask, which still
+# names the checkout and says babylon-lite resolves to its source, and says plainly what stays.
+sealed_notice = "From here on, please don't read or inspect Babylon Lite's code in any form: not its source on disk, not its git history, and not the built copy your pages now load. Its docs, in the docs folder of the checkout, are still yours to read. The task below still says where Lite's source is on disk; leave it closed. Importing babylon-lite still works in your pages, through that built copy, which you shouldn't open either. Work from the notes in your working memory and the docs; that's how I want these done."
+
+# The level the template renders unless told (xhigh), declared so the record names what was sent; no budget.
+[reasoning]
+effort = "xhigh"
+budget_tokens = "none"
+
+# The registry's recommended thinking sampler for the line, every key declared.
+[sampler]
+temperature = 1.0
+top_k = 20
+top_p = 0.95
+min_p = 0.0

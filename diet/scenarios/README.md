@@ -43,8 +43,9 @@ The format has no grammar of its own, so it has no directory under `diet/formats
 | `services` | optional | what each run starts beside serve, outside the sandbox (below) |
 | `sandbox_unix_sockets` | optional | services' values, each `service.NAME.KEY`, passed to serve as `--sandbox-unix-socket`: sockets the model's commands may connect to |
 | `serve_env` | optional | `{VAR: TEXT}`: variables added to serve's environment alone, each text filled as an ask's is |
-| `seal` | optional | services' values, each `service.NAME.KEY`: paths a sealed next session cannot read (below) |
-| `seal_probe` | optional | texts filled as an ask's are, each a file under the seal that the probe asks a sealed session to read |
+| `seal` | optional | `{PART: [...]}`: by part, services' values, each `service.NAME.KEY` of one path or several, colon-separated: paths a sealed next session cannot read when its regimen's `sealed` names the part (below) |
+| `seal_probe` | optional | `{PART: [...]}`: by part, texts filled as an ask's are, each a file the probe asks a sealed session to read: a sealed part's must fail, an unsealed part's must read |
+| `seal_root` | optional | a text filled as an ask's is: the checkout the seal is of, whose `git show HEAD:<file>` of a sealed probe file must fail |
 
 ## Services (#942)
 
@@ -86,7 +87,8 @@ Under `sandbox_reads = "all"` the model's commands read everything but the secre
 - the agents' transcripts and memory (`~/.claude`);
 - every agent session's scratchpad (`/private/tmp/claude-<uid>`), which is outside `$HOME`;
 - the desktop app's data (`~/Library/Application Support/Claude`, `~/Library/Caches/claude-cli-nodejs`, `~/Library/Caches/com.anthropic.claudefordesktop*`);
-- the operator's keys and configuration (`~/.config/discipline`, git's credentials).
+- the operator's keys and configuration (`~/.config/discipline`, git's credentials);
+- every run's work directory left in `$TMPDIR` (`diet-scenario-work-*`): a killed or unassembled run's log and record hold what its model read, and a sealed session's stray-copy sweep finds them (#948).
 - the operator's personal folders: `~/Documents`, `~/Desktop`, `~/Downloads`, `~/Pictures`, `~/Movies`, `~/Music`;
 - browser and credential stores under `~/Library`: Chrome's and Firefox's profiles (`Application Support/Google/Chrome`, `Application Support/Firefox`), `Safari`, `Cookies`, `Keychains`, `Mail`, `Messages`.
 
@@ -258,7 +260,11 @@ Beside it the command writes:
 The regimen's `refill_session` says where a run goes after its declared meditation:
 - **`same`** (the default): the session goes on, as it always has.
 - **`fresh`:** the meditation ends the session. A second session starts from the refilled trunk exactly as sent, and from the working memory as it stood, and runs the scenario's remaining steps. The first request of each session after the refill has the same head digest.
-- **`sealed`:** `fresh`, and the second session's commands cannot read the header's `seal`: those paths join its deny list, and its probe asks it to `cat` each `seal_probe` file, which must fail. A regimen that says `sealed` under a scenario with no `seal` is refused. A seal is proved even where the deny list is waived (`none`), so a sealed run, a dry run included, needs `DIET_SANDBOX_PROBE_FILE` and `DIET_SANDBOX_PROBE_PHRASE`; without them its second session voids as `sandbox`, and the repeat's line says why under `next`.
+- **`sealed`:** `fresh`, and the second session's commands cannot read the parts of the header's `seal` that the regimen's `sealed` names (`sealed = ["source", "docs"]`), nor the run's own outputs, which hold what the first session read. Those paths join its deny list.
+  - **Its probe** asks it to `cat` each sealed part's `seal_probe` file, which must fail; each unsealed part's, which must read; to `git show` each sealed file from `seal_root`, which must fail; and searches for a line only the sealed source holds (the longest `//` comment of the first sealed file, read outside the sandbox), which must be found nowhere it can read.
+  - **Its services are told the parts** as `DIET_SEALED`; serve and the model's commands are not.
+  - **It is told, never met in silence:** the regimen's `sealed_notice` opens the session's first ask, in the same message.
+  - **Refused:** `sealed` or `sealed_notice` without `refill_session = "sealed"`, that refill without both, or a part the header's `seal` does not name. A seal is proved even where the deny list is waived (`none`), so a sealed run, a dry run included, needs `DIET_SANDBOX_PROBE_FILE` and `DIET_SANDBOX_PROBE_PHRASE`; without them its second session voids as `sandbox`, and the repeat's line says why under `next`.
 - **`blank`:** the second session starts from the head alone, carrying nothing: the run's floor. Its worktree is the seed.
 
 How it runs:
