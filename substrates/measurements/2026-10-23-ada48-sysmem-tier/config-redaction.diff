@@ -1,0 +1,6 @@
+config-redacted.yml is the live config.yml of instance 2026-10-23 (live sha256 32b09d54a6df85db...); these values are replaced, none of which affects serving:
+  line 1 (comment): the host's nickname replaced by the public id rtx6000ada-host, and the rollback note's local path by "the saved llama.cpp launch file"
+  network.port: replaced by <port>
+  model.model_dir: the home-directory prefix replaced by $HOME
+Against instance 2026-10-12b's redacted config (substrates/measurements/2026-10-12-ada48-vision/configs/config-redacted.yml) it adds exactly
+model.recurrent_checkpoint_interval_pp 8192 and the memory block (sysmem_kv_cache 32768, sysmem_recurrent_cache 16384).
