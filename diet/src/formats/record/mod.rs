@@ -4271,6 +4271,9 @@ fn take_carried_from(
         meditation_seq,
         trunk_sha256,
         object_sha256,
+        // The record does not name the worktree a session restored (v26
+        // logs do).
+        worktree: None,
     }))
 }
 

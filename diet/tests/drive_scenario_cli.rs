@@ -2763,6 +2763,272 @@ fn an_assembled_arms_run_keeps_what_its_services_and_grader_wrote() {
     let _ = std::fs::remove_dir_all(&dir);
 }
 
+/// #948 (v26): a carried session restores the worktree its refill left, and
+/// names it; a blank one starts from the seed. A run from a recorded refill
+/// (`--from-carry`) takes up the script after its declared meditation from
+/// that refill, its worktree restored; a different script is refused. A log
+/// that kept no worktree carries a given one (`--carry-worktree`), named
+/// `given`, and a given one beside a log that keeps its own is refused.
+#[test]
+#[allow(clippy::too_many_lines)]
+fn a_carried_session_restores_the_worktree_its_refill_left() {
+    let dir = scratch("carry-worktree");
+    for (name, refill) in [
+        ("same.toml", "same"),
+        ("fresh.toml", "fresh"),
+        ("blank.toml", "blank"),
+    ] {
+        let path = commanding(&dir, name, 4);
+        let regimen = std::fs::read_to_string(&path).expect("the regimen");
+        std::fs::write(
+            &path,
+            regimen.replace(
+                "[limits]",
+                &format!(
+                    "interview_warrant = [\"read\"]\nmeditation_empty = \"refill\"\n\
+                     refill_session = \"{refill}\"\n[limits]"
+                ),
+            ),
+        )
+        .expect("the regimen");
+    }
+    let write = serde_json::json!([{"id": "c1", "name": "bash", "arguments": serde_json::json!({"command": "echo kept > notes.txt"}).to_string()}]);
+    let read = serde_json::json!([{"id": "c2", "name": "bash", "arguments": serde_json::json!({"command": "cat notes.txt"}).to_string()}]);
+    let script = |regimen: &str| {
+        let lines = [
+            serde_json::json!({"scenario": "carry-worktree", "regimen": regimen, "head": root().join("diet/drive/heads/floor.md")}),
+            serde_json::json!({"reply": {"when": "Write the note", "text": "Writing.", "calls": write}}),
+            serde_json::json!({"reply": {"when": "Read the note", "text": "Reading.", "calls": read}}),
+            serde_json::json!({"step": "ask", "text": "Write the note."}),
+            serde_json::json!({"step": "declare-meditation"}),
+            serde_json::json!({"step": "ask", "text": "Read the note."}),
+            serde_json::json!({"step": "end"}),
+        ];
+        let mut text: String = lines.iter().map(|line| line.to_string() + "\n").collect();
+        for _ in 0..12 {
+            text.push_str(&serde_json::json!({"reply": {"text": "Done."}}).to_string());
+            text.push('\n');
+        }
+        text
+    };
+    let drive = |args: &[&std::ffi::OsStr]| {
+        let ran = Command::new(DRIVE)
+            .current_dir(root())
+            .arg("scenario")
+            .args(args)
+            .arg("--no-assemble")
+            .output()
+            .expect("diet-drive runs");
+        let stdout = String::from_utf8_lossy(&ran.stdout).into_owned();
+        let said: serde_json::Value =
+            serde_json::from_str(stdout.lines().last().unwrap_or("")).unwrap_or_default();
+        (ran.status.code(), said)
+    };
+    let read_exit = |log: &Path| {
+        logged(log, "tool_call")
+            .into_iter()
+            .find(|call| call["id"] == "c2")
+            .map(|call| (call["exit"].as_i64(), call.to_string()))
+    };
+    let mut first_logs = std::collections::BTreeMap::new();
+    for mode in ["fresh", "blank"] {
+        let file = dir.join(format!("{mode}.jsonl"));
+        std::fs::write(&file, script(&format!("{mode}.toml"))).expect("the scenario");
+        let out = dir.join(format!("out-{mode}"));
+        let (code, said) = drive(&[file.as_os_str(), "--out".as_ref(), out.as_os_str()]);
+        assert_eq!(code, Some(0), "{mode}: {said}");
+        first_logs.insert(mode, out.join("session.log"));
+    }
+    // fresh: the refill kept the worktree, and the next session has the note.
+    let meditation = &logged(&first_logs["fresh"], "meditation")[0];
+    let kept = meditation["worktree_sha256"]
+        .as_str()
+        .expect("a kept worktree")
+        .to_owned();
+    let next = dir.join("out-fresh/next/session.log");
+    let (exit, call) = read_exit(&next).expect("the next session read the note");
+    assert_eq!(exit, Some(0), "{call}");
+    assert!(call.contains("kept"), "{call}");
+    let start = first_line(&next);
+    assert_eq!(
+        start["carried_from"]["worktree_sha256"],
+        kept.as_str(),
+        "{start}"
+    );
+    assert_eq!(
+        start["carried_from"]["worktree_from"], "meditation",
+        "{start}"
+    );
+    // blank: the seed, and no note.
+    let (exit, call) = read_exit(&dir.join("out-blank/next/session.log")).expect("a read");
+    assert_ne!(exit, Some(0), "a blank session has no note: {call}");
+    // A run from the recorded refill: only the steps after the meditation.
+    let file = dir.join("from.jsonl");
+    std::fs::write(&file, script("same.toml")).expect("the scenario");
+    let same_out = dir.join("out-same-first");
+    let same_file = dir.join("same.jsonl");
+    std::fs::write(&same_file, script("same.toml")).expect("the scenario");
+    // A repeat, so its log names the script it ran (`run`).
+    let (code, said) = drive(&[
+        same_file.as_os_str(),
+        "--out".as_ref(),
+        same_out.as_os_str(),
+        "--repeat".as_ref(),
+        "1".as_ref(),
+    ]);
+    assert_eq!(code, Some(0), "{said}");
+    let recorded = same_out.join("repeat-01").join("session.log");
+    let from_out = dir.join("out-from");
+    let (code, said) = drive(&[
+        same_file.as_os_str(),
+        "--out".as_ref(),
+        from_out.as_os_str(),
+        "--from-carry".as_ref(),
+        recorded.as_os_str(),
+    ]);
+    assert_eq!(code, Some(0), "{said}");
+    let from_log = from_out.join("session.log");
+    let asks: Vec<String> = logged(&from_log, "ask")
+        .iter()
+        .map(|ask| ask["text"].as_str().unwrap_or("").to_owned())
+        .collect();
+    assert_eq!(
+        asks,
+        ["Read the note."],
+        "only the steps after the meditation"
+    );
+    let (exit, call) = read_exit(&from_log).expect("a read");
+    assert_eq!(exit, Some(0), "the recorded refill's worktree: {call}");
+    assert_eq!(
+        first_line(&from_log)["carried_from"]["worktree_from"],
+        "meditation"
+    );
+    // An arms batch from the recorded refill: every run starts there.
+    let manifest = dir.join("ARMS.toml");
+    std::fs::write(
+        &manifest,
+        "baseline = \"same\"\npurpose = \"smoke\"\n[arm.same]\nregimen = \"same.toml\"\n\
+         [arm.fresh]\nregimen = \"fresh.toml\"\ncontrast = [\"refill_session\"]\n",
+    )
+    .expect("the manifest");
+    let arms_out = dir.join("out-arms");
+    let ran = Command::new(DRIVE)
+        .current_dir(root())
+        .arg("arms")
+        .arg(&same_file)
+        .arg("--arms")
+        .arg(&manifest)
+        .args(["--repeat", "1", "--no-assemble", "--out"])
+        .arg(&arms_out)
+        .arg("--from-carry")
+        .arg(&recorded)
+        .output()
+        .expect("diet-drive runs");
+    assert_eq!(
+        ran.status.code(),
+        Some(0),
+        "{}{}",
+        String::from_utf8_lossy(&ran.stdout),
+        String::from_utf8_lossy(&ran.stderr)
+    );
+    for arm in ["same", "fresh"] {
+        let log = arms_out.join(arm).join("repeat-01").join("session.log");
+        let asks: Vec<String> = logged(&log, "ask")
+            .iter()
+            .map(|ask| ask["text"].as_str().unwrap_or("").to_owned())
+            .collect();
+        assert_eq!(asks, ["Read the note."], "{arm}: from the recorded refill");
+        assert_eq!(
+            first_line(&log)["carried_from"]["worktree_from"],
+            "meditation",
+            "{arm}"
+        );
+    }
+    // A script the log never ran is refused.
+    let other = dir.join("other.jsonl");
+    std::fs::write(
+        &other,
+        script("same.toml").replace("Read the note.", "Read it."),
+    )
+    .expect("a script");
+    let (code, said) = drive(&[
+        other.as_os_str(),
+        "--out".as_ref(),
+        dir.join("out-other").as_os_str(),
+        "--from-carry".as_ref(),
+        recorded.as_os_str(),
+    ]);
+    assert_eq!(code, Some(1), "{said}");
+    assert!(
+        said["failure"]
+            .as_str()
+            .unwrap_or("")
+            .contains("ran script"),
+        "{said}"
+    );
+    // A log that kept no worktree, with a given one.
+    let old = dir.join("old");
+    std::fs::create_dir_all(&old).expect("a directory");
+    let stripped: String = std::fs::read_to_string(&recorded)
+        .expect("the log")
+        .lines()
+        .map(|line| {
+            let mut value: serde_json::Value = serde_json::from_str(line).expect("a line");
+            if let Some(object) = value.as_object_mut() {
+                object.remove("worktree_sha256");
+            }
+            value.to_string() + "\n"
+        })
+        .collect();
+    std::fs::write(old.join("session.log"), stripped).expect("the log");
+    let files = same_out.join("repeat-01").join("files");
+    std::fs::create_dir_all(old.join("files")).expect("files");
+    for entry in std::fs::read_dir(&files).expect("the recording") {
+        let entry = entry.expect("an entry");
+        std::fs::copy(entry.path(), old.join("files").join(entry.file_name())).expect("a copy");
+    }
+    let given = dir.join("given");
+    std::fs::create_dir_all(&given).expect("a directory");
+    std::fs::write(given.join("notes.txt"), "given\n").expect("a note");
+    let given_out = dir.join("out-given");
+    let (code, said) = drive(&[
+        same_file.as_os_str(),
+        "--out".as_ref(),
+        given_out.as_os_str(),
+        "--from-carry".as_ref(),
+        old.join("session.log").as_os_str(),
+        "--carry-worktree".as_ref(),
+        given.as_os_str(),
+    ]);
+    assert_eq!(code, Some(0), "{said}");
+    let given_log = given_out.join("session.log");
+    let (exit, call) = read_exit(&given_log).expect("a read");
+    assert!(exit == Some(0) && call.contains("given"), "{call}");
+    assert_eq!(
+        first_line(&given_log)["carried_from"]["worktree_from"],
+        "given"
+    );
+    // A given worktree beside a log that keeps its own is refused.
+    let (code, said) = drive(&[
+        same_file.as_os_str(),
+        "--out".as_ref(),
+        dir.join("out-both").as_os_str(),
+        "--from-carry".as_ref(),
+        recorded.as_os_str(),
+        "--carry-worktree".as_ref(),
+        given.as_os_str(),
+    ]);
+    assert_ne!(code, Some(0), "{said}");
+    assert!(
+        said["failure"]
+            .as_str()
+            .unwrap_or("")
+            .contains("would replace it"),
+        "the runner refuses before serve is asked: {said}"
+    );
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
 /// #942: a service that never becomes ready voids the run as `services`
 /// before serve starts, and what it started is stopped.
 #[test]

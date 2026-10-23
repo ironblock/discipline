@@ -260,6 +260,16 @@
 //! that declares 23 or less and carries them is refused. For a reader of
 //! earlier logs, the migration is nothing: no session was carried.
 //!
+//! v26 (#948) carries the worktree. A `meditation` names a snapshot of the
+//! session's worktree kept in the recording, `worktree_sha256`: a manifest of
+//! every file by its path and sha256, each file kept by digest. A session
+//! carried from it restores that worktree, and its `carried_from` names the
+//! snapshot it restored, `worktree_sha256`, and where it came from,
+//! `worktree_from`: `meditation`, or `given` for one supplied beside a log
+//! written before v26. A log that declares 25 or less and carries either is
+//! refused. For a reader of earlier logs, the migration is nothing: no
+//! worktree crossed.
+//!
 //! v25 (#932) names a run's batch: `run.batch`, an id the runner draws
 //! once per invocation, 16 hex digits, the same on every run of the batch
 //! and on a void attempt's re-run at its slot. It is part of what the head
@@ -306,11 +316,12 @@ use super::record::vocabulary;
 struct LogParser;
 
 /// The version this module writes, as `session.start` states it.
-pub const VERSION: i64 = 25;
+pub const VERSION: i64 = 26;
 
 /// Every version this module reads.
 pub const READS: &[i64] = &[
     0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25,
+    26,
 ];
 
 /// How recent an input event must be, at the moment a turn settles, for the
@@ -2244,6 +2255,9 @@ pub enum Event {
         /// The files a native refill embedded the content of (v24, #948), as
         /// the worktree joined them.
         restored_files: Option<Vec<String>>,
+        /// The session's worktree as it stood at the refill, a manifest kept
+        /// in the recording by its sha256 (v26, #948).
+        worktree_sha256: Option<String>,
         /// What its refill carried (v16, #936): working memory's render, or
         /// a native summary; absent before v16, when it was always the
         /// render.
@@ -2395,6 +2409,30 @@ pub struct CarriedFrom {
     /// The sha256 of the working object's dump it started from, when the
     /// first session kept working memory.
     pub object_sha256: Option<String>,
+    /// The worktree snapshot it restored (v26), and where it came from:
+    /// the meditation's own, or one given beside a log written before v26.
+    pub worktree: Option<(String, WorktreeFrom)>,
+}
+
+/// Where a carried session's worktree came from (v26, #948).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum WorktreeFrom {
+    /// The snapshot the carried log's meditation kept.
+    Meditation,
+    /// A snapshot supplied beside a log written before v26, verified
+    /// against that log by whoever made it.
+    Given,
+}
+
+impl WorktreeFrom {
+    /// The tag the log writes.
+    #[must_use]
+    pub const fn tag(self) -> &'static str {
+        match self {
+            Self::Meditation => "meditation",
+            Self::Given => "given",
+        }
+    }
 }
 
 /// Which repeat of which script a session is (v17, #910): what
@@ -2606,6 +2644,13 @@ fn carried_from_value(carried: &CarriedFrom) -> Value {
     ]);
     if let Some(object) = &carried.object_sha256 {
         members.insert("object_sha256".to_owned(), Value::String(object.clone()));
+    }
+    if let Some((sha256, from)) = &carried.worktree {
+        members.insert("worktree_sha256".to_owned(), Value::String(sha256.clone()));
+        members.insert(
+            "worktree_from".to_owned(),
+            Value::String(from.tag().to_owned()),
+        );
     }
     Value::Object(members)
 }
@@ -3598,6 +3643,22 @@ fn beyond(line: &Line, declared: i64) -> Option<String> {
         // approval scope `off`, v7).
         if let (Some(inner_fields), Value::Object(inner)) = (object_fields(field.holds), value) {
             for nested in inner_fields {
+                // A key that arrived after its object did (`carried_from`'s
+                // worktree, v26): every nested key's `since` is read, not
+                // only a run's.
+                if inner.contains_key(nested.key)
+                    && let Some(why) = arrived(
+                        nested.since,
+                        format!(
+                            "`{}`'s `{}` carries `{}`",
+                            kind.tag(),
+                            field.key,
+                            nested.key
+                        ),
+                    )
+                {
+                    return Some(why);
+                }
                 if let (Holds::Tag(tags), Some(Value::String(tag))) =
                     (nested.holds, inner.get(nested.key))
                     && let Some(why) = arrived(
@@ -4737,6 +4798,10 @@ fn from_object(object: &BTreeMap<String, Value>) -> Result<Line, String> {
                 Some(_) => Some(fields.digest("object_sha256")?),
             },
             restored_files: fields.optional_strings("restored_files")?,
+            worktree_sha256: match object.get("worktree_sha256") {
+                None => None,
+                Some(_) => Some(fields.digest("worktree_sha256")?),
+            },
             carry: fields.optional_tag("carry", MeditationCarry::from_tag)?,
             summary_tokens: fields.optional_count("summary_tokens")?,
             // Built only when its two keys are carried ([`all_or_none`]).
@@ -5726,6 +5791,16 @@ const fn must_v8(key: &'static str, holds: Holds) -> Field {
     }
 }
 
+/// A key that arrived in v26, optional wherever its object is written.
+const fn may_v26(key: &'static str, holds: Holds) -> Field {
+    Field {
+        key,
+        holds,
+        required: false,
+        since: 26,
+    }
+}
+
 /// A key that arrived in v25, optional wherever its object is written.
 const fn may_v25(key: &'static str, holds: Holds) -> Field {
     Field {
@@ -5994,6 +6069,8 @@ pub const CARRIED_FROM: &[Field] = &[
     must_v24("meditation_seq", Holds::Count),
     must_v24("trunk_sha256", Holds::Digest),
     may_v24("object_sha256", Holds::Digest),
+    may_v26("worktree_sha256", Holds::Digest),
+    may_v26("worktree_from", Holds::Text),
 ];
 
 pub const RUN: &[Field] = &[
@@ -6625,6 +6702,7 @@ pub fn schema(kind: Kind) -> &'static [Field] {
                 may_v24("trunk_sha256", Holds::Digest),
                 may_v24("object_sha256", Holds::Digest),
                 may_v24("restored_files", Holds::Strings),
+                may_v26("worktree_sha256", Holds::Digest),
                 may_v16("carry", Tag(Tags::MeditationCarry)),
                 may_v16("summary_tokens", Count),
                 may_v7("warm", Holds::Timings),
@@ -7946,6 +8024,7 @@ fn to_value(line: &Line) -> Value {
             trunk_sha256,
             object_sha256,
             restored_files,
+            worktree_sha256,
             carry,
             summary_tokens,
             warm,
@@ -8073,6 +8152,9 @@ fn to_value(line: &Line) -> Value {
                     "restored_files",
                     Value::Array(files.iter().map(|file| text(file)).collect()),
                 );
+            }
+            if let Some(worktree) = worktree_sha256 {
+                put("worktree_sha256", text(worktree));
             }
             if let Some(anyway) = refilled_anyway {
                 put("refilled_anyway", Value::Boolean(*anyway));
@@ -9244,6 +9326,27 @@ impl Fields<'_> {
                 None => None,
                 Some(_) => Some(inner.digest("object_sha256").map_err(within)?),
             },
+            worktree: match (inner.0.get("worktree_sha256"), inner.0.get("worktree_from")) {
+                (None, None) => None,
+                (Some(_), Some(_)) => {
+                    let from = match inner.string("worktree_from").map_err(within)?.as_str() {
+                        "meditation" => WorktreeFrom::Meditation,
+                        "given" => WorktreeFrom::Given,
+                        other => {
+                            return Err(within(format!(
+                                "`worktree_from` is `{other}`: it is `meditation` or `given`"
+                            )));
+                        }
+                    };
+                    Some((inner.digest("worktree_sha256").map_err(within)?, from))
+                }
+                _ => {
+                    return Err(within(
+                        "`worktree_sha256` and `worktree_from` name one worktree: both or neither"
+                            .to_owned(),
+                    ));
+                }
+            },
         })
     }
 
@@ -9548,15 +9651,15 @@ mod tests {
         assert!(refused.why.contains("v8"), "{refused}");
     }
 
-    /// #583, #878, #904, #555, #931, #936, #910, #942, #926, #932, #948: this module writes v25.
+    /// #583, #878, #904, #555, #931, #936, #910, #942, #926, #932, #948: this module writes v26.
     #[test]
-    fn this_module_writes_v25_and_reads_every_version_before_it() {
-        assert_eq!(super::VERSION, 25);
+    fn this_module_writes_v26_and_reads_every_version_before_it() {
+        assert_eq!(super::VERSION, 26);
         assert_eq!(
             super::READS,
             &[
                 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22,
-                23, 24, 25
+                23, 24, 25, 26
             ]
         );
     }

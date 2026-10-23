@@ -764,6 +764,9 @@ pub enum Event {
         trunk_sha256: Option<String>,
         object_sha256: Option<String>,
         restored_files: Option<Vec<String>>,
+        /// The worktree's snapshot at the refill, kept in the recording by
+        /// its manifest's sha256 (v26, #948).
+        worktree_sha256: Option<String>,
         /// What its refill carried (#936): the render, or a native summary.
         carry: log::MeditationCarry,
         /// The native summary's estimated tokens, under `native_summary`.
@@ -2567,6 +2570,9 @@ struct State {
     /// The recording directory, when the session keeps one: where a meditation's
     /// `reference` saves an output's whole (#553).
     recording: Option<std::path::PathBuf>,
+    /// The worktree the session's commands run in, when it runs commands: what
+    /// a meditation snapshots for a session carried from it (#948).
+    worktree: Option<std::path::PathBuf>,
     /// The roots a scenario's model is shown in place of where it ran
     /// (`--shown-root`); none, otherwise.
     shown_roots: super::shown::ShownRoots,
@@ -2770,6 +2776,7 @@ impl State {
             forking: None,
             queued: std::collections::VecDeque::new(),
             recording: tools.and_then(|t| t.recording.clone()),
+            worktree: tools.map(|t| t.worktree.clone()),
             shown_roots: tools.map(|t| t.shown_roots.clone()).unwrap_or_default(),
             jobs_made: 0,
             pruned: Vec::new(),
@@ -5903,6 +5910,7 @@ pub fn line_of(logged: &Logged) -> log::Line {
             trunk_sha256,
             object_sha256,
             restored_files,
+            worktree_sha256,
             carry,
             summary_tokens,
             warm,
@@ -5954,6 +5962,7 @@ pub fn line_of(logged: &Logged) -> log::Line {
             trunk_sha256: trunk_sha256.clone(),
             object_sha256: object_sha256.clone(),
             restored_files: restored_files.clone(),
+            worktree_sha256: worktree_sha256.clone(),
         },
         Event::MeditationHeld {
             at_turn,
@@ -8527,6 +8536,12 @@ fn refilled(
     let restored_files = native
         .map(|summary| summary.embedded.clone())
         .filter(|files| !files.is_empty());
+    // The worktree as it stands at the refill (#948, v26): a session carried
+    // from here restores it, so its own files cross as memory does.
+    let worktree_sha256 = match (&state.worktree, &state.recording) {
+        (Some(worktree), Some(recording)) => super::carry::snapshot(worktree, recording).ok(),
+        _ => None,
+    };
     // The refill is where the trunk's growth counts from again (#788), and
     // a move made by this meditation enters its phase here.
     state.trunk_tokens = None;
@@ -8571,6 +8586,7 @@ fn refilled(
         trunk_sha256,
         object_sha256,
         restored_files,
+        worktree_sha256,
         carry: if native.is_some() {
             log::MeditationCarry::NativeSummary
         } else {
@@ -17363,6 +17379,7 @@ pub(in crate::drive) mod tests {
                 trunk_sha256: None,
                 object_sha256: None,
                 restored_files: None,
+                worktree_sha256: None,
             },
             Event::Recalled {
                 turn: 2,
@@ -17969,6 +17986,7 @@ pub(in crate::drive) mod tests {
                 trunk_sha256: None,
                 object_sha256: None,
                 restored_files: None,
+                worktree_sha256: None,
             },
             log::Event::Recalled {
                 turn: 2,
@@ -28670,6 +28688,7 @@ pub(in crate::drive) mod tests {
             meditation_seq: 16,
             trunk_sha256: "d".repeat(64),
             object_sha256: None,
+            worktree: None,
         };
         let session = Session::open_with(Canned::new(vec![]), template(), None, None, None, None)
             .with_carry(Carry {
@@ -30748,6 +30767,7 @@ pub(in crate::drive) mod tests {
                 trunk_sha256: None,
                 object_sha256: None,
                 restored_files: None,
+                worktree_sha256: None,
             }
         );
 

@@ -259,7 +259,7 @@ The regimen's `refill_session` says where a run goes after its declared meditati
 - **`same`** (the default): the session goes on, as it always has.
 - **`fresh`:** the meditation ends the session. A second session starts from the refilled trunk exactly as sent, and from the working memory as it stood, and runs the scenario's remaining steps. The first request of each session after the refill has the same head digest.
 - **`sealed`:** `fresh`, and the second session's commands cannot read the header's `seal`: those paths join its deny list, and its probe asks it to `cat` each `seal_probe` file, which must fail. A regimen that says `sealed` under a scenario with no `seal` is refused. A seal is proved even where the deny list is waived (`none`), so a sealed run, a dry run included, needs `DIET_SANDBOX_PROBE_FILE` and `DIET_SANDBOX_PROBE_PHRASE`; without them its second session voids as `sandbox`, and the repeat's line says why under `next`.
-- **`blank`:** the second session starts from the head alone, carrying nothing: the run's floor.
+- **`blank`:** the second session starts from the head alone, carrying nothing: the run's floor. Its worktree is the seed.
 
 How it runs:
 - **The first session keeps what crosses.** At each meditation it writes the refilled trunk (`application/json`) and, when the working memory holds anything, its dump (`application/x-ndjson`) into the recording's `files/<sha256>`, and the meditation line names them as `trunk_sha256` and `object_sha256`, with the files a native refill restored as `restored_files` (log v24).
@@ -267,6 +267,20 @@ How it runs:
 - **Its start says where it came from:** `carried_from` (the log's digest, the meditation's `seq`, the trunk's and the object's digests), and, when the trunk restored a file under the seal, `carried_source`, each such file relative to its sealed root (log v24). A native refill restores only worktree files its file tools read, so only a seal inside the worktree can be named. Its record's start carries `carried_from` too (record v6).
 - **Its outputs are in `next/`,** beside the first session's: `repeat-NN/next/session.log` and the rest. Services restart for it, so the seal's paths are the second session's own.
 - **One run, two sessions:** the repeat's line is the first session's, with the second's under `next`; the second's void voids the run, and its log is the one the scenario's expectations are checked against. `table` reads both logs as one run, and `carried_source` gives the carried runs a row of their own.
+
+- **The worktree crosses too (v26).** At each meditation the session snapshots its worktree into the recording: every regular file kept by digest, and a manifest of path and digest, itself kept by digest (`worktree_sha256` on the meditation line). Symlinks and files over 32 MiB are named in the manifest as skipped, never kept. A `fresh` or `sealed` session restores that worktree, each file checked against its digest, in place of the seed, and its `carried_from` names it (`worktree_sha256`, `worktree_from: meditation`).
+
+## A batch from a recorded refill (#948)
+
+```
+diet-drive scenario FILE --out DIR --from-carry LOG [--carry-worktree DIR2] [--repeat N]
+diet-drive arms FILE --arms ARMS.toml --repeat N --out DIR --from-carry LOG [--carry-worktree DIR2]
+```
+
+Every run starts from the same refill: LOG's last meditation that kept a trunk, carried as a `fresh` session is, and the drive takes up FILE after its declared meditation. So every arm or variant starts from an identical trunk, working memory and worktree, each digest-checked.
+- **The script is the one LOG ran:** LOG's `run.script_sha256` must be FILE's digest, so LOG must be a repeat's or a batch's (a single run's log names no run). A different script is refused.
+- **The worktree:** the snapshot LOG's meditation kept. A log written before v26 kept none, so `--carry-worktree DIR2` supplies one: it is snapshotted into the run's own recording, restored from there, and named `worktree_from: given`. Verifying that DIR2 is the worktree as it stood at the refill is the supplier's job, and the start line says so by its tag. A `--carry-worktree` beside a log that keeps its own is refused.
+- **A killed run's raw outputs:** while the assembler runs, a run's own `services/`, `grades/` and `next/` wait in `.<repeat>.parts` beside its directory (#960). A run killed then leaves them there; that is where to look.
 
 ## Repeating a scenario (#910)
 
