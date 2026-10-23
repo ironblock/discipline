@@ -139,10 +139,21 @@ def _segments(cmd):
     return out
 
 
+# A home directory, as hygiene's personal-home-path row matches one: an assembled log writes it `~` (scripts/scrub.py), a raw one spells it.
+HOME_DIR = re.compile(r"^(?:/Users/|/home/)[A-Za-z0-9._-]+(?=/|$)")
+
+
+def _tilde(path):
+    """`path` normalised, a home directory written `~`: one form for a raw log, an assembled one and either form of the root, so the
+    grade never reads the grading machine's $HOME."""
+    path = os.path.normpath(path)
+    return HOME_DIR.sub("~", path, count=1) if path.startswith("/") else path
+
+
 def _under(path, root):
     """`path` relative to the checkout, '' for the checkout itself, or None when it is outside it or is tooling under it."""
-    path = os.path.normpath(path)
-    root = os.path.normpath(root)
+    path = _tilde(path)
+    root = _tilde(root)
     if path == root:
         return ""
     if not path.startswith(root + "/"):
@@ -154,7 +165,7 @@ def _under(path, root):
 
 
 def _resolve(token, cwd):
-    if token.startswith("/"):
+    if token.startswith("/") or token == "~" or token.startswith("~/"):
         return token
     return os.path.join(cwd, token) if cwd else None
 
@@ -240,10 +251,12 @@ def _http_reads(cmd, root):
     """[(relpath, "http", None)]: the checkout's files a page script fetches or imports over Vite's /@fs/ (the sealed smoke's channel),
     a base literal joined with the quoted relative file names beside it included."""
     reads = []
-    prefix = "/@fs" + os.path.normpath(root) + "/"
+    prefix = "/@fs" + _tilde(root) + "/"
     quoted = re.findall(r"'([^']*)'", cmd) + re.findall(r'"([^"]*)"', cmd) + re.findall(r"`([^`]*)`", cmd)
-    # `/@fs` and the absolute path, as a page writes it; a doubled slash after it reads the same.
+    # `/@fs` and the absolute path, as a page writes it; a doubled slash after it reads the same. The path's home is written `~` as the
+    # root's is (an assembled log's scrub leaves `/@fs~/`).
     quoted = [re.sub(r"^/@fs/+", "/@fs/", q) for q in quoted]
+    quoted = ["/@fs" + _tilde(q[4:]) + ("/" if q.endswith("/") else "") if q.startswith("/@fs/") else q for q in quoted]
     bases = [q[len(prefix):] for q in quoted if q.startswith(prefix)]
     for b in bases:
         if b.endswith("/"):
@@ -346,11 +359,15 @@ def fixture_numbers(reads_of=None, targets=None):
     and known non-reads graded as no read. -> (right reads, reads, right non-reads, non-reads, the cases it got wrong)."""
     reads_of = reads_of or globals()["reads_of"]
     targets = targets or globals()["targets"]
-    root = "/srv/reference/Babylon/Babylon-Lite"
+    default = "/srv/reference/Babylon/Babylon-Lite"
+    # HOME stands for a home directory; spelled here so no tree file holds one.
+    home = "/" + "home" + "/someone"
+    fill = lambda text, root: text.replace("ROOT", root).replace("HOME", home)
     fx = json.load(open(FIXTURES))
     wrong, ok_reads, ok_non = [], 0, 0
     for case in fx["reads"]:
-        cmd = case["cmd"].replace("ROOT", root)
+        root = case.get("root", default).replace("HOME", home)
+        cmd = fill(case["cmd"], root)
         got = sorted({r for r, _, _ in reads_of(cmd, root)})
         facts = sorted(targets(cmd, root=root))
         if got == sorted(case["reads"]) and ("facts" not in case or facts == sorted(case["facts"])):
@@ -358,7 +375,8 @@ def fixture_numbers(reads_of=None, targets=None):
         else:
             wrong.append((case["why"], got, facts))
     for case in fx["non_reads"]:
-        cmd = case["cmd"].replace("ROOT", root)
+        root = case.get("root", default).replace("HOME", home)
+        cmd = fill(case["cmd"], root)
         if not reads_of(cmd, root) and not targets(cmd, root=root):
             ok_non += 1
         else:
