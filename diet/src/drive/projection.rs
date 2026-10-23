@@ -2354,6 +2354,7 @@ mod tests {
             run: None,
             rehearsing_as: None,
             head_nonce: None,
+            phase_tool_description_sha256: None,
             carried_from: None,
             carried_source: None,
         }

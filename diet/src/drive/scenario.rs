@@ -2246,6 +2246,12 @@ pub struct RunOptions {
     /// before v26 kept one (`--carry-worktree DIR`): snapshotted into this
     /// session's recording and restored from there, named `given`.
     pub carry_worktree: Option<std::path::PathBuf>,
+    /// A delivery variant of the carried trunk (`--carry-trunk FILE`, v27):
+    /// passed to serve, which sends it in the kept trunk's place.
+    pub carry_trunk: Option<std::path::PathBuf>,
+    /// The phase tool's description in place of the pinned template
+    /// (`--phase-tool-description FILE`, v27): passed to serve.
+    pub phase_tool_description: Option<std::path::PathBuf>,
     /// Paths sealed from this session's commands besides the deny list
     /// (#948, `refill_session = "sealed"`): passed to serve as
     /// `--sandbox-secret`, and probed.
@@ -2759,6 +2765,13 @@ fn running(
         .map_err(|why| Failure(format!("{} cannot be read: {why}", options.file.display())))?;
     let scenario = parse(&text).map_err(|why| Failure(why.to_string()))?;
     said["scenario"] = serde_json::Value::String(scenario.name.clone());
+    // A trunk variant (#948, v27) varies a carry: never silently dropped.
+    if options.carry_trunk.is_some() && !options.carried {
+        return Err(Failure(
+            "--carry-trunk varies a carried session's trunk, and this run is not carried (--from-carry)"
+                .to_owned(),
+        ));
+    }
     // A run from a recorded refill (#948) takes up the script its log ran,
     // after that script's declared meditation.
     // A carried run at step 0 is one from a recorded refill (`--from-carry`):
@@ -3028,6 +3041,13 @@ fn running(
     // A carried session (#948) starts from the first one's kept carry.
     if let Some(carry) = &options.carry {
         serve.arg("--carry").arg(carry);
+        // A delivery variant applies to the carried session alone (#948).
+        if let Some(trunk) = options.carry_trunk.as_ref().filter(|_| options.carried) {
+            serve.arg("--carry-trunk").arg(trunk);
+        }
+    }
+    if let Some(description) = &options.phase_tool_description {
+        serve.arg("--phase-tool-description").arg(description);
     }
     if let Some(key_file) = &options.key_file {
         serve.arg("--key-file").arg(key_file);

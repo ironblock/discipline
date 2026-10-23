@@ -116,6 +116,21 @@ const SCRIPT: &str = "script";
 /// The port `diet-drive replay` listens on unless told another.
 const REPLAY_PORT: u16 = 7902;
 
+/// serve's usage for the carry's flags (#948).
+fn carry_usage(out: &mut String) {
+    out.push_str("--carry LOG: start from the refilled trunk and working memory LOG's last\n");
+    out.push_str("meditation kept, each checked against its digest; the start line names\n");
+    out.push_str("where it came from (#948).\n");
+    out.push_str("--carried-worktree SHA256: with --carry, the worktree snapshot the runner\n");
+    out.push_str("restored for a log that kept none (written before v26), named `given`.\n");
+    out.push_str("--carry-trunk FILE: with --carry, a delivery variant of the carried trunk\n");
+    out.push_str("(messages as the recording keeps a trunk), sent in its place; the start\n");
+    out.push_str("line names its sha256 beside the trunk it varies (#948).\n");
+    out.push_str("--phase-tool-description FILE: the phase tool's description in place of\n");
+    out.push_str("the pinned template, where the regimen declares phases; the start line\n");
+    out.push_str("names its sha256 (#948).\n");
+}
+
 fn serve_usage() -> String {
     let mut out = String::from(
         "usage: diet-drive serve --endpoint URL --model NAME --head FILE [--key-file FILE]\n\
@@ -123,7 +138,8 @@ fn serve_usage() -> String {
          \x20                       [--log FILE] [--record FILE]\n\
          \x20                       [--allow-origin URL]... [--max-output-tokens N]\n\
          \x20                       [--worktree DIR] [--sandbox-unix-socket PATH]...\n\
-         \x20                       [--sandbox-secret PATH]... [--carry LOG [--carried-worktree SHA256]]\n\
+         \x20                       [--sandbox-secret PATH]... [--carry LOG [--carried-worktree SHA256]\n\
+         \x20                       [--carry-trunk FILE]] [--phase-tool-description FILE]\n\
          \x20                       [--run JSON] [--rehearse-as RUNG]\n\
          \x20                       [--seat-endpoint URL --seat-model NAME [--seat-key-file FILE]]\n\
          \x20      diet-drive serve --profile NAME [--config FILE] [any flag above]\n\n",
@@ -203,11 +219,7 @@ fn serve_usage() -> String {
     out.push_str("--sandbox-secret PATH, absolute, each: a path of the run's own denied to\n");
     out.push_str("every command, beside the regimen's secrets; the receipt counts and digests\n");
     out.push_str("them, never naming one (#942).\n");
-    out.push_str("--carry LOG: start from the refilled trunk and working memory LOG's last\n");
-    out.push_str("meditation kept, each checked against its digest; the start line names\n");
-    out.push_str("where it came from (#948).\n");
-    out.push_str("--carried-worktree SHA256: with --carry, the worktree snapshot the runner\n");
-    out.push_str("restored for a log that kept none (written before v26), named `given`.\n");
+    carry_usage(&mut out);
     out.push_str("A regimen declaring `extraction_seat = \"offboard:<registry id>\"` runs its\n");
     out.push_str("interview forks on a second server: --seat-endpoint and --seat-model are\n");
     out.push_str("then required (--seat-key-file as --key-file), the seat's engine is checked\n");
@@ -255,6 +267,12 @@ struct ServeArgs {
     /// `--carried-worktree SHA256`: the worktree snapshot the runner restored
     /// for a carried session whose log kept none (v26, #948), named `given`.
     carried_worktree: Option<String>,
+    /// `--carry-trunk FILE`: a delivery variant of the carried trunk, sent in
+    /// its place and named by its sha256 (v27, #948).
+    carry_trunk: Option<String>,
+    /// `--phase-tool-description FILE`: the phase tool's description in place
+    /// of the pinned template, named by its sha256 (v27, #948).
+    phase_tool_description: Option<String>,
     /// `--rehearse-as`: the rung a rehearsal runs under the declarations of
     /// (#926).
     rehearse_as: Option<String>,
@@ -392,6 +410,8 @@ fn serve_args(args: &[String]) -> Option<ServeArgs> {
     let mut sandbox_secrets = Vec::new();
     let mut carry = None;
     let mut carried_worktree = None;
+    let mut carry_trunk = None;
+    let mut phase_tool_description = None;
     let mut given = args.iter();
     while let Some(flag) = given.next() {
         let value = given.next()?;
@@ -454,6 +474,12 @@ fn serve_args(args: &[String]) -> Option<ServeArgs> {
         } else if flag == "--carry" {
             carry = Some(value.clone());
             true
+        } else if flag == "--carry-trunk" {
+            carry_trunk = Some(value.clone());
+            true
+        } else if flag == "--phase-tool-description" {
+            phase_tool_description = Some(value.clone());
+            true
         } else if flag == "--carried-worktree" {
             carried_worktree = Some(value.clone());
             value.len() == 64
@@ -509,6 +535,8 @@ fn serve_args(args: &[String]) -> Option<ServeArgs> {
         sandbox_secrets,
         carry,
         carried_worktree,
+        carry_trunk,
+        phase_tool_description,
     })
 }
 
@@ -545,6 +573,8 @@ fn serve(args: &[String]) -> ExitCode {
         sandbox_secrets,
         carry,
         carried_worktree,
+        carry_trunk,
+        phase_tool_description,
     }) = serve_args(args)
     else {
         eprint!("{}", serve_usage());
@@ -581,6 +611,44 @@ fn serve(args: &[String]) -> ExitCode {
             carry.from.worktree = Some((sha256, diet::formats::log::WorktreeFrom::Given));
             Some(carry)
         }
+    };
+    // A delivery variant (v27, #948): the carried notes sent another way, a
+    // trunk in place of the kept one, named beside the trunk it varies.
+    let carry = match (carry, carry_trunk.as_deref()) {
+        (carry, None) => carry,
+        (None, Some(_)) => {
+            return fail(
+                EXIT_USAGE,
+                "--carry-trunk varies a carry's trunk, and there is no --carry",
+            );
+        }
+        (Some(mut carry), Some(path)) => {
+            let bytes = match std::fs::read(path) {
+                Ok(bytes) => bytes,
+                Err(why) => return fail(EXIT_INPUT, &format!("--carry-trunk {path}: {why}")),
+            };
+            let trunk = match std::str::from_utf8(&bytes)
+                .map_err(|_| "not UTF-8".to_owned())
+                .and_then(diet::client::shape::messages_of_json)
+            {
+                Ok(trunk) => trunk,
+                Err(why) => return fail(EXIT_INPUT, &format!("--carry-trunk {path}: {why}")),
+            };
+            carry.trunk = trunk;
+            carry.from.variant_sha256 = Some(diet::digest::sha256_hex(&bytes));
+            Some(carry)
+        }
+    };
+    let phase_tool_description = match phase_tool_description
+        .as_deref()
+        .map(std::fs::read_to_string)
+        .transpose()
+    {
+        Ok(text) => text.map(|text| {
+            let sha256 = diet::digest::sha256_hex(text.as_bytes());
+            (text.trim_end().to_owned(), sha256)
+        }),
+        Err(why) => return fail(EXIT_INPUT, &format!("--phase-tool-description: {why}")),
     };
     let run = match run.as_deref().map(diet::formats::log::run_of).transpose() {
         Ok(run) => run,
@@ -1090,7 +1158,14 @@ fn serve(args: &[String]) -> ExitCode {
     let session = served_session(
         (transport, seat),
         (shape, dialect, blind),
-        (tools, run, rehearse_as, head_nonce, carry),
+        (
+            tools,
+            run,
+            rehearse_as,
+            head_nonce,
+            carry,
+            phase_tool_description,
+        ),
         (
             claim,
             interview,
@@ -1319,6 +1394,7 @@ type ServedStart = (
     Option<String>,
     Option<String>,
     Option<session::Carry>,
+    Option<(String, String)>,
 );
 
 /// `serve`'s session, declaring what serves it in the log's `session.start`
@@ -1327,7 +1403,7 @@ type ServedStart = (
 fn served_session(
     (transport, seat): (HttpStream, Option<session::Offboard<HttpStream>>),
     (mut shape, dialect, blind): (RequestShape, Dialect, Option<String>),
-    (tools, run, rehearse_as, head_nonce, carry): ServedStart,
+    (tools, run, rehearse_as, head_nonce, carry, phase_tool_description): ServedStart,
     declared: session::Declared,
 ) -> Result<std::sync::Arc<Session<HttpStream>>, String> {
     let forks = transport.for_forks();
@@ -1349,6 +1425,16 @@ fn served_session(
     // Self-capture's tools after them (#609), from the first request and
     // never changed; with self-capture off the tools are as they were.
     session::declare_self_capture(&mut shape, declared.1.as_ref());
+    // A supplied description for the phase tool (v27, #948), only where the
+    // regimen's phases declare it.
+    if let Some((text, _)) = &phase_tool_description {
+        let tool = shape
+            .tools
+            .iter_mut()
+            .find(|tool| tool.name == session::PHASE_TOOL)
+            .ok_or("--phase-tool-description: the regimen declares no phases, so no phase tool")?;
+        tool.description = Some(text.clone());
+    }
     let session = Session::open_declaring(
         transport,
         shape,
@@ -1378,6 +1464,10 @@ fn served_session(
     };
     let session = match head_nonce {
         Some(nonce) => session.with_head_nonce(&nonce),
+        None => session,
+    };
+    let session = match &phase_tool_description {
+        Some((_, sha256)) => session.with_phase_tool_description(sha256),
         None => session,
     };
     let session = match carry {
@@ -2822,8 +2912,9 @@ fn usage() -> String {
     );
     out.push_str("           --model NAME [--key-file FILE]] [--no-assemble] [--stop-file PATH]\n");
     out.push_str(
-        "           [--void-cap K] [--dry-run] [--from-carry LOG [--carry-worktree DIR]]\n",
+        "           [--void-cap K] [--dry-run] [--from-carry LOG [--carry-worktree DIR]\n",
     );
+    out.push_str("           [--carry-trunk FILE]] [--phase-tool-description FILE]\n");
     out.push_str("       (a scenario under k regimens, each one lever from the baseline, N\n");
     out.push_str("       times each, in a Williams order; #932, diet/scenarios/README.md)\n");
     out.push_str("       diet-drive table DIR [--seed S]\n");
@@ -2869,7 +2960,8 @@ fn scenario(args: &[String]) -> ExitCode {
             EXIT_USAGE,
             "usage: diet-drive scenario FILE --out DIR [--endpoint URL --model NAME \
              [--key-file FILE]] [--regimen FILE] [--worktree DIR] [--no-assemble] [--dry-run] \
-             [--repeat N [--stop-file PATH] [--void-cap K]] [--from-carry LOG [--carry-worktree DIR]]",
+             [--repeat N [--stop-file PATH] [--void-cap K]] [--from-carry LOG [--carry-worktree DIR] \
+             [--carry-trunk FILE]] [--phase-tool-description FILE]",
         )
     };
     let Some((file, rest)) = args.split_first() else {
@@ -2902,8 +2994,7 @@ fn scenario(args: &[String]) -> ExitCode {
             "--key-file" => options.key_file = Some(value.clone()),
             "--regimen" => options.regimen = Some(value.into()),
             "--worktree" => options.worktree = Some(value.into()),
-            "--from-carry" => from_carry(&mut options, value),
-            "--carry-worktree" => options.carry_worktree = Some(value.into()),
+            flag if CARRY_FLAGS.contains(&flag) => carry_flag(&mut options, flag, value),
             "--repeat" => match value.parse::<u64>() {
                 Ok(n) if n > 0 => count = Some(n),
                 _ => return usage(),
@@ -2973,11 +3064,29 @@ type BatchFlags = (
     BTreeMap<String, String>,
 );
 
-/// `--from-carry LOG` (#948): a run from a recorded refill, carried from
-/// that log's last meditation and taking up the script after it.
-fn from_carry(options: &mut diet::drive::scenario::RunOptions, log: &str) {
-    options.carry = Some(log.into());
-    options.carried = true;
+/// The carry's flags `scenario` and `arms` take (#948).
+const CARRY_FLAGS: [&str; 4] = [
+    "--from-carry",
+    "--carry-worktree",
+    "--carry-trunk",
+    "--phase-tool-description",
+];
+
+/// One of [`CARRY_FLAGS`] on `options`: `--from-carry LOG`, a run from a
+/// recorded refill, carried from that log's last meditation and taking up
+/// the script after it; `--carry-worktree DIR`, its worktree for a log
+/// written before v26; `--carry-trunk FILE`, a delivery variant of its trunk;
+/// `--phase-tool-description FILE`, the phase tool's description.
+fn carry_flag(options: &mut diet::drive::scenario::RunOptions, flag: &str, value: &str) {
+    match flag {
+        "--from-carry" => {
+            options.carry = Some(value.into());
+            options.carried = true;
+        }
+        "--carry-worktree" => options.carry_worktree = Some(value.into()),
+        "--carry-trunk" => options.carry_trunk = Some(value.into()),
+        _ => options.phase_tool_description = Some(value.into()),
+    }
 }
 
 /// `pair`'s and `arms`' flags (#912, #932): FILE, then `--repeat N --out DIR`,
@@ -3013,8 +3122,7 @@ fn batch_flags(args: &[String], own: &[&str]) -> Option<BatchFlags> {
             "--repeat" => count = Some(value.parse::<u64>().ok().filter(|n| *n > 0)?),
             "--stop-file" => stop_file = Some(value.into()),
             "--void-cap" => void_cap = value.parse::<u64>().ok()?,
-            "--from-carry" => from_carry(&mut options, value),
-            "--carry-worktree" => options.carry_worktree = Some(value.into()),
+            flag if CARRY_FLAGS.contains(&flag) => carry_flag(&mut options, flag, value),
             flag if own.contains(&flag) => {
                 kept.insert(flag.to_owned(), value.clone());
             }
@@ -3107,7 +3215,7 @@ fn arms(args: &[String]) -> ExitCode {
             EXIT_USAGE,
             "usage: diet-drive arms FILE --arms ARMS.toml --repeat N --out DIR [--endpoint URL \
              --model NAME [--key-file FILE]] [--no-assemble] [--stop-file PATH] [--void-cap K] [--dry-run] \
-             [--from-carry LOG [--carry-worktree DIR]]",
+             [--from-carry LOG [--carry-worktree DIR] [--carry-trunk FILE]] [--phase-tool-description FILE]",
         )
     };
     let Some((options, repeats, kept)) = batch_flags(args, &["--arms"]) else {

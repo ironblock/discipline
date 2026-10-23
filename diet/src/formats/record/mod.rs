@@ -4274,6 +4274,7 @@ fn take_carried_from(
         // The record does not name the worktree a session restored (v26
         // logs do).
         worktree: None,
+        variant_sha256: None,
     }))
 }
 

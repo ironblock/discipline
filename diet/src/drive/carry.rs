@@ -82,6 +82,7 @@ pub fn read(log: &Path, sealed: &[String]) -> Result<Carry, String> {
             trunk_sha256,
             object_sha256,
             worktree: worktree_sha256.map(|sha256| (sha256, log::WorktreeFrom::Meditation)),
+            variant_sha256: None,
         },
         source: (!source.is_empty()).then_some(source),
     })
