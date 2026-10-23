@@ -42,6 +42,12 @@ The header's `services` (`../README.md`, "Services"), outside the sandbox, per r
 
 The graders were verified against 159 cases: each task's stub, its reference solution twice, and every wrong or alternative solution, each graded as expected. The references and alternatives stay private, outside this tree: worked solutions to pre-registered held-out tasks would teach any model trained on this tree.
 
+## A first-move probe (#948)
+
+`diet-drive scenario lite.jsonl --from-carry LOG --only-task TASK --regimen R` runs one held-out task's ask from a recorded refill, and nothing after it, under a regimen whose `[limits] max_steps` is the probe's K. `python3 -I grader/first_move.py LOG ROOT K` measures it from tool calls alone. The first relevant action is the first call that writes the task's `main.ts` or reads the Lite checkout (tier c's classifier); its outcome is `applied` (the write's code applies every fact the detectors test), `wrote without`, `read first`, or `none` within K.
+
+The detectors are static heuristics of each fact's mechanism, one per fact, never a grade. `first_move_fixtures.json` holds code that applies each fact and code that misses it the ways the traps invite, and `--selftest` reports both numbers. Validated privately against the tasks' reference and alternative solutions: every right solution's facts detected, and every solution failing its constraint caught.
+
 ## Outcomes
 
 `python3 -I outcomes.py DIR` writes `outcomes.json` beside each run's log, and `diet-drive table DIR` then counts each outcome per arm, as `outcome: <task>: <outcome>` rows. It covers the scene-update family, the held-out tasks whose facts are `late-add` or `late-family` (h1, h2, h3, h5). Each task's outcome is derived from its grade lines, its last attempt's diagnosis, and the reads it made between the refill and its last grade. A run whose held-out half ran in a second session is read from that session, `next/`, every read of it after the refill:
@@ -51,4 +57,4 @@ The graders were verified against 159 cases: each task's stub, its reference sol
 - **mechanism lost:** made the change the way the task asks, a late add or a swap, and tier a still fails.
 - **other:** anything else, a right answer after a docs-only read among them, with the tiers' results kept beside it.
 
-`python3 -I check.py --selftest`, `python3 -I grader/process_trap.py --selftest` and `python3 -I outcomes.py --selftest` run without a browser, in `./verify.sh`'s scenarios check. The last builds a case for each outcome from the graders' own checks.
+`python3 -I check.py --selftest`, `python3 -I grader/process_trap.py --selftest`, `python3 -I grader/first_move.py --selftest` and `python3 -I outcomes.py --selftest` run without a browser, in `./verify.sh`'s scenarios check. The last builds a case for each outcome from the graders' own checks.

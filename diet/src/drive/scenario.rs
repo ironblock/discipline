@@ -2252,6 +2252,9 @@ pub struct RunOptions {
     /// The phase tool's description in place of the pinned template
     /// (`--phase-tool-description FILE`, v27): passed to serve.
     pub phase_tool_description: Option<std::path::PathBuf>,
+    /// A first-move probe (`--only-task TASK`, #948): from a recorded refill,
+    /// that task's ask alone, then the end; no grade.
+    pub only_task: Option<String>,
     /// Paths sealed from this session's commands besides the deny list
     /// (#948, `refill_session = "sealed"`): passed to serve as
     /// `--sandbox-secret`, and probed.
@@ -2763,7 +2766,7 @@ fn running(
     use std::io::BufRead as _;
     let text = std::fs::read_to_string(&options.file)
         .map_err(|why| Failure(format!("{} cannot be read: {why}", options.file.display())))?;
-    let scenario = parse(&text).map_err(|why| Failure(why.to_string()))?;
+    let mut scenario = parse(&text).map_err(|why| Failure(why.to_string()))?;
     said["scenario"] = serde_json::Value::String(scenario.name.clone());
     // A trunk variant (#948, v27) varies a carry: never silently dropped.
     if options.carry_trunk.is_some() && !options.carried {
@@ -2792,6 +2795,25 @@ fn running(
             })?
     } else {
         options.from_step
+    };
+    // A first-move probe (#948): one task's ask from the recorded refill,
+    // its patience kept, then the end, so a run is that task's first moves.
+    let from_step = match &options.only_task {
+        None => from_step,
+        Some(task) => {
+            if !(options.carried && options.from_step == 0) {
+                return Err(Failure(
+                    "--only-task probes one task from a recorded refill (--from-carry)".to_owned(),
+                ));
+            }
+            let at = (from_step..scenario.steps.len())
+                .find(|&at| matches!(&scenario.steps[at], Step::Ask { task: Some(named), .. } if named == task))
+                .ok_or_else(|| Failure(format!("no ask after the meditation is task `{task}`")))?;
+            let patience = scenario.patience.get(&at).copied();
+            scenario.steps = vec![scenario.steps[at].clone(), Step::End];
+            scenario.patience = patience.map(|p| (0, p)).into_iter().collect();
+            0
+        }
     };
     let live = options.endpoint.is_some();
     let regimen = match (

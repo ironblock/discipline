@@ -3224,6 +3224,123 @@ fn a_carried_run_sends_a_named_trunk_variant_and_phase_tool_description() {
     let _ = std::fs::remove_dir_all(&dir);
 }
 
+/// #948: a first-move probe (`--only-task`) runs one task's ask from a
+/// recorded refill and nothing after it; it is refused without a recorded
+/// refill, and for a task no ask after the meditation names.
+#[test]
+#[allow(clippy::too_many_lines)]
+fn a_first_move_probe_asks_one_task_from_the_recorded_refill() {
+    let dir = scratch("first-move");
+    let canned = std::fs::read_to_string(root().join("diet/scenarios/canned.toml"))
+        .expect("the canned regimen");
+    let (top, sampler) = canned.split_once("[sampler]").expect("its sampler table");
+    std::fs::write(
+        dir.join("probe.toml"),
+        format!("{top}interview_warrant = [\"read\"]\nmeditation_empty = \"refill\"\n\n[sampler]{sampler}"),
+    )
+    .expect("the regimen");
+    let mut text = format!(
+        "{}\n",
+        serde_json::json!({"scenario": "first-move", "regimen": "probe.toml", "head": root().join("diet/drive/heads/floor.md")})
+    );
+    for line in [
+        serde_json::json!({"step": "ask", "text": "Do the tutorial.", "task": "t1"}),
+        serde_json::json!({"step": "declare-meditation"}),
+        serde_json::json!({"step": "ask", "text": "Do the first held-out task.", "task": "h1"}),
+        serde_json::json!({"step": "ask", "text": "Do the second held-out task.", "task": "h2"}),
+        serde_json::json!({"step": "end"}),
+    ] {
+        text.push_str(&(line.to_string() + "\n"));
+    }
+    for _ in 0..12 {
+        text.push_str(&(serde_json::json!({"reply": {"text": "Done."}}).to_string() + "\n"));
+    }
+    let file = dir.join("first-move.jsonl");
+    std::fs::write(&file, text).expect("the scenario");
+    let drive = |args: &[&std::ffi::OsStr]| {
+        let ran = Command::new(DRIVE)
+            .current_dir(root())
+            .arg("scenario")
+            .arg(&file)
+            .args(args)
+            .arg("--no-assemble")
+            .output()
+            .expect("diet-drive runs");
+        let stdout = String::from_utf8_lossy(&ran.stdout).into_owned();
+        let said: serde_json::Value =
+            serde_json::from_str(stdout.lines().last().unwrap_or("")).unwrap_or_default();
+        (ran.status.code(), said)
+    };
+    let recorded = dir.join("recorded");
+    let (code, said) = drive(&[
+        "--out".as_ref(),
+        recorded.as_os_str(),
+        "--repeat".as_ref(),
+        "1".as_ref(),
+    ]);
+    assert_eq!(code, Some(0), "{said}");
+    let log = recorded.join("repeat-01").join("session.log");
+    let probe = dir.join("probe");
+    let (code, said) = drive(&[
+        "--out".as_ref(),
+        probe.as_os_str(),
+        "--from-carry".as_ref(),
+        log.as_os_str(),
+        "--only-task".as_ref(),
+        "h2".as_ref(),
+    ]);
+    assert_eq!(code, Some(0), "{said}");
+    let asks: Vec<(String, String)> = logged(&probe.join("session.log"), "ask")
+        .iter()
+        .map(|ask| {
+            (
+                ask["text"].as_str().unwrap_or("").to_owned(),
+                ask["task"].as_str().unwrap_or("").to_owned(),
+            )
+        })
+        .collect();
+    assert_eq!(
+        asks,
+        [("Do the second held-out task.".to_owned(), "h2".to_owned())],
+        "only h2's ask"
+    );
+    assert!(
+        first_line(&probe.join("session.log"))["carried_from"].is_object(),
+        "from the recorded refill"
+    );
+    let (code, said) = drive(&[
+        "--out".as_ref(),
+        dir.join("uncarried").as_os_str(),
+        "--only-task".as_ref(),
+        "h2".as_ref(),
+    ]);
+    assert_eq!(code, Some(1), "{said}");
+    assert!(
+        said["failure"]
+            .as_str()
+            .unwrap_or("")
+            .contains("--from-carry"),
+        "{said}"
+    );
+    let (code, said) = drive(&[
+        "--out".as_ref(),
+        dir.join("before").as_os_str(),
+        "--from-carry".as_ref(),
+        log.as_os_str(),
+        "--only-task".as_ref(),
+        "t1".as_ref(),
+    ]);
+    assert_eq!(code, Some(1), "{said}");
+    assert!(
+        said["failure"]
+            .as_str()
+            .unwrap_or("")
+            .contains("no ask after the meditation"),
+        "{said}"
+    );
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
 /// #942: a service that never becomes ready voids the run as `services`
 /// before serve starts, and what it started is stopped.
 #[test]
