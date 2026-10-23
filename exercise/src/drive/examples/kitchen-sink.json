@@ -15,7 +15,7 @@
     {
       "approvals_off": true,
       "bash_timeout_ms": 120000,
-      "build_commit": "083da7ed592373fcaa948d7f4e76ebae9860896e",
+      "build_commit": "ffa672bf9bdf83d6b11b7a83cb7b1f02e08cb363",
       "build_dirty": false,
       "compaction_persists": true,
       "fork_asks": "v4",
@@ -86,7 +86,7 @@
       },
       "model": "scenario",
       "notes_in_the_ask": true,
-      "opened": 1792779782326,
+      "opened": 1792782600983,
       "opening_phase": "plan",
       "phase_document": {
         "digest": "c3c3afe17657994b1403ed749e7352bdf4ad1eb47c688b6e60bb0e122db95e8e",
@@ -136,7 +136,7 @@
         "quick",
         "test"
       ],
-      "registry_sha256": "be1d88ec1adeaca81f0f4e7d538d2b8c59af6cadf51727c66661b1d107808e49",
+      "registry_sha256": "fd343802ab62a0cbb2322ebc853d24222ff54ad39995cd99587643d19a6e04a6",
       "scenario_fixed": [
         "job_ids",
         "pids"
@@ -3752,6 +3752,21 @@
       "turn": 7
     },
     {
+      "files": [
+        {
+          "bytes": 0,
+          "media_type": "text/plain",
+          "path": "files/e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        }
+      ],
+      "job": "bg_2",
+      "kind": "background.ended",
+      "seq": 276,
+      "status": "cancelled",
+      "t": 52847
+    },
+    {
       "class": "constraint",
       "compute_units": "none",
       "fired": false,
@@ -3763,7 +3778,7 @@
       "request": 271,
       "revision": "0000000000000000000000000000000000000000",
       "score": "0.040000",
-      "seq": 276,
+      "seq": 277,
       "t": 52847,
       "threshold": "0.5"
     },
@@ -3779,7 +3794,7 @@
       "request": 271,
       "revision": "0000000000000000000000000000000000000000",
       "score": "0.040000",
-      "seq": 277,
+      "seq": 278,
       "t": 52852,
       "threshold": "0.5"
     },
@@ -3795,7 +3810,7 @@
       "request": 271,
       "revision": "0000000000000000000000000000000000000000",
       "score": "0.040000",
-      "seq": 278,
+      "seq": 279,
       "t": 52857,
       "threshold": "0.5"
     },
@@ -3811,7 +3826,7 @@
       "request": 271,
       "revision": "0000000000000000000000000000000000000000",
       "score": "0.040000",
-      "seq": 279,
+      "seq": 280,
       "t": 52862,
       "threshold": "0.5"
     },
@@ -3825,7 +3840,7 @@
       "prefix_shared": false,
       "question": "Answer from this turn alone.\nWhat did this turn establish that a later turn would need? Answer with the fields LEARNED, EVIDENCE and STUCK, one per line, and write NONE for a field with nothing to record.\n",
       "reserved": 706,
-      "seq": 280,
+      "seq": 281,
       "t": 52867,
       "timing": "during_turn",
       "trigger": "call:unknown:call-s1",
@@ -3833,12 +3848,12 @@
       "why": "read"
     },
     {
-      "fork": 280,
+      "fork": 281,
       "head_sha256": "9dd50249ca7ec4bec0cb8c6fe85081e6aaa991d4b6ce4f1d51ef92b2ba54add2",
       "kind": "request",
       "lane": "interview",
       "max_tokens": 512,
-      "seq": 281,
+      "seq": 282,
       "sized_tokens": 1005,
       "t": 52927,
       "turn": 7
@@ -3849,22 +3864,22 @@
       "kind": "request",
       "lane": "trunk",
       "max_tokens": 512,
-      "seq": 282,
+      "seq": 283,
       "sized_tokens": 953,
       "t": 52987,
       "turn": 7
     },
     {
       "kind": "delta",
-      "request": 281,
-      "seq": 283,
+      "request": 282,
+      "seq": 284,
       "t": 53352,
       "text": "LEARNED: NONE\nEVIDENCE: NONE\nSTUCK: NONE"
     },
     {
       "finish_reason": "stop",
       "kind": "response",
-      "seq": 284,
+      "seq": 285,
       "t": 53357,
       "text": "LEARNED: NONE\nEVIDENCE: NONE\nSTUCK: NONE",
       "timings": {
@@ -3872,37 +3887,22 @@
         "predicted_n": 7,
         "prompt_n": 600
       },
-      "to_request": 281,
+      "to_request": 282,
       "usage": {
         "completion_tokens": 7,
         "prompt_tokens": 600
       }
     },
     {
-      "fork": 280,
+      "fork": 281,
       "kind": "fork.settled",
       "outcome": "decline",
-      "seq": 285,
+      "seq": 286,
       "t": 53362
     },
     {
-      "files": [
-        {
-          "bytes": 0,
-          "media_type": "text/plain",
-          "path": "files/e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
-          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
-        }
-      ],
-      "job": "bg_2",
-      "kind": "background.ended",
-      "seq": 286,
-      "status": "cancelled",
-      "t": 53367
-    },
-    {
       "kind": "delta",
-      "request": 282,
+      "request": 283,
       "seq": 287,
       "t": 53670,
       "text": "The build runs on; the watcher is stopped."
@@ -3918,7 +3918,7 @@
         "predicted_n": 7,
         "prompt_n": 600
       },
-      "to_request": 282,
+      "to_request": 283,
       "usage": {
         "completion_tokens": 7,
         "prompt_tokens": 600
@@ -3947,7 +3947,7 @@
       "model": "canned-scenario-classifier@0000000000000000000000000000000000000000",
       "outcome": "decided",
       "probe": "constraint",
-      "request": 282,
+      "request": 283,
       "revision": "0000000000000000000000000000000000000000",
       "score": "0.040000",
       "seq": 291,
@@ -3963,7 +3963,7 @@
       "model": "canned-scenario-classifier@0000000000000000000000000000000000000000",
       "outcome": "decided",
       "probe": "decision",
-      "request": 282,
+      "request": 283,
       "revision": "0000000000000000000000000000000000000000",
       "score": "0.040000",
       "seq": 292,
@@ -3979,7 +3979,7 @@
       "model": "canned-scenario-classifier@0000000000000000000000000000000000000000",
       "outcome": "decided",
       "probe": "gotcha",
-      "request": 282,
+      "request": 283,
       "revision": "0000000000000000000000000000000000000000",
       "score": "0.040000",
       "seq": 293,
@@ -3995,7 +3995,7 @@
       "model": "canned-scenario-classifier@0000000000000000000000000000000000000000",
       "outcome": "decided",
       "probe": "open",
-      "request": 282,
+      "request": 283,
       "revision": "0000000000000000000000000000000000000000",
       "score": "0.040000",
       "seq": 294,
