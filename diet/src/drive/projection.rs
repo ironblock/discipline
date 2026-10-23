@@ -2679,6 +2679,7 @@ mod tests {
             trunk_sha256: None,
             object_sha256: None,
             restored_files: None,
+            worktree_sha256: None,
         });
         let projection = project(
             &numbered(events),
@@ -2741,6 +2742,7 @@ mod tests {
             trunk_sha256: None,
             object_sha256: None,
             restored_files: None,
+            worktree_sha256: None,
         });
         let projection = project(
             &numbered(events),

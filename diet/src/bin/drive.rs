@@ -123,7 +123,7 @@ fn serve_usage() -> String {
          \x20                       [--log FILE] [--record FILE]\n\
          \x20                       [--allow-origin URL]... [--max-output-tokens N]\n\
          \x20                       [--worktree DIR] [--sandbox-unix-socket PATH]...\n\
-         \x20                       [--sandbox-secret PATH]... [--carry LOG]\n\
+         \x20                       [--sandbox-secret PATH]... [--carry LOG [--carried-worktree SHA256]]\n\
          \x20                       [--run JSON] [--rehearse-as RUNG]\n\
          \x20                       [--seat-endpoint URL --seat-model NAME [--seat-key-file FILE]]\n\
          \x20      diet-drive serve --profile NAME [--config FILE] [any flag above]\n\n",
@@ -206,6 +206,8 @@ fn serve_usage() -> String {
     out.push_str("--carry LOG: start from the refilled trunk and working memory LOG's last\n");
     out.push_str("meditation kept, each checked against its digest; the start line names\n");
     out.push_str("where it came from (#948).\n");
+    out.push_str("--carried-worktree SHA256: with --carry, the worktree snapshot the runner\n");
+    out.push_str("restored for a log that kept none (written before v26), named `given`.\n");
     out.push_str("A regimen declaring `extraction_seat = \"offboard:<registry id>\"` runs its\n");
     out.push_str("interview forks on a second server: --seat-endpoint and --seat-model are\n");
     out.push_str("then required (--seat-key-file as --key-file), the seat's engine is checked\n");
@@ -250,6 +252,9 @@ struct ServeArgs {
     /// `--carry LOG`: the session starts from that log's last meditation's
     /// kept trunk and working object (#948).
     carry: Option<String>,
+    /// `--carried-worktree SHA256`: the worktree snapshot the runner restored
+    /// for a carried session whose log kept none (v26, #948), named `given`.
+    carried_worktree: Option<String>,
     /// `--rehearse-as`: the rung a rehearsal runs under the declarations of
     /// (#926).
     rehearse_as: Option<String>,
@@ -386,6 +391,7 @@ fn serve_args(args: &[String]) -> Option<ServeArgs> {
     let mut sandbox_unix_sockets = Vec::new();
     let mut sandbox_secrets = Vec::new();
     let mut carry = None;
+    let mut carried_worktree = None;
     let mut given = args.iter();
     while let Some(flag) = given.next() {
         let value = given.next()?;
@@ -448,6 +454,12 @@ fn serve_args(args: &[String]) -> Option<ServeArgs> {
         } else if flag == "--carry" {
             carry = Some(value.clone());
             true
+        } else if flag == "--carried-worktree" {
+            carried_worktree = Some(value.clone());
+            value.len() == 64
+                && value
+                    .bytes()
+                    .all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b))
         } else if flag == "--allow-origin" {
             let origin = is_an_origin(value);
             if origin {
@@ -496,6 +508,7 @@ fn serve_args(args: &[String]) -> Option<ServeArgs> {
         sandbox_unix_sockets,
         sandbox_secrets,
         carry,
+        carried_worktree,
     })
 }
 
@@ -531,6 +544,7 @@ fn serve(args: &[String]) -> ExitCode {
         sandbox_unix_sockets,
         sandbox_secrets,
         carry,
+        carried_worktree,
     }) = serve_args(args)
     else {
         eprint!("{}", serve_usage());
@@ -546,6 +560,27 @@ fn serve(args: &[String]) -> ExitCode {
             }
         }
         None => None,
+    };
+    // A given worktree (v26, #948) names what the runner restored for a log
+    // that kept none; it never replaces the one a v26 meditation kept.
+    let carry = match (carry, carried_worktree) {
+        (carry, None) => carry,
+        (None, Some(_)) => {
+            return fail(
+                EXIT_USAGE,
+                "--carried-worktree names a carry's worktree, and there is no --carry",
+            );
+        }
+        (Some(carry), Some(_)) if carry.from.worktree.is_some() => {
+            return fail(
+                EXIT_INPUT,
+                "--carried-worktree: the carried log keeps its own worktree",
+            );
+        }
+        (Some(mut carry), Some(sha256)) => {
+            carry.from.worktree = Some((sha256, diet::formats::log::WorktreeFrom::Given));
+            Some(carry)
+        }
     };
     let run = match run.as_deref().map(diet::formats::log::run_of).transpose() {
         Ok(run) => run,
@@ -2786,7 +2821,9 @@ fn usage() -> String {
         "       diet-drive arms FILE --arms ARMS.toml --repeat N --out DIR [--endpoint URL\n",
     );
     out.push_str("           --model NAME [--key-file FILE]] [--no-assemble] [--stop-file PATH]\n");
-    out.push_str("           [--void-cap K] [--dry-run]\n");
+    out.push_str(
+        "           [--void-cap K] [--dry-run] [--from-carry LOG [--carry-worktree DIR]]\n",
+    );
     out.push_str("       (a scenario under k regimens, each one lever from the baseline, N\n");
     out.push_str("       times each, in a Williams order; #932, diet/scenarios/README.md)\n");
     out.push_str("       diet-drive table DIR [--seed S]\n");
@@ -2832,7 +2869,7 @@ fn scenario(args: &[String]) -> ExitCode {
             EXIT_USAGE,
             "usage: diet-drive scenario FILE --out DIR [--endpoint URL --model NAME \
              [--key-file FILE]] [--regimen FILE] [--worktree DIR] [--no-assemble] [--dry-run] \
-             [--repeat N [--stop-file PATH] [--void-cap K]]",
+             [--repeat N [--stop-file PATH] [--void-cap K]] [--from-carry LOG [--carry-worktree DIR]]",
         )
     };
     let Some((file, rest)) = args.split_first() else {
@@ -2865,6 +2902,8 @@ fn scenario(args: &[String]) -> ExitCode {
             "--key-file" => options.key_file = Some(value.clone()),
             "--regimen" => options.regimen = Some(value.into()),
             "--worktree" => options.worktree = Some(value.into()),
+            "--from-carry" => from_carry(&mut options, value),
+            "--carry-worktree" => options.carry_worktree = Some(value.into()),
             "--repeat" => match value.parse::<u64>() {
                 Ok(n) if n > 0 => count = Some(n),
                 _ => return usage(),
@@ -2934,6 +2973,13 @@ type BatchFlags = (
     BTreeMap<String, String>,
 );
 
+/// `--from-carry LOG` (#948): a run from a recorded refill, carried from
+/// that log's last meditation and taking up the script after it.
+fn from_carry(options: &mut diet::drive::scenario::RunOptions, log: &str) {
+    options.carry = Some(log.into());
+    options.carried = true;
+}
+
 /// `pair`'s and `arms`' flags (#912, #932): FILE, then `--repeat N --out DIR`,
 /// the endpoint's, `--no-assemble`, `--stop-file`, `--void-cap`, and any of
 /// `own` kept by name for the caller. `None` when they do not read.
@@ -2967,6 +3013,8 @@ fn batch_flags(args: &[String], own: &[&str]) -> Option<BatchFlags> {
             "--repeat" => count = Some(value.parse::<u64>().ok().filter(|n| *n > 0)?),
             "--stop-file" => stop_file = Some(value.into()),
             "--void-cap" => void_cap = value.parse::<u64>().ok()?,
+            "--from-carry" => from_carry(&mut options, value),
+            "--carry-worktree" => options.carry_worktree = Some(value.into()),
             flag if own.contains(&flag) => {
                 kept.insert(flag.to_owned(), value.clone());
             }
@@ -3058,7 +3106,8 @@ fn arms(args: &[String]) -> ExitCode {
         fail(
             EXIT_USAGE,
             "usage: diet-drive arms FILE --arms ARMS.toml --repeat N --out DIR [--endpoint URL \
-             --model NAME [--key-file FILE]] [--no-assemble] [--stop-file PATH] [--void-cap K] [--dry-run]",
+             --model NAME [--key-file FILE]] [--no-assemble] [--stop-file PATH] [--void-cap K] [--dry-run] \
+             [--from-carry LOG [--carry-worktree DIR]]",
         )
     };
     let Some((options, repeats, kept)) = batch_flags(args, &["--arms"]) else {

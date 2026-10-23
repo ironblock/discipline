@@ -2242,6 +2242,10 @@ pub struct RunOptions {
     /// Whether this is a later session of its run, which the regimen's
     /// `refill_session` started (#948): it is never reseated again.
     pub carried: bool,
+    /// A worktree to restore for a carried session whose log was written
+    /// before v26 kept one (`--carry-worktree DIR`): snapshotted into this
+    /// session's recording and restored from there, named `given`.
+    pub carry_worktree: Option<std::path::PathBuf>,
     /// Paths sealed from this session's commands besides the deny list
     /// (#948, `refill_session = "sealed"`): passed to serve as
     /// `--sandbox-secret`, and probed.
@@ -2755,6 +2759,27 @@ fn running(
         .map_err(|why| Failure(format!("{} cannot be read: {why}", options.file.display())))?;
     let scenario = parse(&text).map_err(|why| Failure(why.to_string()))?;
     said["scenario"] = serde_json::Value::String(scenario.name.clone());
+    // A run from a recorded refill (#948) takes up the script its log ran,
+    // after that script's declared meditation.
+    // A carried run at step 0 is one from a recorded refill (`--from-carry`):
+    // a session carried within its run always starts past a meditation.
+    let from_step = if options.carried && options.from_step == 0 {
+        let log = options
+            .carry
+            .as_ref()
+            .ok_or_else(|| Failure("--from-carry names no log".to_owned()))?;
+        carried_script(log, &text)?;
+        scenario
+            .steps
+            .iter()
+            .position(|step| matches!(step, Step::DeclareMeditation))
+            .map(|at| at + 1)
+            .ok_or_else(|| {
+                Failure("the scenario declares no meditation to start after".to_owned())
+            })?
+    } else {
+        options.from_step
+    };
     let live = options.endpoint.is_some();
     let regimen = match (
         &options.regimen,
@@ -3022,8 +3047,21 @@ fn running(
             Some(worktree) => worktree.clone(),
             None => fresh("worktree").map_err(|failure| voided(said, "worktree", failure))?,
         };
-        seeded(&dir, &options.file, &scenario.seed)
-            .map_err(|failure| voided(said, "worktree", failure))?;
+        // A carried session's worktree is the one its refill left (#948,
+        // v26), restored; a fresh or blank session's, the seed.
+        match carried_worktree(options, &work, &dir)
+            .map_err(|failure| voided(said, "worktree", failure))?
+        {
+            Some((sha256, from, files)) => {
+                said["carried_worktree"] =
+                    serde_json::json!({"sha256": sha256, "from": from.tag(), "files": files});
+                if from == crate::formats::log::WorktreeFrom::Given {
+                    serve.arg("--carried-worktree").arg(&sha256);
+                }
+            }
+            None => seeded(&dir, &options.file, &scenario.seed)
+                .map_err(|failure| voided(said, "worktree", failure))?,
+        }
         serve.arg("--worktree").arg(&dir);
         for secret in &denied {
             serve.arg("--sandbox-secret").arg(secret);
@@ -3164,7 +3202,7 @@ fn running(
     if let Some(worktree) = worktree {
         driver = driver.in_worktree(worktree);
     }
-    let outcome = self::drive_from(&scenario, &driver, (options.from_step, reseat));
+    let outcome = self::drive_from(&scenario, &driver, (from_step, reseat));
     let next = outcome.as_ref().ok().and_then(|(_, next)| *next);
     // A check that crashed (#942): void, whatever else the run says.
     if let Some(cause) = driver.voided() {
@@ -3397,6 +3435,78 @@ fn put_back(aside: Option<&std::path::Path>, out: &std::path::Path) -> Result<()
             .map_err(|why| failed(format!("{}: {why}", to.display())))?;
     }
     std::fs::remove_dir(aside).map_err(|why| failed(format!("{}: {why}", aside.display())))
+}
+
+/// The script a recorded refill's log ran (#948): its `run`'s
+/// `script_sha256` must be `text`'s, or a batch from it would take up a
+/// script it never ran.
+fn carried_script(log: &std::path::Path, text: &str) -> Result<(), Failure> {
+    use crate::formats::log::Event;
+    let written =
+        std::fs::read_to_string(log).map_err(|why| Failure(format!("{}: {why}", log.display())))?;
+    let lines = crate::formats::log::parse(&written)
+        .map_err(|why| Failure(format!("{}: {why}", log.display())))?;
+    let Some(Event::SessionStart { run: Some(run), .. }) = lines.first().map(|line| &line.event)
+    else {
+        return Err(Failure(format!(
+            "{} names no run, so not the script it ran",
+            log.display()
+        )));
+    };
+    let sha256 = crate::digest::sha256_hex(text.as_bytes());
+    if run.script_sha256 != sha256 {
+        return Err(Failure(format!(
+            "{} ran script {}, and this one is {sha256}",
+            log.display(),
+            run.script_sha256
+        )));
+    }
+    Ok(())
+}
+
+/// A carried session's worktree (#948), restored into `into`: the snapshot
+/// its carried log's last meditation kept (v26), or, for a log written
+/// before v26, `--carry-worktree`'s directory snapshotted into this
+/// session's recording `work` and restored from there. `None` when the
+/// session is not carried, is blank, or crosses no worktree.
+fn carried_worktree(
+    options: &RunOptions,
+    work: &std::path::Path,
+    into: &std::path::Path,
+) -> Result<Option<(String, crate::formats::log::WorktreeFrom, usize)>, Failure> {
+    use crate::formats::log::{Event, WorktreeFrom};
+    let Some(log) = options.carry.as_ref().filter(|_| options.carried) else {
+        return Ok(None);
+    };
+    let written =
+        std::fs::read_to_string(log).map_err(|why| Failure(format!("{}: {why}", log.display())))?;
+    let lines = crate::formats::log::parse(&written)
+        .map_err(|why| Failure(format!("{}: {why}", log.display())))?;
+    let kept = lines.iter().rev().find_map(|line| match &line.event {
+        Event::Meditation {
+            trunk_sha256: Some(_),
+            worktree_sha256,
+            ..
+        } => Some(worktree_sha256.clone()),
+        _ => None,
+    });
+    let recording = log.parent().unwrap_or_else(|| std::path::Path::new("."));
+    match (kept.flatten(), &options.carry_worktree) {
+        (Some(_), Some(_)) => Err(Failure(format!(
+            "{} keeps its own worktree: --carry-worktree would replace it",
+            log.display()
+        ))),
+        (Some(sha256), None) => {
+            let files = crate::drive::carry::restore(&sha256, recording, into).map_err(Failure)?;
+            Ok(Some((sha256, WorktreeFrom::Meditation, files)))
+        }
+        (None, Some(given)) => {
+            let sha256 = crate::drive::carry::snapshot(given, work).map_err(Failure)?;
+            let files = crate::drive::carry::restore(&sha256, work, into).map_err(Failure)?;
+            Ok(Some((sha256, WorktreeFrom::Given, files)))
+        }
+        (None, None) => Ok(None),
+    }
 }
 
 /// A sealed session's seal (#948): the scenario's `seal`, each a service's
