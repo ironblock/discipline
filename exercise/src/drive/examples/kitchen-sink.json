@@ -15,7 +15,7 @@
     {
       "approvals_off": true,
       "bash_timeout_ms": 120000,
-      "build_commit": "ba3fd5977baf6cb97de67ea7f0c337923a7bade4",
+      "build_commit": "fc54aa86859c3ef5981353e35b6473b61524787c",
       "build_dirty": false,
       "compaction_persists": true,
       "fork_asks": "v4",
@@ -86,7 +86,7 @@
       },
       "model": "scenario",
       "notes_in_the_ask": true,
-      "opened": 1792685578071,
+      "opened": 1792727663698,
       "opening_phase": "plan",
       "phase_document": {
         "digest": "c3c3afe17657994b1403ed749e7352bdf4ad1eb47c688b6e60bb0e122db95e8e",
@@ -178,7 +178,7 @@
         "propose_phase_transition",
         "refute_beliefs"
       ],
-      "version": 25
+      "version": 26
     },
     {
       "kind": "phase.started",
@@ -1785,7 +1785,8 @@
       "trunk_sha256": "d75fe9185af00d481a955729ccb8480e06c1bf0c46632bfcbc563351224022ef",
       "turn_steps_compacted": 1,
       "turn_steps_kept": 1,
-      "window": 37615
+      "window": 37615,
+      "worktree_sha256": "63b3828745e24ce486aea446540c6faddb67f5fb0c16946c4c977e830f8908d8"
     },
     {
       "kind": "delta",
@@ -2015,7 +2016,8 @@
       "tail_tokens": 400,
       "tool_outputs": "reference",
       "trunk_sha256": "e0fa748ee0fe08ac5dc11c3e65f5804be5a6b5b5896d01836cc71141da85fe2c",
-      "window": 37615
+      "window": 37615,
+      "worktree_sha256": "63b3828745e24ce486aea446540c6faddb67f5fb0c16946c4c977e830f8908d8"
     },
     {
       "beside": 0,
@@ -2218,7 +2220,8 @@
         "cache_n": 0,
         "predicted_n": 7,
         "prompt_n": 600
-      }
+      },
+      "worktree_sha256": "63b3828745e24ce486aea446540c6faddb67f5fb0c16946c4c977e830f8908d8"
     },
     {
       "kind": "ask",
@@ -4267,7 +4270,8 @@
       "trunk_sha256": "7dcbc9de7347fac01e98cb1db59c9b36f4e34d8d92a54d182b48bd86b02287ee",
       "turn_steps_compacted": 0,
       "turn_steps_kept": 1,
-      "window": 37615
+      "window": 37615,
+      "worktree_sha256": "63b3828745e24ce486aea446540c6faddb67f5fb0c16946c4c977e830f8908d8"
     },
     {
       "beside": 1,
@@ -6867,7 +6871,8 @@
         "cache_n": 0,
         "predicted_n": 7,
         "prompt_n": 600
-      }
+      },
+      "worktree_sha256": "63b3828745e24ce486aea446540c6faddb67f5fb0c16946c4c977e830f8908d8"
     },
     {
       "kind": "ask",
@@ -7338,7 +7343,8 @@
         "cache_n": 0,
         "predicted_n": 7,
         "prompt_n": 600
-      }
+      },
+      "worktree_sha256": "63b3828745e24ce486aea446540c6faddb67f5fb0c16946c4c977e830f8908d8"
     },
     {
       "entry": {
@@ -9074,7 +9080,8 @@
         "cache_n": 0,
         "predicted_n": 7,
         "prompt_n": 600
-      }
+      },
+      "worktree_sha256": "00aa8f3aa4471813ef78855661d288912bc1454c4d810a060658da5cb12d9faa"
     },
     {
       "by": "operator",
@@ -9742,7 +9749,8 @@
         "cache_n": 0,
         "predicted_n": 7,
         "prompt_n": 600
-      }
+      },
+      "worktree_sha256": "00aa8f3aa4471813ef78855661d288912bc1454c4d810a060658da5cb12d9faa"
     },
     {
       "from": "awaiting",
