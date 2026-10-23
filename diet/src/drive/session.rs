@@ -377,6 +377,8 @@ pub enum Event {
         /// The nonce the head's first line carries (#932), under the
         /// `head_nonce` lever.
         head_nonce: Option<String>,
+        /// The phase tool's supplied description's sha256 (v27, #948).
+        phase_tool_description_sha256: Option<String>,
         /// Where a carried session started (#948): `serve --carry`'s log,
         /// meditation and digests.
         carried_from: Option<log::CarriedFrom>,
@@ -3506,6 +3508,7 @@ impl<S: Streaming + 'static> Session<S> {
             run: None,
             rehearsing_as: None,
             head_nonce: None,
+            phase_tool_description_sha256: None,
             carried_from: None,
             carried_source: None,
         });
@@ -3643,6 +3646,25 @@ impl<S: Streaming + 'static> Session<S> {
         }) = self.shared.lock().log.first_mut()
         {
             *head_nonce = Some(nonce.to_owned());
+        }
+        self
+    }
+
+    /// This session, its `session.start` naming the digest of the phase
+    /// tool's description that serve was given in place of the pinned one
+    /// (#948, v27).
+    #[must_use]
+    pub fn with_phase_tool_description(self, sha256: &str) -> Self {
+        if let Some(Logged {
+            event:
+                Event::Started {
+                    phase_tool_description_sha256,
+                    ..
+                },
+            ..
+        }) = self.shared.lock().log.first_mut()
+        {
+            *phase_tool_description_sha256 = Some(sha256.to_owned());
         }
         self
     }
@@ -5194,6 +5216,7 @@ pub fn line_of(logged: &Logged) -> log::Line {
             run,
             rehearsing_as,
             head_nonce,
+            phase_tool_description_sha256,
             carried_from,
             carried_source,
         } => log::Event::SessionStart {
@@ -5202,6 +5225,7 @@ pub fn line_of(logged: &Logged) -> log::Line {
             run: run.clone(),
             rehearsing_as: rehearsing_as.clone(),
             head_nonce: head_nonce.clone(),
+            phase_tool_description_sha256: phase_tool_description_sha256.clone(),
             phase_document: phase_document.clone(),
             build_commit: build.as_ref().map(|(commit, _)| commit.clone()),
             build_dirty: build.as_ref().map(|(_, dirty)| *dirty),
@@ -17089,6 +17113,7 @@ pub(in crate::drive) mod tests {
                 run: None,
                 rehearsing_as: None,
                 head_nonce: None,
+                phase_tool_description_sha256: None,
                 carried_from: None,
                 carried_source: None,
                 bash_timeout_ms: None,
@@ -17710,6 +17735,7 @@ pub(in crate::drive) mod tests {
                 run: None,
                 rehearsing_as: None,
                 head_nonce: None,
+                phase_tool_description_sha256: None,
                 carried_from: None,
                 carried_source: None,
             },
@@ -28689,6 +28715,7 @@ pub(in crate::drive) mod tests {
             trunk_sha256: "d".repeat(64),
             object_sha256: None,
             worktree: None,
+            variant_sha256: None,
         };
         let session = Session::open_with(Canned::new(vec![]), template(), None, None, None, None)
             .with_carry(Carry {

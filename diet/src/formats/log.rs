@@ -260,6 +260,16 @@
 //! that declares 23 or less and carries them is refused. For a reader of
 //! earlier logs, the migration is nothing: no session was carried.
 //!
+//! v27 (#948) names a delivery variant. A carried session started from a
+//! trunk other than the one its meditation kept -- the same notes delivered
+//! another way, for the delivery screen -- names that trunk's sha256 as
+//! `carried_from.variant_sha256`, beside the kept trunk it is a variant of.
+//! A session whose phase tool's description was supplied names the text's
+//! sha256 as `phase_tool_description_sha256` on `session.start`. A log that
+//! declares 26 or less and carries either is refused. For a reader of
+//! earlier logs, the migration is nothing: every session sent the trunk its
+//! carry kept, and the pinned description.
+//!
 //! v26 (#948) carries the worktree. A `meditation` names a snapshot of the
 //! session's worktree kept in the recording, `worktree_sha256`: a manifest of
 //! every file by its path and sha256, each file kept by digest. A session
@@ -316,12 +326,12 @@ use super::record::vocabulary;
 struct LogParser;
 
 /// The version this module writes, as `session.start` states it.
-pub const VERSION: i64 = 26;
+pub const VERSION: i64 = 27;
 
 /// Every version this module reads.
 pub const READS: &[i64] = &[
     0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25,
-    26,
+    26, 27,
 ];
 
 /// How recent an input event must be, at the moment a turn settles, for the
@@ -1293,6 +1303,9 @@ pub struct RecordedFile {
 }
 
 /// What happened.
+// `SessionStart` is the large one, and a log holds one: the size each other
+// event carries for it is not worth a box per field (as session's `Event`).
+#[allow(clippy::large_enum_variant)]
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Event {
     /// The session opened.
@@ -1415,6 +1428,9 @@ pub enum Event {
         /// The nonce the head's first line carries (v20, #932), under the
         /// `head_nonce` lever.
         head_nonce: Option<String>,
+        /// The sha256 of the phase tool's description, when one was supplied
+        /// in place of the pinned template (v27, #948).
+        phase_tool_description_sha256: Option<String>,
         /// The session's start from another's meditation (v24, #948): the
         /// first log, the meditation and what it carried.
         carried_from: Option<CarriedFrom>,
@@ -2412,6 +2428,9 @@ pub struct CarriedFrom {
     /// The worktree snapshot it restored (v26), and where it came from:
     /// the meditation's own, or one given beside a log written before v26.
     pub worktree: Option<(String, WorktreeFrom)>,
+    /// The trunk it was started from in place of the kept one (v27): a
+    /// delivery variant of `trunk_sha256`, by its own sha256.
+    pub variant_sha256: Option<String>,
 }
 
 /// Where a carried session's worktree came from (v26, #948).
@@ -2644,6 +2663,9 @@ fn carried_from_value(carried: &CarriedFrom) -> Value {
     ]);
     if let Some(object) = &carried.object_sha256 {
         members.insert("object_sha256".to_owned(), Value::String(object.clone()));
+    }
+    if let Some(variant) = &carried.variant_sha256 {
+        members.insert("variant_sha256".to_owned(), Value::String(variant.clone()));
     }
     if let Some((sha256, from)) = &carried.worktree {
         members.insert("worktree_sha256".to_owned(), Value::String(sha256.clone()));
@@ -4089,6 +4111,10 @@ fn from_object(object: &BTreeMap<String, Value>) -> Result<Line, String> {
                 },
                 rehearsing_as: fields.optional_string("rehearsing_as")?,
                 head_nonce: fields.optional_string("head_nonce")?,
+                phase_tool_description_sha256: match object.get("phase_tool_description_sha256") {
+                    None => None,
+                    Some(_) => Some(fields.digest("phase_tool_description_sha256")?),
+                },
                 carried_from: if object.contains_key("carried_from") {
                     Some(fields.carried_from("carried_from")?)
                 } else {
@@ -5791,6 +5817,16 @@ const fn must_v8(key: &'static str, holds: Holds) -> Field {
     }
 }
 
+/// A key that arrived in v27, optional wherever its object is written.
+const fn may_v27(key: &'static str, holds: Holds) -> Field {
+    Field {
+        key,
+        holds,
+        required: false,
+        since: 27,
+    }
+}
+
 /// A key that arrived in v26, optional wherever its object is written.
 const fn may_v26(key: &'static str, holds: Holds) -> Field {
     Field {
@@ -6071,6 +6107,7 @@ pub const CARRIED_FROM: &[Field] = &[
     may_v24("object_sha256", Holds::Digest),
     may_v26("worktree_sha256", Holds::Digest),
     may_v26("worktree_from", Holds::Text),
+    may_v27("variant_sha256", Holds::Digest),
 ];
 
 pub const RUN: &[Field] = &[
@@ -6405,6 +6442,7 @@ pub fn schema(kind: Kind) -> &'static [Field] {
                 may_v17("run", Holds::Run),
                 may_v19("rehearsing_as", Text),
                 may_v20("head_nonce", Text),
+                may_v27("phase_tool_description_sha256", Holds::Digest),
                 may_v24("carried_from", Holds::CarriedFrom),
                 may_v24("carried_source", Holds::Strings),
             ];
@@ -7215,6 +7253,7 @@ fn to_value(line: &Line) -> Value {
             run,
             rehearsing_as,
             head_nonce,
+            phase_tool_description_sha256,
             carried_from,
             carried_source,
             phases,
@@ -7322,6 +7361,9 @@ fn to_value(line: &Line) -> Value {
             }
             if let Some(nonce) = head_nonce {
                 put("head_nonce", text(nonce));
+            }
+            if let Some(description) = phase_tool_description_sha256 {
+                put("phase_tool_description_sha256", text(description));
             }
             if let Some(carried) = carried_from {
                 put("carried_from", carried_from_value(carried));
@@ -9326,6 +9368,10 @@ impl Fields<'_> {
                 None => None,
                 Some(_) => Some(inner.digest("object_sha256").map_err(within)?),
             },
+            variant_sha256: match inner.0.get("variant_sha256") {
+                None => None,
+                Some(_) => Some(inner.digest("variant_sha256").map_err(within)?),
+            },
             worktree: match (inner.0.get("worktree_sha256"), inner.0.get("worktree_from")) {
                 (None, None) => None,
                 (Some(_), Some(_)) => {
@@ -9651,15 +9697,15 @@ mod tests {
         assert!(refused.why.contains("v8"), "{refused}");
     }
 
-    /// #583, #878, #904, #555, #931, #936, #910, #942, #926, #932, #948: this module writes v26.
+    /// #583, #878, #904, #555, #931, #936, #910, #942, #926, #932, #948: this module writes v27.
     #[test]
-    fn this_module_writes_v26_and_reads_every_version_before_it() {
-        assert_eq!(super::VERSION, 26);
+    fn this_module_writes_v27_and_reads_every_version_before_it() {
+        assert_eq!(super::VERSION, 27);
         assert_eq!(
             super::READS,
             &[
                 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22,
-                23, 24, 25, 26
+                23, 24, 25, 26, 27
             ]
         );
     }
@@ -9682,6 +9728,7 @@ mod tests {
                 api_retry_after_max_seconds: Some(60),
                 rehearsing_as: Some("a-hosted-rung".to_owned()),
                 head_nonce: Some("0123456789abcdef".to_owned()),
+                phase_tool_description_sha256: Some("e".repeat(64)),
                 run: Some(Run {
                     script_sha256: "a".repeat(64),
                     repeat: 2,
@@ -11135,6 +11182,7 @@ mod tests {
             run,
             rehearsing_as,
             head_nonce,
+            phase_tool_description_sha256,
             ..
         } = &mut lines[0].event
         else {
@@ -11144,6 +11192,7 @@ mod tests {
         *run = None;
         *rehearsing_as = None;
         *head_nonce = None;
+        *phase_tool_description_sha256 = None;
         // A v7 key on the first line would be the one named; the check is of
         // what arrived in v1, further down.
         *tool_output = None;

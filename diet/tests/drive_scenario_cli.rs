@@ -3029,6 +3029,201 @@ fn a_carried_session_restores_the_worktree_its_refill_left() {
     let _ = std::fs::remove_dir_all(&dir);
 }
 
+/// #948 (v27): a run from a recorded refill can send a delivery variant of
+/// its trunk in the kept one's place (`--carry-trunk`), named on its start
+/// line beside the trunk it varies; a variant byte-identical to the kept
+/// trunk sends the same head, and one with another system message does not.
+/// A supplied phase tool description (`--phase-tool-description`) is sent
+/// and named, and refused where the regimen declares no phases; a variant
+/// on a run that is not carried is refused, never dropped.
+#[test]
+#[allow(clippy::too_many_lines)]
+fn a_carried_run_sends_a_named_trunk_variant_and_phase_tool_description() {
+    let dir = scratch("carry-variant");
+    let canned = std::fs::read_to_string(root().join("diet/scenarios/canned.toml"))
+        .expect("the canned regimen");
+    let (top, sampler) = canned.split_once("[sampler]").expect("its sampler table");
+    for (name, phases) in [("phased.toml", true), ("plain.toml", false)] {
+        let phased = if phases {
+            "phase_library = \"starter\"\nstarting_phase = \"plan\"\n"
+        } else {
+            ""
+        };
+        std::fs::write(
+            dir.join(name),
+            format!("{top}interview_warrant = [\"read\"]\nmeditation_empty = \"refill\"\n{phased}\n[sampler]{sampler}"),
+        )
+        .expect("the regimen");
+    }
+    let script = |regimen: &str| {
+        let mut text = format!(
+            "{}\n",
+            serde_json::json!({"scenario": "carry-variant", "regimen": regimen, "head": root().join("diet/drive/heads/floor.md")})
+        );
+        for line in [
+            serde_json::json!({"step": "ask", "text": "hello there"}),
+            serde_json::json!({"step": "declare-meditation"}),
+            serde_json::json!({"step": "ask", "text": "and again"}),
+            serde_json::json!({"step": "end"}),
+        ] {
+            text.push_str(&(line.to_string() + "\n"));
+        }
+        for _ in 0..12 {
+            text.push_str(&(serde_json::json!({"reply": {"text": "Done."}}).to_string() + "\n"));
+        }
+        text
+    };
+    let drive = |args: &[&std::ffi::OsStr]| {
+        let ran = Command::new(DRIVE)
+            .current_dir(root())
+            .arg("scenario")
+            .args(args)
+            .arg("--no-assemble")
+            .output()
+            .expect("diet-drive runs");
+        let stdout = String::from_utf8_lossy(&ran.stdout).into_owned();
+        let said: serde_json::Value =
+            serde_json::from_str(stdout.lines().last().unwrap_or("")).unwrap_or_default();
+        (ran.status.code(), said)
+    };
+    let first_head = |log: &Path| {
+        logged(log, "request")
+            .iter()
+            .find(|request| request["lane"] == "trunk")
+            .and_then(|request| request["head_sha256"].as_str().map(str::to_owned))
+            .expect("a trunk request")
+    };
+    let mut recorded = std::collections::BTreeMap::new();
+    for regimen in ["phased.toml", "plain.toml"] {
+        let file = dir.join(regimen.replace(".toml", ".jsonl"));
+        std::fs::write(&file, script(regimen)).expect("the scenario");
+        let out = dir.join(format!("recorded-{regimen}"));
+        let (code, said) = drive(&[
+            file.as_os_str(),
+            "--out".as_ref(),
+            out.as_os_str(),
+            "--repeat".as_ref(),
+            "1".as_ref(),
+        ]);
+        assert_eq!(code, Some(0), "{said}");
+        recorded.insert(regimen, (file, out.join("repeat-01")));
+    }
+    let (file, run) = &recorded["phased.toml"];
+    let log = run.join("session.log");
+    let kept = logged(&log, "meditation")[0]["trunk_sha256"]
+        .as_str()
+        .expect("a kept trunk")
+        .to_owned();
+    let kept_bytes = std::fs::read(run.join("files").join(&kept)).expect("the kept trunk");
+    let same = dir.join("same.json");
+    std::fs::write(&same, &kept_bytes).expect("a variant");
+    let mut other: serde_json::Value = serde_json::from_slice(&kept_bytes).expect("a trunk");
+    let system = other[0]["content"]
+        .as_str()
+        .expect("a system message")
+        .to_owned();
+    other[0]["content"] = serde_json::Value::String(system + "\nYour notes are below.\n");
+    let changed = dir.join("changed.json");
+    std::fs::write(&changed, other.to_string()).expect("a variant");
+    let description = dir.join("description.txt");
+    std::fs::write(
+        &description,
+        "Propose moving the session to another phase.\n",
+    )
+    .expect("a description");
+    let from = |name: &str, extra: &[&std::ffi::OsStr]| {
+        let out = dir.join(name);
+        let mut args: Vec<&std::ffi::OsStr> = vec![
+            file.as_os_str(),
+            "--out".as_ref(),
+            out.as_os_str(),
+            "--from-carry".as_ref(),
+            log.as_os_str(),
+        ];
+        args.extend_from_slice(extra);
+        let (code, said) = drive(&args);
+        (code, said, out.join("session.log"))
+    };
+    let (code, said, plain_log) = from("out-plain", &[]);
+    assert_eq!(code, Some(0), "{said}");
+    let (code, said, same_log) = from("out-same", &["--carry-trunk".as_ref(), same.as_os_str()]);
+    assert_eq!(code, Some(0), "{said}");
+    let (code, said, changed_log) = from(
+        "out-changed",
+        &["--carry-trunk".as_ref(), changed.as_os_str()],
+    );
+    assert_eq!(code, Some(0), "{said}");
+    let (code, said, described_log) = from(
+        "out-described",
+        &["--phase-tool-description".as_ref(), description.as_os_str()],
+    );
+    assert_eq!(code, Some(0), "{said}");
+    assert_eq!(
+        first_head(&same_log),
+        first_head(&plain_log),
+        "the kept trunk's own bytes send the same head"
+    );
+    assert_ne!(
+        first_head(&changed_log),
+        first_head(&plain_log),
+        "another system message is sent"
+    );
+    assert_ne!(
+        first_head(&described_log),
+        first_head(&plain_log),
+        "the supplied description is sent"
+    );
+    let start = first_line(&changed_log);
+    assert_eq!(
+        start["carried_from"]["trunk_sha256"],
+        kept.as_str(),
+        "{start}"
+    );
+    assert_eq!(
+        start["carried_from"]["variant_sha256"],
+        diet::digest::sha256_hex(&std::fs::read(&changed).expect("bytes")).as_str(),
+        "{start}"
+    );
+    assert!(
+        first_line(&plain_log)["carried_from"]
+            .get("variant_sha256")
+            .is_none()
+    );
+    assert_eq!(
+        first_line(&described_log)["phase_tool_description_sha256"],
+        diet::digest::sha256_hex(&std::fs::read(&description).expect("bytes")).as_str()
+    );
+    // Refused: a description where no phase tool is declared, and a variant
+    // on a run that is not carried.
+    let (plain_file, plain_run) = &recorded["plain.toml"];
+    let (code, said) = drive(&[
+        plain_file.as_os_str(),
+        "--out".as_ref(),
+        dir.join("out-no-phases").as_os_str(),
+        "--from-carry".as_ref(),
+        plain_run.join("session.log").as_os_str(),
+        "--phase-tool-description".as_ref(),
+        description.as_os_str(),
+    ]);
+    assert_ne!(code, Some(0), "{said}");
+    let (code, said) = drive(&[
+        file.as_os_str(),
+        "--out".as_ref(),
+        dir.join("out-uncarried").as_os_str(),
+        "--carry-trunk".as_ref(),
+        same.as_os_str(),
+    ]);
+    assert_eq!(code, Some(1), "{said}");
+    assert!(
+        said["failure"]
+            .as_str()
+            .unwrap_or("")
+            .contains("not carried"),
+        "{said}"
+    );
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
 /// #942: a service that never becomes ready voids the run as `services`
 /// before serve starts, and what it started is stopped.
 #[test]
