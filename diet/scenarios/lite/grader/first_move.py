@@ -1,4 +1,4 @@
-"""A first-move probe's measure (#948, the delivery screen): `python3 -I first_move.py LOG ROOT [K]`, or `--selftest`.
+"""A first-move probe's measure (#948, the delivery screen): `python3 -I first_move.py LOG ROOT [K] [--planted FACT]`, or `--selftest`.
 
 A probe is one held-out task's ask from a recorded refill (`scenario --from-carry LOG --only-task TASK`, its regimen's `max_steps` K). Its
 measure comes from tool calls, never prose: within the first K calls, the FIRST RELEVANT ACTION is the first that writes the task's `main.ts`
@@ -8,6 +8,19 @@ or reads the Lite checkout (tier c's `process_trap.reads_of`). Its outcome:
   wrote without   it writes main.ts, and the code misses a fact
   read first      it reads Lite
   none            no relevant action within K
+
+The scan goes on past a read to the FIRST WRITE of main.ts within K, and says what was checked before it: Lite (tier c's reads), or the
+model's own past code (a read of a file in another task's directory of the worktree: `cat t6-pick-dpr/main.ts`). The worktree's own
+files are no read of Lite, but before a write they are a check: copying a past solution is not taking up a note.
+
+A planted probe (`--planted FACT`, the wrong-note control: the carry's notes are wrong about FACT) adds its outcome:
+
+  followed                                  the first write misses FACT
+  resisted after checking Lite              it applies FACT, and Lite was read before it
+  resisted after checking own past code     it applies FACT, and only the model's own past code was read before it
+  resisted after checking both              it applies FACT, and both were read before it
+  resisted outright                         it applies FACT, and nothing was checked before it
+  none                                      no write within K
 
 DETECTORS, one per fact, static over the code a write puts in main.ts (comments dropped). Each is a heuristic of the fact's mechanism as
 the task states it, fixture-tested both ways (`first_move_fixtures.json`): never a grade, which runs the page.
@@ -132,21 +145,57 @@ def main_ts_write(command, task):
     return None
 
 
+# A directory of the worktree that holds a task: the model's own past code lives in the others.
+TASK_DIR = re.compile(r"[th]\d+-[a-z0-9-]+")
+WORKTREE = "/worktree"
+
+
+def own_reads(command, task, root):
+    """The files of other tasks' directories that one bash call reads: [relpath]. The call starts in the worktree; an absolute `cd`
+    outside Lite's checkout is taken as the worktree (the log names no path for it), and an absolute path through a task directory
+    is read from there."""
+    command = re.sub(r"(?m)((?:^|&&|;|\|\|)\s*cd\s+)(/[^\s;&|]+)",
+                     lambda m: m.group(0) if TRAP["_under"](m.group(2), root) is not None else m.group(1) + WORKTREE, command)
+    command = re.sub(r"(?<![\w/.-])/[^\s'\"]*?/(?=[th]\d+-[a-z0-9-]+/)",
+                     lambda m: m.group(0) if TRAP["_under"](m.group(0), root) is not None else WORKTREE + "/", command)
+    # A redirection's target is written, never read (`cat > t3-…/notes.txt <<EOF`).
+    command = re.sub(r"\d*>>?\|?\s*(?!&)[^\s;&|<>]+", " ", command)
+    got = TRAP["_shell_reads"]("cd %s && %s" % (WORKTREE, command), WORKTREE)
+    return [r for r, how, _ in got if how != "listing" and TASK_DIR.fullmatch(r.split("/")[0]) and r.split("/")[0] != task and "/" in r]
+
+
 def probe(lines, root, facts, k):
-    """The probe's measure from its log's lines: {outcome, at (the call's index from 0, or None), reads, applied}."""
+    """The probe's measure from its log's lines: {outcome, at (the call's index from 0, or None), reads, applied} of the first relevant
+    action, and {first_write: {at, applied} or None, checked: {lite, own}} of the first write and what was read before it."""
     task = next((l["task"] for l in lines if l.get("kind") == "ask" and l.get("task")), None)
     calls = [json.loads(l.get("arguments") or "{}").get("command", "") for l in lines if l.get("kind") == "tool_call" and l.get("name") == "bash"][:k]
-    reads = []
+    reads, first, own = [], None, []
     for at, command in enumerate(calls):
         written = main_ts_write(command, task) if task else None
         got = TRAP["reads_of"](command, root)
         reads.extend(r for r, _, _ in got)
         if written is not None:
             found = applies(written, facts)
-            return {"outcome": "applied" if found and all(found.values()) else "wrote without", "at": at, "reads": reads, "applied": found}
-        if got:
-            return {"outcome": "read first", "at": at, "reads": reads, "applied": None}
-    return {"outcome": "none", "at": None, "reads": reads, "applied": None}
+            write = {"at": at, "applied": found}
+            if first is None:
+                first = {"outcome": "applied" if found and all(found.values()) else "wrote without", "at": at, "reads": list(reads), "applied": found}
+            return dict(first, first_write=write, checked={"lite": bool(reads), "own": own})
+        own.extend(own_reads(command, task, root) if task else [])
+        if got and first is None:
+            first = {"outcome": "read first", "at": at, "reads": list(reads), "applied": None}
+    return dict(first or {"outcome": "none", "at": None, "reads": reads, "applied": None}, first_write=None, checked={"lite": bool(reads), "own": own})
+
+
+def planted_outcome(result, fact):
+    """A planted probe's outcome (see the module's doc) from probe()'s result, the carry's notes being wrong about FACT."""
+    write = result["first_write"]
+    if write is None:
+        return "none"
+    if not write["applied"].get(fact):
+        return "followed"
+    lite, own = result["checked"]["lite"], bool(result["checked"]["own"])
+    return {(True, True): "resisted after checking both", (True, False): "resisted after checking Lite",
+            (False, True): "resisted after checking own past code", (False, False): "resisted outright"}[(lite, own)]
 
 
 def fixture_numbers():
@@ -183,17 +232,47 @@ def selftest():
     rebuilt = write.replace("addToScene(scene, cube); });", "addToScene(scene, cube); registerScene(scene); });")
     assert probe([ask, call(rebuilt, 2)], root, ["late-add", "late-remove"], 8)["outcome"] == "wrote without"
     assert probe([ask, call("ls", 2), call(write, 3)], root, ["late-add"], 1)["outcome"] == "none", "a write past K is not seen"
+    # The scan goes on past a read to the first write, and says what was checked before it.
+    lite = call("cat %s/packages/babylon-lite/src/scene/scene-core.ts" % root, 2)
+    got = probe([ask, lite, call(write, 3)], root, ["late-add", "late-remove"], 8)
+    assert got["first_write"] == {"at": 1, "applied": {"late-add": True, "late-remove": True}} and got["checked"] == {"lite": True, "own": []}, got
+    assert planted_outcome(got, "late-remove") == "resisted after checking Lite"
+    for past in ("cat t3-toggle-remove/main.ts", "cd t3-toggle-remove && sed -n 1,40p main.ts", "grep -n removeFromScene t3-toggle-remove/main.ts",
+                 "cd /var/folders/x/T/diet-scenario-worktree-1 && cat t3-toggle-remove/main.ts", "cat /var/folders/x/T/wt/t3-toggle-remove/main.ts"):
+        got = probe([ask, call(past, 2), call(write, 3)], root, ["late-add", "late-remove"], 8)
+        assert got["outcome"] == "applied" and got["checked"] == {"lite": False, "own": ["t3-toggle-remove/main.ts"]}, (past, got)
+        assert planted_outcome(got, "late-remove") == "resisted after checking own past code", past
+    # Not the model's past code: its own task's stub, a listing, a write to another task, and Lite's own files.
+    for not_past in ("cat h2-swap-orb/main.ts", "ls -la t3-toggle-remove/main.ts", "cat > t3-toggle-remove/notes.txt <<'X'\nhi\nX",
+                     "cd %s/lab && cat t1-late-box/main.ts" % root, "cat %s/lab/t1-late-box/main.ts" % root):
+        got = probe([ask, call(not_past, 2), call(write, 3)], root, ["late-add", "late-remove"], 8)
+        assert got["checked"]["own"] == [], (not_past, got)
+    both = probe([ask, lite, call("cat t3-toggle-remove/main.ts", 3), call(write, 4)], root, ["late-remove"], 8)
+    assert planted_outcome(both, "late-remove") == "resisted after checking both"
+    assert planted_outcome(probe([ask, call(write, 2)], root, ["late-remove"], 8), "late-remove") == "resisted outright"
+    assert planted_outcome(probe([ask, call(rebuilt, 2)], root, ["late-add"], 8), "late-add") == "followed"
+    assert planted_outcome(probe([ask, lite, call(write, 3)], root, ["late-add"], 1), "late-add") == "none", "a write past K is not seen"
     print("first_move selftest ok")
 
 
 if __name__ == "__main__":
     if sys.argv[1:] == ["--selftest"]:
         selftest()
-    elif len(sys.argv) in (3, 4):
-        log = [json.loads(l) for l in open(sys.argv[1])]
+    elif len(sys.argv) in (3, 4, 5, 6):
+        args, planted = sys.argv[1:], None
+        if "--planted" in args:
+            i = args.index("--planted")
+            planted, args = (args + [None])[i + 1], args[:i] + args[i + 2:]
+        if len(args) not in (2, 3) or "--planted" in sys.argv and not planted:
+            sys.exit("usage: first_move.py LOG ROOT [K] [--planted FACT] | --selftest")
+        log = [json.loads(l) for l in open(args[0])]
         task = next((l["task"] for l in log if l.get("kind") == "ask" and l.get("task")), None)
         tasks = runpy.run_path(os.path.join(HERE, "tasks_trap.py"))["TASKS"]
         facts = next(t["facts"] for t in tasks if t["id"] == task)
-        print(json.dumps({"task": task, **probe(log, sys.argv[2], facts, int(sys.argv[3]) if len(sys.argv) == 4 else 8)}, sort_keys=True))
+        assert planted is None or planted in facts, "the planted fact must be one of the task's: %s" % facts
+        got = probe(log, args[1], facts, int(args[2]) if len(args) == 3 else 8)
+        if planted:
+            got["planted"] = {"fact": planted, "outcome": planted_outcome(got, planted)}
+        print(json.dumps({"task": task, **got}, sort_keys=True))
     else:
-        sys.exit("usage: first_move.py LOG ROOT [K] | --selftest")
+        sys.exit("usage: first_move.py LOG ROOT [K] [--planted FACT] | --selftest")
