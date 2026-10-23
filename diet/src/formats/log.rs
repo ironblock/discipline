@@ -1426,7 +1426,7 @@ pub enum Event {
         /// ran under (v19, #926); the claim stays the canned one.
         rehearsing_as: Option<String>,
         /// The nonce the head's first line carries (v20, #932), under the
-        /// `head_nonce` lever.
+        /// `head_nonce` lever; under a carry, the carried head's (#969).
         head_nonce: Option<String>,
         /// The sha256 of the phase tool's description, when one was supplied
         /// in place of the pinned template (v27, #948).

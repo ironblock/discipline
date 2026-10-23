@@ -375,7 +375,7 @@ pub enum Event {
         /// serve was told with `--rehearse-as`.
         rehearsing_as: Option<String>,
         /// The nonce the head's first line carries (#932), under the
-        /// `head_nonce` lever.
+        /// `head_nonce` lever; under a carry, the carried head's (#969).
         head_nonce: Option<String>,
         /// The phase tool's supplied description's sha256 (v27, #948).
         phase_tool_description_sha256: Option<String>,
@@ -3597,6 +3597,12 @@ impl<S: Streaming + 'static> Session<S> {
     pub fn with_carry(self, carry: Carry) -> Result<Self, String> {
         {
             let mut state = self.shared.lock();
+            // The head sent is the carried trunk's, so the start names the
+            // nonce it carries, not the one this session drew (#969).
+            let carried_nonce = carry
+                .trunk
+                .first()
+                .and_then(|first| crate::drive::regimen::nonce_in(&first.content));
             state.trunk = carry.trunk;
             match (&carry.object, state.interview.as_mut()) {
                 (Some(dump), Some(interview)) => {
@@ -3624,6 +3630,7 @@ impl<S: Streaming + 'static> Session<S> {
                     Event::Started {
                         carried_from,
                         carried_source,
+                        head_nonce,
                         ..
                     },
                 ..
@@ -3631,6 +3638,7 @@ impl<S: Streaming + 'static> Session<S> {
             {
                 *carried_from = Some(carry.from);
                 *carried_source = carry.source;
+                *head_nonce = carried_nonce;
             }
         }
         Ok(self)
@@ -28748,6 +28756,53 @@ pub(in crate::drive) mod tests {
             carried_source.as_deref(),
             Some(&["src/scene-core.ts".to_owned()][..])
         );
+    }
+
+    /// #969: under a carry the head sent is the carried trunk's, so the start
+    /// names the nonce that head's first line carries -- the run that wrote
+    /// the carry's -- and none when it carries none, never the nonce this
+    /// session drew and then replaced.
+    #[test]
+    fn a_carried_session_names_the_nonce_its_carried_head_carries() {
+        let from = log::CarriedFrom {
+            log_sha256: "c".repeat(64),
+            meditation_seq: 16,
+            trunk_sha256: "d".repeat(64),
+            object_sha256: None,
+            worktree: None,
+            variant_sha256: None,
+        };
+        let carried = |system: &str| {
+            Session::open_with(Canned::new(vec![]), template(), None, None, None, None)
+                .with_head_nonce("1111111111111111")
+                .with_carry(Carry {
+                    trunk: vec![crate::client::shape::Message::new(
+                        crate::client::shape::Role::System,
+                        system,
+                    )],
+                    object: None,
+                    from: from.clone(),
+                    source: None,
+                })
+                .expect("it carries")
+        };
+        let nonce_of = |session: &Session<Canned>| {
+            let state = session.shared.lock();
+            let Some(Logged {
+                event: Event::Started { head_nonce, .. },
+                ..
+            }) = state.log.first()
+            else {
+                panic!("a start line");
+            };
+            head_nonce.clone()
+        };
+        let nonced = carried(&format!(
+            "{}you are the trunk",
+            crate::drive::regimen::nonce_line("2222222222222222")
+        ));
+        assert_eq!(nonce_of(&nonced).as_deref(), Some("2222222222222222"));
+        assert_eq!(nonce_of(&carried("you are the trunk")), None);
     }
 
     /// #788: the model's proposal ends its turn -- one trunk request, the
