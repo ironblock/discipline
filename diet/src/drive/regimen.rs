@@ -883,6 +883,14 @@ pub fn nonce_line(nonce: &str) -> String {
     format!("Session nonce: {nonce}\n")
 }
 
+/// The nonce a head's first message opens with ([`nonce_line`]), or none
+/// (#969): what a carried trunk's head actually sends.
+#[must_use]
+pub fn nonce_in(first_message: &str) -> Option<String> {
+    let line = first_message.lines().next()?;
+    line.strip_prefix("Session nonce: ").map(str::to_owned)
+}
+
 /// A session's head nonce (#932): sixteen hex digits of the sha256 of
 /// `seed`, which a repeating runner gives as the run's own JSON, so no two
 /// runs of a batch share one.

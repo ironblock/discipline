@@ -64,6 +64,9 @@ pub struct Receipts {
     /// Whether the run's head carried its own nonce (#932): `session.start`
     /// names one.
     pub nonced: bool,
+    /// The nonces its sessions' heads carried (#969): a carried replay
+    /// sends its carry's head, so two runs can carry one nonce.
+    pub nonces: BTreeSet<String>,
     /// Each task's derived outcome (#942), from the run's `outcomes.json`
     /// when an analysis wrote one beside its log: `{"outcomes": {task: outcome}}`.
     pub outcomes: BTreeMap<String, String>,
@@ -153,6 +156,7 @@ impl Receipts {
             tasks,
             lanes,
             nonced: self.nonced && later.nonced,
+            nonces: self.nonces.union(&later.nonces).cloned().collect(),
             outcomes: self.outcomes,
             carried: true,
             carried_source: later.carried_source,
@@ -187,6 +191,7 @@ impl Receipts {
                 } if *exit != 0 => receipts.failed_commands += 1,
                 Event::SessionStart { head_nonce, .. } => {
                     receipts.nonced = head_nonce.is_some();
+                    receipts.nonces.extend(head_nonce.iter().cloned());
                 }
                 Event::Request { lane, .. } => {
                     lane_of.insert(line.seq, lane.tag().to_owned());
@@ -280,7 +285,7 @@ fn count(n: u64) -> f64 {
 fn rows(
     reasons: &BTreeSet<String>,
     tasks: &BTreeSet<String>,
-    (lanes, nonced): (&BTreeSet<String>, bool),
+    (lanes, carryover): (&BTreeSet<String>, &str),
 ) -> Vec<Row> {
     let row = |name: &str, source: &'static str, value: Box<dyn Fn(&Receipts) -> f64>| Row {
         name: name.to_owned(),
@@ -363,7 +368,7 @@ fn rows(
             value: Box::new(move |r| count(r.settles.get(&reason).copied().unwrap_or(0))),
         });
     }
-    rows.extend(prefill_rows(lanes, nonced));
+    rows.extend(prefill_rows(lanes, carryover));
     rows.extend(task_rows(tasks));
     rows.push(row(
         "unmet expectations",
@@ -504,16 +509,31 @@ fn outcomes_in(dir: &Path) -> BTreeMap<String, String> {
         .unwrap_or_default()
 }
 
+/// Whether the runs' cached prefill may include another run's (#932,
+/// #969): carryover-free only when every run's head carried a nonce and no
+/// two runs' heads carried the same one, as two replays of one carry do.
+#[must_use]
+pub fn carryover<'a>(runs: impl IntoIterator<Item = &'a Receipts>) -> &'static str {
+    let mut seen = BTreeSet::new();
+    let mut shared = false;
+    for run in runs {
+        if !run.nonced {
+            return "may include carryover from the run before: no head nonce";
+        }
+        shared |= run.nonces.iter().any(|nonce| !seen.insert(nonce));
+    }
+    if shared {
+        "may include carryover from another run: two runs' heads carried the same nonce"
+    } else {
+        "carryover-free: every run's head carried its own nonce"
+    }
+}
+
 /// Each lane's prefill rows (#932), cached and new.
-fn prefill_rows(lanes: &BTreeSet<String>, nonced: bool) -> Vec<Row> {
+fn prefill_rows(lanes: &BTreeSet<String>, carryover: &str) -> Vec<Row> {
     let mut rows = Vec::new();
     // Each lane's prefill (#932), cached and new, never 0 for a count no
-    // response gave; carryover-free only when every run's head was its own.
-    let carryover = if nonced {
-        "carryover-free: every run's head carried its own nonce"
-    } else {
-        "may include carryover from the run before: no head nonce"
-    };
+    // response gave; the label says whether a run's prefill may be another's.
     let source = format!(
         "each `response`'s `timings` `cache_n` and `prompt_n` (llama.cpp, TabbyAPI), else its \
          `usage` `cached_tokens` and the rest of `prompt_tokens` (a hosted API), by its \
@@ -926,11 +946,11 @@ pub fn table(dir: &Path, seed: u64) -> Result<(serde_json::Value, String), Strin
     let reasons: BTreeSet<String> = all().flat_map(|r| r.settles.keys().cloned()).collect();
     let tasks: BTreeSet<String> = all().flat_map(|r| r.tasks.keys().cloned()).collect();
     let lanes: BTreeSet<String> = all().flat_map(|r| r.lanes.keys().cloned()).collect();
-    let nonced = all().all(|r| r.nonced);
+    let carryover = carryover(all());
     let mut draws = Draws(seed);
     let mut json_rows = Vec::new();
     let mut markdown = header(&arms, &baseline);
-    for row in rows(&reasons, &tasks, (&lanes, nonced))
+    for row in rows(&reasons, &tasks, (&lanes, carryover))
         .into_iter()
         .chain(carried_rows(all().any(|r| r.carried)))
         .chain(outcome_rows(all()))
@@ -1025,6 +1045,41 @@ mod tests {
 
     /// #942: an empty refill is counted from the meditation line that says
     /// so, and a refill that carried something is not.
+    /// #969: carryover-free is a claim about every pair of runs. Runs whose
+    /// heads carried distinct nonces read free; two replays of one carry,
+    /// whose heads carried the carry's nonce, read as possibly carried over;
+    /// a run's own two sessions sharing its nonce are still its own.
+    #[test]
+    fn carryover_free_needs_every_runs_nonce_to_be_its_own() {
+        let run = |nonces: &[&str]| Receipts {
+            nonced: !nonces.is_empty(),
+            nonces: nonces.iter().map(|n| (*n).to_owned()).collect(),
+            ..Receipts::default()
+        };
+        let free = "carryover-free: every run's head carried its own nonce";
+        let distinct = [run(&["a1"]), run(&["b2"]), run(&["c3"])];
+        assert_eq!(carryover(&distinct), free);
+        let replays = [run(&["a1"]), run(&["a1"])];
+        assert!(carryover(&replays).starts_with("may include carryover from another run"));
+        let one_run_two_sessions = run(&["a1"]).merged(run(&["a1"]));
+        assert_eq!(carryover(&[one_run_two_sessions, run(&["b2"])]), free);
+        assert!(carryover(&[run(&["a1"]), run(&[])]).contains("no head nonce"));
+        // A run's later session counts too: its nonce shared with another run's is carryover.
+        assert!(
+            carryover(&[run(&["a1"]).merged(run(&["b2"])), run(&["b2"])])
+                .starts_with("may include")
+        );
+        // Read from the log: a start naming a nonce.
+        let nonced_log =
+            include_str!("../../formats/log/fixtures/valid/a-v20-head-carrying-its-nonce.jsonl");
+        let read = Receipts::of(&log::parse(nonced_log).expect("a log"), 0);
+        assert!(read.nonced && read.nonces.len() == 1, "{:?}", read.nonces);
+        assert!(
+            carryover(&[read.clone(), read]).starts_with("may include"),
+            "two replays of one head"
+        );
+    }
+
     #[test]
     fn an_empty_refill_is_counted_from_its_line() {
         let read = |text: &str| Receipts::of(&log::parse(text).expect("the fixture reads"), 0);
