@@ -3020,7 +3020,10 @@ fn a_carried_session_restores_the_worktree_its_refill_left() {
     ]);
     assert_ne!(code, Some(0), "{said}");
     assert!(
-        said["failure"].as_str().unwrap_or("").contains("would replace it"),
+        said["failure"]
+            .as_str()
+            .unwrap_or("")
+            .contains("would replace it"),
         "the runner refuses before serve is asked: {said}"
     );
     let _ = std::fs::remove_dir_all(&dir);
