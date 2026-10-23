@@ -1,0 +1,33 @@
+{
+ "about": "Tier c's read classifier fixtures (process_trap.py `reads_of`): each case a bash command as the model sends it, with ROOT standing for the run's Lite checkout, and the reads it makes of that checkout, each a path relative to it ('' for the checkout itself). `reads: []` is a known non-read. Modelled on the interviews smoke run's audited commands (the audit's section 4 classes), written fresh, never copied. `facts`, where given, are the facts the command targets.",
+ "reads": [
+  {"why": "an absolute cat of a source file", "cmd": "cat ROOT/packages/babylon-lite/src/scene/scene-core.ts", "reads": ["packages/babylon-lite/src/scene/scene-core.ts"], "facts": ["late-add", "late-family", "shadow-attach", "shadow-register"]},
+  {"why": "a relative cat after cd into the source (the audit's 45392)", "cmd": "cd ROOT/packages/babylon-lite/src && cat scene/mesh-scene-registry.ts", "reads": ["packages/babylon-lite/src/scene/mesh-scene-registry.ts"], "facts": ["late-add", "late-remove"]},
+  {"why": "orientation: listing the checkout, then its parts, after cd", "cmd": "ls ROOT; cd ROOT && ls packages; ls docs", "reads": ["", "packages", "docs"]},
+  {"why": "a grep with its pattern and a relative path after cd (the audit's GA class)", "cmd": "cd ROOT && grep -rn createTorus packages/babylon-lite", "reads": ["packages/babylon-lite"]},
+  {"why": "a keyword search targets its fact by the pattern", "cmd": "cd ROOT && grep -rn enqueueMaterialSwap packages/babylon-lite/src", "reads": ["packages/babylon-lite/src"], "facts": ["late-add"]},
+  {"why": "a grep with no path searches the working directory", "cmd": "cd ROOT/packages/babylon-lite/src && grep -rn setSubtreeVisible", "reads": ["packages/babylon-lite/src"], "facts": ["late-hide"]},
+  {"why": "sed -n prints part of a file: a read", "cmd": "sed -n '1,60p' ROOT/packages/babylon-lite/src/mesh/create-torus.ts", "reads": ["packages/babylon-lite/src/mesh/create-torus.ts"]},
+  {"why": "head with an option value is not a path", "cmd": "head -n 80 ROOT/AGENTS.md", "reads": ["AGENTS.md"]},
+  {"why": "a docs read", "cmd": "cat ROOT/docs/lite/01-getting-started.md | head -40", "reads": ["docs/lite/01-getting-started.md"], "facts": ["late-add", "late-hide"]},
+  {"why": "a read piped on: the grep reads only its input", "cmd": "cat ROOT/packages/babylon-lite/src/engine/surface.ts | grep -n devicePixelRatio", "reads": ["packages/babylon-lite/src/engine/surface.ts"], "facts": ["dpr-cap"]},
+  {"why": "git show of a source file at HEAD is a read of the checkout", "cmd": "git -C ROOT show HEAD:packages/babylon-lite/src/scene/scene-core.ts", "reads": ["packages/babylon-lite/src/scene/scene-core.ts"]},
+  {"why": "a page script fetching a source file over /@fs/ (the sealed smoke's 11689)", "cmd": "chrome-devtools evaluate_script \"async () => { const f = await (await fetch('/@fsROOT/packages/babylon-lite/src/scene/scene-core.ts')).text(); return f.length; }\" --pageId 1", "reads": ["packages/babylon-lite/src/scene/scene-core.ts"]},
+  {"why": "a /@fs/ base joined with a file name in the script", "cmd": "chrome-devtools evaluate_script \"async () => { const base = '/@fs/ROOT/packages/babylon-lite/src/'; const f = await (await fetch(base + 'scene/scene-core.ts')).text(); return f.slice(0, 100); }\" --pageId 1", "reads": ["packages/babylon-lite/src/scene/scene-core.ts"]},
+  {"why": "a dynamic import of a source module over /@fs/", "cmd": "chrome-devtools evaluate_script \"async () => { const m = await import('/@fs/ROOT/packages/babylon-lite/src/picking/ray.ts'); return Object.keys(m); }\" --pageId 1", "reads": ["packages/babylon-lite/src/picking/ray.ts"]},
+  {"why": "a read after a heredoc write in the same call", "cmd": "cat > main.ts <<'EOF'\nconst x = 1;\nEOF\ncat ROOT/packages/babylon-lite/src/scene/visibility.ts", "reads": ["packages/babylon-lite/src/scene/visibility.ts"], "facts": ["late-hide"]}
+ ],
+ "non_reads": [
+  {"why": "a heredoc writing main.ts whose code names Lite's API and a pngjs path (the audit's 42278 and 53481)", "cmd": "cat > h5-swap-to-pbr/main.ts <<'EOF'\nimport { addToScene, removeFromScene, enqueueMaterialSwap } from \"babylon-lite\";\n// see ROOT/packages/babylon-lite/src/scene/scene-core.ts\naddToScene(scene, mesh);\nEOF\nls ROOT/node_modules/.bin | grep chrome", "reads": []},
+  {"why": "tooling: listing node_modules for a PNG decoder (the audit's 42991)", "cmd": "ls ROOT/node_modules | grep png", "reads": []},
+  {"why": "tooling: sed -i of the model's own probe to require pngjs (the audit's 43039)", "cmd": "sed -i '' 's|pngjs|ROOT/node_modules/pngjs|' probe.cjs && node probe.cjs", "reads": []},
+  {"why": "tooling: node requiring pngjs from the checkout's node_modules (the audit's 43743)", "cmd": "node -e \"const PNG = require('ROOT/node_modules/pngjs').PNG; console.log(typeof PNG)\"", "reads": []},
+  {"why": "a heredoc probe script whose text names a fact's keyword", "cmd": "cat > probe.cjs <<'EOF'\n// checks _materialSwapQueue drained\nconst s = require('ROOT/node_modules/pngjs');\nEOF\nnode probe.cjs", "reads": []},
+  {"why": "the model's own tutorial answer in the worktree", "cmd": "cat t2-late-pbr/main.ts", "reads": []},
+  {"why": "a page script with no /@fs/ path", "cmd": "chrome-devtools evaluate_script \"() => window.scene ? 1 : 0\" --pageId 1", "reads": []},
+  {"why": "another checkout of the same name is not the run's", "cmd": "cat /srv/elsewhere/Babylon-Lite/packages/babylon-lite/src/scene/scene-core.ts", "reads": []},
+  {"why": "sed -i edits in place: a write (which the sandbox refuses), not a read", "cmd": "sed -i '' 's/a/b/' ROOT/packages/babylon-lite/src/scene/scene-core.ts", "reads": []},
+  {"why": "test -f is no read", "cmd": "test -f ROOT/packages/babylon-lite/src/scene/scene-core.ts && echo yes", "reads": []},
+  {"why": "a grep of the model's own file for a Lite keyword", "cmd": "grep -n addToScene h1-late-torus/main.ts", "reads": []}
+ ]
+}

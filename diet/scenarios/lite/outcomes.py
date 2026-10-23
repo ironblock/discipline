@@ -2,9 +2,10 @@
 arms and repeats, or one run); `--selftest` shows every outcome reachable.
 
 The scene-update family is the held-out tasks whose facts are `late-add` or `late-family` (h1, h2, h3, h5). For each, from the run's grade lines,
-its last attempt's diagnosis (`grades/<task>/attempt-<n>/diagnosis.json`) and the commands it ran between the refill and the task's last grade
-(`grader/process_trap.py`, against the checkout the run's `lite` service checked). A run that went on in a later session (#948, `next/`) is
-read there: its held-out tasks were graded in that session, all of it after the refill, against the checkout its own `lite` service checked:
+its last attempt's diagnosis (`grades/<task>/attempt-<n>/diagnosis.json`) and the reads in the task's own window: the commands between its
+first ask and its last grade, classified by `grader/process_trap.py` against the checkout the run's `lite` service checked. A task's window
+holds only its own reads, so tasks that share a fact are no longer credited each other's (the interviews smoke's audit). A run that went on
+in a later session (#948, `next/`) is read there, against the checkout its own `lite` service checked:
   sufficient           right, with no read of the Lite source or docs after the refill
   recoverable          right, after reading the source (re-derived)
   failed toward docs   wrong, having read only the docs after the refill, with a tier b attractor signature: never made the change (declared it
@@ -75,19 +76,17 @@ def run_outcomes(run):
     """{task: {outcome, reads, a, b, signature}} for one run's directory: its later session's, when it went on in one (#948)."""
     later = os.path.join(run, "next")
     if os.path.exists(os.path.join(later, "session.log")):
-        return session_outcomes(later, carried=True)
-    return session_outcomes(run, carried=False)
+        return session_outcomes(later)
+    return session_outcomes(run)
 
 
-def session_outcomes(run, carried):
-    """The outcomes of one session's directory; a carried session began at the refill, so every command it ran came after it."""
+def session_outcomes(run):
+    """The outcomes of one session's directory, each task's from its own window."""
     lines = [json.loads(line) for line in open(os.path.join(run, "session.log"))]
     provided = os.path.join(run, "services", "lite", "provides.json")
     root = json.load(open(provided))["root"] if os.path.exists(provided) else TRAP["REF"]
     grades = [line for line in lines if line["kind"] == "grade"]
-    tutorial = [t for t, task in TASKS.items() if task["split"] == "tutorial"]
-    tutorial_end = max([g["seq"] for g in grades if g["task"] in tutorial], default=-1)
-    refill = -1 if carried else next((line["seq"] for line in lines if line["kind"] in ("meditation", "meditation.skipped") and line["seq"] > tutorial_end), tutorial_end)
+    windows = TRAP["task_windows"](lines)
     calls = [(line["seq"], json.loads(line.get("arguments") or "{}").get("command", "")) for line in lines if line["kind"] == "tool_call" and line.get("name") == "bash"]
     out = {}
     for task in FAMILY:
@@ -97,7 +96,8 @@ def session_outcomes(run, carried):
         last = max(mine, key=lambda g: g["attempt"])
         diagnosis_path = os.path.join(run, "grades", task, "attempt-%d" % last["attempt"], "diagnosis.json")
         diagnosis = json.load(open(diagnosis_path)) if os.path.exists(diagnosis_path) else {"a": {"ok": False, "checks": []}, "b": {"ok": False, "checks": []}}
-        commands = [command for seq, command in calls if refill < seq <= last["seq"]]
+        lo, hi = windows.get(task, (last["seq"], last["seq"]))
+        commands = [command for seq, command in calls if lo < seq <= hi]
         reads = reads_of(commands, TASKS[task]["facts"], root)
         right = any(g["right"] for g in mine)
         b = diagnosis["b"]["checks"]
@@ -159,7 +159,27 @@ def selftest():
     assert set(cases) == set(OUTCOMES)
     assert FAMILY == ["h1-late-torus", "h2-swap-orb", "h3-click-drop", "h5-swap-to-pbr"], FAMILY
     carried_run(root)
+    shared_fact(root)
     print("outcomes selftest ok")
+
+
+def shared_fact(root):
+    """Tasks that share a fact are each credited only their own window's reads: h1's read of late-add's source makes h1 recoverable, and h2,
+    which shares late-add and read nothing in its window, stays sufficient (before per-task windows, both were recoverable)."""
+    import tempfile
+    with tempfile.TemporaryDirectory() as top:
+        run = os.path.join(top, "repeat-01")
+        os.makedirs(os.path.join(run, "services", "lite"))
+        with open(os.path.join(run, "services", "lite", "provides.json"), "w") as f:
+            json.dump({"root": root}, f)
+        cat = {"kind": "tool_call", "name": "bash", "arguments": json.dumps({"command": "cd %s/packages/babylon-lite/src && cat scene/scene-core.ts" % root})}
+        lines = [{"kind": "session.start"}, {"kind": "meditation"},
+                 {"kind": "ask", "task": "h1-late-torus"}, cat, {"kind": "grade", "task": "h1-late-torus", "attempt": 1, "right": True},
+                 {"kind": "ask", "task": "h2-swap-orb"}, {"kind": "grade", "task": "h2-swap-orb", "attempt": 1, "right": True}]
+        with open(os.path.join(run, "session.log"), "w") as f:
+            f.writelines(json.dumps(dict(line, seq=i)) + "\n" for i, line in enumerate(lines))
+        found = {t: v["outcome"] for t, v in run_outcomes(run).items()}
+        assert found == {"h1-late-torus": "recoverable", "h2-swap-orb": "sufficient"}, found
 
 
 def carried_run(root):
@@ -175,8 +195,8 @@ def carried_run(root):
         log(os.path.join(run, "session.log"), [{"kind": "session.start"}, {"kind": "grade", "task": "t1-first-scene", "attempt": 1, "right": True},
                                                {"kind": "meditation"}])
         cat = {"kind": "tool_call", "name": "bash", "arguments": json.dumps({"command": "cat %s/packages/babylon-lite/src/scene/scene-core.ts" % root})}
-        # A meditation of its own after the read: the read is still after the refill the session began at.
-        log(os.path.join(later, "session.log"), [{"kind": "session.start"}, cat, {"kind": "meditation"},
+        # A meditation of its own after the read: the read is still in the task's window.
+        log(os.path.join(later, "session.log"), [{"kind": "session.start"}, {"kind": "ask", "task": "h1-late-torus"}, cat, {"kind": "meditation"},
                                                  {"kind": "grade", "task": "h1-late-torus", "attempt": 1, "right": True}])
         with open(os.path.join(later, "services", "lite", "provides.json"), "w") as f:
             json.dump({"root": root}, f)

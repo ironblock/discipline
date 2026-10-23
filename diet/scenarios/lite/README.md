@@ -38,7 +38,7 @@ The header's `services` (`../README.md`, "Services"), outside the sandbox, per r
 - **Tier b, how it does it:** the mechanism the task's constraint states, read from the recorder at runtime and never from the model's source.
 - **Right** means both tiers pass.
 - **What the model is told is observations only:** each failing tier a check, expected against seen. A tier b failure is told only as the task's stated constraint, unmet. Never a cause: a cause would hand the model the fact the tutorial lets it find and the interviews capture (ruled 2026-10-21). Every check of both tiers, the dumps and the screenshots go to the attempt's `DIET_GRADE_OUT`.
-- **Tier c, the process:** defined in `grader/process_trap.py` and computed later from the session log. It records whether a fact was re-derived from the source before the last write to a task's `main.ts`.
+- **Tier c, the process:** defined in `grader/process_trap.py` and computed later from the session log. It records, per task window (from the task's first ask to its last grade), the reads the task made of the Lite checkout and whether one re-derived the task's fact from the source. A read is parsed, not matched: heredoc writes, `node_modules` tooling and the model's own files are no read; a relative path after `cd`, and a page script fetching `/@fs/` source, are. `reads_fixtures.json` holds known reads and non-reads, and `--selftest` reports both numbers.
 
 The graders were verified against 159 cases: each task's stub, its reference solution twice, and every wrong or alternative solution, each graded as expected. The references and alternatives stay private, outside this tree: worked solutions to pre-registered held-out tasks would teach any model trained on this tree.
 
