@@ -2914,7 +2914,9 @@ fn usage() -> String {
     out.push_str(
         "           [--void-cap K] [--dry-run] [--from-carry LOG [--carry-worktree DIR]\n",
     );
-    out.push_str("           [--carry-trunk FILE]] [--phase-tool-description FILE]\n");
+    out.push_str(
+        "           [--carry-trunk FILE] [--only-task TASK]] [--phase-tool-description FILE]\n",
+    );
     out.push_str("       (a scenario under k regimens, each one lever from the baseline, N\n");
     out.push_str("       times each, in a Williams order; #932, diet/scenarios/README.md)\n");
     out.push_str("       diet-drive table DIR [--seed S]\n");
@@ -2961,7 +2963,7 @@ fn scenario(args: &[String]) -> ExitCode {
             "usage: diet-drive scenario FILE --out DIR [--endpoint URL --model NAME \
              [--key-file FILE]] [--regimen FILE] [--worktree DIR] [--no-assemble] [--dry-run] \
              [--repeat N [--stop-file PATH] [--void-cap K]] [--from-carry LOG [--carry-worktree DIR] \
-             [--carry-trunk FILE]] [--phase-tool-description FILE]",
+             [--carry-trunk FILE] [--only-task TASK]] [--phase-tool-description FILE]",
         )
     };
     let Some((file, rest)) = args.split_first() else {
@@ -3065,18 +3067,20 @@ type BatchFlags = (
 );
 
 /// The carry's flags `scenario` and `arms` take (#948).
-const CARRY_FLAGS: [&str; 4] = [
+const CARRY_FLAGS: [&str; 5] = [
     "--from-carry",
     "--carry-worktree",
     "--carry-trunk",
     "--phase-tool-description",
+    "--only-task",
 ];
 
 /// One of [`CARRY_FLAGS`] on `options`: `--from-carry LOG`, a run from a
 /// recorded refill, carried from that log's last meditation and taking up
 /// the script after it; `--carry-worktree DIR`, its worktree for a log
 /// written before v26; `--carry-trunk FILE`, a delivery variant of its trunk;
-/// `--phase-tool-description FILE`, the phase tool's description.
+/// `--phase-tool-description FILE`, the phase tool's description;
+/// `--only-task TASK`, a first-move probe of one task from the refill.
 fn carry_flag(options: &mut diet::drive::scenario::RunOptions, flag: &str, value: &str) {
     match flag {
         "--from-carry" => {
@@ -3085,6 +3089,7 @@ fn carry_flag(options: &mut diet::drive::scenario::RunOptions, flag: &str, value
         }
         "--carry-worktree" => options.carry_worktree = Some(value.into()),
         "--carry-trunk" => options.carry_trunk = Some(value.into()),
+        "--only-task" => options.only_task = Some(value.to_owned()),
         _ => options.phase_tool_description = Some(value.into()),
     }
 }
@@ -3215,7 +3220,8 @@ fn arms(args: &[String]) -> ExitCode {
             EXIT_USAGE,
             "usage: diet-drive arms FILE --arms ARMS.toml --repeat N --out DIR [--endpoint URL \
              --model NAME [--key-file FILE]] [--no-assemble] [--stop-file PATH] [--void-cap K] [--dry-run] \
-             [--from-carry LOG [--carry-worktree DIR] [--carry-trunk FILE]] [--phase-tool-description FILE]",
+             [--from-carry LOG [--carry-worktree DIR] [--carry-trunk FILE] [--only-task TASK]] \
+             [--phase-tool-description FILE]",
         )
     };
     let Some((options, repeats, kept)) = batch_flags(args, &["--arms"]) else {

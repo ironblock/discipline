@@ -1,0 +1,182 @@
+{
+ "about": "The first-move detectors' fixtures (first_move.py): code that applies each fact, and code that misses it the ways the traps invite. Written fresh for these detectors, never a task's reference or alternative solution.",
+ "applies": [
+  {
+   "fact": "late-add",
+   "why": "one registration, then an add in a click handler",
+   "code": "registerScene(scene);\nstartEngine(engine, scene);\ncanvas.addEventListener('click', () => { addToScene(scene, torus); });"
+  },
+  {
+   "fact": "late-add",
+   "why": "the shadow form of registration, then an add on a timer",
+   "code": "registerSceneWithShadowSupport(scene, sg);\nsetTimeout(() => addToScene(scene, box), 5000);"
+  },
+  {
+   "fact": "late-family",
+   "why": "a PBR mesh primed before registration",
+   "code": "const prime = createSphere(); prime.material = createPbrMaterial();\naddToScene(scene, prime);\nregisterScene(scene);\nremoveFromScene(scene, prime);"
+  },
+  {
+   "fact": "late-family",
+   "why": "the PBR material made first, its throwaway mesh added before registering",
+   "code": "const pbr = createPbrMaterial({ metallic: 0.2 });\nconst seed = createBox(); seed.material = pbr; addToScene(scene, seed);\nregisterScene(scene);"
+  },
+  {
+   "fact": "late-remove",
+   "why": "a removal in the click handler",
+   "code": "registerScene(scene);\nbutton.addEventListener('click', () => { removeFromScene(scene, orb); });"
+  },
+  {
+   "fact": "late-remove",
+   "why": "a removal on pointerdown",
+   "code": "registerScene(scene);\ncanvas.onpointerdown = () => removeFromScene(scene, ball);"
+  },
+  {
+   "fact": "late-hide",
+   "why": "the scene's visibility call in a handler",
+   "code": "registerScene(scene);\ncanvas.addEventListener('click', () => setMeshVisible(scene, cube, false));"
+  },
+  {
+   "fact": "late-hide",
+   "why": "a subtree hidden on a timer",
+   "code": "registerScene(scene);\nsetTimeout(() => { setSubtreeVisible(scene, group, false); }, 2000);"
+  },
+  {
+   "fact": "material-dirty",
+   "why": "the dirty mark after a colour change",
+   "code": "mat.diffuseColor = [1, 0, 0];\nmarkMaterialUboDirty(mat);"
+  },
+  {
+   "fact": "material-dirty",
+   "why": "material tracking on",
+   "code": "enableMaterialTracking(scene);\nmat.diffuseColor = [0, 1, 0];"
+  },
+  {
+   "fact": "pick-fn-css",
+   "why": "pickAsync fed the event's CSS position",
+   "code": "canvas.addEventListener('click', async (e) => { const hit = await pickAsync(picker, e.offsetX, e.offsetY); window.pickResult = hit; });"
+  },
+  {
+   "fact": "pick-fn-css",
+   "why": "a picker's pick fed clientX and clientY",
+   "code": "canvas.addEventListener('pointerdown', async (ev) => { const r = canvas.getBoundingClientRect(); window.pickResult = await picker.pick(ev.clientX - r.left, ev.clientY - r.top); });"
+  },
+  {
+   "fact": "dpr-cap",
+   "why": "the engine option set",
+   "code": "const engine = await createEngine(canvas, { maxDevicePixelRatio: 1 });"
+  },
+  {
+   "fact": "dpr-cap",
+   "why": "the option in a variable",
+   "code": "const opts = { antialias: true, maxDevicePixelRatio: 2 };\nconst engine = await createEngine(canvas, opts);"
+  },
+  {
+   "fact": "late-family",
+   "why": "primed, then the material swapped in the handler",
+   "code": "const seed = createSphere(); seed.material = createPbrMaterial(); addToScene(scene, seed);\nregisterScene(scene);\ncanvas.addEventListener('click', () => { statue.material = createPbrMaterial(); });"
+  }
+ ],
+ "misses": [
+  {
+   "fact": "late-add",
+   "why": "re-registering in the handler (the forbidden rebuild)",
+   "code": "registerScene(scene);\ncanvas.addEventListener('click', () => { addToScene(scene, torus); registerScene(scene); });"
+  },
+  {
+   "fact": "late-add",
+   "why": "the add before registration, nothing late",
+   "code": "addToScene(scene, torus);\nregisterScene(scene);"
+  },
+  {
+   "fact": "late-add",
+   "why": "a buildScene in the handler",
+   "code": "registerScene(scene);\ncanvas.addEventListener('click', () => { addToScene(scene, torus); buildScene(scene); });"
+  },
+  {
+   "fact": "late-add",
+   "why": "only a comment mentions the late add",
+   "code": "registerScene(scene);\n// canvas.addEventListener('click', () => addToScene(scene, torus));"
+  },
+  {
+   "fact": "late-family",
+   "why": "no primer: the PBR material made after registering",
+   "code": "registerScene(scene);\ncanvas.addEventListener('click', () => { torus.material = createPbrMaterial(); addToScene(scene, torus); });"
+  },
+  {
+   "fact": "late-family",
+   "why": "a PBR material made but no mesh added before registration",
+   "code": "const pbr = createPbrMaterial();\nregisterScene(scene);\naddToScene(scene, ring);"
+  },
+  {
+   "fact": "late-remove",
+   "why": "hiding instead of removing",
+   "code": "registerScene(scene);\nbutton.addEventListener('click', () => setMeshVisible(scene, orb, false));"
+  },
+  {
+   "fact": "late-remove",
+   "why": "removed at boot, not on the event",
+   "code": "removeFromScene(scene, orb);\nregisterScene(scene);"
+  },
+  {
+   "fact": "late-hide",
+   "why": "the mesh's own visible flag",
+   "code": "registerScene(scene);\ncanvas.addEventListener('click', () => { setMeshVisible(scene, cube, true); cube.visible = false; });"
+  },
+  {
+   "fact": "late-hide",
+   "why": "no handler",
+   "code": "setMeshVisible(scene, cube, false);\nregisterScene(scene);"
+  },
+  {
+   "fact": "material-dirty",
+   "why": "a colour change with no dirty mark",
+   "code": "mat.diffuseColor = [1, 0, 0];"
+  },
+  {
+   "fact": "material-dirty",
+   "why": "only the docs' name for it, in a comment",
+   "code": "// markMaterialUboDirty(mat)\nmat.alpha = 0.5;"
+  },
+  {
+   "fact": "pick-fn-css",
+   "why": "the position scaled by devicePixelRatio",
+   "code": "canvas.addEventListener('click', async (e) => { window.pickResult = await pickAsync(picker, e.offsetX * devicePixelRatio, e.offsetY * devicePixelRatio); });"
+  },
+  {
+   "fact": "pick-fn-css",
+   "why": "a pick at a fixed point, not the event's",
+   "code": "canvas.addEventListener('click', async () => { window.pickResult = await pickAsync(picker, 400, 300); });"
+  },
+  {
+   "fact": "dpr-cap",
+   "why": "no cap",
+   "code": "const engine = await createEngine(canvas, { antialias: true });"
+  },
+  {
+   "fact": "dpr-cap",
+   "why": "the cap only in a comment",
+   "code": "// maxDevicePixelRatio: 1\nconst engine = await createEngine(canvas);"
+  },
+  {
+   "fact": "late-family",
+   "why": "primed, then rebuilt later anyway",
+   "code": "const seed = createBox(); seed.material = createPbrMaterial(); addToScene(scene, seed);\nregisterScene(scene);\nsetTimeout(() => { statue.material = createPbrMaterial(); registerScene(scene); }, 9000);"
+  },
+  {
+   "fact": "late-family",
+   "why": "primed, then the mesh replaced rather than swapped",
+   "code": "const seed = createBox(); seed.material = createPbrMaterial(); addToScene(scene, seed);\nregisterScene(scene);\ncanvas.addEventListener('click', () => { removeFromScene(scene, statue); addToScene(scene, shiny); });"
+  },
+  {
+   "fact": "late-family",
+   "why": "primed, then torn down and rebuilt through a helper",
+   "code": "async function build() { scene = createSceneContext(engine); const seed = createBox(); seed.material = createPbrMaterial(); addToScene(scene, seed); registerScene(scene); }\nawait build();\nsetTimeout(async () => { disposeScene(scene); await build(); }, 9000);"
+  },
+  {
+   "fact": "late-add",
+   "why": "the late add after a teardown in the handler",
+   "code": "registerScene(scene);\ncanvas.addEventListener('click', () => { disposeScene(scene); scene = createSceneContext(engine); addToScene(scene, torus); });"
+  }
+ ]
+}
