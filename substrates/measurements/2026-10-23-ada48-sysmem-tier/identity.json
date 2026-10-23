@@ -1,0 +1,15 @@
+{
+ "components": {
+  "serving_commit": "be74bf0a00bcb3a518e6feb7606f150c189be637",
+  "exllamav3_wheel_sha256": "c810dc4ad13e105cc62da2354405ae3d967c143359d683f323149a45c25fc702",
+  "exllamav3_extension_sha256": "9157a0af8dc1135ffccdf99c86fc981f55fbbfe7f9ee659d93deced887f8a89d",
+  "torch": "2.11.0+cu130",
+  "cuda_runtime": "13.0",
+  "nvidia_driver": "615.71.10",
+  "python": "3.12.14",
+  "package_set_sha256": "b5ad92d13e847b3cbe01adc4102839b4ed83dc4ab458d63a95086c6d554dc802",
+  "config_redacted_sha256": "985f6c09921b4c38a3d0f913ccfb21c4463e7f134844dfa7cb0bb9e2b2d314d3",
+  "config_redaction_diff_sha256": "574323e74749c93d3839274ed41aad3cf8833420f2c7e68b543be29d56a02702"
+ },
+ "engine_identity": "6c51e914267e4e32df352267e6f0a7481d9f820cbe7562457d403d36dd9244bc"
+}
