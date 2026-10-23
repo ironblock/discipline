@@ -2900,28 +2900,47 @@ mod tests {
 
     /// The lint fires BEFORE the call, and the drive stops.
     ///
-    /// A dated regime tag is how this arrives in practice -- an arm named for
-    /// the day it was run -- and the meditation's render puts the arm at the top of
-    /// every system prompt, so the date is in the frozen head of every turn.
+    /// The meditation's render is the system prompt, so whatever it carries
+    /// is in the frozen head of every turn after it. The arm no longer reaches
+    /// it (a dated arm, below, drives through); a note does, so a captured
+    /// note naming a day is how a date arrives here: the meditation at turn
+    /// two renders it, and turn three's head would carry it.
     #[test]
     fn a_head_carrying_a_date_stops_the_drive_before_the_call() {
         let ground = Ground::make("dated-head");
-        let mut dated = regime();
-        dated.arm = "dev-loop-2026-09-13".to_owned();
-        let script = canned::script(dated);
+        let script = canned::script(regime());
+        let mut acts = canned::acts();
+        acts[3] = Act::Answer(canned::reply(
+            "DECISION: ship the release cut on 2026-09-13",
+        ));
 
-        let halted = against(&script, canned::acts(), &ground)
-            .expect_err("a head carrying a date is refused");
+        let halted =
+            against(&script, acts, &ground).expect_err("a head carrying a date is refused");
         let Halt::HeadCarriesATimestamp { turn, lane, found } = &halted else {
             panic!("the drive stopped for the wrong reason: {halted:?}");
         };
-        assert_eq!(*turn, 1, "before the first call, not after the run");
+        assert_eq!(
+            *turn, 3,
+            "before turn three's call, the first whose head carries the note"
+        );
         assert_eq!(lane, MAIN);
         assert_eq!(found.found, "2026-09-13");
         assert!(
             format!("{halted}").contains("midnight"),
             "the complaint says what a dated head costs: {halted}"
         );
+    }
+
+    /// An arm named for the day it was run no longer dates the head: the
+    /// render names no arm (the maintainer's ruling, 2026-10-23), so the drive
+    /// runs where it used to stop at the lint.
+    #[test]
+    fn a_dated_arm_no_longer_reaches_the_head() {
+        let ground = Ground::make("dated-arm");
+        let mut dated = regime();
+        dated.arm = "dev-loop-2026-09-13".to_owned();
+        let script = canned::script(dated);
+        against(&script, canned::acts(), &ground).expect("a dated arm is not in the head");
     }
 
     /// #79's first acceptance row, end to end on this crate's own meditation.
