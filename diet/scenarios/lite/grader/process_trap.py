@@ -170,6 +170,35 @@ def _resolve(token, cwd):
     return os.path.join(cwd, token) if cwd else None
 
 
+# A redirection: an output's operator, with its target or alone (`2>/dev/null`, `> out.txt`, `&>log`), or an input's.
+OUT_REDIRECT = re.compile(r"^(?:\d*|&)>>?(.*)$")
+IN_REDIRECT = re.compile(r"^\d*<(.*)$")
+
+
+def _unredirected(args):
+    """`args` with every redirection taken out: an output's target is written, never read, so it goes with its operator; an input's file
+    is read, so it stays as an operand. A target spaced from its operator is the next token."""
+    out, i = [], 0
+    while i < len(args):
+        a = args[i]
+        m = OUT_REDIRECT.match(a)
+        if m:
+            i += 1 if m.group(1) else 2
+            continue
+        m = IN_REDIRECT.match(a)
+        if m and not a.startswith("<<"):
+            if m.group(1):
+                out.append(m.group(1))
+                i += 1
+            else:
+                out.extend(args[i + 1:i + 2])
+                i += 2
+            continue
+        out.append(a)
+        i += 1
+    return out
+
+
 def _shell_reads(cmd, root):
     """[(relpath, how, pattern)] of one bash call's reads of the checkout. Each call starts in the worktree (cwd unknown, never the
     checkout); `cd` moves it within the call. how is content, listing or search; pattern is a search's pattern."""
@@ -181,7 +210,7 @@ def _shell_reads(cmd, root):
             seg = seg[1:]
         if not seg:
             continue
-        verb, args = os.path.basename(seg[0]), seg[1:]
+        verb, args = os.path.basename(seg[0]), _unredirected(seg[1:])
         if verb == "cd":
             target = args[0] if args else None
             cwd = _resolve(target, cwd) if target and target != "-" else None
