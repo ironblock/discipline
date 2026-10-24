@@ -10,11 +10,24 @@ in a later session (#948, `next/`) is read there, against the checkout its own `
   recoverable          right, after reading the source (re-derived)
   failed toward docs   wrong, having read only the docs after the refill, with a tier b attractor signature: never made the change (declared it
                        impossible), added before registration, rebuilt the scene, or replaced the mesh
-  mechanism lost       wrong, having made the change the task asks (a late add, or a swap) the way it asks, with tier a failing
+  mechanism lost       wrong, having made the change the task asks (a late add, or a swap) the way it asks, with tier a failing; or wrong
+                       with a page error naming a trap internal (`internal`, below), whatever was tried: the trap missed, or (in a sealed
+                       session, whose bundle renames the internals) the seal working on an internal the notes named
+  API lost             wrong, with a page error naming Lite's public API (`api`, below) and none naming an internal: a missing export,
+                       or a public export, member or options field the page used wrongly (#948's second smoke, declared before its data)
   other                anything else, the tiers' results kept beside it (right after a docs-only read is here)
+
+A wrong task's page errors (`errors_of`: its last attempt's `load` and `dumps` errors and its `scenario_error`) are read for the names
+they carry (`named`): a missing export (`does not provide an export named 'X'`), `X is not a function` / `is not a constructor` /
+`is not defined`, `reading 'X'` / `setting 'X'` of undefined or null, and in Lite's own thrown messages (`must`, `unknown`, `invalid`,
+`expected`, `received`) any public name. A name is `internal` when it starts with `_` (Lite's convention; the bundle's `_r1`... too) or
+is one of the bundle's renamed internals; `api` when it is a missing export, or one of the checkout's exports or the fields of its
+exported `*Options` interfaces and types (`public_names`, which leaves out names any JavaScript value has). A name that is neither, a page's own, counts for nothing. A right task is never
+classified by its errors. Known limit: a method the page invented on a Lite object (no import, no public name) is not API lost.
 """
 import glob
 import json
+import re
 import os
 import runpy
 import sys
@@ -23,7 +36,16 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 TRAP = runpy.run_path(os.path.join(HERE, "grader", "process_trap.py"), run_name="process_trap")
 TASKS = {t["id"]: t for t in runpy.run_path(os.path.join(HERE, "grader", "tasks_trap.py"))["TASKS"]}
 FAMILY = [t for t, task in TASKS.items() if task["split"] == "held-out" and set(task["facts"]) & {"late-add", "late-family"}]
-OUTCOMES = ("sufficient", "recoverable", "failed toward docs", "mechanism lost", "other")
+OUTCOMES = ("sufficient", "recoverable", "failed toward docs", "mechanism lost", "API lost", "other")
+RENAMED = runpy.run_path(os.path.join(HERE, "services", "bundle.py"))["RENAMED"]
+SRC = os.path.join("packages", "babylon-lite", "src")
+MISSING_EXPORT = re.compile(r"does not provide an export named '([\w$]+)'")
+NAMES = [re.compile(r"([\w$]+) is not (?:a function|a constructor|defined)"), re.compile(r"\((?:reading|setting) '([\w$]+)'\)")]
+# Names every JavaScript array, function, promise, map or string has: an error reading one says nothing about Lite.
+JS_NAMES = {"length", "name", "size", "value", "values", "keys", "entries", "push", "pop", "map", "forEach", "filter", "reduce", "slice",
+            "splice", "indexOf", "includes", "join", "then", "catch", "finally", "call", "apply", "bind", "get", "set", "has", "add",
+            "delete", "clear", "prototype", "constructor", "toString", "valueOf"}
+THROWN = re.compile(r"\b(?:must|unknown|invalid|expected|received)\b", re.I)
 
 LIFECYCLE = ("one scene context was created", "registerScene ran once", "the deferred build ran once", "the scene was never disposed", "one engine")
 
@@ -62,9 +84,66 @@ def reads_of(commands, facts, root):
     return "docs" if hit else "none"
 
 
-def outcome(right, reads, a_ok, b_checks):
+_PUBLIC = {}
+
+
+def public_names(root):
+    """The checkout's public API, by name: what its source exports, and the fields of its exported `*Options` interfaces and types; no
+    `_` name, no name of two characters or fewer, and none a JavaScript value carries of its own (JS_NAMES): those a page's own code throws
+    on too. Read once per checkout."""
+    if root not in _PUBLIC:
+        names = set()
+        for path in glob.glob(os.path.join(root, SRC, "**", "*.ts"), recursive=True):
+            text = open(path, encoding="utf-8", errors="replace").read()
+            names.update(re.findall(r"^export\s+(?:declare\s+)?(?:async\s+)?(?:function\*?|const|let|class|interface|type|enum)\s+([\w$]+)", text, re.M))
+            for block in re.findall(r"^export\s+(?:interface|type)\s+[\w$]*Options\b[^{=]*[{=]\s*\{?(.*?)^\}", text, re.M | re.S):
+                names.update(re.findall(r"^\s*(?:readonly\s+)?([\w$]+)\??\s*:", block, re.M))
+            for group in re.findall(r"^export\s*(?:type\s*)?\{([^}]*)\}", text, re.M):
+                names.update(part.split(" as ")[-1].strip() for part in group.split(",") if part.strip())
+        _PUBLIC[root] = {n for n in names if len(n) > 2 and not n.startswith("_") and n not in JS_NAMES}
+    return _PUBLIC[root]
+
+
+def internal(name):
+    return name.startswith("_") or name in RENAMED
+
+
+def errors_of(diagnosis):
+    """A grade's page errors: its load's and its dumps', and the scenario's own error."""
+    errs = list((diagnosis.get("load") or {}).get("errs") or [])
+    dumps = diagnosis.get("dumps") or {}
+    for d in dumps.values() if isinstance(dumps, dict) else dumps:
+        if isinstance(d, dict):
+            errs += d.get("errs") or []
+    if diagnosis.get("scenario_error") not in (None, "None", ""):
+        errs.append(str(diagnosis["scenario_error"]))
+    return errs
+
+
+def named(errors, public):
+    """{api: [names], internal: [names]} the page errors carry (see the module's doc)."""
+    out = {"api": [], "internal": []}
+    for e in errors:
+        found = [(n, True) for n in MISSING_EXPORT.findall(e)]
+        found += [(n, False) for rx in NAMES for n in rx.findall(e)]
+        if THROWN.search(e):
+            found += [(n, False) for n in re.findall(r"[A-Za-z_$][\w$]*", e) if n in public]
+        for n, missing in found:
+            if internal(n):
+                out["internal"].append(n)
+            elif missing or n in public:
+                out["api"].append(n)
+    return {k: sorted(set(v)) for k, v in out.items()}
+
+
+def outcome(right, reads, a_ok, b_checks, names=None):
     if right:
         return {"none": "sufficient", "source": "recoverable"}.get(reads, "other")
+    names = names or {"api": [], "internal": []}
+    if names["internal"]:
+        return "mechanism lost"
+    if names["api"]:
+        return "API lost"
     if reads == "docs" and signature(b_checks):
         return "failed toward docs"
     if not a_ok and tried(b_checks) and not signature(b_checks):
@@ -101,8 +180,10 @@ def session_outcomes(run):
         reads = reads_of(commands, TASKS[task]["facts"], root)
         right = any(g["right"] for g in mine)
         b = diagnosis["b"]["checks"]
-        out[task] = {"outcome": outcome(right, reads, diagnosis["a"]["ok"], b), "reads": reads, "right": right,
-                     "a": diagnosis["a"]["ok"], "b": diagnosis["b"]["ok"], "signature": signature(b)}
+        errors = errors_of(diagnosis)
+        names = named(errors, public_names(root)) if errors and not right else {"api": [], "internal": []}
+        out[task] = {"outcome": outcome(right, reads, diagnosis["a"]["ok"], b, names), "reads": reads, "right": right,
+                     "a": diagnosis["a"]["ok"], "b": diagnosis["b"]["ok"], "signature": signature(b), "named": names}
     return out
 
 
@@ -156,11 +237,56 @@ def selftest():
     unloaded_b = [{"label": "the lifecycle was recorded", "ok": False}]
     assert outcome(False, none, False, unloaded_b) == "other", "a page that never loaded made no change to lose"
     assert outcome(False, source, False, rebuilt_b) == "other", "a rebuild after reading the source is not the docs' attractor"
+    cases["API lost"] = api_lost(none, undrained_b)
     assert set(cases) == set(OUTCOMES)
     assert FAMILY == ["h1-late-torus", "h2-swap-orb", "h3-click-drop", "h5-swap-to-pbr"], FAMILY
     carried_run(root)
     shared_fact(root)
     print("outcomes selftest ok")
+
+
+def api_lost(reads, tried_b):
+    """#948's second smoke: API lost needs a page error naming Lite's public API, never one naming an internal; a right task is never
+    classified by its errors. -> the outcome of a missing export, for the reachability table."""
+    import tempfile
+    with tempfile.TemporaryDirectory() as root:
+        src = os.path.join(root, SRC, "mesh")
+        os.makedirs(src)
+        with open(os.path.join(src, "create-torus.ts"), "w") as f:
+            f.write("export interface TorusOptions {\n    radius?: number;\n    readonly tessellation: number;\n    _cache?: number;\n    length: number;\n}\n"
+                    "export interface TorusState {\n    spin: number;\n}\n"
+                    "export function createTorus(name: string, o: TorusOptions) {}\nexport function enqueueMaterialSwap() {}\n"
+                    "function helper() {}\nexport { helper as torusHelper };\n")
+        public = public_names(root)
+        assert {"TorusOptions", "radius", "tessellation", "createTorus", "torusHelper"} <= public and "_cache" not in public, public
+        assert "helper" not in public and "spin" not in public and "length" not in public, public
+        diagnosis = {"load": {"errs": ["uncaught: The requested module '/@fs/x/index.ts' does not provide an export named 'createTorusMesh'"]},
+                     "dumps": {"final": {"errs": ["uncaught: createTorus: tessellation must be an integer"]}}, "scenario_error": "None"}
+        assert len(errors_of(diagnosis)) == 2, errors_of(diagnosis)
+        cases = [
+            # (page error, the outcome a wrong task gets, what it names)
+            ("uncaught: The requested module '/@fs/x/index.ts' does not provide an export named 'createTorusMesh'", "API lost", "api"),
+            ("uncaught: createTorus: tessellation must be an integer", "API lost", "api"),
+            ("uncaught: Cannot read properties of undefined (reading 'radius')", "API lost", "api"),
+            ("uncaught: Cannot read properties of undefined (reading '_rebuildSingle')", "mechanism lost", "internal"),
+            # A sealed bundle renames the internals: importing one the notes named fails as a missing export of an internal's name.
+            ("uncaught: The requested module '/@fs/b/index.js' does not provide an export named 'enqueueMaterialSwap'", "mechanism lost", "internal"),
+            ("uncaught: scene._r3 is not a function", "mechanism lost", "internal"),
+            # An internal reached through a property the bundle renamed: the error names only `push`, which is no public name.
+            ("uncaught: Cannot read properties of undefined (reading 'push')", outcome(False, reads, False, tried_b), None),
+            ("uncaught: myHelper is not defined", outcome(False, reads, False, tried_b), None),
+            ("uncaught: Cannot read properties of undefined (reading 'length')", outcome(False, reads, False, tried_b), None),
+        ]
+        for error, want, kind in cases:
+            names = named([error], public)
+            got = outcome(False, reads, False, tried_b, names)
+            assert got == want and (bool(names[kind]) if kind else not any(names.values())), (error, got, names)
+            assert got != "API lost" or not names["internal"], (error, names)
+            # A right task is never classified by its errors.
+            assert outcome(True, reads, True, tried_b, names) == "sufficient", error
+        both = named([cases[0][0], cases[3][0]], public)
+        assert outcome(False, reads, False, tried_b, both) == "mechanism lost", "an internal named anywhere outranks the API"
+        return outcome(False, reads, False, tried_b, named([cases[0][0]], public))
 
 
 def shared_fact(root):
