@@ -17,13 +17,14 @@ in a later session (#948, `next/`) is read there, against the checkout its own `
                        or a public export, member or options field the page used wrongly (#948's second smoke, declared before its data)
   other                anything else, the tiers' results kept beside it (right after a docs-only read is here)
 
-A wrong task's page errors (`errors_of`: its last attempt's `load` and `dumps` errors and its `scenario_error`) are read for the names
+A wrong task's page errors (`errors_of`: its last attempt's `load` and `dumps` errors) are read for the names
 they carry (`named`): a missing export (`does not provide an export named 'X'`), `X is not a function` / `is not a constructor` /
 `is not defined`, `reading 'X'` / `setting 'X'` of undefined or null, and in Lite's own thrown messages (`must`, `unknown`, `invalid`,
 `expected`, `received`) any public name. A name is `internal` when it starts with `_` (Lite's convention; the bundle's `_r1`... too) or
 is one of the bundle's renamed internals; `api` when it is a missing export, or one of the checkout's exports or the fields of its
 exported `*Options` interfaces and types (`public_names`, which leaves out names any JavaScript value has). A name that is neither, a page's own, counts for nothing. A right task is never
-classified by its errors. Known limit: a method the page invented on a Lite object (no import, no public name) is not API lost.
+classified by its errors. The grader's own exception (`scenario_error`) is never a page error: it is listed beside the outcome as
+`grader_error`, and the task falls through to the rules above. Known limit: a method the page invented on a Lite object (no import, no public name) is not API lost.
 """
 import glob
 import json
@@ -109,15 +110,19 @@ def internal(name):
 
 
 def errors_of(diagnosis):
-    """A grade's page errors: its load's and its dumps', and the scenario's own error."""
+    """A grade's page errors: its load's and its dumps'. Never its `scenario_error`, the grader's own exception (see `grader_error`)."""
     errs = list((diagnosis.get("load") or {}).get("errs") or [])
     dumps = diagnosis.get("dumps") or {}
     for d in dumps.values() if isinstance(dumps, dict) else dumps:
         if isinstance(d, dict):
             errs += d.get("errs") or []
-    if diagnosis.get("scenario_error") not in (None, "None", ""):
-        errs.append(str(diagnosis["scenario_error"]))
     return errs
+
+
+def grader_error(diagnosis):
+    """The grader's own exception, or None: listed beside the outcome so a grader bug shows, never read as the page's error."""
+    e = diagnosis.get("scenario_error")
+    return None if e in (None, "None", "") else str(e)
 
 
 def named(errors, public):
@@ -183,7 +188,8 @@ def session_outcomes(run):
         errors = errors_of(diagnosis)
         names = named(errors, public_names(root)) if errors and not right else {"api": [], "internal": []}
         out[task] = {"outcome": outcome(right, reads, diagnosis["a"]["ok"], b, names), "reads": reads, "right": right,
-                     "a": diagnosis["a"]["ok"], "b": diagnosis["b"]["ok"], "signature": signature(b), "named": names}
+                     "a": diagnosis["a"]["ok"], "b": diagnosis["b"]["ok"], "signature": signature(b), "named": names,
+                     "grader_error": grader_error(diagnosis)}
     return out
 
 
@@ -262,7 +268,12 @@ def api_lost(reads, tried_b):
         assert "helper" not in public and "spin" not in public and "length" not in public, public
         diagnosis = {"load": {"errs": ["uncaught: The requested module '/@fs/x/index.ts' does not provide an export named 'createTorusMesh'"]},
                      "dumps": {"final": {"errs": ["uncaught: createTorus: tessellation must be an integer"]}}, "scenario_error": "None"}
-        assert len(errors_of(diagnosis)) == 2, errors_of(diagnosis)
+        assert len(errors_of(diagnosis)) == 2 and grader_error(diagnosis) is None, errors_of(diagnosis)
+        # The grader's own exception names a public field and says "expected": never the page's error, and listed.
+        grader_bug = {"load": {"errs": []}, "dumps": {}, "scenario_error": "TypeError: Cannot read properties of undefined (reading 'radius'); expected a dump"}
+        assert errors_of(grader_bug) == [] and named(errors_of(grader_bug), public) == {"api": [], "internal": []}, grader_bug
+        assert grader_error(grader_bug) == grader_bug["scenario_error"]
+        assert outcome(False, reads, False, tried_b, named(errors_of(grader_bug), public)) != "API lost"
         cases = [
             # (page error, the outcome a wrong task gets, what it names)
             ("uncaught: The requested module '/@fs/x/index.ts' does not provide an export named 'createTorusMesh'", "API lost", "api"),
