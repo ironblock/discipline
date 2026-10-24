@@ -2,7 +2,9 @@
 `--check` exits 1, naming the file, when either is not what it would write. The prompts' one source is grader/tasks_trap.py.
 
 - `lite.jsonl`: the eight tutorial tasks, a declared meditation (the refill every arm crosses; golden acknowledges it as skipped), then the twelve
-  held-out tasks; each ask is graded by check.py, three attempts, the feedback observations only.
+  held-out tasks; each ask is graded by check.py, three attempts, the feedback observations only. Every ask, grade and declared meditation
+  waits up to PATIENCE (2700 s) for the session to settle, not the runner's 900 s default; `--check` refuses a scenario whose settling steps
+  wait less.
 - `lite-empty.jsonl`: `lite.jsonl` whose canned interviews capture nothing, so a rehearsal crosses an empty refill (`meditation_empty = "refill"`).
 
 Both start the same services: the pinned Lite checkout, the model's and the grader's dev servers, and the grader's and the model's browser daemons.
@@ -31,6 +33,10 @@ DECLINE = {"reply": {"when": "show that something you believed was wrong", "text
                      "calls": [{"id": "canned-refuted", "name": "refute_beliefs", "arguments": "{\"refuted\":[]}"}]}}
 
 ATTEMPTS = 3
+# How long each settling step waits for the session before the drive fails (#948): the runner's default is 900 s, and the second smoke's
+# sealed-native-src turn 19 ran 1,011 s, working steadily, and was voided by it. A hung run still ends.
+PATIENCE = 2700
+SETTLING = ("ask", "grade", "declare-meditation")
 CHECK = 'python3 -I "$DIET_GRADE_SCENARIO_DIR/check.py"'
 BROWSER = "python3 -I services/browser.py"
 LITE = "python3 -I services/lite.py"
@@ -74,8 +80,8 @@ def header(name):
 
 def graded(task):
     return [
-        {"step": "ask", "text": task["prompt"](False), "task": task["id"]},
-        {"step": "grade", "task": task["id"], "check": CHECK, "attempts": ATTEMPTS, "timeout_s": 180,
+        {"step": "ask", "text": task["prompt"](False), "task": task["id"], "patience": PATIENCE},
+        {"step": "grade", "task": task["id"], "check": CHECK, "attempts": ATTEMPTS, "timeout_s": 180, "patience": PATIENCE,
          "wrong": "{got} That was attempt {attempt} of {attempts} at {task}; try again in ./{task}.",
          "last": "{got} That was the last attempt at {task}; moving on.",
          "right": "Graded: right. Moving on."},
@@ -102,7 +108,7 @@ def lines(name, tasks, meditate_after=None, capture=False):
     for task in tasks:
         out += graded(task)
         if task["id"] == meditate_after:
-            out.append({"step": "declare-meditation"})
+            out.append({"step": "declare-meditation", "patience": PATIENCE})
     out.append({"step": "end"})
     return "".join(json.dumps(line, sort_keys=True) + "\n" for line in out)
 
@@ -116,6 +122,12 @@ def written():
     }
 
 
+def impatient(text):
+    """The settling steps of a written scenario that wait less than PATIENCE: [(line, step)]."""
+    lines_ = [json.loads(line) for line in text.splitlines() if line.strip()]
+    return [(n, l["step"]) for n, l in enumerate(lines_, 1) if l.get("step") in SETTLING and l.get("patience", 900) < PATIENCE]
+
+
 def main(check):
     stale = []
     for name, text in written().items():
@@ -123,6 +135,8 @@ def main(check):
         if check:
             if not os.path.exists(path) or open(path).read() != text:
                 stale.append(name)
+            elif impatient(open(path).read()):
+                sys.exit("make_scenario: %s has settling steps waiting under %d s: %s" % (name, PATIENCE, impatient(open(path).read())[:3]))
         else:
             with open(path, "w") as f:
                 f.write(text)
