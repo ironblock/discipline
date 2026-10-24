@@ -41,9 +41,9 @@ head_nonce = "per_run"
 refill_session = "sealed"
 # The parts it seals (#948): the source (every top-level entry of the checkout but docs, its git objects among them) and the docs.
 sealed = ["source", "docs"]
-# What it is told at its first ask, the user's intent stated (#948): a DRAFT for the maintainer's approval. It reconciles the ask, which still
+# What it is told at its first ask, the user's intent stated (#948): approved by the maintainer, 2026-10-23. It reconciles the ask, which still
 # names the checkout and says babylon-lite resolves to its source.
-sealed_notice = "From here on, please don't read or inspect Babylon Lite's code in any form: not its source or docs on disk, not its git history, and not the built copy your pages now load. The task below still says where Lite's source and docs are on disk; leave them closed. Importing babylon-lite still works in your pages, through that built copy, which you shouldn't open either. Work only from the notes in your working memory; that's how I want these done."
+sealed_notice = "From here on, please don't read or inspect Babylon Lite's code or docs in any form: not its source or docs on disk, not its git history, and not the built copy your pages now load. The task below still says where Lite's source and docs are on disk; leave them closed. Importing babylon-lite still works in your pages, through that built copy, which you shouldn't open either. Work only from the notes in your working memory and your own earlier work; that's how I want these done."
 
 # The level the template renders unless told (xhigh), declared so the record names what was sent; no budget.
 [reasoning]
