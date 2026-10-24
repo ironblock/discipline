@@ -235,7 +235,7 @@ check_scenarios() {
   # what their one source writes, the model is told no cause, the process
   # tier's definition holds, and every outcome is reachable.
   local lite
-  for lite in "make_scenario.py --check" "check.py --selftest" "grader/process_trap.py --selftest" "grader/first_move.py --selftest" "outcomes.py --selftest"; do
+  for lite in "make_scenario.py --check" "check.py --selftest" "grader/process_trap.py --selftest" "grader/first_move.py --selftest" "services/bundle.py --selftest" "services/seal_probe.py --selftest" "outcomes.py --selftest"; do
     code=0
     # shellcheck disable=SC2086 # the script and its one flag
     python3 -I diet/scenarios/lite/${lite} || code=$?

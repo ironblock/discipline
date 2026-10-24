@@ -8,7 +8,7 @@
 //! rule its canned classifier scores by, one `step` the runner drives, or one
 //! `expect` the log must meet.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::fmt::{self, Write as _};
 
 use crate::formats::record::json::{self, Value};
@@ -60,11 +60,18 @@ pub struct Scenario {
     /// is still the regimen's `env_passthrough`.
     pub serve_env: BTreeMap<String, String>,
     /// What a sealed session is denied besides the deny list (#948,
-    /// `refill_session = "sealed"`): services' values, `service.NAME.KEY`.
-    pub seal: Vec<(String, String)>,
-    /// Files a sealed session's probe must fail to read (#948): texts filled
-    /// from the run's ports and values.
-    pub seal_probe: Vec<String>,
+    /// `refill_session = "sealed"`), by part (`source`, `docs`): services'
+    /// values, `service.NAME.KEY`, each one path or several, colon-separated.
+    /// The regimen's `sealed` names the parts a session seals.
+    pub seal: BTreeMap<String, Vec<(String, String)>>,
+    /// Files a sealed session's probe reads (#948), by part: texts filled
+    /// from the run's ports and values. A sealed part's must fail to read,
+    /// an unsealed part's must read.
+    pub seal_probe: BTreeMap<String, Vec<String>>,
+    /// The checkout the seal is of (#948): a text filled from the run's
+    /// values. Its git objects are sealed with its source, so the probe's
+    /// `git show` of a sealed file from here must fail.
+    pub seal_root: Option<String>,
 }
 
 /// One canned reply: the text a request's last message must hold, or none
@@ -304,7 +311,8 @@ impl Scenario {
         let serve_env: Vec<String> = self
             .serve_env
             .values()
-            .chain(&self.seal_probe)
+            .chain(self.seal_probe.values().flatten())
+            .chain(&self.seal_root)
             .cloned()
             .collect();
         let (ports, services) = (
@@ -1069,21 +1077,47 @@ fn header(mut fields: Fields) -> Result<Scenario, ScenarioError> {
             })
             .collect::<Result<Vec<_>, _>>()
     };
+    // The seal by part (#948): `{"source": ["service.lite.sealed_source"], ...}`.
     let seal = match fields.take("seal") {
-        None => Vec::new(),
-        Some(Value::Array(named)) => service_values(&fields, "seal", named)?,
-        Some(_) => return Err(fields.wrong("`seal` a list")),
-    };
-    let seal_probe = match fields.take("seal_probe") {
-        None => Vec::new(),
-        Some(Value::Array(texts)) => texts
+        None => BTreeMap::new(),
+        Some(Value::Object(by_part)) => by_part
             .into_iter()
-            .map(|text| match text {
-                Value::String(text) => Ok(text),
-                _ => Err(fields.wrong("each of `seal_probe` text")),
+            .map(|(part, named)| match named {
+                Value::Array(named) if crate::drive::services::is_a_name(&part) => {
+                    Ok((part, service_values(&fields, "seal", named)?))
+                }
+                _ => Err(fields.wrong("`seal` naming each part's list of services' values")),
             })
             .collect::<Result<_, _>>()?,
-        Some(_) => return Err(fields.wrong("`seal_probe` a list")),
+        Some(_) => return Err(fields.wrong("`seal` an object of parts")),
+    };
+    let seal_probe: BTreeMap<String, Vec<String>> = match fields.take("seal_probe") {
+        None => BTreeMap::new(),
+        Some(Value::Object(by_part)) => by_part
+            .into_iter()
+            .map(|(part, texts)| match texts {
+                Value::Array(texts) => texts
+                    .into_iter()
+                    .map(|text| match text {
+                        Value::String(text) => Ok(text),
+                        _ => Err(fields.wrong("each of `seal_probe` text")),
+                    })
+                    .collect::<Result<Vec<_>, _>>()
+                    .map(|texts| (part, texts)),
+                _ => Err(fields.wrong("`seal_probe` naming each part's list of files")),
+            })
+            .collect::<Result<_, _>>()?,
+        Some(_) => return Err(fields.wrong("`seal_probe` an object of parts")),
+    };
+    if let Some(part) = seal_probe.keys().find(|part| !seal.contains_key(*part)) {
+        return Err(fields.wrong(&format!(
+            "`seal_probe` naming `{part}`, a part `seal` does not"
+        )));
+    }
+    let seal_root = match fields.take("seal_root") {
+        None => None,
+        Some(Value::String(text)) => Some(text),
+        Some(_) => return Err(fields.wrong("`seal_root` text")),
     };
     let serve_env = match fields.take("serve_env") {
         None => BTreeMap::new(),
@@ -1123,6 +1157,7 @@ fn header(mut fields: Fields) -> Result<Scenario, ScenarioError> {
         serve_env,
         seal,
         seal_probe,
+        seal_root,
     })
 }
 
@@ -2255,18 +2290,94 @@ pub struct RunOptions {
     /// A first-move probe (`--only-task TASK`, #948): from a recorded refill,
     /// that task's ask alone, then the end; no grade.
     pub only_task: Option<String>,
-    /// Paths sealed from this session's commands besides the deny list
-    /// (#948, `refill_session = "sealed"`): passed to serve as
+    /// The seal of a sealed session (#948, `refill_session = "sealed"`), from
+    /// the run before's services: what its commands are denied, what its
+    /// probe checks, and the parts its services are told it seals.
+    pub sealed: Option<Sealed>,
+}
+
+/// A sealed session's seal (#948), filled from the run before's services.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct Sealed {
+    /// The parts sealed (`source`, `docs`): the regimen's `sealed`, told to
+    /// the session's services as `DIET_SEALED`, never to serve or the model.
+    pub parts: Vec<String>,
+    /// Paths denied besides the deny list: passed to serve as
     /// `--sandbox-secret`, and probed.
-    pub seal: Vec<String>,
-    /// Files the probe must fail to read besides `DIET_SANDBOX_PROBE_FILE`
-    /// (#948): the scenario's `seal_probe`, filled.
-    pub seal_probe: Vec<String>,
+    pub paths: Vec<String>,
+    /// Files the probe must fail to read: the sealed parts' `seal_probe`.
+    pub unreadable: Vec<String>,
+    /// Files the probe must read: the unsealed parts' `seal_probe`.
+    pub readable: Vec<String>,
+    /// The checkout's root and each unreadable file under it, relative: the
+    /// probe's `git show HEAD:<file>` from the root must fail.
+    pub git: Option<(String, Vec<String>)>,
+    /// A line only the sealed source holds (the longest `//` comment of the
+    /// first unreadable file), read outside the sandbox: the probe's sweep
+    /// for a stray copy must find it nowhere the session can read.
+    pub phrase: Option<String>,
 }
 
 /// The regimen key for what a declared meditation does to its session
 /// (#948).
 pub const REFILL_SESSION: &str = "refill_session";
+
+/// The regimen key for the parts a sealed session seals (#948): the
+/// scenario header's `seal` parts, as `sealed = ["source", "docs"]`.
+pub const SEALED: &str = "sealed";
+
+/// The regimen key for what a sealed session is told at its first ask
+/// (#948): the user's intent, stated, never a seal met in silence.
+pub const SEALED_NOTICE: &str = "sealed_notice";
+
+/// The parts a regimen seals ([`SEALED`]), and its notice
+/// ([`SEALED_NOTICE`]): both under `refill_session = "sealed"` and neither
+/// otherwise, so no seal goes unannounced and no key is silently ignored.
+///
+/// # Errors
+///
+/// When either is set without `refill_session = "sealed"`, either is missing
+/// under it, `sealed` is no list of words or names a part twice, or the
+/// notice is no text or is empty.
+pub fn sealed_of(
+    regimen: &crate::formats::regimen::Regimen,
+) -> Result<Option<(Vec<String>, String)>, String> {
+    use crate::formats::regimen::Value;
+    let refill = refill_session(regimen)?;
+    let parts = regimen.get(SEALED);
+    let notice = regimen.get(SEALED_NOTICE);
+    if refill != RefillSession::Sealed {
+        return match (parts, notice) {
+            (None, None) => Ok(None),
+            _ => Err(format!(
+                "`{SEALED}` and `{SEALED_NOTICE}` are read only under `{REFILL_SESSION}` = \"sealed\""
+            )),
+        };
+    }
+    let parts = match parts {
+        Some(Value::Array(words)) if !words.is_empty() => words
+            .iter()
+            .map(|word| match word {
+                Value::String(word) if crate::drive::services::is_a_name(word) => Ok(word.clone()),
+                other => Err(format!("`{SEALED}` names parts, not {other:?}")),
+            })
+            .collect::<Result<Vec<_>, _>>()?,
+        _ => {
+            return Err(format!(
+                "`{REFILL_SESSION}` = \"sealed\" needs `{SEALED}`, the parts it seals"
+            ));
+        }
+    };
+    if parts.iter().collect::<BTreeSet<_>>().len() != parts.len() {
+        return Err(format!("`{SEALED}` names a part twice: {parts:?}"));
+    }
+    match notice {
+        Some(Value::String(text)) if !text.trim().is_empty() => Ok(Some((parts, text.clone()))),
+        _ => Err(format!(
+            "`{REFILL_SESSION}` = \"sealed\" needs `{SEALED_NOTICE}`: a seal is stated, never met in silence"
+        )),
+    }
+}
 
 /// What a declared meditation does to its session (#948).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -2869,9 +2980,15 @@ fn running(
         .steps
         .iter()
         .any(|step| matches!(step, Step::DeclareMeditation));
-    if refill == RefillSession::Sealed && meditates && scenario.seal.is_empty() {
+    // The parts it seals and its notice (#948), refused unless both come with
+    // `sealed` and neither without it.
+    let sealing =
+        sealed_of(&read).map_err(|why| Failure(format!("{}: {why}", regimen.display())))?;
+    if let (Some((parts, _)), true) = (&sealing, meditates)
+        && let Some(part) = parts.iter().find(|part| !scenario.seal.contains_key(*part))
+    {
         return Err(Failure(format!(
-            "{} seals the session after the refill, and the scenario names no `seal`",
+            "{} seals `{part}` after the refill, and the scenario's `seal` names no such part",
             regimen.display()
         )));
     }
@@ -2897,7 +3014,12 @@ fn running(
     // A sealed session's seal (#948) is denied beside the deny list.
     let denied: Vec<String> = denied
         .into_iter()
-        .chain(options.seal.iter().cloned())
+        .chain(
+            options
+                .sealed
+                .iter()
+                .flat_map(|sealed| sealed.paths.iter().cloned()),
+        )
         .collect();
     said["sandbox_secrets"] = match &deny {
         crate::drive::probe::Deny::Waived => serde_json::json!("waived"),
@@ -2930,7 +3052,7 @@ fn running(
                 drive,
                 &regimen,
                 &beside(&options.file, &scenario.head),
-                (&denied, &options.seal_probe),
+                (&denied, options.sealed.as_ref()),
                 &options.out,
             ),
         }
@@ -3158,7 +3280,13 @@ fn running(
                 &scenario_dir,
                 worktree.as_deref(),
             ),
-            &[],
+            // A sealed session's services are told its parts (#948); serve and
+            // the model are not.
+            &options
+                .sealed
+                .iter()
+                .map(|sealed| ("DIET_SEALED".to_owned(), sealed.parts.join(",")))
+                .collect::<Vec<_>>(),
         );
         let mut running = match started {
             Ok(running) => running,
@@ -3244,6 +3372,11 @@ fn running(
     if let Some(worktree) = worktree {
         driver = driver.in_worktree(worktree);
     }
+    // A sealed session is told (#948): the notice opens its first ask.
+    let scenario = match (&options.sealed, &sealing) {
+        (Some(_), Some((_, notice))) => with_notice(scenario, from_step, notice)?,
+        _ => scenario,
+    };
     let outcome = self::drive_from(&scenario, &driver, (from_step, reseat));
     let next = outcome.as_ref().ok().and_then(|(_, next)| *next);
     // A check that crashed (#942): void, whatever else the run says.
@@ -3272,8 +3405,23 @@ fn running(
     let _ = std::fs::remove_dir_all(&secrets);
     // A sealed next session's seal (#948), from this run's services' values,
     // read before they stop: the same checkout the next one's will check.
-    let sealed = match (next, refill) {
-        (Some(_), RefillSession::Sealed) => Some(seal_of(&scenario, services.as_ref())?),
+    let sealed = match (next, &sealing) {
+        (Some(_), Some((parts, _))) => {
+            let mut sealed = seal_of(&scenario, services.as_ref(), parts)?;
+            // This run's own outputs, and the work directory its log and
+            // recording are written in until assembly, hold what its first
+            // session read: sealed too, wherever they are.
+            for dir in [&options.out, &work] {
+                let dir = std::path::absolute(dir)
+                    .unwrap_or_else(|_| dir.clone())
+                    .display()
+                    .to_string();
+                if !sealed.paths.contains(&dir) {
+                    sealed.paths.push(dir);
+                }
+            }
+            Some(sealed)
+        }
         _ => None,
     };
     if let Some(mut running) = services.take() {
@@ -3331,15 +3479,13 @@ fn running(
     // meets the scenario's expectations.
     let next_met = match next {
         Some(from_step) => {
-            let (seal, seal_probe) = sealed.unwrap_or_default();
             let carried = RunOptions {
                 out: options.out.join("next"),
                 worktree: None,
                 carry: (refill != RefillSession::Blank).then(|| log.clone()),
                 from_step,
                 carried: true,
-                seal,
-                seal_probe,
+                sealed,
                 ..options.clone()
             };
             let mut next_said = serde_json::json!({"ok": false});
@@ -3551,34 +3697,117 @@ fn carried_worktree(
     }
 }
 
-/// A sealed session's seal (#948): the scenario's `seal`, each a service's
-/// value, and its `seal_probe`, filled, from this run's services.
+/// `scenario` with `notice` opening its first ask at or after `from_step`
+/// (#948): the user's words before the task's, in the one message.
+fn with_notice(
+    mut scenario: Scenario,
+    from_step: usize,
+    notice: &str,
+) -> Result<Scenario, Failure> {
+    let first = scenario
+        .steps
+        .iter_mut()
+        .skip(from_step)
+        .find_map(|step| match step {
+            Step::Ask {
+                text,
+                refused: None,
+                ..
+            } => Some(text),
+            _ => None,
+        })
+        .ok_or_else(|| Failure("a sealed session has no ask to state its notice in".to_owned()))?;
+    *first = format!("{}\n\n{first}", notice.trim_end());
+    Ok(scenario)
+}
+
+/// A sealed session's seal (#948): the scenario's `seal` for each of
+/// `parts`, each a service's value of one path or several, colon-separated;
+/// its `seal_probe`, filled, split into the sealed parts' files and the
+/// others'; `git show` from `seal_root`; and the sweep's phrase.
 fn seal_of(
     scenario: &Scenario,
     services: Option<&crate::drive::services::Running>,
-) -> Result<(Vec<String>, Vec<String>), Failure> {
+    parts: &[String],
+) -> Result<Sealed, Failure> {
     let running = services.ok_or_else(|| {
         Failure("the scenario seals service values and starts no service".to_owned())
     })?;
-    let seal = scenario
-        .seal
-        .iter()
-        .map(|(name, key)| {
-            running
+    let mut paths = Vec::new();
+    for part in parts {
+        let named = scenario
+            .seal
+            .get(part)
+            .ok_or_else(|| Failure(format!("the scenario's `seal` names no part `{part}`")))?;
+        for (name, key) in named {
+            let value = running
                 .value(&["service", name, key])
-                .ok_or_else(|| Failure(format!("service `{name}` gave no `{key}` to seal")))
-        })
-        .collect::<Result<Vec<_>, _>>()?;
-    let probe = scenario
-        .seal_probe
-        .iter()
-        .map(|text| {
-            running
+                .ok_or_else(|| Failure(format!("service `{name}` gave no `{key}` to seal")))?;
+            paths.extend(
+                value
+                    .split(':')
+                    .filter(|path| !path.is_empty())
+                    .map(str::to_owned),
+            );
+        }
+    }
+    let filled = |texts: &[String]| {
+        texts
+            .iter()
+            .map(|text| {
+                running
+                    .filled(text)
+                    .map_err(|why| Failure(format!("`seal_probe`: {why}")))
+            })
+            .collect::<Result<Vec<_>, _>>()
+    };
+    let (mut unreadable, mut readable) = (Vec::new(), Vec::new());
+    for (part, texts) in &scenario.seal_probe {
+        if parts.contains(part) {
+            unreadable.extend(filled(texts)?);
+        } else {
+            readable.extend(filled(texts)?);
+        }
+    }
+    let git = match &scenario.seal_root {
+        None => None,
+        Some(text) => {
+            let root = running
                 .filled(text)
-                .map_err(|why| Failure(format!("`seal_probe`: {why}")))
-        })
-        .collect::<Result<Vec<_>, _>>()?;
-    Ok((seal, probe))
+                .map_err(|why| Failure(format!("`seal_root`: {why}")))?;
+            let under = unreadable
+                .iter()
+                .filter_map(|file| {
+                    std::path::Path::new(file)
+                        .strip_prefix(&root)
+                        .ok()
+                        .map(|rel| rel.to_string_lossy().into_owned())
+                })
+                .collect();
+            Some((root, under))
+        }
+    };
+    // Read here, outside the sandbox, from the file the session must not read.
+    let phrase = match unreadable.first() {
+        None => None,
+        Some(file) => {
+            let text = std::fs::read_to_string(file)
+                .map_err(|why| Failure(format!("the seal's probe file {file}: {why}")))?;
+            text.lines()
+                .map(str::trim)
+                .filter(|line| line.starts_with("//"))
+                .max_by_key(|line| line.len())
+                .map(str::to_owned)
+        }
+    };
+    Ok(Sealed {
+        parts: parts.to_vec(),
+        paths,
+        unreadable,
+        readable,
+        git,
+        phrase,
+    })
 }
 
 /// The probes passed in this process (#942), by the digests of the
@@ -3594,7 +3823,7 @@ fn probed(
     drive: &std::path::Path,
     regimen: &std::path::Path,
     head: &std::path::Path,
-    (secrets, sealed_files): (&[String], &[String]),
+    (secrets, sealed): (&[String], Option<&Sealed>),
     kept_in: &std::path::Path,
 ) -> Result<serde_json::Value, Failure> {
     use crate::drive::probe::{PROBE_FILE, PROBE_PHRASE};
@@ -3638,12 +3867,16 @@ fn probed(
         secrets,
         (
             &std::iter::once(file.clone())
-                .chain(sealed_files.iter().cloned())
+                .chain(
+                    sealed
+                        .iter()
+                        .flat_map(|sealed| sealed.unreadable.iter().cloned()),
+                )
                 .collect::<Vec<_>>(),
             &phrase,
             &grep_in,
         ),
-        &canary,
+        (&canary, sealed),
     );
     std::fs::write(&file_path, text)
         .map_err(|why| Failure(format!("the probe cannot be written: {why}")))?;
@@ -3669,8 +3902,11 @@ fn probed(
     })?;
     let verdict = crate::drive::probe::verdict(
         &log,
-        (secrets.len(), 1 + sealed_files.len()),
-        &canary_file.display().to_string(),
+        (
+            secrets.len(),
+            1 + sealed.map_or(0, |sealed| sealed.unreadable.len()),
+        ),
+        (&canary_file.display().to_string(), sealed),
     );
     // A failed probe's log is kept beside the run, for whoever reads why.
     if verdict["ok"] != true {

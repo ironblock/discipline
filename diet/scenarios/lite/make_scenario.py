@@ -8,8 +8,10 @@
 Both start the same services: the pinned Lite checkout, the model's and the grader's dev servers, and the grader's and the model's browser daemons.
 The model's daemon is reached through its own socket (`sandbox_unix_sockets`) and its session id (`serve_env`). Their canned replies answer every
 request with text and no call, but for what the interviews need: a rehearsal of the plumbing, every attempt graded wrong, not a run of the
-tasks. The header's `seal` is the Lite checkout, which a sealed arm's next session cannot read (#948), and its `seal_probe` the source file
-the probe asks that session to read. In `lite.jsonl` the first task's canned answer reads its stub, so an interview fork is warranted, and that fork records what it learned: the
+tasks. The header's `seal` is the Lite checkout by part (#948): `source`, every top-level entry but `docs` (`.git` among them), and `docs`; a
+sealed arm's next session cannot read the parts its regimen's `sealed` names. Its `seal_probe` is a file of each part, which the probe asks that
+session to read (a sealed part's must fail, an unsealed part's must read), and its `seal_root` the checkout, whose `git show` of a sealed file must
+fail. The `seal-probe` service, last, probes a sealed session's served code and browser reach before serve starts, and passes elsewhere. In `lite.jsonl` the first task's canned answer reads its stub, so an interview fork is warranted, and that fork records what it learned: the
 interviews arm's working memory is not empty at the refill. Refutation forks, cut as each ask arrives and quoting it, decline first.
 """
 import json
@@ -54,10 +56,14 @@ def header(name):
              "ready": {"command": BROWSER + " status"}, "ready_timeout_s": 180},
             {"name": "model-browser", "start": BROWSER + ' start --vision --workspace "$DIET_WORKTREE" --allow model_vite', "stop": BROWSER + " stop",
              "ready": {"command": BROWSER + " status"}, "ready_timeout_s": 180},
+            {"name": "seal-probe", "start": "python3 -I services/seal_probe.py start", "stop": "python3 -I services/seal_probe.py stop",
+             "ready": {"command": 'test -s "$DIET_SERVICE_DIR/provides.json"'}, "ready_timeout_s": 300},
         ],
         "sandbox_unix_sockets": ["service.model-browser.socket"],
-        "seal": ["service.lite.root"],
-        "seal_probe": ["{service.lite.root}/packages/babylon-lite/src/scene/scene-core.ts"],
+        "seal": {"source": ["service.lite.sealed_source"], "docs": ["service.lite.docs"]},
+        "seal_probe": {"source": ["{service.lite.root}/packages/babylon-lite/src/scene/scene-core.ts"],
+                       "docs": ["{service.lite.root}/docs/lite/01-getting-started.md"]},
+        "seal_root": "{service.lite.root}",
         "serve_env": {
             "CD4A_INTERNAL_DAEMON_SESSION_ID": "{service.model-browser.session}",
             "CHROME_DEVTOOLS_MCP_NO_UPDATE_CHECKS": "1",

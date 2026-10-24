@@ -2227,18 +2227,95 @@ fn a_fresh_session_carries_the_working_memory_its_refill_kept() {
     let _ = std::fs::remove_dir_all(&dir);
 }
 
-/// #948: under `refill_session = "sealed"` the next session is also
-/// denied the scenario's `seal`: a file the first session read under it is
-/// refused to the second, inside serve's own sandbox, and its receipt
-/// counts the sealed path.
-#[test]
+/// What one sealed run shows (#948): its exit, its line, and its two logs.
+#[cfg(target_os = "macos")]
+struct SealedRun {
+    said: serde_json::Value,
+    first: PathBuf,
+    next: PathBuf,
+    out: PathBuf,
+}
+
+/// The ways [`sealed_run`] is broken on purpose, each a probe leg's RED.
+#[cfg(target_os = "macos")]
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Broken {
+    Nothing,
+    /// The checkout's `.git` left out of the sealed source.
+    GitUnsealed,
+    /// A copy of the sealed source left where the session can read it.
+    StrayCopy,
+    /// The readable docs file put under the deny list.
+    DocsDenied,
+}
+
+/// A sealed run (#948): a first session that reads the checkout's source,
+/// a declared meditation, and a sealed next session under
+/// `sealed = ["source"]` that tries the source and reads the docs.
 #[cfg(target_os = "macos")]
 #[allow(clippy::too_many_lines)]
-fn a_sealed_session_is_refused_what_the_first_one_read() {
-    let dir = scratch("carry-sealed");
-    let sealed = dir.join("reference");
-    std::fs::create_dir_all(&sealed).expect("the sealed directory");
-    std::fs::write(sealed.join("source.ts"), "export const answer = 42;\n").expect("a file");
+fn sealed_run(name: &str, broken: Broken) -> SealedRun {
+    let dir = scratch(name);
+    let home = dir.join("home");
+    let private = home.join("private-runs");
+    std::fs::create_dir_all(&private).expect("the private directory");
+    let checkout = dir.join("reference");
+    std::fs::create_dir_all(checkout.join("source")).expect("the source directory");
+    std::fs::create_dir_all(checkout.join("docs")).expect("the docs directory");
+    // A line only this run's checkout holds: tests run beside each other.
+    let trap = format!(
+        "// the late add is drained by the swap queue, case {name}-{}-{}",
+        std::process::id(),
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map_or(0, |since| since.as_nanos())
+    );
+    std::fs::write(
+        checkout.join("source/source.ts"),
+        format!("{trap}\nexport const answer = 42;\n"),
+    )
+    .expect("a source file");
+    std::fs::write(checkout.join("docs/guide.md"), "# Guide\n").expect("a docs file");
+    let git = |args: &[&str]| {
+        let ran = Command::new("git")
+            .arg("-C")
+            .arg(&checkout)
+            .args(args)
+            .env("HOME", &home)
+            .env("GIT_CONFIG_NOSYSTEM", "1")
+            .output()
+            .expect("git runs");
+        assert!(
+            ran.status.success(),
+            "git {args:?}: {}",
+            String::from_utf8_lossy(&ran.stderr)
+        );
+    };
+    git(&["init", "-q"]);
+    git(&["add", "."]);
+    git(&[
+        "-c",
+        "user.name=t",
+        "-c",
+        "user.email=t@t",
+        "commit",
+        "-q",
+        "-m",
+        "the checkout",
+    ]);
+    if broken == Broken::StrayCopy {
+        std::fs::copy(checkout.join("source/source.ts"), home.join("old-copy.ts"))
+            .expect("a stray copy");
+    }
+    if broken == Broken::DocsDenied {
+        std::fs::copy(checkout.join("docs/guide.md"), private.join("guide.md"))
+            .expect("a denied docs file");
+    }
+    let docs_probe = if broken == Broken::DocsDenied {
+        private.join("guide.md").display().to_string()
+    } else {
+        "{service.box.root}/docs/guide.md".to_owned()
+    };
     let canned = std::fs::read_to_string(root().join("diet/scenarios/canned.toml"))
         .expect("the canned regimen");
     let (top, sampler) = canned.split_once("[sampler]").expect("its sampler table");
@@ -2249,26 +2326,43 @@ fn a_sealed_session_is_refused_what_the_first_one_read() {
              sandbox_reads = \"all\"\napproval = \"none\"\n\
              approval_policy = \"approvals are off: every command runs without a gate decision or a prompt\"\n\
              interview_warrant = [\"read\"]\nmeditation_empty = \"refill\"\nrefill_session = \"sealed\"\n\
+             sealed = [\"source\"]\nsealed_notice = \"Please work from your notes from here on.\"\n\
              [limits]\nmax_steps = 4\n\n[sampler]{sampler}"
         ),
     )
     .expect("the regimen");
-    let read = |id: &str| serde_json::json!([{"id": id, "name": "bash", "arguments": serde_json::json!({"command": format!("cat {}", sealed.join("source.ts").display())}).to_string()}]);
+    let bash = |id: &str, command: String| serde_json::json!({"id": id, "name": "bash", "arguments": serde_json::json!({"command": command}).to_string()});
+    let source = checkout.join("source/source.ts").display().to_string();
+    let guide = checkout.join("docs/guide.md").display().to_string();
+    let sealed_source = if broken == Broken::GitUnsealed {
+        format!("{}/source", checkout.display())
+    } else {
+        format!("{0}/source:{0}/.git", checkout.display())
+    };
+    // The service names what it was told of the seal, where the test reads it.
     let provides = format!(
-        "printf '{{\"root\": \"{}\"}}' > \"$DIET_SERVICE_DIR/provides.json\"; : > \"$DIET_SERVICE_DIR/pids\"",
-        sealed.display()
+        "printf '%s' \"$DIET_SEALED\" > \"$DIET_SERVICE_DIR/sealed.txt\"; \
+         printf '{{\"root\": \"{0}\", \"sealed_source\": \"{1}\", \"docs\": \"{0}/docs\"}}' > \"$DIET_SERVICE_DIR/provides.json\"; \
+         : > \"$DIET_SERVICE_DIR/pids\"",
+        checkout.display(),
+        sealed_source
     );
     let lines = [
         serde_json::json!({
-            "scenario": "carry-sealed",
+            "scenario": name,
             "regimen": "sealed.toml",
             "head": root().join("diet/drive/heads/floor.md"),
             "services": [{"name": "box", "start": provides, "stop": "true", "ready": {"command": "test -s \"$DIET_SERVICE_DIR/provides.json\""}}],
-            "seal": ["service.box.root"],
-            "seal_probe": ["{service.box.root}/source.ts"],
+            "seal": {"source": ["service.box.sealed_source"], "docs": ["service.box.docs"]},
+            "seal_probe": {"source": ["{service.box.root}/source/source.ts"], "docs": [docs_probe]},
+            "seal_root": "{service.box.root}",
         }),
-        serde_json::json!({"reply": {"when": "Read it once", "text": "Reading.", "calls": read("c1")}}),
-        serde_json::json!({"reply": {"when": "Read it again", "text": "Reading.", "calls": read("c2")}}),
+        serde_json::json!({"reply": {"when": "Read it once", "text": "Reading.", "calls": [bash("c1", format!("cat {source}"))]}}),
+        serde_json::json!({"reply": {"when": "Read it again", "text": "Reading.", "calls": [
+            bash("c2", format!("cat {source}")),
+            bash("c3", format!("cat {guide}")),
+            bash("c4", "printenv DIET_SEALED".to_owned()),
+        ]}}),
         serde_json::json!({"step": "ask", "text": "Read it once."}),
         serde_json::json!({"step": "declare-meditation"}),
         serde_json::json!({"step": "ask", "text": "Read it again."}),
@@ -2284,9 +2378,6 @@ fn a_sealed_session_is_refused_what_the_first_one_read() {
     std::fs::write(&file, text).expect("the scenario");
     // A dry run with a deny list, so both sessions probe: the first proves
     // the deny list under the sealed regimen, the second the seal as well.
-    let home = dir.join("home");
-    let private = home.join("private-runs");
-    std::fs::create_dir_all(&private).expect("the private directory");
     let phrase = format!(
         "sealed-trap-phrase-{}-{}",
         std::process::id(),
@@ -2316,24 +2407,46 @@ fn a_sealed_session_is_refused_what_the_first_one_read() {
     let stdout = String::from_utf8_lossy(&ran.stdout);
     let said: serde_json::Value =
         serde_json::from_str(stdout.lines().last().unwrap_or("")).unwrap_or_default();
-    assert_eq!(
-        ran.status.code(),
-        Some(0),
-        "{stdout}{}",
-        String::from_utf8_lossy(&ran.stderr)
-    );
+    if broken == Broken::Nothing {
+        assert_eq!(
+            ran.status.code(),
+            Some(0),
+            "{stdout}{}",
+            String::from_utf8_lossy(&ran.stderr)
+        );
+    }
+    SealedRun {
+        said,
+        first: out.join("session.log"),
+        next: out.join("next/session.log"),
+        out,
+    }
+}
+
+/// #948: under `refill_session = "sealed"` and `sealed = ["source"]` the
+/// next session is denied the source part a first session read, inside
+/// serve's own sandbox, and keeps the docs part. Its probe proves the source
+/// unreadable, the docs readable, the checkout's git objects sealed with
+/// the source, and no stray copy of it; its first ask opens with the
+/// notice; its services are told the parts, and its commands are not.
+#[test]
+#[cfg(target_os = "macos")]
+fn a_sealed_session_is_refused_the_sealed_part_and_keeps_the_rest() {
+    let run = sealed_run("carry-sealed", Broken::Nothing);
+    let said = &run.said;
     assert_eq!(
         said["sandbox_probe"]["ok"], true,
         "the first session's probe: {said}"
     );
+    let probe = &said["next"]["sandbox_probe"];
+    assert_eq!(probe["ok"], true, "the sealed session's probe: {said}");
     assert_eq!(
-        said["next"]["sandbox_probe"]["ok"], true,
-        "the sealed session's probe: {said}"
+        probe["paths_denied"], 4,
+        "the deny list, the seal's two paths and the run's own outputs: {said}"
     );
-    assert_eq!(
-        said["next"]["sandbox_probe"]["paths_denied"], 2,
-        "the deny list and the seal: {said}"
-    );
+    assert_eq!(probe["sealed"]["readable_read"], 1, "{said}");
+    assert_eq!(probe["sealed"]["git_denied"], 1, "{said}");
+    assert_eq!(probe["sealed"]["phrase_searched"], true, "{said}");
     let exit_of = |log: &Path, id: &str| {
         logged(log, "tool_call")
             .into_iter()
@@ -2341,21 +2454,83 @@ fn a_sealed_session_is_refused_what_the_first_one_read() {
             .and_then(|call| call["exit"].as_i64())
     };
     assert_eq!(
-        exit_of(&out.join("session.log"), "c1"),
+        exit_of(&run.first, "c1"),
         Some(0),
         "the first session read it"
     );
     assert!(
-        exit_of(&out.join("next/session.log"), "c2").is_some_and(|exit| exit != 0),
+        exit_of(&run.next, "c2").is_some_and(|exit| exit != 0),
         "the sealed session was refused it: {said}"
     );
+    assert_eq!(
+        exit_of(&run.next, "c3"),
+        Some(0),
+        "the docs part stays readable: {said}"
+    );
+    assert!(
+        exit_of(&run.next, "c4").is_some_and(|exit| exit != 0),
+        "the model's commands are not told the seal"
+    );
+    let asks = logged(&run.next, "ask");
+    assert!(
+        asks.first()
+            .and_then(|ask| ask["text"].as_str())
+            .is_some_and(|text| text
+                .starts_with("Please work from your notes from here on.\n\nRead it again.")),
+        "the notice opens the sealed session's first ask: {asks:?}"
+    );
+    let told = |dir: &str| {
+        std::fs::read_to_string(run.out.join(dir).join("services/box/sealed.txt"))
+            .unwrap_or_default()
+    };
+    assert_eq!(
+        told(""),
+        "",
+        "the first session's services are told nothing"
+    );
+    assert_eq!(
+        told("next"),
+        "source",
+        "the sealed session's services are told its parts"
+    );
     let receipt: serde_json::Value = serde_json::from_str(
-        &std::fs::read_to_string(out.join("next/session.record.jsonl.receipt.json"))
+        &std::fs::read_to_string(run.out.join("next/session.record.jsonl.receipt.json"))
             .expect("the receipt"),
     )
     .expect("JSON");
-    assert_eq!(receipt["run_secrets"]["count"], 2, "{receipt}");
-    let _ = std::fs::remove_dir_all(&dir);
+    assert_eq!(receipt["run_secrets"]["count"], 4, "{receipt}");
+}
+
+/// #948: each sealed leg of the probe catches its own leak, and voids the
+/// sealed session (REDs for the green above): the git objects left
+/// readable, a stray copy of the sealed source, and an unsealed part that
+/// cannot be read.
+#[test]
+#[cfg(target_os = "macos")]
+fn each_sealed_leg_of_the_probe_catches_its_leak() {
+    for (broken, leg) in [
+        (Broken::GitUnsealed, "git"),
+        (Broken::StrayCopy, "phrase"),
+        (Broken::DocsDenied, "readable"),
+    ] {
+        let run = sealed_run(&format!("carry-sealed-red-{leg}"), broken);
+        let probe = &run.said["next"]["sandbox_probe"];
+        assert_eq!(
+            probe["ok"], false,
+            "{leg}: the probe caught it: {}",
+            run.said
+        );
+        match broken {
+            Broken::GitUnsealed => assert_eq!(probe["sealed"]["git_denied"], 0, "{}", run.said),
+            Broken::StrayCopy => assert_eq!(probe["phrase_found"], true, "{}", run.said),
+            _ => assert_eq!(probe["sealed"]["readable_read"], 0, "{}", run.said),
+        }
+        assert_eq!(
+            run.said["next"]["void"], "sandbox",
+            "{leg}: the sealed session is void: {}",
+            run.said
+        );
+    }
 }
 
 /// #948: a native refill restores only files under the worktree, so a seal
@@ -2377,6 +2552,7 @@ fn a_carried_start_names_the_sealed_file_its_refill_restored() {
              sandbox_reads = \"all\"\napproval = \"none\"\n\
              approval_policy = \"approvals are off: every command runs without a gate decision or a prompt\"\n\
              meditation_carry = \"native_summary\"\nrefill_session = \"sealed\"\n\
+             sealed = [\"source\"]\nsealed_notice = \"Please work from your notes from here on.\"\n\
              [limits]\nmax_steps = 4\n\n[sampler]{sampler}"
         ),
     )
@@ -2391,7 +2567,7 @@ fn a_carried_start_names_the_sealed_file_its_refill_restored() {
             "regimen": "restored.toml",
             "head": root().join("diet/drive/heads/floor.md"),
             "services": [{"name": "box", "start": provides, "stop": "true", "ready": {"command": "test -s \"$DIET_SERVICE_DIR/provides.json\""}}],
-            "seal": ["service.box.root"],
+            "seal": {"source": ["service.box.root"]},
         }),
         serde_json::json!({"reply": {"when": "Read it once", "text": "Reading.", "calls": read}}),
         serde_json::json!({"step": "ask", "text": "Read it once."}),

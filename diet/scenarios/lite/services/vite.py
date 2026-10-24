@@ -3,6 +3,8 @@
 It becomes Lite's vite (exec, so the process the runner stops is vite itself), rooted at the run's worktree ($DIET_WORKTREE) with Lite's source
 ($DIET_SERVICE_LITE_ROOT) aliased in read-only, on $DIET_PORT_MODEL_VITE or $DIET_PORT_GRADER_VITE. The `grader` flavour sets LITE_TRACE=1: the
 lifecycle-recording wrappers (vite/lite-trace-plugin.mjs), which the model's server never carries. Its cache is the service's own directory.
+In a sealed session ($DIET_SEALED, #948) the `model` flavour serves the sealed bundle ($DIET_SERVICE_LITE_BUNDLE) in the source's place, and allows
+the worktree and the bundle alone: no path of the checkout. The grader's server is unchanged.
 """
 import os
 import sys
@@ -25,6 +27,8 @@ def main(flavour):
     }
     if flavour == "grader":
         env["LITE_TRACE"] = "1"
+    elif os.environ.get("DIET_SEALED"):
+        env["LITE_BUNDLE"] = os.environ["DIET_SERVICE_LITE_BUNDLE"]
     vite = os.path.join(root, "node_modules", ".bin", "vite")
     os.chdir(HERE)
     os.execve(vite, [vite, "--config", os.path.join(HERE, "vite", "vite.config.mjs")], env)

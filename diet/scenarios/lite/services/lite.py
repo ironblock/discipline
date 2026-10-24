@@ -1,11 +1,15 @@
 """The `lite` service (#942): `python3 -I lite.py start|stop`. The Babylon Lite checkout every run reads, outside the tree, checked at the pinned commit.
 
 `start` refuses (exit 1) unless the checkout at $LITE_REPO, else ~/git/reference/Babylon/Babylon-Lite, is a git checkout at PINNED with no change to a
-tracked file and has its vite installed; then it writes `provides.json` with `root` (what the prompts name) and `commit`. It leaves no process, so
-`pids` is empty. `stop` does nothing.
+tracked file and has its vite installed; then it writes `provides.json` with `root` (what the prompts name) and `commit`, and the seal's parts (#948):
+`docs`, the checkout's docs directory, and `sealed_source`, every other top-level entry of the checkout (`.git` among them, which holds every
+source object), colon-separated absolute paths. In a sealed session ($DIET_SEALED names the parts) it also builds the sealed bundle into its own
+directory (bundle.py) and provides `bundle`, the built directory model-vite serves in the source's place. It leaves no process, so `pids` is empty.
+`stop` does nothing.
 """
 import json
 import os
+import runpy
 import subprocess
 import sys
 
@@ -27,8 +31,15 @@ def start():
     if not os.access(os.path.join(root, "node_modules", ".bin", "vite"), os.X_OK):
         sys.exit("lite: %s has no node_modules/.bin/vite (install its dependencies)" % root)
     open(os.path.join(here, "pids"), "w").close()
+    provides = {"root": root, "commit": PINNED, "docs": os.path.join(root, "docs"),
+                "sealed_source": ":".join(os.path.join(root, entry) for entry in sorted(os.listdir(root)) if entry != "docs")}
+    if os.environ.get("DIET_SEALED"):
+        bundle = runpy.run_path(os.path.join(os.path.dirname(os.path.abspath(__file__)), "bundle.py"))
+        out = os.path.join(here, "bundle")
+        bundle["build"](root, out)
+        provides["bundle"] = os.path.join(out, "dist")
     with open(os.path.join(here, "provides.json"), "w") as f:
-        json.dump({"root": root, "commit": PINNED}, f)
+        json.dump(provides, f)
 
 
 if __name__ == "__main__":

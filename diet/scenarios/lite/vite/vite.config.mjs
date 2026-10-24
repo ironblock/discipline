@@ -2,11 +2,14 @@
 // Started OUTSIDE the model's sandbox. Two flavours of the same config:
 //   - the MODEL's server: no LITE_TRACE, serves Lite untouched;
 //   - the GRADER's server: LITE_TRACE=1 adds the lifecycle-recording transform (vite/lite-trace-plugin.mjs). Nothing else differs.
+//   - a SEALED session's model server (LITE_BUNDLE, #948): the built bundle in the source's place, and nothing of the checkout allowed.
 // Nothing is written to the reference checkout (cacheDir is ours, per flavour).
 import { liteTrace } from "./lite-trace-plugin.mjs";
 const LITE = process.env.LITE_SRC;       // <reference>/packages/babylon-lite/src
 const REF = process.env.LITE_REPO;       // <reference> (read access for /@fs/ module URLs)
 const port = Number(process.env.VITE_PORT);
+const BUNDLE = process.env.LITE_BUNDLE;  // <the lite service's dir>/bundle/dist, in a sealed session alone
+const lite = BUNDLE ? BUNDLE + "/index.js" : LITE;
 
 // No HMR client: a plain dev server that serves what is on disk, so a page never reloads itself under the model.
 const noClient = { name: "no-vite-client", transformIndexHtml: { order: "post", handler: (html) => html.replace(/<script type="module" src="\/@vite\/client"><\/script>\s*/, "") } };
@@ -18,6 +21,6 @@ export default {
     clearScreen: false,
     logLevel: "info",
     optimizeDeps: { exclude: ["@recast-navigation/core", "@recast-navigation/generators", "@recast-navigation/wasm"] },
-    resolve: { alias: { "babylon-lite": LITE, "@babylonjs/lite": LITE } },
-    server: { host: "127.0.0.1", port, strictPort: true, fs: { allow: [process.env.VITE_ROOT, REF] }, hmr: false },
+    resolve: { alias: { "babylon-lite": lite, "@babylonjs/lite": lite } },
+    server: { host: "127.0.0.1", port, strictPort: true, fs: { allow: [process.env.VITE_ROOT, BUNDLE || REF] }, hmr: false },
 };
