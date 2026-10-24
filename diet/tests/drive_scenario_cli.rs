@@ -2228,6 +2228,7 @@ fn a_fresh_session_carries_the_working_memory_its_refill_kept() {
 }
 
 /// What one sealed run shows (#948): its exit, its line, and its two logs.
+#[cfg(target_os = "macos")]
 struct SealedRun {
     said: serde_json::Value,
     first: PathBuf,
@@ -2236,6 +2237,7 @@ struct SealedRun {
 }
 
 /// The ways [`sealed_run`] is broken on purpose, each a probe leg's RED.
+#[cfg(target_os = "macos")]
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum Broken {
     Nothing,
@@ -2250,6 +2252,7 @@ enum Broken {
 /// A sealed run (#948): a first session that reads the checkout's source,
 /// a declared meditation, and a sealed next session under
 /// `sealed = ["source"]` that tries the source and reads the docs.
+#[cfg(target_os = "macos")]
 #[allow(clippy::too_many_lines)]
 fn sealed_run(name: &str, broken: Broken) -> SealedRun {
     let dir = scratch(name);
