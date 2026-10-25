@@ -1,0 +1,22 @@
+# The ast-grep tutorial's canned regimen (#971): the routed scenario substrate, the bare regimen's sandbox and
+# commands. What `scenario tutorial.jsonl` runs under by itself.
+arm = "ast-grep-canned"
+dogma_version = 0
+
+substrate = "canned-scenario"
+substrate_reasoning = "off"
+# The `hardware_fingerprint` of equipment `canned-loopback-scenario` in `substrates/registry.toml`.
+substrate_hardware = "b6bc80e9e8e4bc2342219f064dab89a8d17c02535600b32b84895fc0b9ba6513"
+
+allowed_commands = ["ast-grep", "ls", "cat"]
+isolation = "sandbox"
+network = "none"
+sandbox_reads = "all"
+sandbox_secrets = ["~/.config/git", "~/.git-credentials"]
+approval = "none"
+approval_policy = "approvals are off: every command runs without a gate decision or a prompt; the sandbox confines writes to the worktree"
+
+[sampler]
+temperature = 0.6
+top_p = 0.95
+seed = 7

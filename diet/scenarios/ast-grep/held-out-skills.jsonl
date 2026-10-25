@@ -1,0 +1,32 @@
+{"answer_tool": "answer-tool.json", "head": "head-skills.md", "live_regimen": "bare.toml", "regimen": "canned.toml", "sandbox_secrets": ["service.fixture.dir"], "sandbox_tools": ["ast-grep"], "scenario": "ast-grep-held-out-skills", "services": [{"name": "fixture", "ready": {"command": "test -s \"$DIET_SERVICE_DIR/provides.json\""}, "start": "python3 -I services/fixture.py start", "stop": "python3 -I services/fixture.py stop"}, {"name": "skills", "ready": {"command": "test -s \"$DIET_SERVICE_DIR/provides.json\""}, "ready_timeout_s": 120, "start": "python3 -I services/skills.py start", "stop": "python3 -I services/skills.py stop"}]}
+{"reply": {"calls": [{"arguments": "{\"command\": \"ast-grep run -l ts -p 'const $N = ($$$A): Socket => $B' src\"}", "id": "canned-run-h1-ret-arrow", "name": "bash"}], "text": "", "when": "Task `h1-ret-arrow`"}}
+{"reply": {"calls": [{"arguments": "{\"task\": \"h1-ret-arrow\", \"answer\": [\"(none)\"]}", "id": "canned-answer-h1-ret-arrow", "name": "answer"}], "text": ""}}
+{"reply": {"text": "Canned: answered."}}
+{"reply": {"calls": [{"arguments": "{\"command\": \"ast-grep outline src --match '^VertexSpec$'\"}", "id": "canned-run-h2-maybe-defined", "name": "bash"}], "text": "", "when": "Task `h2-maybe-defined`"}}
+{"reply": {"calls": [{"arguments": "{\"task\": \"h2-maybe-defined\", \"answer\": [\"no\"]}", "id": "canned-answer-h2-maybe-defined", "name": "answer"}], "text": ""}}
+{"reply": {"text": "Canned: answered."}}
+{"reply": {"calls": [{"arguments": "{\"command\": \"ast-grep outline src/index.ts; ast-grep run -l ts -p 'export interface $I { $$$B }' src\"}", "id": "canned-run-h3-hidden-itfs", "name": "bash"}], "text": "", "when": "Task `h3-hidden-itfs`"}}
+{"reply": {"calls": [{"arguments": "{\"task\": \"h3-hidden-itfs\", \"answer\": [\"Relay\", \"Vertex\"]}", "id": "canned-answer-h3-hidden-itfs", "name": "answer"}], "text": ""}}
+{"reply": {"text": "Canned: answered."}}
+{"reply": {"calls": [{"arguments": "{\"command\": \"ast-grep scan --inline-rules 'id: q\\nlanguage: ts\\nrule:\\n  kind: function_declaration\\n  has:\\n    stopBy: end\\n    pattern: loadMeadow($$$A)\\n    inside:\\n      kind: try_statement\\n      stopBy: end' src\"}", "id": "canned-run-h4-log-in-try", "name": "bash"}], "text": "", "when": "Task `h4-log-in-try`"}}
+{"reply": {"calls": [{"arguments": "{\"task\": \"h4-log-in-try\", \"answer\": [\"drainMeadow\", \"loadBundle\", \"mergeParcel\", \"scanParcel\", \"splitBundle\", \"storeEmber\", \"trimCanopy\"]}", "id": "canned-answer-h4-log-in-try", "name": "answer"}], "text": ""}}
+{"reply": {"text": "Canned: answered."}}
+{"reply": {"calls": [{"arguments": "{\"command\": \"ast-grep run -l ts -p '$track($$$A)' src\"}", "id": "canned-run-h5-track-count", "name": "bash"}], "text": "", "when": "Task `h5-track-count`"}}
+{"reply": {"calls": [{"arguments": "{\"task\": \"h5-track-count\", \"answer\": [\"9\"]}", "id": "canned-answer-h5-track-count", "name": "answer"}], "text": ""}}
+{"reply": {"text": "Canned: answered."}}
+{"reply": {"calls": [{"arguments": "{\"command\": \"ast-grep outline src --match '^Relay$'\"}", "id": "canned-run-h6-itf-line", "name": "bash"}], "text": "", "when": "Task `h6-itf-line`"}}
+{"reply": {"calls": [{"arguments": "{\"task\": \"h6-itf-line\", \"answer\": [\"src/core/shared.ts\", \"1\"]}", "id": "canned-answer-h6-itf-line", "name": "answer"}], "text": ""}}
+{"reply": {"text": "Canned: answered."}}
+{"step": "ask", "task": "h1-ret-arrow", "text": "DRAFT. Task `h1-ret-arrow`: DRAFT. List every arrow function assigned to a `const` under src/ whose declared return type is exactly `{service.fixture.arrow_target}`. Answer with the constants' names."}
+{"attempts": 1, "check": "python3 -I \"$DIET_GRADE_SCENARIO_DIR/check.py\"", "step": "grade", "task": "h1-ret-arrow", "wrong": "DRAFT. (Not sent: a pass asks each task once.)"}
+{"step": "ask", "task": "h2-maybe-defined", "text": "DRAFT. Task `h2-maybe-defined`: DRAFT. Is `{service.fixture.maybe}` defined anywhere under src/, as a function, class, interface or type? Answer with one item: yes or no."}
+{"attempts": 1, "check": "python3 -I \"$DIET_GRADE_SCENARIO_DIR/check.py\"", "step": "grade", "task": "h2-maybe-defined", "wrong": "DRAFT. (Not sent: a pass asks each task once.)"}
+{"step": "ask", "task": "h3-hidden-itfs", "text": "DRAFT. Task `h3-hidden-itfs`: DRAFT. Which interfaces are exported by some file under src/ but are not part of the package's public surface (what src/index.ts exports)? Answer with their names."}
+{"attempts": 1, "check": "python3 -I \"$DIET_GRADE_SCENARIO_DIR/check.py\"", "step": "grade", "task": "h3-hidden-itfs", "wrong": "DRAFT. (Not sent: a pass asks each task once.)"}
+{"step": "ask", "task": "h4-log-in-try", "text": "DRAFT. Task `h4-log-in-try`: DRAFT. List every function declared with the `function` keyword under src/ that calls `{service.fixture.log_fn}(...)` somewhere inside a `try` block, at any depth. Answer with their names."}
+{"attempts": 1, "check": "python3 -I \"$DIET_GRADE_SCENARIO_DIR/check.py\"", "step": "grade", "task": "h4-log-in-try", "wrong": "DRAFT. (Not sent: a pass asks each task once.)"}
+{"step": "ask", "task": "h5-track-count", "text": "DRAFT. Task `h5-track-count`: DRAFT. How many calls to `$track(...)` are there under src/? Answer with the count as the one item."}
+{"attempts": 1, "check": "python3 -I \"$DIET_GRADE_SCENARIO_DIR/check.py\"", "step": "grade", "task": "h5-track-count", "wrong": "DRAFT. (Not sent: a pass asks each task once.)"}
+{"step": "ask", "task": "h6-itf-line", "text": "DRAFT. Task `h6-itf-line`: DRAFT. Where does the interface `{service.fixture.line_itf}` begin? Answer with two items: its file's path relative to this directory, then the line it starts on, numbered from 1 as an editor numbers lines."}
+{"attempts": 1, "check": "python3 -I \"$DIET_GRADE_SCENARIO_DIR/check.py\"", "step": "grade", "task": "h6-itf-line", "wrong": "DRAFT. (Not sent: a pass asks each task once.)"}
+{"step": "end"}

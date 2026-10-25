@@ -58,6 +58,11 @@ pub struct Scenario {
     /// service's value, `service.NAME.KEY` (#942): serve's
     /// `--sandbox-unix-socket`.
     pub sandbox_unix_sockets: Vec<(String, String)>,
+    /// Paths the model's commands may not read, each a service's value,
+    /// `service.NAME.KEY`, of one path or several, colon-separated (#971):
+    /// serve's `--sandbox-secret`, once the services gave them. What a
+    /// service keeps from the model, such as a task's answer key.
+    pub sandbox_secrets: Vec<(String, String)>,
     /// The commands the model's sandbox must run (#976): each probed inside
     /// it, its path found, readable and executable and its `--version`
     /// answering, before a live run starts.
@@ -1058,13 +1063,34 @@ fn header(mut fields: Fields) -> Result<Scenario, ScenarioError> {
                         Ok(((*name).to_owned(), (*key).to_owned()))
                     }
                     _ => Err(fields.wrong(
-                        "each of `sandbox_unix_sockets` a declared service's value,                          `service.NAME.KEY`",
+                        "each of `sandbox_unix_sockets` a declared service's value, `service.NAME.KEY`",
                     )),
                 },
                 _ => Err(fields.wrong("each of `sandbox_unix_sockets` text")),
             })
             .collect::<Result<_, _>>()?,
         Some(_) => return Err(fields.wrong("`sandbox_unix_sockets` a list")),
+    };
+    let sandbox_secrets = match fields.take("sandbox_secrets") {
+        None => Vec::new(),
+        Some(Value::Array(named)) => named
+            .into_iter()
+            .map(|named| match named {
+                Value::String(named) => match named.split('.').collect::<Vec<_>>().as_slice() {
+                    ["service", name, key]
+                        if services.iter().any(|service| service.name == *name)
+                            && crate::drive::services::is_a_name(key) =>
+                    {
+                        Ok(((*name).to_owned(), (*key).to_owned()))
+                    }
+                    _ => Err(fields.wrong(
+                        "each of `sandbox_secrets` a declared service's value, `service.NAME.KEY`",
+                    )),
+                },
+                _ => Err(fields.wrong("each of `sandbox_secrets` text")),
+            })
+            .collect::<Result<_, _>>()?,
+        Some(_) => return Err(fields.wrong("`sandbox_secrets` a list")),
     };
     let sandbox_tools = match fields.take("sandbox_tools") {
         None => Vec::new(),
@@ -1181,6 +1207,7 @@ fn header(mut fields: Fields) -> Result<Scenario, ScenarioError> {
         ports,
         services,
         sandbox_unix_sockets,
+        sandbox_secrets,
         sandbox_tools,
         serve_env,
         seal,
@@ -3368,6 +3395,21 @@ fn running(
             };
             sockets.push(socket);
         }
+        let mut kept = Vec::new();
+        for (name, key) in &scenario.sandbox_secrets {
+            let Some(paths) = running.value(&["service", name, key]) else {
+                refused.get_or_insert(format!(
+                    "service `{name}` gave no `{key}` for the sandbox's secrets"
+                ));
+                break;
+            };
+            kept.extend(
+                paths
+                    .split(':')
+                    .filter(|path| !path.is_empty())
+                    .map(str::to_owned),
+            );
+        }
         let mut serve_env = Vec::new();
         for (name, text) in &scenario.serve_env {
             match running.filled(text) {
@@ -3391,6 +3433,13 @@ fn running(
         };
         for socket in sockets {
             serve.arg("--sandbox-unix-socket").arg(socket);
+        }
+        // Counted, never named: a service's paths are a run's facts.
+        if !kept.is_empty() {
+            said["sandbox_secrets_from_services"] = serde_json::json!(kept.len());
+        }
+        for secret in kept {
+            serve.arg("--sandbox-secret").arg(secret);
         }
         serve.envs(running.env());
         // Named with their sources, never their values: a run's facts.
@@ -4167,6 +4216,31 @@ mod tests {
         let lengths: Vec<usize> = names.iter().map(String::len).collect();
         assert!(lengths.iter().all(|&l| l == lengths[0]), "{names:?}");
         assert_ne!(names[1], names[2], "distinct processes, distinct names");
+    }
+
+    /// `sandbox_secrets` names declared services' values (#971), as
+    /// `sandbox_unix_sockets` does: an undeclared service or a bare word is
+    /// refused when the scenario is read.
+    #[test]
+    fn sandbox_secrets_name_declared_services_values() {
+        let service = r#""services": [{"name": "fixture", "start": "true", "stop": "true", "ready": {"command": "true"}}]"#;
+        let header = |secrets: &str| {
+            format!(
+                "{{\"scenario\": \"s\", \"regimen\": \"r.toml\", \"head\": \"h.md\", {service}, \"sandbox_secrets\": {secrets}}}\n{{\"step\": \"end\"}}\n"
+            )
+        };
+        let read = parse(&header(r#"["service.fixture.dir"]"#)).expect("it reads");
+        assert_eq!(
+            read.sandbox_secrets,
+            [("fixture".to_owned(), "dir".to_owned())]
+        );
+        for refused in [
+            r#"["service.other.dir"]"#,
+            r#"["dir"]"#,
+            r#""service.fixture.dir""#,
+        ] {
+            assert!(parse(&header(refused)).is_err(), "{refused}");
+        }
     }
 
     /// The replies' digest moves with any reply and with nothing else.

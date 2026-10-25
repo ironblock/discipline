@@ -1,5 +1,5 @@
 {
- "about": "The docs-read classifier's fixtures (docs_reads.py `reads_of`): each case one bash call as the model sends it, with the official skills at SKILLS; a read lists the kinds it makes, in order, and a non-read makes none.",
+ "about": "The docs-read classifier's fixtures (docs_reads.py `reads_of`): each case one bash call as the model sends it, with the official skills at SKILLS and the tool installed at INSTALLED; a read lists the kinds it makes, in order, and a non-read makes none.",
  "skills": "/skills/agent-skill",
  "reads": [
   {
@@ -164,6 +164,34 @@
    "kinds": [
     "skill"
    ]
+  },
+  {
+   "why": "the tool bare prints its whole help (0.44.0)",
+   "cmd": "ast-grep",
+   "kinds": [
+    "help"
+   ]
+  },
+  {
+   "why": "the alias bare, piped on",
+   "cmd": "sg | head -20",
+   "kinds": [
+    "help"
+   ]
+  },
+  {
+   "why": "the install's README beside the binary",
+   "cmd": "cat /opt/tool/ast-grep/0.44.0/README.md",
+   "kinds": [
+    "installed"
+   ]
+  },
+  {
+   "why": "the install's shell completions, which list every option",
+   "cmd": "grep -n stop /opt/tool/ast-grep/0.44.0/share/zsh/site-functions/_ast-grep",
+   "kinds": [
+    "installed"
+   ]
   }
  ],
  "non_reads": [
@@ -230,6 +258,23 @@
   {
    "why": "option values that are exactly a help flag: a pattern and a rewrite",
    "cmd": "ast-grep run -p '-h' -r '--help' src"
+  },
+  {
+   "why": "run given nothing prints only its usage error (0.44.0)",
+   "cmd": "ast-grep run"
+  },
+  {
+   "why": "outline given nothing outlines the working directory",
+   "cmd": "ast-grep outline"
+  },
+  {
+   "why": "running the installed binary by its path",
+   "cmd": "/opt/tool/ast-grep/0.44.0/bin/ast-grep run -p 'x' src"
+  },
+  {
+   "why": "listing the install's bin directory",
+   "cmd": "ls /opt/tool/ast-grep/0.44.0/bin"
   }
- ]
+ ],
+ "installed": "/opt/tool/ast-grep/0.44.0"
 }
