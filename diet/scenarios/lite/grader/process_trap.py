@@ -5,6 +5,12 @@ DEFINITION
   A "read" is what one shell tool call (the session log's `bash` calls) does with the Lite checkout: the path the run's `lite` service checked
   at start (its provides.json `root`), else $LITE_REPO, else ~/git/reference/Babylon/Babylon-Lite. `reads_of` parses the call:
     - heredoc bodies are dropped first: what a heredoc writes is the model's own text, never a read, however much Lite it names;
+    - but a heredoc body the call EXECUTES is read for what it reads (`_script_reads`, smoke 2's interviews h9): one fed straight to an
+      interpreter (`node <<EOF`, `python3 - <<EOF`), or one written to a file (`cat > F <<EOF`, `tee F <<EOF`) that the same call then runs
+      (`node F`, `python3 F`). In it, a read call with a literal path under the checkout reads that path: JavaScript's `fs` reads and
+      listings, `require` and `import`; Python's `open`, `os.listdir`/`os.scandir`, and pathlib's `.read_text`/`.read_bytes`/`.open`/
+      `.iterdir`. A path the script only prints, a relative path (the script's own working directory is not followed) and a body
+      written and never run are no read;
     - the call is split into segments; each call starts in the worktree, and `cd` moves it, so a relative path after `cd <root>/...` resolves;
     - content verbs (cat, head, tail, nl, wc, ...; sed and awk past their script; `git -C <root> show HEAD:<path>`) read their file operands,
       search verbs (grep, rg, ...) their path operands, or the working directory when they name none, and listing verbs (ls, tree, find, ...)
@@ -97,6 +103,69 @@ def _strip_heredocs(cmd):
                 i += 1
             i += 1
     return "\n".join(out)
+
+
+INTERPRETERS = {"node", "nodejs", "python", "python3", "deno", "bun"}
+HEREDOC = re.compile(r"<<-?\s*['\"]?([A-Za-z_][A-Za-z0-9_]*)['\"]?")
+# A script's read calls, each with its literal path: (call, path).
+SCRIPT_READ = re.compile(r"""\b(readFileSync|readFile|createReadStream|readdirSync|readdir|opendirSync|opendir|require|import|open|listdir|scandir)"""
+                         r"""\s*\(\s*(['"`])([^'"`\n]+)\2""")
+PATHLIB_READ = re.compile(r"""\bPath\s*\(\s*(['"])([^'"\n]+)\1\s*\)\s*\.\s*(read_text|read_bytes|open|iterdir)\b""")
+RUNS = re.compile(r"(^|[\n;&|]\s*)(?:\S*/)?(node|nodejs|python3?|deno|bun)(?:\s+-\S+)*\s+([^\s;&|<>]+)")
+LISTING_CALLS = {"readdirSync", "readdir", "opendirSync", "opendir", "listdir", "scandir", "iterdir"}
+
+
+def _heredocs(cmd):
+    """[(the line that opens it, its body)] of every heredoc in the command, in order."""
+    out, lines, i = [], cmd.split("\n"), 0
+    while i < len(lines):
+        line = lines[i]
+        i += 1
+        for end in HEREDOC.findall(line):
+            body = []
+            while i < len(lines) and lines[i].strip() != end:
+                body.append(lines[i])
+                i += 1
+            i += 1
+            out.append((line, "\n".join(body)))
+    return out
+
+
+def _script_reads(cmd, root):
+    """[(relpath, how, None)] the heredoc bodies this call executes read of the checkout (see DEFINITION): fed to an interpreter, or
+    written to a file the call then runs with one."""
+    run, written = [], {}
+    for line, body in _heredocs(cmd):
+        # The command the heredoc belongs to: the line's last segment before `<<`.
+        own = re.split(r"&&|\|\||;|\|", line.split("<<", 1)[0])[-1] + " " + line.split("<<", 1)[1]
+        head = own.split("<<", 1)[0].split()
+        verb = os.path.basename(head[0]) if head else ""
+        if verb in INTERPRETERS:
+            run.append(body)
+        if verb == "tee":
+            names = [a for a in head[1:] if not a.startswith("-")]
+            name = names[0] if names else None
+        else:
+            target = re.search(r"(?<![<\d&])>>?\s*([^\s<>;&|]+)", own)
+            name = target.group(1) if target else None
+        if name and name != "/dev/null":
+            written[os.path.normpath(name)] = body
+    # The scripts the call runs, from its text with the heredoc bodies out: an interpreter starting a command (a line, or after `;`, `&&`,
+    # `||`, `|`) with a file operand. Its own scan, as `_segments` joins a heredoc's opening token to the line after it.
+    for _, verb, name in RUNS.findall(_strip_heredocs(cmd)):
+        if os.path.normpath(name) in written:
+            run.append(written[os.path.normpath(name)])
+    reads = []
+    for body in run:
+        found = [(call, path) for call, _, path in SCRIPT_READ.findall(body)]
+        found += [(call, path) for _, path, call in PATHLIB_READ.findall(body)]
+        for call, path in found:
+            if not (path.startswith("/") or path == "~" or path.startswith("~/")):
+                continue
+            rel = _under(path, root)
+            if rel is not None:
+                reads.append((rel, "listing" if call in LISTING_CALLS else "content", None))
+    return reads
 
 
 def _segments(cmd):
@@ -300,7 +369,7 @@ def _http_reads(cmd, root):
 
 def reads_of(cmd, root=REF):
     """Every read one bash command makes of the checkout: [(relpath, how, pattern)], how in content, listing, search, http."""
-    return _shell_reads(cmd, root) + _http_reads(cmd, root)
+    return _shell_reads(cmd, root) + _http_reads(cmd, root) + _script_reads(cmd, root)
 
 
 def is_read(cmd, root=REF):

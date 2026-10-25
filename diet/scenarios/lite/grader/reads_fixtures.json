@@ -29,7 +29,10 @@
   {"why": "an input redirection is a read of its file", "cmd": "cd ROOT && wc -l < docs/lite/01-getting-started.md", "reads": ["docs/lite/01-getting-started.md"]},
   {"why": "errors folded into the pipe", "cmd": "cd ROOT && ls packages 2>&1 | head", "reads": ["packages"]},
   {"why": "a cat appended to a file", "cmd": "cd ROOT && cat docs/lite/01-getting-started.md >> notes.txt", "reads": ["docs/lite/01-getting-started.md"]},
-  {"why": "an input redirection with its file attached", "cmd": "cd ROOT && wc -l <docs/lite/01-getting-started.md", "reads": ["docs/lite/01-getting-started.md"]}
+  {"why": "an input redirection with its file attached", "cmd": "cd ROOT && wc -l <docs/lite/01-getting-started.md", "reads": ["docs/lite/01-getting-started.md"]},
+  {"why": "a heredoc writes a node script that reads a Lite source file, and the same call runs it (smoke 2's interviews h9 shape): the script's read is the call's", "cmd": "cd ROOT/packages/babylon-lite/src/mesh && cat > /dev/null; cd /srv/work && cat > .probe/boxrule.js <<'EOF'\nconst fs = require('fs');\nconst src = fs.readFileSync('ROOT/packages/babylon-lite/src/mesh/create-box.ts', 'utf8');\nconsole.log(src.length);\nEOF\nnode .probe/boxrule.js", "reads": ["packages/babylon-lite/src/mesh/create-box.ts"]},
+  {"why": "a heredoc fed straight to node lists a Lite directory", "cmd": "node <<'EOF'\nconst fs = require(\"fs\");\nconsole.log(fs.readdirSync(\"ROOT/packages/babylon-lite/src/scene\"));\nEOF", "reads": ["packages/babylon-lite/src/scene"]},
+  {"why": "a heredoc fed to python3 opens a Lite doc", "cmd": "python3 - <<'PY'\nprint(open('ROOT/docs/lite/01-getting-started.md').read()[:200])\nPY", "reads": ["docs/lite/01-getting-started.md"]}
  ],
  "non_reads": [
   {"why": "a heredoc writing main.ts whose code names Lite's API and a pngjs path (the audit's 42278 and 53481)", "cmd": "cat > h5-swap-to-pbr/main.ts <<'EOF'\nimport { addToScene, removeFromScene, enqueueMaterialSwap } from \"babylon-lite\";\n// see ROOT/packages/babylon-lite/src/scene/scene-core.ts\naddToScene(scene, mesh);\nEOF\nls ROOT/node_modules/.bin | grep chrome", "reads": []},
@@ -45,6 +48,10 @@
   {"why": "a grep of the model's own file for a Lite keyword", "cmd": "grep -n addToScene h1-late-torus/main.ts", "reads": []},
   {"why": "a tilde path outside Lite", "root": "~/git/reference/Babylon/Babylon-Lite", "cmd": "cat ~/git/experiments/lite-probe/notes.md"},
   {"why": "a tilde path to a sibling of the checkout whose name starts the same", "root": "~/git/reference/Babylon/Babylon-Lite", "cmd": "cat ~/git/reference/Babylon/Babylon-Lite-old/packages/babylon-lite/src/scene/scene-core.ts"},
-  {"why": "an absolute path outside Lite, graded against a tilde root", "root": "~/git/reference/Babylon/Babylon-Lite", "cmd": "ls HOME/git/experiments"}
+  {"why": "an absolute path outside Lite, graded against a tilde root", "root": "~/git/reference/Babylon/Babylon-Lite", "cmd": "ls HOME/git/experiments"},
+  {"why": "a heredoc writes a script that would read Lite, and nothing runs it: a write", "cmd": "cat > .probe/later.js <<'EOF'\nrequire('fs').readFileSync('ROOT/packages/babylon-lite/src/mesh/create-box.ts', 'utf8');\nEOF"},
+  {"why": "a heredoc fed to node names a Lite path in its own text, and reads nothing", "cmd": "node <<'EOF'\nconsole.log('the box is in ROOT/packages/babylon-lite/src/mesh/create-box.ts');\nEOF"},
+  {"why": "the call runs another script than the one its heredoc wrote", "cmd": "cat > a.js <<'EOF'\nrequire('fs').readFileSync('ROOT/packages/babylon-lite/src/mesh/create-box.ts');\nEOF\nnode b.js"},
+  {"why": "a node heredoc that reads tooling under the checkout (node_modules), not Lite", "cmd": "node <<'EOF'\nrequire('fs').readFileSync('ROOT/node_modules/pngjs/package.json');\nEOF"}
  ]
 }
