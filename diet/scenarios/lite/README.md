@@ -55,6 +55,15 @@ The scan goes on past a read to the first write of `main.ts` within K, and says 
 
 The detectors are static heuristics of each fact's mechanism, one per fact, never a grade. `first_move_fixtures.json` holds code that applies each fact and code that misses it the ways the traps invite, and `--selftest` reports both numbers. Validated privately against the tasks' reference and alternative solutions: every right solution's facts detected, and every solution failing its constraint caught.
 
+## The ledger (#976)
+
+`python3 -I ledger.py ROOT OUT [--absolute]` writes `OUT/ledger.tsv`, Lite's public surface as a pointer table: one row per name the package's barrel (`src/index.ts`) exports, values and types, under the header `name	description	query`. The query is a whole runnable `ast-grep outline` command anchored on one name, and the description says what running it shows. The TSV holds no ast-grep output, no line numbers, signatures or spans, and is written at run time, never committed.
+- **A row's query** starts from the whole source tree, so it survives a file move. It is narrowed to the barrel's own file only when the tree holds more than one item of that name. An alias (`X as Y`) is row `Y`, its query anchored on `X`. The view is `signatures` for a function, constant or variable, and `expanded` for the rest. `--absolute` puts the checkout's path in each query, so it runs from a model's worktree.
+- **The gate:** every query is run as written and its items parsed (`--json=stream`). A row is written only when the query finds the count its description declares, one, and every item is the definition's name. A miss prints `nothing found` and exits 0, so the count is graded, never the exit status.
+- **Refused names** go to `OUT/ledger-refused.tsv` with the count found, and `OUT/ledger.json` says what was built.
+- **On Lite's checkout:** 862 of 863 names are admitted, about 70 s on 8 workers. The one refused is a name its barrel takes from a module that re-exports it under another name: `outline` doesn't follow re-exports.
+- `--selftest` runs the gate on a fake ast-grep (a miss, an over-broad name, an alias, a re-run gate and a name check), so it needs no binary.
+
 ## Outcomes
 
 `python3 -I outcomes.py DIR` writes `outcomes.json` beside each run's log, and `diet-drive table DIR` then counts each outcome per arm, as `outcome: <task>: <outcome>` rows. It covers the scene-update family, the held-out tasks whose facts are `late-add` or `late-family` (h1, h2, h3, h5). Each task's outcome is derived from its grade lines, its last attempt's diagnosis, and the reads it made between the refill and its last grade. A run whose held-out half ran in a second session is read from that session, `next/`, every read of it after the refill:
