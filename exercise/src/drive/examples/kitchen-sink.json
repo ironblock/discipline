@@ -15,7 +15,7 @@
     {
       "approvals_off": true,
       "bash_timeout_ms": 120000,
-      "build_commit": "c6becd09e31c62584abd61ecb05535b4c08dbccd",
+      "build_commit": "95a9145e30538b78c626db8a206ada9433c7544d",
       "build_dirty": false,
       "compaction_persists": true,
       "fork_asks": "v4",
@@ -88,7 +88,7 @@
       },
       "model": "scenario",
       "notes_in_the_ask": true,
-      "opened": 1792902812876,
+      "opened": 1792959664565,
       "opening_phase": "plan",
       "phase_document": {
         "digest": "c3c3afe17657994b1403ed749e7352bdf4ad1eb47c688b6e60bb0e122db95e8e",
@@ -180,7 +180,7 @@
         "propose_phase_transition",
         "refute_beliefs"
       ],
-      "version": 28
+      "version": 29
     },
     {
       "kind": "phase.started",
@@ -3857,16 +3857,31 @@
       "turn": 7
     },
     {
+      "files": [
+        {
+          "bytes": 0,
+          "media_type": "text/plain",
+          "path": "files/e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        }
+      ],
+      "job": "bg_2",
+      "kind": "background.ended",
+      "seq": 283,
+      "status": "cancelled",
+      "t": 52992
+    },
+    {
       "kind": "delta",
       "request": 281,
-      "seq": 283,
+      "seq": 284,
       "t": 53352,
       "text": "LEARNED: NONE\nEVIDENCE: NONE\nSTUCK: NONE"
     },
     {
       "finish_reason": "stop",
       "kind": "response",
-      "seq": 284,
+      "seq": 285,
       "t": 53357,
       "text": "LEARNED: NONE\nEVIDENCE: NONE\nSTUCK: NONE",
       "timings": {
@@ -3884,23 +3899,8 @@
       "fork": 280,
       "kind": "fork.settled",
       "outcome": "decline",
-      "seq": 285,
-      "t": 53362
-    },
-    {
-      "files": [
-        {
-          "bytes": 0,
-          "media_type": "text/plain",
-          "path": "files/e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
-          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
-        }
-      ],
-      "job": "bg_2",
-      "kind": "background.ended",
       "seq": 286,
-      "status": "cancelled",
-      "t": 53367
+      "t": 53362
     },
     {
       "kind": "delta",
