@@ -55,8 +55,7 @@ Option values are never flags, `cd` is followed, `$(...)` counts as a command, a
 - **The model can't read the answer key.** `sandbox_reads` is `all`, so the fixture's directory, which holds the truth, is the header's `sandbox_secrets` (`service.fixture.dir`), denied to the model's commands. The check runs outside the sandbox and still reads it.
   - `probe_key.py` proves it. It runs a canned pass of `tutorial.jsonl` and `tutorial-skills.jsonl` whose one reply `cat`s the truth by its absolute path; the call must run, fail, and print nothing of the truth.
   - It was red before the deny (exit 0, the answers printed) and is green after it.
-  - It needs the platform sandbox. On Linux it skips, saying so, where bwrap can't start, as on a CI runner whose bwrap is refused its network namespace. It also skips there when the drive isn't built.
-  - On macOS, where the live runs are, it never skips: an unbuilt drive or a run the sandbox can't confine fails it.
+  - Off macOS it skips and says why (below). On macOS, where the live runs are, it never skips: an unbuilt drive, or a run the sandbox can't confine, fails it.
   - The skills service keeps no cache: the archive is read in memory, and only the three skill files are written.
 - **Each task is asked once and graded once** (`attempts` 1), on its `answer` call (`check.py`), with no feedback inside the pass. The header's `answer_tool` hands serve `answer-tool.json`.
 - **The bare regimen** (`bare.toml`) runs bash and the answer tool, with no memory levers. `canned.toml` is its rehearsal twin.
@@ -79,6 +78,7 @@ Option values are never flags, `cd` is followed, `$(...)` counts as a command, a
   - the official skills' root;
   - the tool's install prefix (`installed_prefix()`, where Homebrew keeps its README, changelog and completions beside the binary), which `pass.py` reads on the machine that grades.
 - **The live run's deny list covers the agents' plugin and skills caches** (`~/.claude`; see `../README.md`). A copy anywhere else, such as a package cache holding the tool's README, is neither denied nor counted.
+- **The tutorial runs on macOS only.** Its regimens read all (`sandbox_reads = "all"`), which the drive builds for macOS alone; elsewhere serve refuses to start. So `probe_key.py` skips off macOS, saying so, and a pass can't run there.
 - **The live substrate is the production GPU host's registry entry (`ada48-tabbyapi-exl3-qwen38flashnext-2p05`) by default.** Which model runs the tutorial is the maintainer's open question.
 
 ## Checks

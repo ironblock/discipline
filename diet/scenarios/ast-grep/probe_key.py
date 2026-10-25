@@ -3,9 +3,9 @@
 Runs a canned pass of SCENARIO (`tutorial.jsonl` unless given) under its own header, services and sandbox, with one
 reply: a `cat` of the instance's truth, by the absolute path the `fixture` service writes it at under the run's
 `--out`. The probe passes only when that call ran and failed, and printed nothing of the truth. `--selftest` runs it
-with the built drive at `target/debug/diet-drive` and its `diet`, skipping (exit 0, said) off macOS when they are
-not built, or on Linux when the platform sandbox can't run there (`sandbox_cannot_run`), as a CI runner's bwrap may not. On macOS,
-where the live runs are, the sandbox is never skipped: a run it can't confine fails.
+with the built drive at `target/debug/diet-drive` and its `diet`. Off macOS it skips (exit 0, said):
+the tutorial's regimens read all (`sandbox_reads = "all"`), which the drive builds for macOS only. On macOS, where the
+live runs are, it never skips: an unbuilt drive, or a run the sandbox can't confine, fails it.
 """
 import json, os, shutil, subprocess, sys, tempfile
 
@@ -58,15 +58,11 @@ def probe(drive, scenario="tutorial.jsonl"):
 
 
 def sandbox_cannot_run():
-    """Why the platform sandbox can't run on this host, or None. Only Linux is asked: bwrap, as the drive confines a
-    command (`--unshare-all`), must start a no-op. On macOS nothing is skipped, so a missing Seatbelt fails the probe."""
-    if not sys.platform.startswith("linux"):
+    """Why the tutorial's sandbox can't run on this host, or None: its regimens read all (`sandbox_reads = "all"`),
+    which the drive builds for macOS only and refuses elsewhere. On macOS nothing is skipped."""
+    if sys.platform == "darwin":
         return None
-    if not shutil.which("bwrap"):
-        return "no bwrap on PATH"
-    ran = subprocess.run(["bwrap", "--unshare-all", "--ro-bind", "/", "/", "--proc", "/proc", "--dev", "/dev", "true"],
-                         capture_output=True, text=True)
-    return None if ran.returncode == 0 else f"bwrap cannot start here: {ran.stderr.strip()[:200]}"
+    return 'the tutorial\'s regimen reads all (`sandbox_reads = "all"`), built for macOS only'
 
 
 def main(drive, scenario):
@@ -77,16 +73,16 @@ def main(drive, scenario):
 
 if __name__ == "__main__":
     if sys.argv[1:] == ["--selftest"]:
+        cannot = sandbox_cannot_run()
+        if cannot:
+            print(f"probe_key: skipped: {cannot}")
+            sys.exit(0)
         root = os.path.dirname(os.path.dirname(os.path.dirname(HERE)))
         drive, diet = (os.path.join(root, "target", "debug", b) for b in ("diet-drive", "diet"))
         if not (os.access(drive, os.X_OK) and os.access(diet, os.X_OK)):
-            # On macOS, where the live runs are, a probe that didn't run is a failure, never a pass.
-            print("probe_key: " + ("FAILED" if sys.platform == "darwin" else "skipped") + ": no built diet-drive and diet under target/debug")
-            sys.exit(1 if sys.platform == "darwin" else 0)
-        cannot = sandbox_cannot_run()
-        if cannot:
-            print(f"probe_key: skipped: the platform sandbox can't run on this host ({cannot})")
-            sys.exit(0)
+            # Only macOS gets here, where the live runs are: a probe that didn't run is a failure, never a pass.
+            print("probe_key: FAILED: no built diet-drive and diet under target/debug")
+            sys.exit(1)
         os.environ.setdefault("DIET_BIN", diet)
         sys.exit(main(drive, "tutorial.jsonl") or main(drive, "tutorial-skills.jsonl"))
     if not sys.argv[1:2]:
