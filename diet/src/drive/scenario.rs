@@ -25,6 +25,9 @@ pub struct Scenario {
     pub live_regimen: Option<String>,
     /// The trunk's head, relative to the file.
     pub head: String,
+    /// The tool its tasks are answered through (#971), relative to the
+    /// file: serve's `--answer-tool`.
+    pub answer_tool: Option<String>,
     /// How a prompt waiting on the operator is answered: a `POST /approve`
     /// scope. Absent, a prompt fails the run.
     pub approvals: Option<String>,
@@ -985,12 +988,13 @@ pub fn parse(text: &str) -> Result<Scenario, ScenarioError> {
 }
 
 /// The first line: `scenario`, `regimen`, `head`, and optionally
-/// `live_regimen` and `approvals`.
+/// `live_regimen`, `answer_tool` and `approvals`.
 #[allow(clippy::too_many_lines)]
 fn header(mut fields: Fields) -> Result<Scenario, ScenarioError> {
     let name = fields.text("scenario")?;
     let regimen = fields.text("regimen")?;
     let head = fields.text("head")?;
+    let answer_tool = fields.maybe_text("answer_tool")?;
     let live_regimen = fields.maybe_text("live_regimen")?;
     let approvals = fields.maybe_text("approvals")?;
     let fixed_asks = match fields.take("fixed_asks") {
@@ -1165,6 +1169,7 @@ fn header(mut fields: Fields) -> Result<Scenario, ScenarioError> {
         regimen,
         live_regimen,
         head,
+        answer_tool,
         approvals,
         seed,
         fixed_asks,
@@ -3228,6 +3233,12 @@ fn running(
     if let Some(description) = &options.phase_tool_description {
         serve.arg("--phase-tool-description").arg(description);
     }
+    // The tool its tasks are answered through (#971), on every run.
+    if let Some(answer_tool) = &scenario.answer_tool {
+        serve
+            .arg("--answer-tool")
+            .arg(beside(&options.file, answer_tool));
+    }
     if let Some(key_file) = &options.key_file {
         serve.arg("--key-file").arg(key_file);
     } else if hosted && !live {
@@ -4321,6 +4332,30 @@ mod tests {
         let mut other = read.clone();
         other.replies[1].status = Some((429, Some(7)));
         assert_ne!(other.replies_digest(), read.replies_digest());
+    }
+
+    /// #971: the header's `answer_tool` names a file relative to the
+    /// scenario, as `head` does; absent, there is none; not text, refused.
+    #[test]
+    fn the_header_names_its_answer_tool_beside_the_scenario() {
+        let read = |header: &str| parse(&format!("{header}\n"));
+        let named = read(
+            r#"{"scenario":"s","regimen":"r.toml","head":"h.md","answer_tool":"answer.json"}"#,
+        )
+        .expect("it reads");
+        assert_eq!(named.answer_tool.as_deref(), Some("answer.json"));
+        let none = read(r#"{"scenario":"s","regimen":"r.toml","head":"h.md"}"#).expect("it reads");
+        assert_eq!(none.answer_tool, None);
+        for wrong in ["7", "[]"] {
+            let refused = read(&format!(
+                r#"{{"scenario":"s","regimen":"r.toml","head":"h.md","answer_tool":{wrong}}}"#
+            ))
+            .expect_err(wrong);
+            assert!(
+                refused.to_string().contains("answer_tool"),
+                "{wrong}: {refused}"
+            );
+        }
     }
 
     /// Every way a line can be wrong is refused, naming its line.

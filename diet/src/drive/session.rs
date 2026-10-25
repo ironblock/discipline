@@ -379,6 +379,8 @@ pub enum Event {
         head_nonce: Option<String>,
         /// The phase tool's supplied description's sha256 (v27, #948).
         phase_tool_description_sha256: Option<String>,
+        /// The answer tool's file's sha256 (v29, #971).
+        answer_tool_sha256: Option<String>,
         /// Where a carried session started (#948): `serve --carry`'s log,
         /// meditation and digests.
         carried_from: Option<log::CarriedFrom>,
@@ -2476,6 +2478,9 @@ struct State {
     /// The substrate an ask's images cannot reach (#815): its served
     /// configuration takes none. `None` sends them.
     blind: Option<String>,
+    /// The answer tool the session declared (#971): its call is checked
+    /// against its schema and shown its result.
+    answer: Option<super::answer::AnswerTool>,
     /// The request never sent because the session's `max_api_requests` was
     /// reached (#555): every later ask is refused, and nothing more is sent.
     api_capped: Option<u64>,
@@ -2748,6 +2753,7 @@ impl State {
             captures_this_turn: 0,
             reminder_due: None,
             blind: None,
+            answer: None,
             api_capped: None,
             cache_written: None,
             phase_note_due: None,
@@ -3509,6 +3515,7 @@ impl<S: Streaming + 'static> Session<S> {
             rehearsing_as: None,
             head_nonce: None,
             phase_tool_description_sha256: None,
+            answer_tool_sha256: None,
             carried_from: None,
             carried_source: None,
         });
@@ -3674,6 +3681,26 @@ impl<S: Streaming + 'static> Session<S> {
         {
             *phase_tool_description_sha256 = Some(sha256.to_owned());
         }
+        self
+    }
+
+    /// This session, answering a call to `tool` (#971), declared on its
+    /// requests already ([`super::answer::declare`]), and its
+    /// `session.start` naming the digest of the file it was read from (v29).
+    #[must_use]
+    pub fn with_answer_tool(self, tool: super::answer::AnswerTool, sha256: &str) -> Self {
+        let mut state = self.shared.lock();
+        if let Some(Logged {
+            event: Event::Started {
+                answer_tool_sha256, ..
+            },
+            ..
+        }) = state.log.first_mut()
+        {
+            *answer_tool_sha256 = Some(sha256.to_owned());
+        }
+        state.answer = Some(tool);
+        drop(state);
         self
     }
 
@@ -5225,6 +5252,7 @@ pub fn line_of(logged: &Logged) -> log::Line {
             rehearsing_as,
             head_nonce,
             phase_tool_description_sha256,
+            answer_tool_sha256,
             carried_from,
             carried_source,
         } => log::Event::SessionStart {
@@ -5234,6 +5262,7 @@ pub fn line_of(logged: &Logged) -> log::Line {
             rehearsing_as: rehearsing_as.clone(),
             head_nonce: head_nonce.clone(),
             phase_tool_description_sha256: phase_tool_description_sha256.clone(),
+            answer_tool_sha256: answer_tool_sha256.clone(),
             phase_document: phase_document.clone(),
             build_commit: build.as_ref().map(|(commit, _)| commit.clone()),
             build_dirty: build.as_ref().map(|(_, dirty)| *dirty),
@@ -7707,6 +7736,25 @@ fn one_call<S: Streaming>(
             return (line, None);
         }
         return task_stop_call(shared, (turn, request), call);
+    }
+    // The answer tool (#971): checked against its schema and shown its
+    // result. It runs nothing, so no gate, no confinement and no approval
+    // decide it.
+    let answer = declared
+        .then(|| shared.lock().answer.clone())
+        .flatten()
+        .filter(|answer| answer.definition.name == call.name);
+    if let Some(answer) = answer {
+        if last {
+            return (refused(log::ToolRefusal::MaxSteps), None);
+        }
+        return match answer.fault(&call.arguments) {
+            None => (
+                ToolLine::of(request, turn, call, log::ToolOutcome::Ran),
+                Some(answer.result),
+            ),
+            Some(why) => (refused(log::ToolRefusal::Unparsable), Some(why)),
+        };
     }
     let Some(tools) = shared
         .tools
@@ -15923,6 +15971,75 @@ pub(in crate::drive) mod tests {
         );
     }
 
+    /// #971: a supplied answer tool is declared after the session's tools
+    /// and its call runs nothing: a well-formed one is shown the file's
+    /// result, a malformed one is refused `unparsable` naming the key, one
+    /// at the step limit is refused as any other; the start names the file.
+    #[test]
+    fn an_answer_tool_call_is_checked_against_its_schema_and_shown_its_result() {
+        let tool = super::super::answer::AnswerTool::read(
+            r#"{"name":"answer","description":"Give it.","parameters":{"type":"object","properties":{"rule":{"type":"string"}},"required":["rule"]},"result":"Taken."}"#,
+        )
+        .expect("it reads");
+        let mut shape = template();
+        super::super::answer::declare(&mut shape, &tool).expect("declared");
+        let session = Session::open_with(
+            Canned::new(Vec::<Vec<Step>>::new()),
+            shape,
+            None,
+            None,
+            None,
+            None,
+        )
+        .with_answer_tool(tool, &"a".repeat(64));
+        let answer = |arguments: &str| Call {
+            index: 0,
+            id: "c".to_owned(),
+            name: "answer".to_owned(),
+            arguments: arguments.to_owned(),
+        };
+        let called = |arguments: &str, last: bool| {
+            one_call(
+                &session.shared,
+                &Cancel::new(),
+                (1, 4),
+                &answer(arguments),
+                last,
+            )
+        };
+        let (line, shown) = called(r#"{"rule":"id: x"}"#, false);
+        assert_eq!(line.outcome, log::ToolOutcome::Ran);
+        assert_eq!(line.arguments, r#"{"rule":"id: x"}"#);
+        assert_eq!(shown.as_deref(), Some("Taken."));
+        let (line, shown) = called(r#"{"rules":"id: x"}"#, false);
+        assert_eq!(
+            (line.outcome, line.reason),
+            (
+                log::ToolOutcome::Refused,
+                Some(log::ToolRefusal::Unparsable)
+            )
+        );
+        let shown = shown.expect("a reason");
+        assert!(shown.contains("`rule`"), "{shown}");
+        let (line, shown) = called(r#"{"rule":7}"#, false);
+        assert_eq!(line.reason, Some(log::ToolRefusal::Unparsable));
+        assert!(shown.expect("a reason").contains("not a string"));
+        let (line, shown) = called(r#"{"rule":"id: x"}"#, true);
+        assert_eq!(line.reason, Some(log::ToolRefusal::MaxSteps));
+        assert_eq!(shown, None);
+        let state = session.shared.lock();
+        let Some(Logged {
+            event: Event::Started {
+                answer_tool_sha256, ..
+            },
+            ..
+        }) = state.log.first()
+        else {
+            panic!("the session opened");
+        };
+        assert_eq!(answer_tool_sha256.as_deref(), Some("a".repeat(64).as_str()));
+    }
+
     /// #878: a large working memory offers only the lever's count of notes,
     /// those most like the trigger's text first, and the fork line names
     /// them.
@@ -17122,6 +17239,7 @@ pub(in crate::drive) mod tests {
                 rehearsing_as: None,
                 head_nonce: None,
                 phase_tool_description_sha256: None,
+                answer_tool_sha256: None,
                 carried_from: None,
                 carried_source: None,
                 bash_timeout_ms: None,
@@ -17744,6 +17862,7 @@ pub(in crate::drive) mod tests {
                 rehearsing_as: None,
                 head_nonce: None,
                 phase_tool_description_sha256: None,
+                answer_tool_sha256: None,
                 carried_from: None,
                 carried_source: None,
             },
