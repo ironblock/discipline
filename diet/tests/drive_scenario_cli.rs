@@ -4265,3 +4265,89 @@ fn a_session_that_never_meditates_skips_a_declared_meditation_and_never_refills(
     assert!(said.contains("nothing-to-meditate"), "{said}");
     let _ = std::fs::remove_dir_all(&dir);
 }
+
+/// #971 (v29): a scenario's `answer_tool` is passed to serve, declared on
+/// the trunk's requests, and named on the start line by its file's digest;
+/// a canned reply calls it by name: a well-formed call is shown the file's
+/// result, a malformed one is refused `unparsable`, naming the key.
+#[test]
+fn a_scenarios_answer_tool_is_declared_and_its_calls_checked() {
+    let dir = scratch("answer-tool");
+    let tool = serde_json::json!({
+        "name": "answer",
+        "description": "Give your answer.",
+        "parameters": {
+            "type": "object",
+            "properties": {"rule": {"type": "string"}},
+            "required": ["rule"],
+        },
+        "result": "Answer recorded.",
+    });
+    std::fs::write(
+        dir.join("answer.json"),
+        serde_json::to_string_pretty(&tool).expect("text"),
+    )
+    .expect("the answer tool");
+    let call = |id: &str, arguments: &str| serde_json::json!({"reply": {"text": "", "calls": [{"id": id, "name": "answer", "arguments": arguments}]}});
+    let mut text = format!(
+        "{}\n",
+        serde_json::json!({"scenario": "answer-tool", "regimen": root().join("diet/scenarios/canned.toml"), "head": root().join("diet/drive/heads/floor.md"), "answer_tool": "answer.json"})
+    );
+    for line in [
+        serde_json::json!({"step": "ask", "text": "write the rule"}),
+        serde_json::json!({"step": "end"}),
+        call("call-1", r#"{"rules":"id: x"}"#),
+        call("call-2", r#"{"rule":"id: x"}"#),
+        serde_json::json!({"reply": {"text": "Done."}}),
+    ] {
+        text.push_str(&(line.to_string() + "\n"));
+    }
+    let file = dir.join("answer-tool.jsonl");
+    std::fs::write(&file, text).expect("the scenario");
+    let out = dir.join("out");
+    let ran = Command::new(DRIVE)
+        .current_dir(root())
+        .arg("scenario")
+        .arg(&file)
+        .arg("--out")
+        .arg(&out)
+        .arg("--no-assemble")
+        .output()
+        .expect("diet-drive runs");
+    assert_eq!(
+        ran.status.code(),
+        Some(0),
+        "{}",
+        String::from_utf8_lossy(&ran.stdout)
+    );
+    let log = out.join("session.log");
+    assert_eq!(
+        first_line(&log)["answer_tool_sha256"],
+        diet::digest::sha256_hex(&std::fs::read(dir.join("answer.json")).expect("bytes")).as_str()
+    );
+    let calls = logged(&log, "tool_call");
+    assert_eq!(calls.len(), 2, "{calls:?}");
+    assert_eq!(
+        (&calls[0]["outcome"], &calls[0]["reason"]),
+        (
+            &serde_json::json!("refused"),
+            &serde_json::json!("unparsable")
+        ),
+        "{}",
+        calls[0]
+    );
+    assert_eq!(calls[1]["outcome"], "ran", "{}", calls[1]);
+    assert_eq!(calls[1]["arguments"], r#"{"rule":"id: x"}"#);
+    assert_eq!(calls[1]["shown"], "Answer recorded.", "{}", calls[1]);
+    assert!(
+        calls[0]["shown"].as_str().unwrap_or("").contains("`rule`"),
+        "the refusal names the key: {}",
+        calls[0]
+    );
+    assert_eq!(
+        first_line(&log)["tools"],
+        serde_json::json!(["answer"]),
+        "declared from the first request"
+    );
+    let _ = std::fs::remove_dir_all(&dir);
+}

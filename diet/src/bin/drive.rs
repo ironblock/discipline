@@ -132,6 +132,10 @@ fn carry_usage(out: &mut String) {
     out.push_str("--phase-tool-description FILE: the phase tool's description in place of\n");
     out.push_str("the pinned template, where the regimen declares phases; the start line\n");
     out.push_str("names its sha256 (#948).\n");
+    out.push_str("--answer-tool FILE: a tool the model answers through (#971), one JSON\n");
+    out.push_str("object {name, description, parameters, result}, declared after the\n");
+    out.push_str("others; a call holding the schema's required keys, each of its type, is\n");
+    out.push_str("shown `result`; the start line names the file's sha256 (v29).\n");
 }
 
 fn serve_usage() -> String {
@@ -143,6 +147,7 @@ fn serve_usage() -> String {
          \x20                       [--worktree DIR] [--sandbox-unix-socket PATH]...\n\
          \x20                       [--sandbox-secret PATH]... [--carry LOG [--carried-worktree SHA256]\n\
          \x20                       [--carry-trunk FILE] [--carried-root FROM=TO]...] [--phase-tool-description FILE]\n\
+         \x20                       [--answer-tool FILE]\n\
          \x20                       [--run JSON] [--rehearse-as RUNG]\n\
          \x20                       [--seat-endpoint URL --seat-model NAME [--seat-key-file FILE]]\n\
          \x20      diet-drive serve --profile NAME [--config FILE] [any flag above]\n\n",
@@ -276,6 +281,9 @@ struct ServeArgs {
     /// `--phase-tool-description FILE`: the phase tool's description in place
     /// of the pinned template, named by its sha256 (v27, #948).
     phase_tool_description: Option<String>,
+    /// `--answer-tool FILE`: the tool a scenario's tasks are answered
+    /// through, named by its file's sha256 (v29, #971).
+    answer_tool: Option<String>,
     /// `--carried-root FROM=TO`, each: the carried text rerooted from the
     /// first session's worktree into this one's (v28, #948).
     carried_roots: Vec<(String, String)>,
@@ -418,6 +426,7 @@ fn serve_args(args: &[String]) -> Option<ServeArgs> {
     let mut carried_worktree = None;
     let mut carry_trunk = None;
     let mut phase_tool_description = None;
+    let mut answer_tool = None;
     let mut carried_roots = Vec::new();
     let mut given = args.iter();
     while let Some(flag) = given.next() {
@@ -498,6 +507,9 @@ fn serve_args(args: &[String]) -> Option<ServeArgs> {
         } else if flag == "--phase-tool-description" {
             phase_tool_description = Some(value.clone());
             true
+        } else if flag == "--answer-tool" {
+            answer_tool = Some(value.clone());
+            true
         } else if flag == "--carried-worktree" {
             carried_worktree = Some(value.clone());
             value.len() == 64
@@ -555,6 +567,7 @@ fn serve_args(args: &[String]) -> Option<ServeArgs> {
         carried_worktree,
         carry_trunk,
         phase_tool_description,
+        answer_tool,
         carried_roots,
     })
 }
@@ -594,6 +607,7 @@ fn serve(args: &[String]) -> ExitCode {
         carried_worktree,
         carry_trunk,
         phase_tool_description,
+        answer_tool,
         carried_roots,
     }) = serve_args(args)
     else {
@@ -684,6 +698,16 @@ fn serve(args: &[String]) -> ExitCode {
             (text.trim_end().to_owned(), sha256)
         }),
         Err(why) => return fail(EXIT_INPUT, &format!("--phase-tool-description: {why}")),
+    };
+    // The tool a scenario's tasks are answered through (v29, #971).
+    let answer_tool = match answer_tool.as_deref().map(|path| {
+        let text = std::fs::read_to_string(path).map_err(|why| why.to_string())?;
+        let tool = diet::drive::answer::AnswerTool::read(&text)?;
+        Ok::<_, String>((tool, diet::digest::sha256_hex(text.as_bytes())))
+    }) {
+        None => None,
+        Some(Ok(read)) => Some(read),
+        Some(Err(why)) => return fail(EXIT_INPUT, &format!("--answer-tool: {why}")),
     };
     let run = match run.as_deref().map(diet::formats::log::run_of).transpose() {
         Ok(run) => run,
@@ -1200,6 +1224,7 @@ fn serve(args: &[String]) -> ExitCode {
             head_nonce,
             carry,
             phase_tool_description,
+            answer_tool,
         ),
         (
             claim,
@@ -1422,7 +1447,8 @@ fn outputs(
 }
 
 /// What a served session is told at its start besides its shape: its tools,
-/// its run, the rung it rehearses as, its head's nonce and its carry (#948).
+/// its run, the rung it rehearses as, its head's nonce, its carry (#948),
+/// its phase tool's description and its answer tool (#971).
 type ServedStart = (
     Option<Tools>,
     Option<diet::formats::log::Run>,
@@ -1430,6 +1456,7 @@ type ServedStart = (
     Option<String>,
     Option<session::Carry>,
     Option<(String, String)>,
+    Option<(diet::drive::answer::AnswerTool, String)>,
 );
 
 /// `serve`'s session, declaring what serves it in the log's `session.start`
@@ -1438,7 +1465,7 @@ type ServedStart = (
 fn served_session(
     (transport, seat): (HttpStream, Option<session::Offboard<HttpStream>>),
     (mut shape, dialect, blind): (RequestShape, Dialect, Option<String>),
-    (tools, run, rehearse_as, head_nonce, carry, phase_tool_description): ServedStart,
+    (tools, run, rehearse_as, head_nonce, carry, phase_tool_description, answer_tool): ServedStart,
     declared: session::Declared,
 ) -> Result<std::sync::Arc<Session<HttpStream>>, String> {
     let forks = transport.for_forks();
@@ -1469,6 +1496,11 @@ fn served_session(
             .find(|tool| tool.name == session::PHASE_TOOL)
             .ok_or("--phase-tool-description: the regimen declares no phases, so no phase tool")?;
         tool.description = Some(text.clone());
+    }
+    // The answer tool (v29, #971) after every other, never over one.
+    if let Some((tool, _)) = &answer_tool {
+        diet::drive::answer::declare(&mut shape, tool)
+            .map_err(|why| format!("--answer-tool: {why}"))?;
     }
     let session = Session::open_declaring(
         transport,
@@ -1503,6 +1535,10 @@ fn served_session(
     };
     let session = match &phase_tool_description {
         Some((_, sha256)) => session.with_phase_tool_description(sha256),
+        None => session,
+    };
+    let session = match answer_tool {
+        Some((tool, sha256)) => session.with_answer_tool(tool, &sha256),
         None => session,
     };
     let session = match carry {

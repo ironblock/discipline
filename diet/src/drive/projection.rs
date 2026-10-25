@@ -2355,6 +2355,7 @@ mod tests {
             rehearsing_as: None,
             head_nonce: None,
             phase_tool_description_sha256: None,
+            answer_tool_sha256: None,
             carried_from: None,
             carried_source: None,
         }

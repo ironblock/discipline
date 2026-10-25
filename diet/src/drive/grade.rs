@@ -280,8 +280,9 @@ pub fn feedback(
 }
 
 /// The turn a check reads (#942), from the log's lines: the latest turn's
-/// `tool_call`s, each with its whole streams as the log holds them, and
-/// the turn's final answer, its last trunk response's text.
+/// `tool_call`s, each with its arguments text and its whole streams as the
+/// log holds them, and the turn's final answer, its last trunk response's
+/// text.
 ///
 /// A stream past what a call holds in memory (#734) is held by the log as
 /// its head and tail; its `bytes` then exceed its text's, and a check that
@@ -313,6 +314,7 @@ pub fn turn_of(lines: &[log::Line], (task, attempt): (&str, u64)) -> serde_json:
             }
             Event::ToolCall {
                 name,
+                arguments,
                 outcome,
                 exit,
                 stdout,
@@ -328,6 +330,7 @@ pub fn turn_of(lines: &[log::Line], (task, attempt): (&str, u64)) -> serde_json:
                 calls.push(serde_json::json!({
                     "seq": line.seq,
                     "name": name,
+                    "arguments": arguments,
                     "outcome": outcome.tag(),
                     "exit": exit,
                     "stdout": stream(stdout),
@@ -459,5 +462,26 @@ mod tests {
         assert_eq!(turn["turn"], 1);
         assert_eq!(turn["answer"], "hello");
         assert_eq!(turn["calls"], serde_json::json!([]));
+    }
+
+    /// #971: each call carries its arguments text, as the model wrote them:
+    /// an answer tool's call is the answer.
+    #[test]
+    fn each_call_in_the_turn_carries_its_arguments() {
+        let text = include_str!(
+            "../../formats/log/fixtures/valid/a-v29-session-answering-through-a-supplied-answer-tool.jsonl"
+        );
+        let lines = log::parse(text).expect("a log");
+        let turn = turn_of(&lines, ("t1", 1));
+        let calls = turn["calls"].as_array().expect("calls");
+        assert_eq!(calls.len(), 1);
+        assert_eq!(calls[0]["name"], "answer");
+        let arguments: serde_json::Value =
+            serde_json::from_str(calls[0]["arguments"].as_str().expect("its arguments text"))
+                .expect("JSON");
+        assert_eq!(
+            arguments["rule"],
+            "id: x\nlanguage: ts\nrule: {kind: call_expression}"
+        );
     }
 }

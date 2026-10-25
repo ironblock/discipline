@@ -36,6 +36,7 @@ The format has no grammar of its own, so it has no directory under `diet/formats
 | `regimen` | required | the canned regimen, relative to the file; its substrate is `canned-scenario` |
 | `live_regimen` | optional | the regimen a re-fire on an endpoint runs under |
 | `head` | required | the trunk's head, relative to the file |
+| `answer_tool` | optional | the tool the tasks are answered through (#971), a file relative to the scenario, passed to serve as `--answer-tool` on every run (below) |
 | `approvals` | optional | the `POST /approve` scope (`once`, `session`, `workspace`, `decline`) that answers each prompt; absent, a prompt fails the run |
 | `seed` | optional | `{worktree path: file}`: each file, relative to the scenario, copied into the fresh worktree before serve starts (an `AGENTS.md`, say). The regimen must run commands. |
 | `fixed_asks` | optional | the asks, by their place among the asks from 0, that are fixed: an operator script (below) lists `[0]`. Every later ask was typed in answer to what the model did, so a scripted run of it is not that answer. A person who knows a later ask was written in advance adds its index. |
@@ -164,6 +165,19 @@ What the deny list does:
 - `pick` names a live entry, read from `GET /memory`: a number is its place in id order, and text is the first entry whose content holds it.
 - `place` (optional, an object) on any step is for a reader. The runner never reads it. An operator script writes it (below).
 
+## Answering through a tool (#971)
+
+A task's answer comes through a tool with a schema, never parsed out of prose. The header's `answer_tool` names a file of one JSON object:
+```json
+{"name": "answer", "description": "...", "parameters": {"type": "object", "properties": {...}, "required": [...]}, "result": "..."}
+```
+- **Its words are the file's.** `description` is what the model is told, and `result` what a well-formed call is shown. The engine writes only a malformed call's reason.
+- **It is declared from the first request,** after every other tool, and never changed. A name a declared tool already has is refused at start, naming it.
+- **A call runs nothing:** no gate, no confinement, no approval. It is well formed when its arguments are a JSON object holding every key the schema's top-level `required` lists, and each key it gives is of the `type` (`string`, `integer`, `number`, `boolean`, `array`, `object`) its top-level property names, when it names one. Well formed, its `tool_call` line is `ran`. Otherwise it is refused `unparsable`, and the model is shown which key is missing or mistyped. At the step limit it is refused `max_steps`, as any call is.
+- **The answer is the call's arguments,** on its `tool_call` line and in the grade's turn file (below).
+- **The start line names it:** `answer_tool_sha256`, the file's sha256 (log v29).
+- **A canned reply** calls it by name, as any tool, so a canned scenario can answer through it.
+
 ## Grading a task (#942)
 
 A `grade` step comes right after the admitted `ask` of its task. That ask asks the task: its own `task`, or the step's. The step gives the task `attempts` tries (3 unless given), the first being the ask's.
@@ -190,7 +204,7 @@ A `grade` step comes right after the admitted `ask` of its task. That ask asks t
 - **`DIET_GRADE_TURN`** is a file, outside the worktree and gone once the check has run. It is written from the session's log once the log holds every line, and holds the latest turn:
   - `task`, `attempt`, `turn`;
   - `answer`, its last trunk response's text;
-  - `calls`, each `tool_call` with its `seq`, `name`, `outcome`, `exit`, and its `stdout` and `stderr` as `{text, bytes}`.
+  - `calls`, each `tool_call` with its `seq`, `name`, `arguments` (its arguments text, as the model wrote it), `outcome`, `exit`, and its `stdout` and `stderr` as `{text, bytes}`.
 
   A stream past what a call holds in memory (#734) is in the log as its head and tail alone. Its `bytes` then exceed its text's: it is not whole. Its whole in the recording is joined with its other stream, as the model saw them, so the file can't carry it apart.
 - **The check never changes what the model sees.**
