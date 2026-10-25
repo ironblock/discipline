@@ -55,6 +55,10 @@ pub struct Scenario {
     /// service's value, `service.NAME.KEY` (#942): serve's
     /// `--sandbox-unix-socket`.
     pub sandbox_unix_sockets: Vec<(String, String)>,
+    /// The commands the model's sandbox must run (#976): each probed inside
+    /// it, its path found, readable and executable and its `--version`
+    /// answering, before a live run starts.
+    pub sandbox_tools: Vec<String>,
     /// Variables added to serve's environment alone, each a text filled
     /// from the run's ports and values (#942): what a command sees of them
     /// is still the regimen's `env_passthrough`.
@@ -1058,6 +1062,24 @@ fn header(mut fields: Fields) -> Result<Scenario, ScenarioError> {
             .collect::<Result<_, _>>()?,
         Some(_) => return Err(fields.wrong("`sandbox_unix_sockets` a list")),
     };
+    let sandbox_tools = match fields.take("sandbox_tools") {
+        None => Vec::new(),
+        Some(Value::Array(named)) => named
+            .into_iter()
+            .map(|named| match named {
+                Value::String(name)
+                    if !name.is_empty()
+                        && name
+                            .bytes()
+                            .all(|b| b.is_ascii_alphanumeric() || b"._+-".contains(&b)) =>
+                {
+                    Ok(name)
+                }
+                _ => Err(fields.wrong("each of `sandbox_tools` a command's name")),
+            })
+            .collect::<Result<_, _>>()?,
+        Some(_) => return Err(fields.wrong("`sandbox_tools` a list")),
+    };
     let service_values = |fields: &Fields, key: &str, named: Vec<Value>| {
         named
             .into_iter()
@@ -1154,6 +1176,7 @@ fn header(mut fields: Fields) -> Result<Scenario, ScenarioError> {
         ports,
         services,
         sandbox_unix_sockets,
+        sandbox_tools,
         serve_env,
         seal,
         seal_probe,
@@ -3040,7 +3063,12 @@ fn running(
                 {
                     let mut sorted = denied.clone();
                     sorted.sort();
-                    sorted.join("\n")
+                    // The tools it ran are part of what it proved (#976).
+                    format!(
+                        "{}\ntools:{}",
+                        sorted.join("\n"),
+                        scenario.sandbox_tools.join(",")
+                    )
                 }
                 .as_bytes(),
             ),
@@ -3059,6 +3087,7 @@ fn running(
                 &regimen,
                 &beside(&options.file, &scenario.head),
                 (&denied, options.sealed.as_ref()),
+                &scenario.sandbox_tools,
                 &options.out,
             ),
         }
@@ -3855,6 +3884,7 @@ fn probed(
     regimen: &std::path::Path,
     head: &std::path::Path,
     (secrets, sealed): (&[String], Option<&Sealed>),
+    tools: &[String],
     kept_in: &std::path::Path,
 ) -> Result<serde_json::Value, Failure> {
     use crate::drive::probe::{PROBE_FILE, PROBE_PHRASE};
@@ -3908,6 +3938,7 @@ fn probed(
             &grep_in,
         ),
         (&canary, sealed),
+        tools,
     );
     std::fs::write(&file_path, text)
         .map_err(|why| Failure(format!("the probe cannot be written: {why}")))?;
@@ -3938,6 +3969,7 @@ fn probed(
             1 + sealed.map_or(0, |sealed| sealed.unreadable.len()),
         ),
         (&canary_file.display().to_string(), sealed),
+        tools,
     );
     // A failed probe's log is kept beside the run, for whoever reads why.
     if verdict["ok"] != true {

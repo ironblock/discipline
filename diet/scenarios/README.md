@@ -42,6 +42,7 @@ The format has no grammar of its own, so it has no directory under `diet/formats
 | `ports` | optional | names of loopback ports reserved for each run (below) |
 | `services` | optional | what each run starts beside serve, outside the sandbox (below) |
 | `sandbox_unix_sockets` | optional | services' values, each `service.NAME.KEY`, passed to serve as `--sandbox-unix-socket`: sockets the model's commands may connect to |
+| `sandbox_tools` | optional | the commands the model's sandbox must run (#976), each a command's name. The sandbox probe runs each inside the sandbox: its path found, readable and executable, and its `--version` answering. A tool that doesn't run voids the run `sandbox`, and the probe's line names each tool's version. |
 | `serve_env` | optional | `{VAR: TEXT}`: variables added to serve's environment alone, each text filled as an ask's is |
 | `seal` | optional | `{PART: [...]}`: by part, services' values, each `service.NAME.KEY` of one path or several, colon-separated: paths a sealed next session cannot read when its regimen's `sealed` names the part (below) |
 | `seal_probe` | optional | `{PART: [...]}`: by part, texts filled as an ask's are, each a file the probe asks a sealed session to read: a sealed part's must fail, an unsealed part's must read |

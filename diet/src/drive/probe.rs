@@ -143,6 +143,7 @@ pub fn scenario(
     roots: &[String],
     (files, phrase, grep_in): (&[String], &str, &[String]),
     (canary, sealed): (&str, Option<&crate::drive::scenario::Sealed>),
+    tools: &[String],
 ) -> String {
     let bash = |id: String, command: String, timeout: u64| {
         serde_json::json!({
@@ -193,6 +194,17 @@ pub fn scenario(
             }));
         }
     }
+    // The tools the scenario needs its model to run (#976): each found on
+    // the sandbox's PATH, its file readable and executable, and answering.
+    calls.extend(tools.iter().enumerate().map(|(at, tool)| {
+        bash(
+            format!("probe-tool-{at}"),
+            format!(
+                "p=$(command -v -- {tool}) && test -r \"$p\" && test -x \"$p\" && {tool} --version"
+            ),
+            30_000,
+        )
+    }));
     // The sweep for a stray copy of the sealed source (#948): one line only
     // that source holds, searched beside the deny list's phrase.
     let seal_phrase = sealed
@@ -252,12 +264,14 @@ pub fn scenario(
 /// The probe's verdict, read from its session's log: how many denied paths
 /// `ls` failed on, whether `cat` failed, whether `grep` finished finding
 /// nothing, and under a seal (#948) whether every unsealed file read and
-/// every sealed one stayed out of `git show`; `ok` when all hold.
+/// every sealed one stayed out of `git show`, and (#976) whether every
+/// tool the scenario names ran; `ok` when all hold.
 #[must_use]
 pub fn verdict(
     log: &str,
     (roots, files): (usize, usize),
     (canary_file, sealed): (&str, Option<&crate::drive::scenario::Sealed>),
+    tools: &[String],
 ) -> serde_json::Value {
     let calls: Vec<serde_json::Value> = log
         .lines()
@@ -303,9 +317,26 @@ pub fn verdict(
         .and_then(|text| text.lines().next())
         .unwrap_or("")
         .to_owned();
+    let ran: serde_json::Map<String, serde_json::Value> = tools
+        .iter()
+        .enumerate()
+        .map(|(at, tool)| {
+            let id = format!("probe-tool-{at}");
+            let version = call(&id)
+                .and_then(|call| call["stdout"].as_str())
+                .and_then(|text| text.lines().next())
+                .unwrap_or("")
+                .to_owned();
+            (
+                tool.clone(),
+                serde_json::json!({"ok": succeeded(&id), "version": version}),
+            )
+        })
+        .collect();
+    let tools_ran = ran.values().all(|tool| tool["ok"] == true);
     let mut said = serde_json::json!({
         "ok": roots > 0 && denied == roots && file_denied && grep_finished && canary_seen && found == 0
-            && read == readable && git_denied == gits,
+            && read == readable && git_denied == gits && tools_ran,
         "paths": roots,
         "paths_denied": denied,
         "file_denied": file_denied,
@@ -316,6 +347,9 @@ pub fn verdict(
         "rg": version,
         "max_filesize": MAX_FILESIZE,
     });
+    if !tools.is_empty() {
+        said["tools"] = serde_json::Value::Object(ran);
+    }
     if let Some(sealed) = sealed {
         said["sealed"] = serde_json::json!({
             "parts": sealed.parts,
@@ -378,6 +412,7 @@ mod tests {
             &[private],
             (&["/f".to_owned()], "trap phrase", &roots),
             ("canary words", None),
+            &[],
         );
         assert!(
             !text.contains("trap phrase") && !text.contains("canary words"),
@@ -397,6 +432,73 @@ mod tests {
             "the phrase goes hex-escaped through printf: {text}"
         );
         let _ = std::fs::remove_dir_all(&home);
+    }
+
+    /// #976: a scenario's tools are probed inside the sandbox, each found,
+    /// readable, executable and answering, and the verdict holds only when
+    /// every one ran.
+    #[test]
+    fn the_verdict_holds_only_when_every_tool_ran() {
+        let tools = ["ast-grep".to_owned(), "missing-tool".to_owned()];
+        let text = scenario(
+            Path::new("/r.toml"),
+            Path::new("/h.md"),
+            &["/denied".to_owned()],
+            (&["/f".to_owned()], "phrase", &["/home".to_owned()]),
+            ("canary", None),
+            &tools,
+        );
+        assert!(
+            text.contains("probe-tool-0") && text.contains("probe-tool-1"),
+            "{text}"
+        );
+        for part in [
+            "command -v -- ast-grep",
+            "test -r ",
+            "test -x ",
+            "&& ast-grep --version",
+        ] {
+            assert!(text.contains(part), "{part}: {text}");
+        }
+        let line = |id: &str, exit: i64, stdout: &str| {
+            serde_json::json!({"kind": "tool_call", "id": id, "outcome": "ran", "exit": exit, "stdout": stdout})
+                .to_string()
+        };
+        let base = [
+            line("probe-ls-0", 1, ""),
+            line("probe-cat-0", 1, ""),
+            line("probe-grep", 2, "/t/canary.txt\n"),
+        ]
+        .join("\n");
+        let both = format!(
+            "{base}\n{}\n{}",
+            line("probe-tool-0", 0, "ast-grep 0.44.0\n"),
+            line("probe-tool-1", 0, "missing-tool 1\n")
+        );
+        let held = verdict(&both, (1, 1), ("/t/canary.txt", None), &tools);
+        assert_eq!(held["ok"], true, "{held}");
+        assert_eq!(
+            held["tools"]["ast-grep"]["version"], "ast-grep 0.44.0",
+            "{held}"
+        );
+        let one_missing = format!(
+            "{base}\n{}\n{}",
+            line("probe-tool-0", 0, "ast-grep 0.44.0\n"),
+            line("probe-tool-1", 1, "")
+        );
+        let refused = verdict(&one_missing, (1, 1), ("/t/canary.txt", None), &tools);
+        assert_eq!(refused["ok"], false, "{refused}");
+        assert_eq!(refused["tools"]["missing-tool"]["ok"], false, "{refused}");
+        // Never run at all: not proven.
+        let unrun = verdict(&base, (1, 1), ("/t/canary.txt", None), &tools);
+        assert_eq!(unrun["ok"], false, "{unrun}");
+        // No tools named: no tools leg, and the rest decides.
+        let none = verdict(&base, (1, 1), ("/t/canary.txt", None), &[]);
+        assert_eq!(
+            (none["ok"].clone(), none.get("tools").is_none()),
+            (serde_json::json!(true), true),
+            "{none}"
+        );
     }
 
     /// #942: the verdict holds only when every probe failed to read, and
@@ -423,42 +525,43 @@ mod tests {
         };
         let seen = "/t/probe/canary.txt\n";
         // rg exits 2 where a denied file is unreadable: what it lists decides.
-        let held = verdict(&log(1, 1, (Some(2), seen)), (2, 1), (canary, None));
+        let held = verdict(&log(1, 1, (Some(2), seen)), (2, 1), (canary, None), &[]);
         assert_eq!(held["ok"], true, "{held}");
         assert_eq!(held["rg"], "ripgrep 15.1.0", "{held}");
         assert_eq!(
             held["max_filesize"], "64M",
             "the line says what the search skipped: {held}"
         );
-        let read = verdict(&log(0, 1, (Some(2), seen)), (2, 1), (canary, None));
+        let read = verdict(&log(0, 1, (Some(2), seen)), (2, 1), (canary, None), &[]);
         assert_eq!(
             (read["ok"].clone(), read["paths_denied"].clone()),
             (serde_json::json!(false), serde_json::json!(1))
         );
         assert_eq!(
-            verdict(&log(1, 0, (Some(2), seen)), (2, 1), (canary, None))["ok"],
+            verdict(&log(1, 0, (Some(2), seen)), (2, 1), (canary, None), &[])["ok"],
             false
         );
         let leaked = verdict(
             &log(1, 1, (Some(0), "/x/TASKS.md\n/t/probe/canary.txt\n")),
             (2, 1),
             (canary, None),
+            &[],
         );
         assert_eq!(
             (leaked["ok"].clone(), leaked["files_with_phrase"].clone()),
             (serde_json::json!(false), serde_json::json!(1))
         );
-        let blind = verdict(&log(1, 1, (Some(2), "")), (2, 1), (canary, None));
+        let blind = verdict(&log(1, 1, (Some(2), "")), (2, 1), (canary, None), &[]);
         assert_eq!(
             (blind["ok"].clone(), blind["canary_seen"].clone()),
             (serde_json::json!(false), serde_json::json!(false)),
             "a search that found not even the canary searched nothing"
         );
         assert_eq!(
-            verdict(&log(1, 1, (None, seen)), (2, 1), (canary, None))["ok"],
+            verdict(&log(1, 1, (None, seen)), (2, 1), (canary, None), &[])["ok"],
             false,
             "a search killed before it finished proves nothing"
         );
-        assert_eq!(verdict("", (2, 1), (canary, None))["ok"], false);
+        assert_eq!(verdict("", (2, 1), (canary, None), &[])["ok"], false);
     }
 }
