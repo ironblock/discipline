@@ -76,7 +76,9 @@ def replies(tasks, truth):
 def header(name, skills):
     return {"scenario": name, "regimen": "canned.toml", "live_regimen": "bare.toml",
             "head": "head-skills.md" if skills else "head.md", "answer_tool": "answer-tool.json",
-            "services": [FIXTURE, SKILLS] if skills else [FIXTURE], "sandbox_tools": ["ast-grep"]}
+            "services": [FIXTURE, SKILLS] if skills else [FIXTURE], "sandbox_tools": ["ast-grep"],
+            # The answer key is the fixture's own directory: denied to the model's commands (probe_key.py proves it).
+            "sandbox_secrets": ["service.fixture.dir"]}
 
 
 def lines(name, tasks, skills):

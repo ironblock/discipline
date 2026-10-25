@@ -1,9 +1,10 @@
 """The `fixture` service (#971): `python3 -I fixture.py start|stop`. Each run's fresh instance of the tasks.
 
 `start` writes a `gen.py` instance into the run's worktree, `$DIET_WORKTREE`, and its truth into its own directory,
-outside the worktree and the model's reach. Its seed is `$DIET_AST_GREP_SEED` when set (a canned rehearsal pins one,
+outside the worktree. Its seed is `$DIET_AST_GREP_SEED` when set (a canned rehearsal pins one,
 so its canned answers are the instance's), else drawn fresh: every pass a new instance. It provides `truth` (the
-check reads it as `$DIET_SERVICE_FIXTURE_TRUTH`), `seed`, and each param the asks fill (`{service.fixture.target}`).
+check reads it as `$DIET_SERVICE_FIXTURE_TRUTH`), `dir`, its directory, which the scenarios deny the model's sandbox
+(`sandbox_secrets`), `seed`, and each param the asks fill (`{service.fixture.target}`).
 It leaves no process, so `pids` is empty. `stop` does nothing.
 """
 import json, os, secrets, sys
@@ -19,7 +20,7 @@ def start():
     truth = gen.write(seed, worktree, truth_path)
     open(os.path.join(here, "pids"), "w").close()
     with open(os.path.join(here, "provides.json"), "w") as f:
-        json.dump({"truth": truth_path, "seed": str(truth["seed"]), **truth["params"]}, f)
+        json.dump({"truth": truth_path, "dir": here, "seed": str(truth["seed"]), **truth["params"]}, f)
 
 
 if __name__ == "__main__":

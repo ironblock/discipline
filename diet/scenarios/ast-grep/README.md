@@ -37,7 +37,7 @@ A pass that reads the docs rolls back, so what counts as a read is parsed, never
 - `web`: a fetch of ast-grep's site or repository;
 - `skill`: any reading command on a path under the official skills' root, when the condition gives them.
 
-Option values are never flags, `cd` is followed, `$(...)` counts as a command, and a heredoc's body counts only when it is fed to a shell. The tool run bare prints its whole help, so it is a read, but a subcommand given nothing is not (0.44.0: `run` prints only its usage error, and `outline` outlines the working directory). `docs_reads_fixtures.json` holds 25 reads and 18 non-reads.
+Option values are never flags, `cd` is followed, `$(...)` counts as a command, and a heredoc's body counts only when it is fed to a shell. The tool run bare prints its whole help, so it is a read, but a subcommand given nothing is not (0.44.0: `run` prints only its usage error, and `outline` outlines the working directory). A read under the tool's install prefix, but the binary, is `installed`. `docs_reads_fixtures.json` holds 27 reads and 20 non-reads.
 
 ## Solvable, and the gaps are real: `ref.py`
 `python3 -I ref.py [SEEDS]` needs `ast-grep` and runs outside `./verify.sh`. On each fresh instance it runs one reference solution per family and one naive try that walks into the family's gap, and grades both against the truth.
@@ -52,6 +52,10 @@ Option values are never flags, `cd` is followed, `$(...)` counts as a command, a
 - **A pass is one session on a fresh instance.** The `fixture` service (`services/fixture.py`) writes a `gen.py` instance into the run's worktree before serve starts, and its truth into the service's own directory, where the model can't read it.
   - Its seed is `$DIET_AST_GREP_SEED`, else drawn fresh.
   - The asks fill each instance's names from it (`{service.fixture.target}`).
+- **The model can't read the answer key.** `sandbox_reads` is `all`, so the fixture's directory, which holds the truth, is the header's `sandbox_secrets` (`service.fixture.dir`), denied to the model's commands. The check runs outside the sandbox and still reads it.
+  - `probe_key.py` proves it. It runs a canned pass of `tutorial.jsonl` and `tutorial-skills.jsonl` whose one reply `cat`s the truth by its absolute path; the call must run, fail, and print nothing of the truth.
+  - It was red before the deny (exit 0, the answers printed) and is green after it.
+  - The skills service keeps no cache: the archive is read in memory, and only the three skill files are written.
 - **Each task is asked once and graded once** (`attempts` 1), on its `answer` call (`check.py`), with no feedback inside the pass. The header's `answer_tool` hands serve `answer-tool.json`.
 - **The bare regimen** (`bare.toml`) runs bash and the answer tool, with no memory levers. `canned.toml` is its rehearsal twin.
   - Its `max_output_tokens`, 8192 per response, is a DRAFT: the cap isn't ruled.
@@ -67,8 +71,16 @@ Option values are never flags, `cd` is followed, `$(...)` counts as a command, a
     - `none` when they ran nothing. The tutorial ends on a clean pass and rolls back from any other.
 - **The canned replies** are a real ast-grep command and then an answer call, for the instance at `CANNED_SEED` (7). The first task's answer is wrong on purpose, the return-type miss. So `DIET_AST_GREP_SEED=7 diet-drive scenario tutorial.jsonl --out DIR` grades both ways: t1 wrong, t2–t6 right, and the pass unclean on t1. The skills and held-out scenarios do the same.
 
+## Declared limits
+- **Other copies of ast-grep's docs stay readable** under `sandbox_reads = "all"`, outside the skills condition too. The classifier counts the ones it knows as docs reads, which roll a pass back:
+  - the help, man and web reads above;
+  - the official skills' root;
+  - the tool's install prefix (`installed_prefix()`, where Homebrew keeps its README, changelog and completions beside the binary), which `pass.py` reads on the machine that grades.
+- **The live run's deny list covers the agents' plugin and skills caches** (`~/.claude`; see `../README.md`). A copy anywhere else, such as a package cache holding the tool's README, is neither denied nor counted.
+- **The live substrate is the production GPU host's registry entry (`ada48-tabbyapi-exl3-qwen38flashnext-2p05`) by default.** Which model runs the tutorial is the maintainer's open question.
+
 ## Checks
-`gen.py --selftest`, `check.py --selftest`, `docs_reads.py --selftest`, `make_scenario.py --check` and `pass.py --selftest` run in `./verify.sh`'s scenarios check, with no ast-grep needed. Each was seen to go red on a mutant:
+`gen.py --selftest`, `check.py --selftest`, `docs_reads.py --selftest`, `make_scenario.py --check`, `pass.py --selftest` and `probe_key.py --selftest` (skipped, saying so, when the drive isn't built) run in `./verify.sh`'s scenarios check, with no ast-grep needed. Each was seen to go red on a mutant:
 - the generator, its line numbers off by one;
 - the grader, a refused call counted;
 - the classifier, its option values read as flags.

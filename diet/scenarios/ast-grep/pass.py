@@ -2,7 +2,7 @@
 
 Reads the run's `session.log`: each task's `grade` line, and each `bash` call's docs reads (`docs_reads.py`), the
 official skills' root taken as `.agent-skills` under the call's working directory when `--skills` says the
-condition gave them. A pass is clean when every task graded right and no call read the docs: the tutorial ends on a
+condition gave them, and the tool's install prefix on this machine (`installed_prefix()`). A pass is clean when every task graded right and no call read the docs: the tutorial ends on a
 clean pass, and rolls back from any other. Prints one JSON object: per task, `right`, the turn's `docs_reads`, its `commands` and `tool_used`
 (`ast-grep`, `other` or `none`: descriptive only, since whether a clean pass must use ast-grep is not ruled);
 then `reads_outside_tasks`, `clean` and `why`.
@@ -10,7 +10,7 @@ then `reads_outside_tasks`, `clean` and `why`.
 import json, os, sys
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from docs_reads import TOOLS, reads_of, simple_commands, strip_wrappers  # noqa: E402
+from docs_reads import TOOLS, installed_prefix, reads_of, simple_commands, strip_wrappers  # noqa: E402
 
 
 def tools_of(cmd):
@@ -34,7 +34,7 @@ def used(names):
     return "ast-grep" if "ast-grep" in names else "other" if names else "none"
 
 
-def verdict(lines, skills):
+def verdict(lines, skills, installed=None):
     tasks, turn_task, outside = {}, {}, []
     for l in lines:
         if l.get("kind") == "ask" and l.get("task"):
@@ -49,7 +49,7 @@ def verdict(lines, skills):
             except ValueError:
                 continue
             cwd = l.get("cwd") or "/"
-            found = reads_of(cmd, os.path.join(cwd, ".agent-skills") if skills else None, cwd=cwd, home=os.path.expanduser("~"))
+            found = reads_of(cmd, os.path.join(cwd, ".agent-skills") if skills else None, cwd=cwd, home=os.path.expanduser("~"), installed=installed)
             task = turn_task.get(l.get("turn"))
             (tasks[task]["docs_reads"] if task else outside).extend(found)
             if task:
@@ -98,4 +98,4 @@ if __name__ == "__main__":
     if not sys.argv[1:2]:
         sys.exit(__doc__)
     log = [json.loads(l) for l in open(os.path.join(sys.argv[1], "session.log")) if l.strip()]
-    print(json.dumps(verdict(log, "--skills" in sys.argv[2:]), indent=1))
+    print(json.dumps(verdict(log, "--skills" in sys.argv[2:], installed_prefix()), indent=1))

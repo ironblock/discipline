@@ -6,6 +6,8 @@ A pass that reads the docs rolls back, so what counts is parsed, never matched a
   (a pattern, a rule, a rewrite) is never a flag, so `-p '--help'` is no read.
 - `man`: `man ast-grep` or `man sg`; `tldr` and `cheat` the same.
 - `web`: `curl`, `wget` or `open` of an ast-grep.github.io or ast-grep repository page.
+- `installed`: any reading command on a path under INSTALLED, the tool's install prefix (`installed_prefix()`), but
+  the binary: its README, changelog and completions.
 - `skill`: any reading command (`cat`, `head`, `sed`, `grep`, `ls`, ...) on a path under SKILLS, the official skills'
   root when the condition gives them, with `cd` followed and `~` read as the home directory on both sides.
 
@@ -85,7 +87,15 @@ def under(path, root, cwd, home):
     return full == root or full.startswith(root + "/")
 
 
-def reads_of(cmd, skills=None, cwd="/work", home="/HOME"):
+def installed_prefix():
+    """The tool's install prefix on this machine (`/usr/local/Cellar/ast-grep/0.44.0` for a Homebrew install), where
+    its README, changelog and completions sit beside the binary; None when it isn't on PATH."""
+    import shutil
+    found = shutil.which("ast-grep") or shutil.which("sg")
+    return os.path.dirname(os.path.dirname(os.path.realpath(found))) if found else None
+
+
+def reads_of(cmd, skills=None, cwd="/work", home="/HOME", installed=None):
     """The docs reads one bash call makes: a list of {"kind", "what"}."""
     found = []
     for words in simple_commands(cmd):
@@ -121,6 +131,12 @@ def reads_of(cmd, skills=None, cwd="/work", home="/HOME"):
         if name in {"curl", "wget", "open", "lynx", "w3m"} and any(WEB.search(w) for w in words[1:]):
             found.append({"kind": "web", "what": next(w for w in words[1:] if WEB.search(w))})
             continue
+        if installed and name in READERS:
+            hit = next((w for w in words[1:] if not w.startswith("-") and under(w, installed, cwd, home)
+                        and os.path.basename(w) not in TOOLS and not w.rstrip("/").endswith("/bin")), None)
+            if hit:
+                found.append({"kind": "installed", "what": hit})
+                continue
         if skills and name in READERS:
             operands = [w for w in words[1:] if not w.startswith("-")]
             # A listing with no path lists where it stands, and so does a search given only its pattern.
@@ -137,11 +153,11 @@ def selftest():
     skills = fx["skills"]
     bad = 0
     for case in fx["reads"]:
-        got = [r["kind"] for r in reads_of(case["cmd"], skills)]
+        got = [r["kind"] for r in reads_of(case["cmd"], skills, installed=fx["installed"])]
         if got != case["kinds"]:
             print(f"docs_reads: read missed: {case['why']}: got {got}, want {case['kinds']}"); bad += 1
     for case in fx["non_reads"]:
-        got = reads_of(case["cmd"], skills)
+        got = reads_of(case["cmd"], skills, installed=fx["installed"])
         if got:
             print(f"docs_reads: false read: {case['why']}: got {got}"); bad += 1
     print(f"docs_reads: {len(fx['reads'])} reads and {len(fx['non_reads'])} non-reads, {bad} misclassified")
