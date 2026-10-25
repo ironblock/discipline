@@ -1,7 +1,8 @@
 """What counts as reading ast-grep's docs (#971): `reads_of(cmd, skills)`, a parsed classifier of one bash call.
 
 A pass that reads the docs rolls back, so what counts is parsed, never matched as text:
-- `help`: `--help` or `-h` to `ast-grep` or `sg` on any subcommand, or the `help` subcommand. An option's own value
+- `help`: `--help` or `-h` to `ast-grep` or `sg` on any subcommand, the `help` subcommand, or the tool bare, which
+  prints the same help. An option's own value
   (a pattern, a rule, a rewrite) is never a flag, so `-p '--help'` is no read.
 - `man`: `man ast-grep` or `man sg`; `tldr` and `cheat` the same.
 - `web`: `curl`, `wget` or `open` of an ast-grep.github.io or ast-grep repository page.
@@ -99,6 +100,11 @@ def reads_of(cmd, skills=None, cwd="/work", home="/HOME"):
             continue
         if name in TOOLS:
             args, i = words[1:], 0
+            # Bare, or given only its global config, 0.44.0 prints its whole help, commands and options; a subcommand
+            # given nothing prints only its usage error (`run`), or runs on the working directory (`outline`).
+            if not [a for a in args if a not in {"-c", "--config"} and not a.endswith(".yml")]:
+                found.append({"kind": "help", "what": " ".join(words)})
+                continue
             while i < len(args):
                 a = args[i]
                 if a in {"--help", "-h"} or (i == 0 and a == "help"):

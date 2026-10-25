@@ -1,6 +1,6 @@
 # The ast-grep tutorial (#971)
 
-The first slice of #971: one model and ast-grep (`run` and `outline`) on small TypeScript projects. This directory holds what the tutorial is graded with. The scenarios that run it come with the answer tool (#971's runner PR).
+The first slice of #971: one model and ast-grep (`run` and `outline`) on small TypeScript projects. This directory holds what the tutorial is graded with, and the scenarios that run a pass of it.
 
 **Model-facing text here is a DRAFT.** That covers every ask in `tasks.py`, the answer tool's description and result in `answer-tool.json`, and any framing. The wording is the maintainer's. Each such text says `DRAFT.` until he settles it.
 
@@ -37,7 +37,7 @@ A pass that reads the docs rolls back, so what counts as a read is parsed, never
 - `web`: a fetch of ast-grep's site or repository;
 - `skill`: any reading command on a path under the official skills' root, when the condition gives them.
 
-Option values are never flags, `cd` is followed, `$(...)` counts as a command, and a heredoc's body counts only when it is fed to a shell. `docs_reads_fixtures.json` holds 23 reads and 16 non-reads.
+Option values are never flags, `cd` is followed, `$(...)` counts as a command, and a heredoc's body counts only when it is fed to a shell. The tool run bare prints its whole help, so it is a read, but a subcommand given nothing is not (0.44.0: `run` prints only its usage error, and `outline` outlines the working directory). `docs_reads_fixtures.json` holds 25 reads and 18 non-reads.
 
 ## Solvable, and the gaps are real: `ref.py`
 `python3 -I ref.py [SEEDS]` needs `ast-grep` and runs outside `./verify.sh`. On each fresh instance it runs one reference solution per family and one naive try that walks into the family's gap, and grades both against the truth.
@@ -47,8 +47,28 @@ Option values are never flags, `cd` is followed, `$(...)` counts as a command, a
   - every naive try is wrong on every seed, except h2's text search, which is right whenever the name really is defined (11 of 20).
 - One more gap it found: `export { $$$S } from $P` doesn't parse as a pattern ("Multiple AST nodes"). The barrel is read by `kind: export_statement`.
 
+## Running a pass
+`make_scenario.py` writes four scenarios from `tasks.py`, one pass each: `tutorial.jsonl` and `held-out.jsonl`, bare, and their `-skills` twins, the official skills' condition. `--check` says when one is stale.
+- **A pass is one session on a fresh instance.** The `fixture` service (`services/fixture.py`) writes a `gen.py` instance into the run's worktree before serve starts, and its truth into the service's own directory, where the model can't read it.
+  - Its seed is `$DIET_AST_GREP_SEED`, else drawn fresh.
+  - The asks fill each instance's names from it (`{service.fixture.target}`).
+- **Each task is asked once and graded once** (`attempts` 1), on its `answer` call (`check.py`), with no feedback inside the pass. The header's `answer_tool` hands serve `answer-tool.json`.
+- **The bare regimen** (`bare.toml`) runs bash and the answer tool, with no memory levers. `canned.toml` is its rehearsal twin.
+  - Its `max_output_tokens`, 8192 per response, is a DRAFT: the cap isn't ruled.
+- **The official skills** (github.com/ast-grep/agent-skill) carry no license, so they are never in this tree. The `skills` service fetches the repository's archive at a pinned commit and checks each file against its digest. It then writes the files under the worktree's `.agent-skills/`, where `head-skills.md` points.
+- **`pass.py RUN_DIR [--skills]`** gives the pass's verdict, from the log:
+  - each task's grade;
+  - each bash call's docs reads (`docs_reads.py`), with `.agent-skills` under the call's working directory as the skills' root under `--skills`.
+
+  A pass is clean when every task is right and nothing read the docs.
+  - Each task also reports `tool_used`, which is descriptive only: whether a clean pass must use ast-grep isn't ruled.
+    - `ast-grep` when its calls searched with `run`, `outline` or `scan` (an option-led call runs `run`);
+    - `other` when they ran only something else (rg, grep, a script; help alone counts here);
+    - `none` when they ran nothing. The tutorial ends on a clean pass and rolls back from any other.
+- **The canned replies** are a real ast-grep command and then an answer call, for the instance at `CANNED_SEED` (7). The first task's answer is wrong on purpose, the return-type miss. So `DIET_AST_GREP_SEED=7 diet-drive scenario tutorial.jsonl --out DIR` grades both ways: t1 wrong, t2–t6 right, and the pass unclean on t1. The skills and held-out scenarios do the same.
+
 ## Checks
-`gen.py --selftest`, `check.py --selftest` and `docs_reads.py --selftest` run in `./verify.sh`'s scenarios check, with no ast-grep needed. Each was seen to go red on a mutant:
+`gen.py --selftest`, `check.py --selftest`, `docs_reads.py --selftest`, `make_scenario.py --check` and `pass.py --selftest` run in `./verify.sh`'s scenarios check, with no ast-grep needed. Each was seen to go red on a mutant:
 - the generator, its line numbers off by one;
 - the grader, a refused call counted;
 - the classifier, its option values read as flags.

@@ -164,6 +164,20 @@
    "kinds": [
     "skill"
    ]
+  },
+  {
+   "why": "the tool bare prints its whole help (0.44.0)",
+   "cmd": "ast-grep",
+   "kinds": [
+    "help"
+   ]
+  },
+  {
+   "why": "the alias bare, piped on",
+   "cmd": "sg | head -20",
+   "kinds": [
+    "help"
+   ]
   }
  ],
  "non_reads": [
@@ -230,6 +244,14 @@
   {
    "why": "option values that are exactly a help flag: a pattern and a rewrite",
    "cmd": "ast-grep run -p '-h' -r '--help' src"
+  },
+  {
+   "why": "run given nothing prints only its usage error (0.44.0)",
+   "cmd": "ast-grep run"
+  },
+  {
+   "why": "outline given nothing outlines the working directory",
+   "cmd": "ast-grep outline"
   }
  ]
 }
