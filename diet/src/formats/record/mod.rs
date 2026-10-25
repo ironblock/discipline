@@ -4275,6 +4275,7 @@ fn take_carried_from(
         // logs do).
         worktree: None,
         variant_sha256: None,
+        rerooted: None,
     }))
 }
 

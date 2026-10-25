@@ -83,9 +83,92 @@ pub fn read(log: &Path, sealed: &[String]) -> Result<Carry, String> {
             object_sha256,
             worktree: worktree_sha256.map(|sha256| (sha256, log::WorktreeFrom::Meditation)),
             variant_sha256: None,
+            rerooted: None,
         },
         source: (!source.is_empty()).then_some(source),
     })
+}
+
+/// The carry rerooted into this session's worktree (#948, log v28): every
+/// occurrence of the first session's worktree root in the carried text
+/// replaced with this session's, for each `(from, to)` of `roots` in turn (a
+/// worktree's resolved path and the path it was given, which a symlinked
+/// temporary directory makes two). The text is the trunk's -- each
+/// message's content, reasoning, notes and call arguments -- and the working
+/// object's dump, so the native summary and the interview notes alike name
+/// the worktree the session runs in. No other byte changes. A root followed
+/// by a character a name goes on with (a letter, a digit, `_`, `-`) is another
+/// path and is left. Reasoning a server signed is left too: it goes back
+/// byte for byte or not at all. Given any root, `carried_from` names how many
+/// were replaced, 0 among them (the carry was rerooted and nothing named the
+/// old root), and the text's digests as sent. Returns how many.
+pub fn reroot(carry: &mut Carry, roots: &[(String, String)]) -> u64 {
+    let roots: Vec<(&str, &str)> = roots
+        .iter()
+        .map(|(from, to)| (from.trim_end_matches('/'), to.trim_end_matches('/')))
+        .filter(|(from, to)| !from.is_empty() && from != to)
+        .collect();
+    let mut replaced = 0;
+    let mut swap = |text: &mut String| {
+        for (from, to) in &roots {
+            let (out, n) = rooted_at(text, from, to);
+            if n > 0 {
+                *text = out;
+                replaced += n;
+            }
+        }
+    };
+    for message in &mut carry.trunk {
+        swap(&mut message.content);
+        if message.reasoning_signature.is_none()
+            && let Some(reasoning) = message.reasoning.as_mut()
+        {
+            swap(reasoning);
+        }
+        for note in &mut message.notes {
+            swap(note);
+        }
+        for call in &mut message.tool_calls {
+            swap(&mut call.arguments);
+        }
+    }
+    if let Some(object) = carry.object.as_mut() {
+        swap(object);
+    }
+    if !roots.is_empty() {
+        let sent = crate::client::shape::messages_json(&carry.trunk);
+        carry.from.rerooted = Some(Box::new(log::Rerooted {
+            replaced,
+            trunk_sha256: crate::digest::sha256_hex(sent.as_bytes()),
+            object_sha256: carry
+                .object
+                .as_deref()
+                .map(|object| crate::digest::sha256_hex(object.as_bytes())),
+        }));
+    }
+    replaced
+}
+
+/// `text` with each whole occurrence of the root `from` replaced with `to`,
+/// and how many: one followed by a letter, a digit, `_` or `-` is a longer
+/// name and is left.
+fn rooted_at(text: &str, from: &str, to: &str) -> (String, u64) {
+    let mut out = String::with_capacity(text.len());
+    let mut n = 0;
+    let mut rest = text;
+    while let Some(at) = rest.find(from) {
+        let after = &rest[at + from.len()..];
+        let whole = !after
+            .chars()
+            .next()
+            .is_some_and(|c| c.is_alphanumeric() || c == '_' || c == '-');
+        out.push_str(&rest[..at]);
+        out.push_str(if whole { to } else { from });
+        n += u64::from(whole);
+        rest = after;
+    }
+    out.push_str(rest);
+    (out, n)
 }
 
 /// The largest file a worktree snapshot keeps; a larger one is named in the
@@ -256,6 +339,106 @@ mod tests {
         let unsealed = read(&dir.join("session.log"), &[]).expect("it reads");
         assert_eq!(unsealed.source, None, "nothing sealed, nothing named");
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// #948 (smoke 2): the carried text names the first session's worktree;
+    /// rerooted, every occurrence names the new one instead, in the trunk's
+    /// content, reasoning, notes and call arguments and in the object's dump,
+    /// a longer path that only starts with the root is left, and the start
+    /// names how many were replaced and the digests of what was sent.
+    #[test]
+    fn a_rerooted_carry_names_the_new_worktree_and_never_the_old() {
+        let old = "/tmp/diet-scenario-worktree-1";
+        let new = "/tmp/diet-scenario-worktree-2";
+        let mut summary = Message::new(
+            Role::User,
+            format!(
+                "<state_snapshot>main.ts is at {old}/h1/main.ts; {old}-10/x is not mine</state_snapshot>"
+            ),
+        );
+        summary.notes = vec![format!("notes: {old}/t1 and /private{old}/t2")];
+        let mut answer = Message::new(Role::Assistant, "");
+        answer.reasoning = Some(format!("I will cd {old}"));
+        answer.tool_calls = vec![crate::client::shape::ToolCall {
+            id: "c1".to_owned(),
+            name: "bash".to_owned(),
+            arguments: format!("{{\"command\":\"ls {old}/h1\"}}"),
+        }];
+        // A server's signed reasoning goes back byte for byte: left.
+        let mut signed = Message::new(Role::Assistant, "done");
+        signed.reasoning = Some(format!("signed: {old}/h1"));
+        signed.reasoning_signature = Some("sig".to_owned());
+        let dump = format!("{{\"facts\":[\"the stub is {old}/t1/main.ts\"]}}");
+        let mut carry = Carry {
+            trunk: vec![
+                Message::new(Role::System, "the head"),
+                summary,
+                answer,
+                signed,
+            ],
+            object: Some(dump),
+            from: log::CarriedFrom {
+                log_sha256: "a".repeat(64),
+                meditation_seq: 1,
+                trunk_sha256: "b".repeat(64),
+                object_sha256: Some("c".repeat(64)),
+                worktree: None,
+                variant_sha256: None,
+                rerooted: None,
+            },
+            source: None,
+        };
+        let roots = [
+            (format!("/private{old}"), format!("/private{new}")),
+            (old.to_owned(), new.to_owned()),
+        ];
+        let replaced = reroot(&mut carry, &roots);
+        let sent = crate::client::shape::messages_json(&carry.trunk);
+        let object = carry.object.clone().expect("the object");
+        assert_eq!(replaced, 6, "{sent}\n{object}");
+        assert!(
+            sent.contains(&format!("/private{new}/t2")),
+            "the resolved form, rerooted to its own: {sent}"
+        );
+        assert_eq!(
+            carry.trunk[3].reasoning.as_deref(),
+            Some(format!("signed: {old}/h1").as_str()),
+            "signed reasoning is left"
+        );
+        let unsigned: Vec<_> = carry.trunk[..3].to_vec();
+        let unsigned = crate::client::shape::messages_json(&unsigned);
+        assert!(
+            !unsigned.replace(&format!("{old}-10"), "").contains(old),
+            "{unsigned}"
+        );
+        assert!(!object.contains(old), "{object}");
+        assert!(
+            sent.contains(&format!("{new}/h1/main.ts")) && sent.contains(&format!("{old}-10/x")),
+            "{sent}"
+        );
+        assert!(object.contains(&format!("{new}/t1/main.ts")), "{object}");
+        assert_eq!(carry.trunk[0].content, "the head", "no other byte changes");
+        assert_eq!(
+            carry.from.rerooted,
+            Some(Box::new(log::Rerooted {
+                replaced: 6,
+                trunk_sha256: crate::digest::sha256_hex(sent.as_bytes()),
+                object_sha256: Some(crate::digest::sha256_hex(object.as_bytes())),
+            }))
+        );
+        assert_eq!(
+            carry.from.trunk_sha256,
+            "b".repeat(64),
+            "the kept digest stays"
+        );
+        // Nothing left to replace: still named, with 0.
+        let again = reroot(&mut carry, &roots);
+        assert_eq!(again, 0);
+        assert_eq!(carry.from.rerooted.as_ref().map(|r| r.replaced), Some(0));
+        // No root given: no rerooting named at all.
+        carry.from.rerooted = None;
+        assert_eq!(reroot(&mut carry, &[]), 0);
+        assert_eq!(carry.from.rerooted, None);
     }
 
     /// #948: a worktree snapshot restores every file as it was, a skipped

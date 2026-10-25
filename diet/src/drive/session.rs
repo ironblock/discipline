@@ -28724,6 +28724,7 @@ pub(in crate::drive) mod tests {
             object_sha256: None,
             worktree: None,
             variant_sha256: None,
+            rerooted: None,
         };
         let session = Session::open_with(Canned::new(vec![]), template(), None, None, None, None)
             .with_carry(Carry {
@@ -28771,6 +28772,7 @@ pub(in crate::drive) mod tests {
             object_sha256: None,
             worktree: None,
             variant_sha256: None,
+            rerooted: None,
         };
         let carried = |system: &str| {
             Session::open_with(Canned::new(vec![]), template(), None, None, None, None)
