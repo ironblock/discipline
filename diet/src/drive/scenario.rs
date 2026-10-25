@@ -1063,7 +1063,7 @@ fn header(mut fields: Fields) -> Result<Scenario, ScenarioError> {
                         Ok(((*name).to_owned(), (*key).to_owned()))
                     }
                     _ => Err(fields.wrong(
-                        "each of `sandbox_unix_sockets` a declared service's value,                          `service.NAME.KEY`",
+                        "each of `sandbox_unix_sockets` a declared service's value, `service.NAME.KEY`",
                     )),
                 },
                 _ => Err(fields.wrong("each of `sandbox_unix_sockets` text")),
@@ -1084,7 +1084,7 @@ fn header(mut fields: Fields) -> Result<Scenario, ScenarioError> {
                         Ok(((*name).to_owned(), (*key).to_owned()))
                     }
                     _ => Err(fields.wrong(
-                        "each of `sandbox_secrets` a declared service's value,                          `service.NAME.KEY`",
+                        "each of `sandbox_secrets` a declared service's value, `service.NAME.KEY`",
                     )),
                 },
                 _ => Err(fields.wrong("each of `sandbox_secrets` text")),
