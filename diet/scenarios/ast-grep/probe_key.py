@@ -3,7 +3,9 @@
 Runs a canned pass of SCENARIO (`tutorial.jsonl` unless given) under its own header, services and sandbox, with one
 reply: a `cat` of the instance's truth, by the absolute path the `fixture` service writes it at under the run's
 `--out`. The probe passes only when that call ran and failed, and printed nothing of the truth. `--selftest` runs it
-with the built drive at `target/debug/diet-drive` and its `diet`, skipping (exit 0, said) when they are not built.
+with the built drive at `target/debug/diet-drive` and its `diet`, skipping (exit 0, said) off macOS when they are
+not built, or on Linux when the platform sandbox can't run there (`sandbox_cannot_run`), as a CI runner's bwrap may not. On macOS,
+where the live runs are, the sandbox is never skipped: a run it can't confine fails.
 """
 import json, os, shutil, subprocess, sys, tempfile
 
@@ -31,7 +33,14 @@ def probe(drive, scenario="tutorial.jsonl"):
         shutil.rmtree(out)
         ran = subprocess.run([drive, "scenario", path, "--out", out], capture_output=True, text=True, env=env)
         if ran.returncode != 0:
-            return f"the probe's run failed (exit {ran.returncode}): {ran.stdout[-400:]}{ran.stderr[-400:]}"
+            said = {}
+            for line in reversed(ran.stdout.splitlines()):
+                try:
+                    said = json.loads(line); break
+                except ValueError:
+                    continue
+            why = {k: said[k] for k in ("void", "failure", "why", "error") if k in said} or ran.stdout[-600:]
+            return f"the probe's run failed (exit {ran.returncode}): {why} {ran.stderr.strip()[-600:]}"
         if not os.path.exists(truth):
             return "the fixture wrote no truth where the probe looks"
         calls = [json.loads(l) for l in open(os.path.join(out, "session.log")) if '"tool_call"' in l]
@@ -48,6 +57,18 @@ def probe(drive, scenario="tutorial.jsonl"):
         shutil.rmtree(out, ignore_errors=True)
 
 
+def sandbox_cannot_run():
+    """Why the platform sandbox can't run on this host, or None. Only Linux is asked: bwrap, as the drive confines a
+    command (`--unshare-all`), must start a no-op. On macOS nothing is skipped, so a missing Seatbelt fails the probe."""
+    if not sys.platform.startswith("linux"):
+        return None
+    if not shutil.which("bwrap"):
+        return "no bwrap on PATH"
+    ran = subprocess.run(["bwrap", "--unshare-all", "--ro-bind", "/", "/", "--proc", "/proc", "--dev", "/dev", "true"],
+                         capture_output=True, text=True)
+    return None if ran.returncode == 0 else f"bwrap cannot start here: {ran.stderr.strip()[:200]}"
+
+
 def main(drive, scenario):
     why = probe(drive, scenario)
     print(f"probe_key: {scenario}: " + (why or "the answer key is unreadable from the sandbox"))
@@ -59,7 +80,12 @@ if __name__ == "__main__":
         root = os.path.dirname(os.path.dirname(os.path.dirname(HERE)))
         drive, diet = (os.path.join(root, "target", "debug", b) for b in ("diet-drive", "diet"))
         if not (os.access(drive, os.X_OK) and os.access(diet, os.X_OK)):
-            print("probe_key: skipped: no built diet-drive and diet under target/debug")
+            # On macOS, where the live runs are, a probe that didn't run is a failure, never a pass.
+            print("probe_key: " + ("FAILED" if sys.platform == "darwin" else "skipped") + ": no built diet-drive and diet under target/debug")
+            sys.exit(1 if sys.platform == "darwin" else 0)
+        cannot = sandbox_cannot_run()
+        if cannot:
+            print(f"probe_key: skipped: the platform sandbox can't run on this host ({cannot})")
             sys.exit(0)
         os.environ.setdefault("DIET_BIN", diet)
         sys.exit(main(drive, "tutorial.jsonl") or main(drive, "tutorial-skills.jsonl"))

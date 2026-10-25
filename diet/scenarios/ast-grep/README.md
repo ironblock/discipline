@@ -55,6 +55,8 @@ Option values are never flags, `cd` is followed, `$(...)` counts as a command, a
 - **The model can't read the answer key.** `sandbox_reads` is `all`, so the fixture's directory, which holds the truth, is the header's `sandbox_secrets` (`service.fixture.dir`), denied to the model's commands. The check runs outside the sandbox and still reads it.
   - `probe_key.py` proves it. It runs a canned pass of `tutorial.jsonl` and `tutorial-skills.jsonl` whose one reply `cat`s the truth by its absolute path; the call must run, fail, and print nothing of the truth.
   - It was red before the deny (exit 0, the answers printed) and is green after it.
+  - It needs the platform sandbox. On Linux it skips, saying so, where bwrap can't start, as on a CI runner whose bwrap is refused its network namespace. It also skips there when the drive isn't built.
+  - On macOS, where the live runs are, it never skips: an unbuilt drive or a run the sandbox can't confine fails it.
   - The skills service keeps no cache: the archive is read in memory, and only the three skill files are written.
 - **Each task is asked once and graded once** (`attempts` 1), on its `answer` call (`check.py`), with no feedback inside the pass. The header's `answer_tool` hands serve `answer-tool.json`.
 - **The bare regimen** (`bare.toml`) runs bash and the answer tool, with no memory levers. `canned.toml` is its rehearsal twin.
@@ -80,7 +82,7 @@ Option values are never flags, `cd` is followed, `$(...)` counts as a command, a
 - **The live substrate is the production GPU host's registry entry (`ada48-tabbyapi-exl3-qwen38flashnext-2p05`) by default.** Which model runs the tutorial is the maintainer's open question.
 
 ## Checks
-`gen.py --selftest`, `check.py --selftest`, `docs_reads.py --selftest`, `make_scenario.py --check`, `pass.py --selftest` and `probe_key.py --selftest` (skipped, saying so, when the drive isn't built) run in `./verify.sh`'s scenarios check, with no ast-grep needed. Each was seen to go red on a mutant:
+`gen.py --selftest`, `check.py --selftest`, `docs_reads.py --selftest`, `make_scenario.py --check`, `pass.py --selftest` and `probe_key.py --selftest` run in `./verify.sh`'s scenarios check, with no ast-grep needed. Each was seen to go red on a mutant:
 - the generator, its line numbers off by one;
 - the grader, a refused call counted;
 - the classifier, its option values read as flags.
