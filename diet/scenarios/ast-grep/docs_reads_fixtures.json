@@ -1,0 +1,235 @@
+{
+ "about": "The docs-read classifier's fixtures (docs_reads.py `reads_of`): each case one bash call as the model sends it, with the official skills at SKILLS; a read lists the kinds it makes, in order, and a non-read makes none.",
+ "skills": "/skills/agent-skill",
+ "reads": [
+  {
+   "why": "--help on the tool",
+   "cmd": "ast-grep --help",
+   "kinds": [
+    "help"
+   ]
+  },
+  {
+   "why": "-h on a subcommand",
+   "cmd": "ast-grep run -h",
+   "kinds": [
+    "help"
+   ]
+  },
+  {
+   "why": "--help on outline, piped on",
+   "cmd": "ast-grep outline --help | head -40",
+   "kinds": [
+    "help"
+   ]
+  },
+  {
+   "why": "the help subcommand",
+   "cmd": "ast-grep help scan",
+   "kinds": [
+    "help"
+   ]
+  },
+  {
+   "why": "the sg alias",
+   "cmd": "sg --help",
+   "kinds": [
+    "help"
+   ]
+  },
+  {
+   "why": "--help after a pattern",
+   "cmd": "ast-grep run -p 'foo($A)' --help",
+   "kinds": [
+    "help"
+   ]
+  },
+  {
+   "why": "through a wrapper",
+   "cmd": "command ast-grep scan --help",
+   "kinds": [
+    "help"
+   ]
+  },
+  {
+   "why": "through npx",
+   "cmd": "npx ast-grep --help",
+   "kinds": [
+    "help"
+   ]
+  },
+  {
+   "why": "an env prefix",
+   "cmd": "NO_COLOR=1 ast-grep run --help",
+   "kinds": [
+    "help"
+   ]
+  },
+  {
+   "why": "an absolute path to the binary",
+   "cmd": "/usr/local/bin/ast-grep --help",
+   "kinds": [
+    "help"
+   ]
+  },
+  {
+   "why": "after a cd and a real search",
+   "cmd": "cd src && ast-grep run -p 'x($A)' . ; ast-grep run --help",
+   "kinds": [
+    "help"
+   ]
+  },
+  {
+   "why": "help in a command substitution",
+   "cmd": "echo \"$(ast-grep outline --help)\" | grep view",
+   "kinds": [
+    "help"
+   ]
+  },
+  {
+   "why": "a help call in a script fed to bash",
+   "cmd": "bash <<'EOF'\nast-grep scan --help\nEOF",
+   "kinds": [
+    "help"
+   ]
+  },
+  {
+   "why": "the man page",
+   "cmd": "man ast-grep",
+   "kinds": [
+    "man"
+   ]
+  },
+  {
+   "why": "tldr",
+   "cmd": "tldr sg",
+   "kinds": [
+    "man"
+   ]
+  },
+  {
+   "why": "the docs site",
+   "cmd": "curl -s https://ast-grep.github.io/guide/rule-config.html | head",
+   "kinds": [
+    "web"
+   ]
+  },
+  {
+   "why": "the repo's raw docs",
+   "cmd": "curl -sL https://raw.githubusercontent.com/ast-grep/ast-grep/main/README.md",
+   "kinds": [
+    "web"
+   ]
+  },
+  {
+   "why": "the skill file",
+   "cmd": "cat /skills/agent-skill/ast-grep/SKILL.md",
+   "kinds": [
+    "skill"
+   ]
+  },
+  {
+   "why": "a reference under the skill, by sed",
+   "cmd": "sed -n '1,80p' /skills/agent-skill/ast-grep/references/rule_reference.md",
+   "kinds": [
+    "skill"
+   ]
+  },
+  {
+   "why": "a relative read after cd into the skills",
+   "cmd": "cd /skills/agent-skill && ls && cat ast-grep/SKILL.md",
+   "kinds": [
+    "skill",
+    "skill"
+   ]
+  },
+  {
+   "why": "a grep through the skills",
+   "cmd": "grep -rn stopBy /skills/agent-skill",
+   "kinds": [
+    "skill"
+   ]
+  },
+  {
+   "why": "help and a skill read in one call",
+   "cmd": "ast-grep --help; cat /skills/agent-skill/outline/SKILL.md",
+   "kinds": [
+    "help",
+    "skill"
+   ]
+  },
+  {
+   "why": "a pattern-only rg inside the skills searches them",
+   "cmd": "cd /skills/agent-skill && rg stopBy",
+   "kinds": [
+    "skill"
+   ]
+  }
+ ],
+ "non_reads": [
+  {
+   "why": "a search",
+   "cmd": "ast-grep run -l ts -p 'function $F($$$A): $R { $$$B }' src"
+  },
+  {
+   "why": "a pattern that holds --help as text",
+   "cmd": "ast-grep run -p \"console.log('--help')\" src"
+  },
+  {
+   "why": "a rule that holds -h",
+   "cmd": "ast-grep scan --inline-rules 'id: a\nlanguage: ts\nrule:\n  pattern: run(\"-h\")' src"
+  },
+  {
+   "why": "outline with its options",
+   "cmd": "ast-grep outline src --match '^Frob$' --view signatures"
+  },
+  {
+   "why": "the version",
+   "cmd": "ast-grep --version"
+  },
+  {
+   "why": "--help to another tool",
+   "cmd": "jq --help"
+  },
+  {
+   "why": "grep for help in the project",
+   "cmd": "grep -rn help src"
+  },
+  {
+   "why": "echo of the word",
+   "cmd": "echo 'try ast-grep --help'"
+  },
+  {
+   "why": "a heredoc that writes a script, never run",
+   "cmd": "cat > notes.md <<'EOF'\nast-grep run --help\nEOF"
+  },
+  {
+   "why": "reading the project, not the skills",
+   "cmd": "cat src/index.ts"
+  },
+  {
+   "why": "a path that only starts like the skills root",
+   "cmd": "cat /skills/agent-skill-copy/SKILL.md"
+  },
+  {
+   "why": "a man page of another tool",
+   "cmd": "man grep"
+  },
+  {
+   "why": "a URL that is not ast-grep's",
+   "cmd": "curl -s https://example.com/ast-grep.html"
+  },
+  {
+   "why": "ast-grep's json output piped to jq",
+   "cmd": "ast-grep run -p 'x' --json src | jq length"
+  },
+  {
+   "why": "a bare listing of the project",
+   "cmd": "ls"
+  },
+  {
+   "why": "option values that are exactly a help flag: a pattern and a rewrite",
+   "cmd": "ast-grep run -p '-h' -r '--help' src"
+  }
+ ]
+}

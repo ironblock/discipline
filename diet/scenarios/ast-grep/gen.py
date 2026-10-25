@@ -1,0 +1,269 @@
+"""A seeded TypeScript fixture for the ast-grep tutorial (#971): python3 -I gen.py SEED OUT TRUTH.
+
+Writes a small project under OUT (`package.json`, `src/`, a barrel `src/index.ts`) and the answer to every task
+family to TRUTH, both from the same construction: the generator places each function, call and export itself and
+records where, so the truth never comes from ast-grep, the tool under test. A seed is one instance: the same skills,
+with new file layout, new names and new values. `--selftest` builds a few seeds and checks the truth's invariants.
+"""
+import json, os, random, sys
+
+VERBS = ["load", "parse", "build", "merge", "fetch", "store", "render", "split", "scan", "pack", "route", "sync",
+         "trim", "sort", "index", "probe", "seal", "stamp", "drain", "weigh"]
+NOUNS = ["ledger", "parcel", "beacon", "ticket", "bundle", "shard", "quota", "relay", "anchor", "harbor", "cipher",
+         "socket", "vertex", "lattice", "meadow", "garnet", "pylon", "sprocket", "turbine", "canopy", "glacier", "ember"]
+DIRS = ["core", "io", "model", "net", "util", "store", "view", "jobs"]
+FILES = ["main", "helpers", "types", "shared", "flow", "codec", "state", "rules"]
+
+
+def cap(word):
+    return word[0].upper() + word[1:]
+
+
+class Instance:
+    def __init__(self, seed):
+        self.rng = random.Random(seed)
+        self.seed = seed
+        self.used = set()
+        self.files = {}  # path -> list of lines
+
+    def word(self, pool, fmt=lambda w: w):
+        while True:
+            w = fmt(self.rng.choice(pool))
+            if w not in self.used:
+                self.used.add(w)
+                return w
+
+    def fn_name(self):
+        while True:
+            name = self.rng.choice(VERBS) + cap(self.rng.choice(NOUNS))
+            if name not in self.used:
+                self.used.add(name)
+                return name
+
+    def emit(self, path, line):
+        self.files.setdefault(path, []).append(line)
+        return len(self.files[path])  # 1-based
+
+
+def build(seed):
+    """The instance's files and its truth."""
+    g = Instance(seed)
+    rng = g.rng
+    types = [g.word(NOUNS, cap) for _ in range(4)]
+    target, arrow_target, other = types[0], types[1], types[2]
+    paths = []
+    for d in rng.sample(DIRS, 3):
+        for f in rng.sample(FILES, 2):
+            paths.append(f"src/{d}/{f}.ts")
+    log_fn, zero_fn, track = g.fn_name(), g.fn_name(), "$track"
+    maybe = g.word(NOUNS, lambda w: cap(w) + "Spec")
+    truth = {"seed": seed, "params": {}, "answers": {}}
+    funcs, exported, interfaces = [], [], []
+
+    # The interfaces, one per type, spread over the files; one more is never public.
+    for name in types + [g.word(NOUNS, lambda w: cap(w) + "Row")]:
+        path = rng.choice(paths)
+        line = g.emit(path, f"export interface {name} {{")
+        g.emit(path, f"  id: string;")
+        g.emit(path, f"  weight?: number;")
+        g.emit(path, "}")
+        g.emit(path, "")
+        interfaces.append({"name": name, "path": path, "line": line})
+
+    # Helpers every body calls: the log function, the event emitter, the tracker and the zero-call function.
+    helper = paths[0]
+    g.emit(helper, f"export function {log_fn}(message: string): void {{")
+    g.emit(helper, "  console.log(message);")
+    g.emit(helper, "}")
+    g.emit(helper, "")
+    g.emit(helper, "export const $emit = (event: string): string => event;")
+    g.emit(helper, "export const $track = (what: string): number => what.length;")
+    g.emit(helper, "")
+    g.emit(helper, f"export function {zero_fn}(count: number): number {{")
+    g.emit(helper, "  return count * 2;")
+    g.emit(helper, "}")
+    g.emit(helper, "")
+    exported += [log_fn, zero_fn]
+    zero_calls = rng.choice([0, 0, 1, 2])
+    tracks = 0
+
+    # The functions: each a declaration or an arrow constant, with a return type drawn so every family has its
+    # positives and its look-alikes.
+    plan = (["decl"] * 9) + (["arrow"] * 4)
+    rng.shuffle(plan)
+    for i, kind in enumerate(plan):
+        name, path = g.fn_name(), rng.choice(paths[1:])
+        ret = rng.choice([target, target, f"Promise<{target}>", arrow_target, other, None])
+        if kind == "arrow" and i % 2 == 0:
+            ret = arrow_target
+        awaits = rng.choice(["none", "top", "nested", "nested"]) if kind == "decl" else "none"
+        if awaits != "none" and ret is not None and not ret.startswith("Promise"):
+            ret = f"Promise<{ret}>"
+        logs = rng.choice(["none", "plain", "try", "try-nested"]) if kind == "decl" else "none"
+        emits = rng.random() < 0.35 and kind == "decl"
+        n_track = rng.choice([0, 0, 1, 2]) if kind == "decl" else 0
+        is_export = rng.random() < 0.8
+        asy = "async " if awaits != "none" else ""
+        sig_ret = f": {ret}" if ret else ""
+        exp = "export " if is_export else ""
+        body = []
+        if awaits == "top":
+            body.append(f"  const got = await Promise.resolve(id);")
+        if awaits == "nested":
+            body.append(f"  for (const part of id.split(',')) {{")
+            body.append(f"    if (part) {{")
+            body.append(f"      await Promise.resolve(part);")
+            body.append(f"    }}")
+            body.append(f"  }}")
+        if logs == "plain":
+            body.append(f"  {log_fn}(id);")
+        if logs == "try":
+            body += [f"  try {{", f"    {log_fn}(id);", f"  }} catch (err) {{", f"    void err;", f"  }}"]
+        if logs == "try-nested":
+            body += [f"  try {{", f"    if (id.length > 1) {{", f"      {log_fn}(id);", f"    }}", f"  }} finally {{",
+                     f"    void id;", f"  }}"]
+        if emits:
+            body.append(f"  $emit('{rng.choice(NOUNS)}');")
+        for _ in range(n_track):
+            body.append(f"  $track('{rng.choice(NOUNS)}');")
+        tracks += n_track
+        if zero_calls and kind == "decl" and sum(f.get("zero", 0) for f in funcs) < zero_calls:
+            body.append(f"  {zero_fn}({rng.randint(2, 99)});")
+            zero = 1
+        else:
+            zero = 0
+        ret_expr = "{ id }" if ret and (target in ret or arrow_target in ret or other in ret) else "undefined"
+        if kind == "decl":
+            line = g.emit(path, f"{exp}{asy}function {name}(id: string){sig_ret} {{")
+            for b in body:
+                g.emit(path, b)
+            g.emit(path, f"  return {ret_expr} as never;")
+            g.emit(path, "}")
+        else:
+            line = g.emit(path, f"{exp}const {name} = (id: string){sig_ret} => ({ret_expr} as never);")
+        g.emit(path, "")
+        funcs.append({"name": name, "kind": kind, "path": path, "line": line, "ret": ret, "awaits": awaits, "logs": logs,
+                      "emits": emits, "zero": zero, "export": is_export})
+        if is_export:
+            exported.append(name)
+    zero_calls = sum(f["zero"] for f in funcs)
+
+    # A class whose method returns the target type: a look-alike for the declaration family.
+    cls_path = rng.choice(paths[1:])
+    cls = g.word(NOUNS, lambda w: cap(w) + "Desk")
+    g.emit(cls_path, f"export class {cls} {{")
+    g.emit(cls_path, f"  {g.fn_name()}(id: string): {target} {{")
+    g.emit(cls_path, f"    return {{ id }} as never;")
+    g.emit(cls_path, "  }")
+    g.emit(cls_path, "}")
+    g.emit(cls_path, "")
+
+    # Decoys a text search finds and a structural one doesn't: the zero-call function in a comment and a string,
+    # and the maybe-defined name the same way unless it is defined.
+    decoy = rng.choice(paths[1:])
+    g.emit(decoy, f"// {zero_fn}() is kept for callers outside this package; {maybe} was planned here.")
+    g.emit(decoy, f"export const NOTE = \"call {zero_fn}() only through the {maybe} path\";")
+    g.emit(decoy, "")
+    defined = rng.random() < 0.5
+    if defined:
+        mpath = rng.choice(paths[1:])
+        g.emit(mpath, f"export type {maybe} = {{ name: string }};")
+        g.emit(mpath, "")
+
+    # The barrel: some exported functions, a few under another name, and all but one interface but the never-public
+    # one; the rest are module exports, not the package's public surface.
+    public_fns, barrel = [], []
+    for name in exported:
+        if rng.random() < 0.6:
+            src = next((f["path"] for f in funcs if f["name"] == name), helper)
+            if rng.random() < 0.25:
+                alias = name + "Public"
+                barrel.append(f"export {{ {name} as {alias} }} from './{src[4:-3]}';")
+                public_fns.append(alias)
+            else:
+                barrel.append(f"export {{ {name} }} from './{src[4:-3]}';")
+                public_fns.append(name)
+    hidden = rng.sample(interfaces, 2)
+    for itf in interfaces:
+        if itf not in hidden:
+            barrel.append(f"export type {{ {itf['name']} }} from './{itf['path'][4:-3]}';")
+    for line in barrel:
+        g.emit("src/index.ts", line)
+
+    decls = [f for f in funcs if f["kind"] == "decl"]
+    line_fn = rng.choice(decls)
+    line_itf = rng.choice(interfaces)
+    truth["params"] = {"target": target, "arrow_target": arrow_target, "zero_fn": zero_fn, "maybe": maybe,
+                       "log_fn": log_fn, "line_fn": line_fn["name"], "line_itf": line_itf["name"]}
+    a = truth["answers"]
+    a["ret-decl"] = {"kind": "set", "items": sorted(f["name"] for f in decls if f["ret"] == target)}
+    a["ret-arrow"] = {"kind": "set", "items": sorted(f["name"] for f in funcs if f["kind"] == "arrow" and f["ret"] == arrow_target)}
+    a["zero-calls"] = {"kind": "count", "items": [str(zero_calls)]}
+    a["maybe-defined"] = {"kind": "word", "items": ["yes" if defined else "no"]}
+    a["public-fns"] = {"kind": "set", "items": sorted(public_fns)}
+    a["hidden-itfs"] = {"kind": "set", "items": sorted(i["name"] for i in hidden)}
+    a["await-any"] = {"kind": "set", "items": sorted(f["name"] for f in decls if f["awaits"] != "none")}
+    a["log-in-try"] = {"kind": "set", "items": sorted(f["name"] for f in decls if f["logs"].startswith("try"))}
+    a["emit-callers"] = {"kind": "set", "items": sorted(f["name"] for f in decls if f["emits"])}
+    a["track-count"] = {"kind": "count", "items": [str(tracks)]}
+    a["fn-line"] = {"kind": "seq", "items": [line_fn["path"], str(line_fn["line"])]}
+    a["itf-line"] = {"kind": "seq", "items": [line_itf["path"], str(line_itf["line"])]}
+    return g.files, truth
+
+
+def usable(truth):
+    """Every set family has a positive, so no answer is the empty one by construction."""
+    return all(v["items"] for v in truth["answers"].values())
+
+
+def write(seed, out, truth_path):
+    """The first usable instance at or after SEED: its files under OUT and its truth at TRUTH."""
+    for s in range(seed, seed + 1000):
+        files, truth = build(s)
+        if usable(truth):
+            break
+    else:
+        raise SystemExit(f"gen: no usable instance in 1000 seeds from {seed}")
+    for path, lines in files.items():
+        os.makedirs(os.path.join(out, os.path.dirname(path)), exist_ok=True)
+        with open(os.path.join(out, path), "w") as f:
+            f.write("\n".join(lines) + "\n")
+    with open(os.path.join(out, "package.json"), "w") as f:
+        f.write(json.dumps({"name": "fixture", "private": True, "type": "module", "main": "src/index.ts"}, indent=2) + "\n")
+    with open(truth_path, "w") as f:
+        json.dump(truth, f, indent=1, sort_keys=True)
+    return truth
+
+
+def selftest():
+    import tempfile
+    bad = 0
+    seen = set()
+    for seed in range(1, 21):
+        with tempfile.TemporaryDirectory() as d:
+            truth = write(seed, os.path.join(d, "repo"), os.path.join(d, "truth.json"))
+            again = write(seed, os.path.join(d, "again"), os.path.join(d, "truth2.json"))
+            text = lambda r: {p: open(os.path.join(dp, p)).read() for dp, _, fs in os.walk(r) for p in fs}
+            if truth != again or text(os.path.join(d, "repo")).keys() != text(os.path.join(d, "again")).keys():
+                print(f"gen: seed {seed} is not reproducible"); bad += 1
+            fn_path, fn_line = truth["answers"]["fn-line"]["items"]
+            line = open(os.path.join(d, "repo", fn_path)).read().split("\n")[int(fn_line) - 1]
+            if f"function {truth['params']['line_fn']}(" not in line:
+                print(f"gen: seed {seed}: fn-line points at {line!r}"); bad += 1
+            itf_path, itf_line = truth["answers"]["itf-line"]["items"]
+            line = open(os.path.join(d, "repo", itf_path)).read().split("\n")[int(itf_line) - 1]
+            if f"interface {truth['params']['line_itf']} " not in line:
+                print(f"gen: seed {seed}: itf-line points at {line!r}"); bad += 1
+            seen.add(truth["params"]["target"])
+    if len(seen) < 5:
+        print(f"gen: 20 seeds drew only {len(seen)} target types"); bad += 1
+    print(f"gen: 20 seeds, {bad} problem(s)")
+    return 1 if bad else 0
+
+
+if __name__ == "__main__":
+    if sys.argv[1:] == ["--selftest"]:
+        sys.exit(selftest())
+    if len(sys.argv) != 4:
+        sys.exit(__doc__)
+    write(int(sys.argv[1]), sys.argv[2], sys.argv[3])
