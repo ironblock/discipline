@@ -244,6 +244,19 @@ check_scenarios() {
       rc=1
     fi
   done
+  # The ast-grep tutorial (#971): its fixtures' truth, its grader and its
+  # docs-read classifier hold without ast-grep; ref.py, which runs it, does not
+  # run here.
+  local tut
+  for tut in "gen.py --selftest" "check.py --selftest" "docs_reads.py --selftest"; do
+    code=0
+    # shellcheck disable=SC2086 # the script and its one flag
+    python3 -I diet/scenarios/ast-grep/${tut} || code=$?
+    if [[ "$code" -ne 0 ]]; then
+      echo "verify: diet/scenarios/ast-grep/${tut} failed (exit ${code})" >&2
+      rc=1
+    fi
+  done
   return "$rc"
 }
 
