@@ -66,6 +66,8 @@ def header(name):
              "ready": {"command": 'test -s "$DIET_SERVICE_DIR/provides.json"'}, "ready_timeout_s": 300},
         ],
         "sandbox_unix_sockets": ["service.model-browser.socket"],
+        # The ledger's queries run `ast-grep` (#976): probed inside the sandbox before a live run.
+        "sandbox_tools": ["ast-grep"],
         "seal": {"source": ["service.lite.sealed_source"], "docs": ["service.lite.docs"]},
         "seal_probe": {"source": ["{service.lite.root}/packages/babylon-lite/src/scene/scene-core.ts"],
                        "docs": ["{service.lite.root}/docs/lite/01-getting-started.md"]},

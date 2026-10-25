@@ -642,6 +642,28 @@ fn the_sandbox_probe_proves_the_deny_list_or_refuses_the_run() {
     );
     assert_eq!(said["sandbox_probe"]["ok"], true, "{said}");
     assert_ne!(said["void"], "sandbox", "{said}");
+    // #976: a tool the scenario names must run inside the sandbox: found,
+    // readable, executable and answering, or the run is void.
+    let plain = std::fs::read_to_string(&file).expect("the scenario");
+    let with_tools = |tools: &str| {
+        let (head, rest) = plain.split_once('\n').expect("a header");
+        let mut head: serde_json::Value = serde_json::from_str(head).expect("JSON");
+        head["sandbox_tools"] = serde_json::from_str(tools).expect("a list");
+        std::fs::write(&file, format!("{head}\n{rest}")).expect("the scenario");
+    };
+    with_tools(r#"["sh"]"#);
+    let (code, said, _) = probe(Some(&private), "a-tool", &[]);
+    assert_eq!(code, Some(0), "{said}");
+    assert_eq!(said["sandbox_probe"]["tools"]["sh"]["ok"], true, "{said}");
+    with_tools(r#"["diet-no-such-tool"]"#);
+    let (code, said, _) = probe(Some(&private), "no-tool", &[]);
+    assert_eq!(code, Some(1), "{said}");
+    assert_eq!(said["void"], "sandbox", "{said}");
+    assert_eq!(
+        said["sandbox_probe"]["tools"]["diet-no-such-tool"]["ok"], false,
+        "{said}"
+    );
+    std::fs::write(&file, &plain).expect("the scenario");
     // Last: a probe that read the file keeps its log here, which a later
     // probe's grep would find.
     let (code, said, _) = probe(Some(&home.join("elsewhere")), "undenied", &[]);
