@@ -260,6 +260,19 @@
 //! that declares 23 or less and carries them is refused. For a reader of
 //! earlier logs, the migration is nothing: no session was carried.
 //!
+//! v28 (#948) names a rerooted carry. A carried session runs in a worktree
+//! of its own, and the carried text -- the refilled trunk and the working
+//! object -- named the first session's. Every occurrence of the first
+//! session's worktree root in it is replaced, mechanically, with the new
+//! session's, and `carried_from` says so: `rerooted`, how many occurrences
+//! were replaced (0 when the runner rerooted it and nothing named the old
+//! root), with `rerooted_trunk_sha256` and, when an object crossed,
+//! `rerooted_object_sha256`, the digests of the text as the session started
+//! from it (the kept digests stay beside them). Neither root is named: they
+//! are paths. A log that declares 27 or less and carries them is refused.
+//! For a reader of earlier logs, the migration is nothing: no carry was
+//! rerooted.
+//!
 //! v27 (#948) names a delivery variant. A carried session started from a
 //! trunk other than the one its meditation kept -- the same notes delivered
 //! another way, for the delivery screen -- names that trunk's sha256 as
@@ -326,12 +339,12 @@ use super::record::vocabulary;
 struct LogParser;
 
 /// The version this module writes, as `session.start` states it.
-pub const VERSION: i64 = 27;
+pub const VERSION: i64 = 28;
 
 /// Every version this module reads.
 pub const READS: &[i64] = &[
     0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25,
-    26, 27,
+    26, 27, 28,
 ];
 
 /// How recent an input event must be, at the moment a turn settles, for the
@@ -2431,6 +2444,20 @@ pub struct CarriedFrom {
     /// The trunk it was started from in place of the kept one (v27): a
     /// delivery variant of `trunk_sha256`, by its own sha256.
     pub variant_sha256: Option<String>,
+    /// The carried text rerooted into this session's worktree (v28).
+    pub rerooted: Option<Box<Rerooted>>,
+}
+
+/// A carry's text rerooted (v28, #948): every occurrence of the first
+/// session's worktree root replaced with the new session's.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Rerooted {
+    /// How many occurrences were replaced, the trunk's and the object's.
+    pub replaced: u64,
+    /// The sha256 of the trunk as the session started from it.
+    pub trunk_sha256: String,
+    /// The sha256 of the working object's dump as loaded, when one crossed.
+    pub object_sha256: Option<String>,
 }
 
 /// Where a carried session's worktree came from (v26, #948).
@@ -2666,6 +2693,22 @@ fn carried_from_value(carried: &CarriedFrom) -> Value {
     }
     if let Some(variant) = &carried.variant_sha256 {
         members.insert("variant_sha256".to_owned(), Value::String(variant.clone()));
+    }
+    if let Some(rerooted) = &carried.rerooted {
+        members.insert(
+            "rerooted".to_owned(),
+            Value::Integer(i64::try_from(rerooted.replaced).unwrap_or(i64::MAX)),
+        );
+        members.insert(
+            "rerooted_trunk_sha256".to_owned(),
+            Value::String(rerooted.trunk_sha256.clone()),
+        );
+        if let Some(object) = &rerooted.object_sha256 {
+            members.insert(
+                "rerooted_object_sha256".to_owned(),
+                Value::String(object.clone()),
+            );
+        }
     }
     if let Some((sha256, from)) = &carried.worktree {
         members.insert("worktree_sha256".to_owned(), Value::String(sha256.clone()));
@@ -5817,6 +5860,16 @@ const fn must_v8(key: &'static str, holds: Holds) -> Field {
     }
 }
 
+/// A key that arrived in v28, optional wherever its object is written.
+const fn may_v28(key: &'static str, holds: Holds) -> Field {
+    Field {
+        key,
+        holds,
+        required: false,
+        since: 28,
+    }
+}
+
 /// A key that arrived in v27, optional wherever its object is written.
 const fn may_v27(key: &'static str, holds: Holds) -> Field {
     Field {
@@ -6108,6 +6161,9 @@ pub const CARRIED_FROM: &[Field] = &[
     may_v26("worktree_sha256", Holds::Digest),
     may_v26("worktree_from", Holds::Text),
     may_v27("variant_sha256", Holds::Digest),
+    may_v28("rerooted", Holds::Count),
+    may_v28("rerooted_trunk_sha256", Holds::Digest),
+    may_v28("rerooted_object_sha256", Holds::Digest),
 ];
 
 pub const RUN: &[Field] = &[
@@ -9372,6 +9428,27 @@ impl Fields<'_> {
                 None => None,
                 Some(_) => Some(inner.digest("variant_sha256").map_err(within)?),
             },
+            rerooted: match (
+                inner.0.get("rerooted"),
+                inner.0.get("rerooted_trunk_sha256"),
+                inner.0.get("rerooted_object_sha256"),
+            ) {
+                (None, None, None) => None,
+                (Some(_), Some(_), object) => Some(Box::new(Rerooted {
+                    replaced: inner.count("rerooted").map_err(within)?,
+                    trunk_sha256: inner.digest("rerooted_trunk_sha256").map_err(within)?,
+                    object_sha256: match object {
+                        None => None,
+                        Some(_) => Some(inner.digest("rerooted_object_sha256").map_err(within)?),
+                    },
+                })),
+                _ => {
+                    return Err(within(
+                        "`rerooted` and `rerooted_trunk_sha256` name one rerooting: both or neither, and `rerooted_object_sha256` only with them"
+                            .to_owned(),
+                    ));
+                }
+            },
             worktree: match (inner.0.get("worktree_sha256"), inner.0.get("worktree_from")) {
                 (None, None) => None,
                 (Some(_), Some(_)) => {
@@ -9699,13 +9776,13 @@ mod tests {
 
     /// #583, #878, #904, #555, #931, #936, #910, #942, #926, #932, #948: this module writes v27.
     #[test]
-    fn this_module_writes_v27_and_reads_every_version_before_it() {
-        assert_eq!(super::VERSION, 27);
+    fn this_module_writes_v28_and_reads_every_version_before_it() {
+        assert_eq!(super::VERSION, 28);
         assert_eq!(
             super::READS,
             &[
                 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22,
-                23, 24, 25, 26, 27
+                23, 24, 25, 26, 27, 28
             ]
         );
     }

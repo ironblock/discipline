@@ -4,8 +4,8 @@
 // i64, and a JavaScript number is exact only to 2^53. A `timings`
 // millisecond may carry a fraction, written as the server wrote it.
 
-export const VERSION = 27;
-export const READS = [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27] as const;
+export const VERSION = 28;
+export const READS = [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28] as const;
 export const PRESENCE_WINDOW_MS = 2000;
 
 export type Kind =
@@ -330,6 +330,9 @@ export interface CarriedFrom {
   worktree_sha256?: string;
   worktree_from?: string;
   variant_sha256?: string;
+  rerooted?: number;
+  rerooted_trunk_sha256?: string;
+  rerooted_object_sha256?: string;
 }
 
 export interface TemplateKwargs {
@@ -424,7 +427,7 @@ export type SessionStartLine = {
   seq: number;
   t: number;
   kind: "session.start";
-  version: 0 | 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9 | 10 | 11 | 12 | 13 | 14 | 15 | 16 | 17 | 18 | 19 | 20 | 21 | 22 | 23 | 24 | 25 | 26 | 27;
+  version: 0 | 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9 | 10 | 11 | 12 | 13 | 14 | 15 | 16 | 17 | 18 | 19 | 20 | 21 | 22 | 23 | 24 | 25 | 26 | 27 | 28;
   opened: number;
   model: string;
   head: HeadMessage[];

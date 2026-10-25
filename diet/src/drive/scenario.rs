@@ -2284,6 +2284,12 @@ pub struct RunOptions {
     /// A delivery variant of the carried trunk (`--carry-trunk FILE`, v27):
     /// passed to serve, which sends it in the kept trunk's place.
     pub carry_trunk: Option<std::path::PathBuf>,
+    /// The worktree the carried session's first session ran in (#948, log
+    /// v28), as given and as resolved: serve reroots the carried text from
+    /// each into this session's own worktree's same form. The runner sets it
+    /// for the next session of a run; a carry taken from another run's log
+    /// (`--from-carry`) names none, and its text is carried as kept.
+    pub carried_root: Option<(std::path::PathBuf, std::path::PathBuf)>,
     /// The phase tool's description in place of the pinned template
     /// (`--phase-tool-description FILE`, v27): passed to serve.
     pub phase_tool_description: Option<std::path::PathBuf>,
@@ -3227,6 +3233,22 @@ fn running(
                 .map_err(|failure| voided(said, "worktree", failure))?,
         }
         serve.arg("--worktree").arg(&dir);
+        // A carry's text named the first session's worktree: serve reroots
+        // it into this one's (#948, v28), the resolved form first, as the
+        // given form is the tail of it.
+        if let Some((given, resolved)) = options
+            .carried_root
+            .as_ref()
+            .filter(|_| options.carry.is_some())
+        {
+            let here = std::path::absolute(&dir).unwrap_or_else(|_| dir.clone());
+            let here_resolved = std::fs::canonicalize(&dir).unwrap_or_else(|_| here.clone());
+            for (from, to) in [(resolved, &here_resolved), (given, &here)] {
+                serve
+                    .arg("--carried-root")
+                    .arg(format!("{}={}", from.display(), to.display()));
+            }
+        }
         for secret in &denied {
             serve.arg("--sandbox-secret").arg(secret);
         }
@@ -3369,6 +3391,12 @@ fn running(
     if let Some(running) = &services {
         driver = driver.telling(running.env());
     }
+    // The next session's carry is rerooted from this one's worktree (#948).
+    let first_root = worktree.as_ref().map(|dir| {
+        let given = std::path::absolute(dir).unwrap_or_else(|_| dir.clone());
+        let resolved = std::fs::canonicalize(dir).unwrap_or_else(|_| given.clone());
+        (given, resolved)
+    });
     if let Some(worktree) = worktree {
         driver = driver.in_worktree(worktree);
     }
@@ -3483,6 +3511,9 @@ fn running(
                 out: options.out.join("next"),
                 worktree: None,
                 carry: (refill != RefillSession::Blank).then(|| log.clone()),
+                carried_root: (refill != RefillSession::Blank)
+                    .then(|| first_root.clone())
+                    .flatten(),
                 from_step,
                 carried: true,
                 sealed,

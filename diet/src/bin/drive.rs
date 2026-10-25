@@ -126,6 +126,9 @@ fn carry_usage(out: &mut String) {
     out.push_str("--carry-trunk FILE: with --carry, a delivery variant of the carried trunk\n");
     out.push_str("(messages as the recording keeps a trunk), sent in its place; the start\n");
     out.push_str("line names its sha256 beside the trunk it varies (#948).\n");
+    out.push_str("--carried-root FROM=TO: with --carry, the carried text's worktree root\n");
+    out.push_str("FROM replaced with this session's TO, each whole occurrence; repeatable,\n");
+    out.push_str("applied in order; the start line names how many and what was sent (v28).\n");
     out.push_str("--phase-tool-description FILE: the phase tool's description in place of\n");
     out.push_str("the pinned template, where the regimen declares phases; the start line\n");
     out.push_str("names its sha256 (#948).\n");
@@ -139,7 +142,7 @@ fn serve_usage() -> String {
          \x20                       [--allow-origin URL]... [--max-output-tokens N]\n\
          \x20                       [--worktree DIR] [--sandbox-unix-socket PATH]...\n\
          \x20                       [--sandbox-secret PATH]... [--carry LOG [--carried-worktree SHA256]\n\
-         \x20                       [--carry-trunk FILE]] [--phase-tool-description FILE]\n\
+         \x20                       [--carry-trunk FILE] [--carried-root FROM=TO]...] [--phase-tool-description FILE]\n\
          \x20                       [--run JSON] [--rehearse-as RUNG]\n\
          \x20                       [--seat-endpoint URL --seat-model NAME [--seat-key-file FILE]]\n\
          \x20      diet-drive serve --profile NAME [--config FILE] [any flag above]\n\n",
@@ -273,6 +276,9 @@ struct ServeArgs {
     /// `--phase-tool-description FILE`: the phase tool's description in place
     /// of the pinned template, named by its sha256 (v27, #948).
     phase_tool_description: Option<String>,
+    /// `--carried-root FROM=TO`, each: the carried text rerooted from the
+    /// first session's worktree into this one's (v28, #948).
+    carried_roots: Vec<(String, String)>,
     /// `--rehearse-as`: the rung a rehearsal runs under the declarations of
     /// (#926).
     rehearse_as: Option<String>,
@@ -412,6 +418,7 @@ fn serve_args(args: &[String]) -> Option<ServeArgs> {
     let mut carried_worktree = None;
     let mut carry_trunk = None;
     let mut phase_tool_description = None;
+    let mut carried_roots = Vec::new();
     let mut given = args.iter();
     while let Some(flag) = given.next() {
         let value = given.next()?;
@@ -477,6 +484,17 @@ fn serve_args(args: &[String]) -> Option<ServeArgs> {
         } else if flag == "--carry-trunk" {
             carry_trunk = Some(value.clone());
             true
+        } else if flag == "--carried-root" {
+            match value.split_once('=') {
+                Some((from, to))
+                    if std::path::Path::new(from).is_absolute()
+                        && std::path::Path::new(to).is_absolute() =>
+                {
+                    carried_roots.push((from.to_owned(), to.to_owned()));
+                    true
+                }
+                _ => false,
+            }
         } else if flag == "--phase-tool-description" {
             phase_tool_description = Some(value.clone());
             true
@@ -537,6 +555,7 @@ fn serve_args(args: &[String]) -> Option<ServeArgs> {
         carried_worktree,
         carry_trunk,
         phase_tool_description,
+        carried_roots,
     })
 }
 
@@ -575,6 +594,7 @@ fn serve(args: &[String]) -> ExitCode {
         carried_worktree,
         carry_trunk,
         phase_tool_description,
+        carried_roots,
     }) = serve_args(args)
     else {
         eprint!("{}", serve_usage());
@@ -636,6 +656,21 @@ fn serve(args: &[String]) -> ExitCode {
             };
             carry.trunk = trunk;
             carry.from.variant_sha256 = Some(diet::digest::sha256_hex(&bytes));
+            Some(carry)
+        }
+    };
+    // The carried text rerooted into this session's worktree (v28, #948):
+    // the native summary and the working memory name the worktree it runs in.
+    let carry = match (carry, carried_roots.is_empty()) {
+        (carry, true) => carry,
+        (None, false) => {
+            return fail(
+                EXIT_USAGE,
+                "--carried-root reroots a carry's text, and there is no --carry",
+            );
+        }
+        (Some(mut carry), false) => {
+            diet::drive::carry::reroot(&mut carry, &carried_roots);
             Some(carry)
         }
     };

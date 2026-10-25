@@ -3035,6 +3035,14 @@ fn a_carried_session_restores_the_worktree_its_refill_left() {
         start["carried_from"]["worktree_from"], "meditation",
         "{start}"
     );
+    // The runner rerooted the carry from the first session's worktree into
+    // this one's (v28): on the canned substrate both were shown the same
+    // placeholder, so nothing named the real root, and the start says so.
+    assert_eq!(start["carried_from"]["rerooted"], 0, "{start}");
+    assert!(
+        start["carried_from"]["rerooted_trunk_sha256"].is_string(),
+        "{start}"
+    );
     // blank: the seed, and no note.
     let (exit, call) = read_exit(&dir.join("out-blank/next/session.log")).expect("a read");
     assert_ne!(exit, Some(0), "a blank session has no note: {call}");
@@ -3078,6 +3086,12 @@ fn a_carried_session_restores_the_worktree_its_refill_left() {
     assert_eq!(
         first_line(&from_log)["carried_from"]["worktree_from"],
         "meditation"
+    );
+    assert!(
+        first_line(&from_log)["carried_from"]
+            .get("rerooted")
+            .is_none(),
+        "a carry from another run's log names no first worktree, and is carried as kept"
     );
     // An arms batch from the recorded refill: every run starts there.
     let manifest = dir.join("ARMS.toml");
