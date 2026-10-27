@@ -1,0 +1,11 @@
+{"answer_tools_sha256":["7777777777777777777777777777777777777777777777777777777777777777","8888888888888888888888888888888888888888888888888888888888888888"],"head":[{"content":"you are the trunk","role":"system"}],"kind":"session.start","model":"a-model","opened":1790000000000,"seq":0,"t":0,"version":29}
+{"kind":"ask","seq":1,"t":5,"text":"give the command","turn":1}
+{"from":"awaiting","kind":"settlement","seq":2,"t":10,"to":"turn"}
+{"kind":"request","lane":"trunk","seq":3,"t":15,"turn":1}
+{"kind":"delta","request":3,"seq":4,"t":20,"tool_call":{"arguments":"{\"command\":\"ast-grep run -p 'foo($A)' src\"}","id":"call-0","index":0,"name":"answer"}}
+{"finish_reason":"tool_calls","kind":"response","seq":5,"t":25,"text":"","to_request":3}
+{"arguments":"{\"command\":\"ast-grep run -p 'foo($A)' src\"}","id":"call-0","kind":"tool_call","name":"answer","outcome":"ran","request":3,"seq":6,"t":30,"turn":1}
+{"kind":"request","lane":"trunk","seq":7,"t":35,"turn":1}
+{"kind":"delta","request":7,"seq":8,"t":40,"tool_call":{"arguments":"{\"notes\":[\"foo takes one argument\"]}","id":"call-1","index":0,"name":"notes"}}
+{"finish_reason":"tool_calls","kind":"response","seq":9,"t":45,"text":"","to_request":7}
+{"arguments":"{\"notes\":[\"foo takes one argument\"]}","id":"call-1","kind":"tool_call","name":"notes","outcome":"ran","request":7,"seq":10,"t":50,"turn":1}

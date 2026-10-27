@@ -4266,7 +4266,7 @@ fn a_session_that_never_meditates_skips_a_declared_meditation_and_never_refills(
     let _ = std::fs::remove_dir_all(&dir);
 }
 
-/// #971 (v29): a scenario's `answer_tool` is passed to serve, declared on
+/// #971 (v29, v30): a scenario's `answer_tool` is passed to serve, declared on
 /// the trunk's requests, and named on the start line by its file's digest;
 /// a canned reply calls it by name: a well-formed call is shown the file's
 /// result, a malformed one is refused `unparsable`, naming the key.
@@ -4322,9 +4322,13 @@ fn a_scenarios_answer_tool_is_declared_and_its_calls_checked() {
     );
     let log = out.join("session.log");
     assert_eq!(
-        first_line(&log)["answer_tool_sha256"],
-        diet::digest::sha256_hex(&std::fs::read(dir.join("answer.json")).expect("bytes")).as_str()
+        first_line(&log)["answer_tools_sha256"],
+        serde_json::json!([diet::digest::sha256_hex(
+            &std::fs::read(dir.join("answer.json")).expect("bytes")
+        )]),
+        "v30 writes the list, of one"
     );
+    assert!(first_line(&log).get("answer_tool_sha256").is_none());
     let calls = logged(&log, "tool_call");
     assert_eq!(calls.len(), 2, "{calls:?}");
     assert_eq!(
@@ -4349,5 +4353,112 @@ fn a_scenarios_answer_tool_is_declared_and_its_calls_checked() {
         serde_json::json!(["answer"]),
         "declared from the first request"
     );
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// #971 (v30): a header's `answer_tool` list is passed to serve as one
+/// `--answer-tool` each, in order: both are declared after the session's
+/// tools in that order, each call is checked against its own tool's schema
+/// and shown its own result, and the start line names each file's digest in
+/// the same order. Two tools by one name are refused at start, naming it.
+#[test]
+#[allow(clippy::too_many_lines)]
+fn a_scenarios_two_answer_tools_are_declared_in_order() {
+    let dir = scratch("answer-tools");
+    let tool = |name: &str, key: &str, kind: &str, result: &str| {
+        serde_json::json!({
+            "name": name,
+            "description": format!("Give your {key}."),
+            "parameters": {
+                "type": "object",
+                "properties": {key: {"type": kind}},
+                "required": [key],
+            },
+            "result": result,
+        })
+    };
+    for (file, tool) in [
+        (
+            "answer.json",
+            tool("answer", "command", "string", "Answer recorded."),
+        ),
+        (
+            "notes.json",
+            tool("notes", "notes", "array", "Notes updated."),
+        ),
+        ("again.json", tool("answer", "rule", "string", "Again.")),
+    ] {
+        std::fs::write(
+            dir.join(file),
+            serde_json::to_string_pretty(&tool).expect("text"),
+        )
+        .expect("a tool");
+    }
+    let call = |id: &str, name: &str, arguments: &str| serde_json::json!({"reply": {"text": "", "calls": [{"id": id, "name": name, "arguments": arguments}]}});
+    let scenario = |name: &str, tools: serde_json::Value| {
+        let mut text = format!(
+            "{}\n",
+            serde_json::json!({"scenario": name, "regimen": root().join("diet/scenarios/canned.toml"), "head": root().join("diet/drive/heads/floor.md"), "answer_tool": tools})
+        );
+        for line in [
+            serde_json::json!({"step": "ask", "text": "give the command, then the notes"}),
+            serde_json::json!({"step": "end"}),
+            call("call-1", "notes", r#"{"command":"sg -p x"}"#),
+            call("call-2", "answer", r#"{"command":"sg -p x"}"#),
+            call("call-3", "notes", r#"{"notes":["x is a call"]}"#),
+            serde_json::json!({"reply": {"text": "Done."}}),
+        ] {
+            text.push_str(&(line.to_string() + "\n"));
+        }
+        let file = dir.join(format!("{name}.jsonl"));
+        std::fs::write(&file, text).expect("the scenario");
+        let out = dir.join(format!("out-{name}"));
+        let ran = Command::new(DRIVE)
+            .current_dir(root())
+            .arg("scenario")
+            .arg(&file)
+            .arg("--out")
+            .arg(&out)
+            .arg("--no-assemble")
+            .output()
+            .expect("diet-drive runs");
+        (
+            ran.status.code(),
+            format!(
+                "{}{}",
+                String::from_utf8_lossy(&ran.stdout),
+                String::from_utf8_lossy(&ran.stderr)
+            ),
+            out.join("session.log"),
+        )
+    };
+    let (code, said, log) = scenario("two", serde_json::json!(["answer.json", "notes.json"]));
+    assert_eq!(code, Some(0), "{said}");
+    let digest =
+        |file: &str| diet::digest::sha256_hex(&std::fs::read(dir.join(file)).expect("bytes"));
+    assert_eq!(
+        first_line(&log)["answer_tools_sha256"],
+        serde_json::json!([digest("answer.json"), digest("notes.json")])
+    );
+    assert_eq!(
+        first_line(&log)["tools"],
+        serde_json::json!(["answer", "notes"]),
+        "declared in the order given"
+    );
+    let calls = logged(&log, "tool_call");
+    assert_eq!(calls.len(), 3, "{calls:?}");
+    assert_eq!(calls[0]["reason"], "unparsable", "{}", calls[0]);
+    assert!(
+        calls[0]["shown"].as_str().unwrap_or("").contains("`notes`"),
+        "checked against the notes tool's own schema: {}",
+        calls[0]
+    );
+    assert_eq!(calls[1]["outcome"], "ran", "{}", calls[1]);
+    assert_eq!(calls[1]["shown"], "Answer recorded.", "{}", calls[1]);
+    assert_eq!(calls[2]["outcome"], "ran", "{}", calls[2]);
+    assert_eq!(calls[2]["shown"], "Notes updated.", "{}", calls[2]);
+    let (code, said, _) = scenario("twice", serde_json::json!(["answer.json", "again.json"]));
+    assert_ne!(code, Some(0), "{said}");
+    assert!(said.contains("`answer`"), "the refusal names it: {said}");
     let _ = std::fs::remove_dir_all(&dir);
 }
