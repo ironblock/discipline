@@ -1,0 +1,43 @@
+# The ast-grep tutorial's bare regimen on the floor (#971): `bare.toml` on the 27B line: bash and the answer tool, no memory levers. A pass is one session from a
+# fresh instance; what the tutorial carries between passes is its preamble, never this session's memory.
+arm = "ast-grep-bare-floor"
+dogma_version = 0
+
+substrate = "accel24-tabbyapi-exl3-qwen38-27b-3p00"
+substrate_reasoning = "on"
+# The registry's hardware_fingerprint for the entry's equipment.
+substrate_hardware = "e6489f9c1815a0c4540a0c6663acaa3c62b1b66e03806479475c2645347fe7af"
+
+# The model's commands run in the worktree under the OS's sandbox: reads everywhere but the secrets, writes in the
+# worktree alone, and no network. Approvals are off, so `allowed_commands` is the pre-seeded set and gates nothing.
+allowed_commands = ["ast-grep", "ls", "cat"]
+isolation = "sandbox"
+network = "none"
+sandbox_reads = "all"
+sandbox_secrets = ["~/.config/git", "~/.git-credentials"]
+approval = "none"
+approval_policy = "approvals are off: every command runs without a gate decision or a prompt; the sandbox confines writes to the worktree"
+
+# DRAFT: no hard cap (the maintainer, 2026-10-26): output length is graded instead. The largest job the pool admits:
+# cache_size 163840 less two 2048-token chunks of headroom; the drive cuts each request to what is left (#826).
+max_output_tokens = 159744
+
+# No interviews and no working memory.
+interview_warrant = []
+refutation_interview = "off"
+self_capture = "off"
+
+# A nonce of the run's own first in the head, as the Lite arms draw it: no pass's prefix is one the server cached for
+# another. Its reset is a fresh session, not a cached prefix.
+head_nonce = "per_run"
+
+[reasoning]
+effort = "xhigh"
+budget_tokens = "none"
+
+# The registry's recommended thinking sampler for the line, every key declared.
+[sampler]
+temperature = 1.0
+top_k = 20
+top_p = 0.95
+min_p = 0.0

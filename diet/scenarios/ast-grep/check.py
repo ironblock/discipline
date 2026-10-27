@@ -1,29 +1,30 @@
 """The ast-grep tutorial's check (#971): python3 -I check.py, as a scenario's `grade` step runs it.
 
-Grades the task's answer, never an exit status: the last well-formed call to the answer tool (`answer-tool.json`)
-in the turn naming the task, against the instance's truth from `gen.py` (`$DIET_SERVICE_FIXTURE_TRUTH`). An answer
-in prose, with no call, is no answer. Prints one line, `{"right", "expected", "got"}`. `--selftest` grades known
-turns.
+The answer is a command. The check takes the turn's last well-formed `answer` call (`answer-tool.json`), refuses
+it as wrong when it may not run (`command.py`: not ast-grep, a shell operator, a forbidden flag, a path out of the
+project), and otherwise runs it out of the model's sight, confined, against a pristine copy of the instance
+(`$DIET_SERVICE_FIXTURE_PRISTINE`). It is right when the lines it matches are exactly the truth's
+(`$DIET_SERVICE_FIXTURE_TRUTH`, from `gen.py`'s construction): equivalent spellings pass, and an answer reached any
+other way fails. It never grades an exit status, and an answer in prose is no answer. It runs commands on macOS
+only, where its confinement is built. Prints one line, `{"right", "expected", "got"}`; `got` names counts, never
+what the command printed. `--selftest` grades known answers.
 """
 import json, os, sys
 
 HERE = os.path.dirname(os.path.abspath(__file__))
+sys.path.insert(0, HERE)
+import command  # noqa: E402
+
 TOOL = json.load(open(os.path.join(HERE, "answer-tool.json")))["name"]
 
 
 def family_of(task):
-    sys.path.insert(0, HERE)
     from tasks import TASKS
     return next(t["family"] for t in TASKS if t["id"] == task)
 
 
-def norm(item):
-    item = item.strip().strip("`\"'").strip()
-    return item[:-2] if item.endswith("()") else item
-
-
-def answered(turn, task):
-    """The answer's items from the turn's last well-formed answer call for TASK, or None."""
+def answered(turn):
+    """The command of the turn's last well-formed answer call, or None."""
     got = None
     for call in turn.get("calls", []):
         if call.get("name") != TOOL or call.get("outcome") == "refused":
@@ -32,75 +33,71 @@ def answered(turn, task):
             args = json.loads(call.get("arguments") or "")
         except ValueError:
             continue
-        if isinstance(args, dict) and args.get("task") == task and isinstance(args.get("answer"), list):
-            got = [str(x) for x in args["answer"]]
+        if isinstance(args, dict) and isinstance(args.get("command"), str):
+            got = args["command"]
     return got
 
 
-def grade(turn, task, truth):
-    want = truth["answers"][family_of(task)]
-    kind, items = want["kind"], want["items"]
-    expected = ", ".join(items)
-    got = answered(turn, task)
-    if got is None:
+def grade(turn, task, truth, pristine):
+    want = sorted(truth["answers"][family_of(task)])
+    expected = f"{len(want)} matching line(s)"
+    cmd = answered(turn)
+    if cmd is None:
         return {"right": False, "expected": expected, "got": "(no answer through the answer tool)"}
-    shown = ", ".join(got)
-    g = [norm(x) for x in got if norm(x)]
-    if kind == "set":
-        right = sorted(set(g)) == sorted(items) and len(g) == len(set(g))
-    elif kind == "count":
-        right = len(g) == 1 and g[0].isdigit() and int(g[0]) == int(items[0])
-    elif kind == "word":
-        right = len(g) == 1 and g[0].lower().rstrip(".") == items[0]
-    else:  # seq: a path, then a 1-based line
-        right = (len(g) == 2 and g[0].removeprefix("./") == items[0] and g[1].isdigit()
-                 and int(g[1]) == int(items[1]))
-    return {"right": right, "expected": expected, "got": shown}
+    if sys.platform != "darwin":
+        return {"right": False, "expected": expected, "got": "(not run: the check confines commands on macOS only)"}
+    try:
+        found = command.matches(command.checked(cmd), pristine)
+    except command.Refused as why:
+        return {"right": False, "expected": expected, "got": f"(refused: {why})"}
+    extra, missing = len(set(found) - set(want)), len(set(want) - set(found))
+    return {"right": found == want, "expected": expected,
+            "got": f"{len(found)} matching line(s), {missing} missing, {extra} extra"}
 
 
 def main():
     turn = json.load(open(os.environ["DIET_GRADE_TURN"]))
     truth = json.load(open(os.environ["DIET_SERVICE_FIXTURE_TRUTH"]))
-    print(json.dumps(grade(turn, os.environ["DIET_GRADE_TASK"], truth)))
+    print(json.dumps(grade(turn, os.environ["DIET_GRADE_TASK"], truth, os.environ["DIET_SERVICE_FIXTURE_PRISTINE"])))
 
 
 def selftest():
-    truth = {"answers": {"ret-decl": {"kind": "set", "items": ["aFn", "bFn"]},
-                         "zero-calls": {"kind": "count", "items": ["0"]},
-                         "maybe-defined": {"kind": "word", "items": ["no"]},
-                         "fn-line": {"kind": "seq", "items": ["src/a/b.ts", "7"]}}}
-    call = lambda task, answer, outcome="ok", name=TOOL: {"name": name, "outcome": outcome,
-                                                         "arguments": json.dumps({"task": task, "answer": answer})}
+    import tempfile, gen
+    call = lambda cmd, outcome="ok", name=TOOL: {"name": name, "outcome": outcome, "arguments": json.dumps({"command": cmd})}
     turn = lambda *calls, answer="": {"calls": list(calls), "answer": answer}
-    cases = [
-        ("the right set, in any order", "t1-ret-decl", turn(call("t1-ret-decl", ["bFn", "aFn"])), True),
-        ("names in backticks, with parentheses", "t1-ret-decl", turn(call("t1-ret-decl", ["`aFn`", "bFn()"])), True),
-        ("one name missing", "t1-ret-decl", turn(call("t1-ret-decl", ["aFn"])), False),
-        ("one name extra", "t1-ret-decl", turn(call("t1-ret-decl", ["aFn", "bFn", "cFn"])), False),
-        ("a name twice", "t1-ret-decl", turn(call("t1-ret-decl", ["aFn", "bFn", "aFn"])), False),
-        ("the right answer in prose, with no call", "t1-ret-decl", turn(answer="aFn, bFn"), False),
-        ("an answer for another task", "t1-ret-decl", turn(call("t2-zero-calls", ["aFn", "bFn"])), False),
-        ("a refused call is no answer", "t1-ret-decl", turn(call("t1-ret-decl", ["aFn", "bFn"], "refused")), False),
-        ("the last call decides", "t1-ret-decl", turn(call("t1-ret-decl", ["aFn", "bFn"]), call("t1-ret-decl", ["aFn"])), False),
-        ("a corrected last call", "t1-ret-decl", turn(call("t1-ret-decl", ["aFn"]), call("t1-ret-decl", ["aFn", "bFn"])), True),
-        ("a bash call is no answer", "t1-ret-decl", turn(call("t1-ret-decl", ["aFn", "bFn"], name="bash")), False),
-        ("a zero count", "t2-zero-calls", turn(call("t2-zero-calls", ["0"])), True),
-        ("a count in words", "t2-zero-calls", turn(call("t2-zero-calls", ["zero"])), False),
-        ("a nonzero count from a text search", "t2-zero-calls", turn(call("t2-zero-calls", ["2"])), False),
-        ("no, any case", "h2-maybe-defined", turn(call("h2-maybe-defined", ["No."])), True),
-        ("yes when it is not", "h2-maybe-defined", turn(call("h2-maybe-defined", ["yes"])), False),
-        ("a path and a 1-based line", "t6-fn-line", turn(call("t6-fn-line", ["./src/a/b.ts", "7"])), True),
-        ("json's 0-based line", "t6-fn-line", turn(call("t6-fn-line", ["src/a/b.ts", "6"])), False),
-        ("the line alone", "t6-fn-line", turn(call("t6-fn-line", ["7"])), False),
-    ]
-    bad = 0
-    for why, task, t, want in cases:
-        got = grade(t, task, truth)["right"]
-        if got != want:
-            print(f"check: {why}: graded {got}, expected {want}")
-            bad += 1
-    right = sum(1 for c in cases if c[3])
-    print(f"check: {right} right and {len(cases) - right} wrong answers, {bad} misgraded")
+    bad, n = 0, 0
+    with tempfile.TemporaryDirectory() as d:
+        pristine = os.path.join(d, "pristine")
+        truth = gen.write(11, pristine, os.path.join(d, "truth.json"))
+        p = truth["params"]
+        cases = [
+            ("no call", "t1-ret-decl", turn(answer="ast-grep run ..."), False),
+            ("a bash call is no answer", "t1-ret-decl", turn(call("ast-grep run -p x src", name="bash")), False),
+            ("a refused call is no answer", "t1-ret-decl", turn(call(f"ast-grep run -l ts -p 'function $F($$$A): {p['target']} {{ $$$B }}' src", "refused")), False),
+            ("not ast-grep", "t1-ret-decl", turn(call("rg -n 'function' src")), False),
+            ("a shell operator", "t1-ret-decl", turn(call(f"ast-grep run -p 'function $F($$$A): {p['target']} {{ $$$B }}' src | head")), False),
+        ]
+        if sys.platform == "darwin" and command.shutil.which("ast-grep"):
+            cases += [
+                ("the return type", "t1-ret-decl", turn(call(f"ast-grep run -l ts -p 'function $F($$$A): {p['target']} {{ $$$B }}' src")), True),
+                ("the same, by the sg name, with its own --json", "t1-ret-decl", turn(call(f"sg run -l ts -p 'function $F($$$A): {p['target']} {{ $$$B }}' src --json")), True),
+                ("no return type: every untyped function instead", "t1-ret-decl", turn(call("ast-grep run -l ts -p 'function $F($$$A) { $$$B }' src")), False),
+                ("the last call decides", "t1-ret-decl", turn(call("ast-grep run -l ts -p 'function $F($$$A) { $$$B }' src"),
+                                                               call(f"ast-grep run -l ts -p 'function $F($$$A): {p['target']} {{ $$$B }}' src")), True),
+                ("a direct-call pattern", "t2-zero-calls", turn(call(f"ast-grep run -l ts -p '{p['zero_fn']}($$$A)' src")), True),
+                ("the barrel's outline", "t3-public-surface", turn(call("ast-grep outline src/index.ts")), True),
+                ("the directory's exports are not the surface", "t3-public-surface", turn(call("ast-grep outline src --items exports")), False),
+                ("an anchored outline", "t6-fn-outline", turn(call(f"ast-grep outline src --match '^{p['line_fn']}$'")), True),
+                ("an unanchored outline matches more", "t6-fn-outline", turn(call(f"ast-grep outline src --match '{p['line_fn'][:4]}'")), False),
+                ("a double-quoted metavariable is the shell's", "t5-emit-calls", turn(call('ast-grep run -p "$emit($$$A)" src')), False),
+                ("single quotes keep it", "t5-emit-calls", turn(call("ast-grep run -p '$emit($$$A)' src")), True),
+            ]
+        for why, task, t, want in cases:
+            n += 1
+            got = grade(t, task, truth, pristine)
+            if got["right"] != want:
+                print(f"check: {why}: graded {got}, expected {want}"); bad += 1
+    print(f"check: {n} answers graded, {bad} misgraded" + ("" if n > 5 else " (the commands run on macOS only: not run here)"))
     return 1 if bad else 0
 
 

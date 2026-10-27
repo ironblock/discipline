@@ -59,6 +59,7 @@ def build(seed):
     maybe = g.word(NOUNS, lambda w: cap(w) + "Spec")
     truth = {"seed": seed, "params": {}, "answers": {}}
     funcs, exported, interfaces = [], [], []
+    lines_of = {"log-in-try": [], "emit-calls": [], "track-calls": [], "zero-calls": []}
 
     # The interfaces, one per type, spread over the files; one more is never public.
     for name in types + [g.word(NOUNS, lambda w: cap(w) + "Row")]:
@@ -106,37 +107,37 @@ def build(seed):
         asy = "async " if awaits != "none" else ""
         sig_ret = f": {ret}" if ret else ""
         exp = "export " if is_export else ""
-        body = []
+        body = []  # (text, what the line is a match of, if anything)
         if awaits == "top":
-            body.append(f"  const got = await Promise.resolve(id);")
+            body.append((f"  const got = await Promise.resolve(id);", None))
         if awaits == "nested":
-            body.append(f"  for (const part of id.split(',')) {{")
-            body.append(f"    if (part) {{")
-            body.append(f"      await Promise.resolve(part);")
-            body.append(f"    }}")
-            body.append(f"  }}")
+            body += [(f"  for (const part of id.split(',')) {{", None), (f"    if (part) {{", None),
+                     (f"      await Promise.resolve(part);", None), (f"    }}", None), (f"  }}", None)]
         if logs == "plain":
-            body.append(f"  {log_fn}(id);")
+            body.append((f"  {log_fn}(id);", None))
         if logs == "try":
-            body += [f"  try {{", f"    {log_fn}(id);", f"  }} catch (err) {{", f"    void err;", f"  }}"]
+            body += [(f"  try {{", None), (f"    {log_fn}(id);", "log-in-try"), (f"  }} catch (err) {{", None), (f"    void err;", None),
+                     (f"  }}", None)]
         if logs == "try-nested":
-            body += [f"  try {{", f"    if (id.length > 1) {{", f"      {log_fn}(id);", f"    }}", f"  }} finally {{",
-                     f"    void id;", f"  }}"]
+            body += [(f"  try {{", None), (f"    if (id.length > 1) {{", None), (f"      {log_fn}(id);", "log-in-try"),
+                     (f"    }}", None), (f"  }} finally {{", None), (f"    void id;", None), (f"  }}", None)]
         if emits:
-            body.append(f"  $emit('{rng.choice(NOUNS)}');")
+            body.append((f"  $emit('{rng.choice(NOUNS)}');", "emit-calls"))
         for _ in range(n_track):
-            body.append(f"  $track('{rng.choice(NOUNS)}');")
+            body.append((f"  $track('{rng.choice(NOUNS)}');", "track-calls"))
         tracks += n_track
         if zero_calls and kind == "decl" and sum(f.get("zero", 0) for f in funcs) < zero_calls:
-            body.append(f"  {zero_fn}({rng.randint(2, 99)});")
+            body.append((f"  {zero_fn}({rng.randint(2, 99)});", "zero-calls"))
             zero = 1
         else:
             zero = 0
         ret_expr = "{ id }" if ret and (target in ret or arrow_target in ret or other in ret) else "undefined"
         if kind == "decl":
             line = g.emit(path, f"{exp}{asy}function {name}(id: string){sig_ret} {{")
-            for b in body:
-                g.emit(path, b)
+            for text, what in body:
+                at = g.emit(path, text)
+                if what:
+                    lines_of[what].append(f"{path}:{at}")
             g.emit(path, f"  return {ret_expr} as never;")
             g.emit(path, "}")
         else:
@@ -167,7 +168,7 @@ def build(seed):
     defined = rng.random() < 0.5
     if defined:
         mpath = rng.choice(paths[1:])
-        g.emit(mpath, f"export type {maybe} = {{ name: string }};")
+        maybe_line = f"{mpath}:{g.emit(mpath, f'export type {maybe} = {{ name: string }};')}"
         g.emit(mpath, "")
 
     # The barrel: some exported functions, a few under another name, and all but one interface but the never-public
@@ -187,33 +188,41 @@ def build(seed):
     for itf in interfaces:
         if itf not in hidden:
             barrel.append(f"export type {{ {itf['name']} }} from './{itf['path'][4:-3]}';")
+    barrel_lines, type_lines = [], []
     for line in barrel:
-        g.emit("src/index.ts", line)
+        at = f"src/index.ts:{g.emit('src/index.ts', line)}"
+        barrel_lines.append(at)
+        if line.startswith("export type"):
+            type_lines.append(at)
 
     decls = [f for f in funcs if f["kind"] == "decl"]
     line_fn = rng.choice(decls)
     line_itf = rng.choice(interfaces)
     truth["params"] = {"target": target, "arrow_target": arrow_target, "zero_fn": zero_fn, "maybe": maybe,
                        "log_fn": log_fn, "line_fn": line_fn["name"], "line_itf": line_itf["name"]}
+    # Each family's truth is the set of lines a right command matches, `path:line` with lines from 1: what the
+    # generator wrote there, never what ast-grep says.
+    at = lambda f: f"{f['path']}:{f['line']}"
     a = truth["answers"]
-    a["ret-decl"] = {"kind": "set", "items": sorted(f["name"] for f in decls if f["ret"] == target)}
-    a["ret-arrow"] = {"kind": "set", "items": sorted(f["name"] for f in funcs if f["kind"] == "arrow" and f["ret"] == arrow_target)}
-    a["zero-calls"] = {"kind": "count", "items": [str(zero_calls)]}
-    a["maybe-defined"] = {"kind": "word", "items": ["yes" if defined else "no"]}
-    a["public-fns"] = {"kind": "set", "items": sorted(public_fns)}
-    a["hidden-itfs"] = {"kind": "set", "items": sorted(i["name"] for i in hidden)}
-    a["await-any"] = {"kind": "set", "items": sorted(f["name"] for f in decls if f["awaits"] != "none")}
-    a["log-in-try"] = {"kind": "set", "items": sorted(f["name"] for f in decls if f["logs"].startswith("try"))}
-    a["emit-callers"] = {"kind": "set", "items": sorted(f["name"] for f in decls if f["emits"])}
-    a["track-count"] = {"kind": "count", "items": [str(tracks)]}
-    a["fn-line"] = {"kind": "seq", "items": [line_fn["path"], str(line_fn["line"])]}
-    a["itf-line"] = {"kind": "seq", "items": [line_itf["path"], str(line_itf["line"])]}
+    a["ret-decl"] = sorted(at(f) for f in decls if f["ret"] == target)
+    a["ret-arrow"] = sorted(at(f) for f in funcs if f["kind"] == "arrow" and f["ret"] == arrow_target)
+    a["zero-calls"] = sorted(lines_of["zero-calls"])
+    a["maybe-defined"] = [maybe_line] if defined else []
+    a["public-surface"] = sorted(barrel_lines)
+    a["public-types"] = sorted(type_lines)
+    a["await-any"] = sorted(at(f) for f in decls if f["awaits"] != "none")
+    a["log-in-try"] = sorted(lines_of["log-in-try"])
+    a["emit-calls"] = sorted(lines_of["emit-calls"])
+    a["track-calls"] = sorted(lines_of["track-calls"])
+    a["fn-outline"] = [at(line_fn)]
+    a["itf-outline"] = [f"{line_itf['path']}:{line_itf['line']}"]
     return g.files, truth
 
 
 def usable(truth):
-    """Every set family has a positive, so no answer is the empty one by construction."""
-    return all(v["items"] for v in truth["answers"].values())
+    """Every family but the two misses has a match, so no right command is the one that matches nothing; the misses
+    (`zero-calls`, `maybe-defined`) may match nothing, on purpose."""
+    return all(v for k, v in truth["answers"].items() if k not in ("zero-calls", "maybe-defined"))
 
 
 def write(seed, out, truth_path):
@@ -246,14 +255,22 @@ def selftest():
             text = lambda r: {p: open(os.path.join(dp, p)).read() for dp, _, fs in os.walk(r) for p in fs}
             if truth != again or text(os.path.join(d, "repo")).keys() != text(os.path.join(d, "again")).keys():
                 print(f"gen: seed {seed} is not reproducible"); bad += 1
-            fn_path, fn_line = truth["answers"]["fn-line"]["items"]
-            line = open(os.path.join(d, "repo", fn_path)).read().split("\n")[int(fn_line) - 1]
-            if f"function {truth['params']['line_fn']}(" not in line:
-                print(f"gen: seed {seed}: fn-line points at {line!r}"); bad += 1
-            itf_path, itf_line = truth["answers"]["itf-line"]["items"]
-            line = open(os.path.join(d, "repo", itf_path)).read().split("\n")[int(itf_line) - 1]
-            if f"interface {truth['params']['line_itf']} " not in line:
-                print(f"gen: seed {seed}: itf-line points at {line!r}"); bad += 1
+            p = truth["params"]
+            # Every truth line holds, as written, what its family matches: a check of the construction alone.
+            holds = {"ret-decl": lambda t: "function " in t and f"): {p['target']} {{" in t,
+                     "ret-arrow": lambda t: t.lstrip("export ").startswith("const ") and f"): {p['arrow_target']} =>" in t,
+                     "zero-calls": lambda t: f"{p['zero_fn']}(" in t and not t.lstrip().startswith(("//", "export")),
+                     "maybe-defined": lambda t: f"export type {p['maybe']} " in t,
+                     "public-surface": lambda t: t.startswith("export "), "public-types": lambda t: t.startswith("export type {"),
+                     "await-any": lambda t: "async function " in t, "log-in-try": lambda t: f"{p['log_fn']}(id)" in t,
+                     "emit-calls": lambda t: "$emit(" in t, "track-calls": lambda t: "$track(" in t,
+                     "fn-outline": lambda t: f"function {p['line_fn']}(" in t, "itf-outline": lambda t: f"interface {p['line_itf']} " in t}
+            for fam, lines in truth["answers"].items():
+                for spot in lines:
+                    path, n = spot.rsplit(":", 1)
+                    text = open(os.path.join(d, "repo", path)).read().split("\n")[int(n) - 1]
+                    if not holds[fam](text):
+                        print(f"gen: seed {seed}: {fam} points at {text!r}"); bad += 1
             seen.add(truth["params"]["target"])
     if len(seen) < 5:
         print(f"gen: 20 seeds drew only {len(seen)} target types"); bad += 1

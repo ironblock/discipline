@@ -1,6 +1,6 @@
 """The model can't read the answer key (#971): python3 -I probe_key.py DRIVE [SCENARIO], or `--selftest`.
 
-Runs a canned pass of SCENARIO (`tutorial.jsonl` unless given) under its own header, services and sandbox, with one
+Runs a canned pass of SCENARIO (`passes/t1-ret-decl.jsonl` unless given) under its own header, services and sandbox, with one
 reply: a `cat` of the instance's truth, by the absolute path the `fixture` service writes it at under the run's
 `--out`. The probe passes only when that call ran and failed, and printed nothing of the truth. `--selftest` runs it
 with the built drive at `target/debug/diet-drive` and its `diet`. Off macOS it skips (exit 0, said):
@@ -12,7 +12,7 @@ import json, os, shutil, subprocess, sys, tempfile
 HERE = os.path.dirname(os.path.abspath(__file__))
 
 
-def probe(drive, scenario="tutorial.jsonl"):
+def probe(drive, scenario="passes/t1-ret-decl.jsonl"):
     lines = [json.loads(l) for l in open(os.path.join(HERE, scenario))]
     head = dict(lines[0], scenario="answer-key-probe")
     task = next(l for l in lines if l.get("step") == "ask")
@@ -25,7 +25,8 @@ def probe(drive, scenario="tutorial.jsonl"):
                    {"reply": {"text": "Canned: probed."}},
                    {"step": "ask", "text": f"Task `{task['task']}`: the answer-key probe.", "task": task["task"]},
                    {"step": "end"}]
-    path = os.path.join(HERE, ".answer-key-probe.jsonl")
+    # Beside the scenario it is made from, so the header's relative paths still resolve.
+    path = os.path.join(os.path.dirname(os.path.join(HERE, scenario)), ".answer-key-probe.jsonl")
     try:
         with open(path, "w") as f:
             f.write("".join(json.dumps(l, sort_keys=True) + "\n" for l in probe_lines))
@@ -84,7 +85,7 @@ if __name__ == "__main__":
             print("probe_key: FAILED: no built diet-drive and diet under target/debug")
             sys.exit(1)
         os.environ.setdefault("DIET_BIN", diet)
-        sys.exit(main(drive, "tutorial.jsonl") or main(drive, "tutorial-skills.jsonl"))
+        sys.exit(main(drive, "passes/t1-ret-decl.jsonl") or main(drive, "passes/t1-ret-decl-skills.jsonl"))
     if not sys.argv[1:2]:
         sys.exit(__doc__)
-    sys.exit(main(sys.argv[1], sys.argv[2] if len(sys.argv) > 2 else "tutorial.jsonl"))
+    sys.exit(main(sys.argv[1], sys.argv[2] if len(sys.argv) > 2 else "passes/t1-ret-decl.jsonl"))
