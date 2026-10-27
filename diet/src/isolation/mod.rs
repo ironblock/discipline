@@ -4108,6 +4108,80 @@ mod tests {
         );
     }
 
+    /// The masks above, executed (#988): a secret masked inside a declared
+    /// read path is not read under bwrap, and a sibling of it is. The
+    /// seeded escapes cover a secret outside the policy; this is one inside.
+    #[test]
+    #[cfg(target_os = "linux")]
+    fn bwrap_denies_a_secret_masked_inside_a_declared_path_and_reads_its_sibling() {
+        let ground = Ground::make("masked-read");
+        let keys = ground.outside.join("keys");
+        fs::create_dir_all(&keys).expect("a secret dir");
+        fs::write(keys.join("id"), "k3y-in-a-dir\n").expect("a secret dir's file");
+        let token = ground.outside.join("token");
+        fs::write(&token, "t0ken-file\n").expect("a secret file");
+        let sibling = ground.outside.join("sibling.txt");
+        fs::write(&sibling, "visible\n").expect("a readable sibling");
+        // The declared path beside the default read scope (`/usr` among it,
+        // so `cat` and `ls` exist in there).
+        let base = Policy::merged_usr();
+        let mut readable = base.readable.clone();
+        readable.push(ground.outside.to_string_lossy().into_owned());
+        let policy = Policy {
+            readable,
+            secrets: vec![
+                keys.to_string_lossy().into_owned(),
+                token.to_string_lossy().into_owned(),
+            ],
+            ..base
+        };
+        let confinement = match open_on(&policy, Platform::Linux) {
+            Err(unavailable) => {
+                assert!(
+                    std::env::var_os(REQUIRED).is_none(),
+                    "`{REQUIRED}` is set and bwrap is not on this host ({unavailable:?}): \
+                     the masks were never executed, and that is not a green run"
+                );
+                return;
+            }
+            Ok(confinement) => confinement,
+        };
+        let run = |parts: &[&str]| {
+            confinement
+                .run(&policy, &ground.tree, &argv(parts))
+                .expect("the sandbox set up")
+        };
+        // The control: the declared path reads, so a sandbox that hid all of
+        // it would fail here, not pass the rows below.
+        let read = run(&["cat", &sibling.to_string_lossy()]);
+        assert_eq!(read.exit, Some(0), "{}", read.stderr);
+        assert_eq!(read.stdout.trim(), "visible");
+        // A file secret, masked by `/dev/null`: it reads as nothing.
+        let file = run(&["cat", &token.to_string_lossy()]);
+        assert!(
+            !file.stdout.contains("t0ken-file"),
+            "the masked file did not leak: {:?}",
+            file.stdout
+        );
+        // A directory secret, masked by an empty tmpfs: its file is absent
+        // and the directory lists empty.
+        let in_dir = run(&["cat", &keys.join("id").to_string_lossy()]);
+        assert_ne!(in_dir.exit, Some(0), "the masked dir's file is not there");
+        assert!(
+            !in_dir.stdout.contains("k3y-in-a-dir"),
+            "and did not leak: {:?}",
+            in_dir.stdout
+        );
+        let listed = run(&["ls", "-A", &keys.to_string_lossy()]);
+        assert_eq!(listed.exit, Some(0), "{}", listed.stderr);
+        assert_eq!(listed.stdout.trim(), "", "the masked dir lists empty");
+        // And the host's own files are untouched.
+        assert_eq!(
+            fs::read_to_string(&token).expect("the token"),
+            "t0ken-file\n"
+        );
+    }
+
     #[test]
     fn a_session_that_drops_its_confinement_kills_what_its_commands_left_running() {
         // `serve`'s path: a session owns its confinement handle and ends by
