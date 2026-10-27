@@ -8,6 +8,9 @@ Reads the run's `session.log`. Per task:
   `reasoning_chars_before_answer` over the responses before it;
 - `output_tokens`, every response of the task's turn, and `capped`, the responses cut at their cap
   (`finish_reason` `length`);
+- `trial_searches`: ast-grep searches against the project before the answer, apart from help and docs reads,
+  recorded only (whether trial is allowed now that the answer never runs is the maintainer's open question);
+- `requests`, each response's `prompt_tokens` and `cached_tokens`: cache state moves the seconds;
 - `docs_reads` (`docs_reads.py`), the official skills' root taken as `.agent-skills` under the call's working
   directory under `--skills`, and the tool's install prefix on this machine; `commands` and `tool_used`
   (`ast-grep`, `other` or `none`: descriptive only).
@@ -24,6 +27,8 @@ sys.path.insert(0, HERE)
 from docs_reads import TOOLS, installed_prefix, reads_of, simple_commands, strip_wrappers  # noqa: E402
 
 ANSWER = json.load(open(os.path.join(HERE, "answer-tool.json")))["name"]
+# The first live passes (2026-10-27) answered through `answer`, before it was `submit_answer`: read too.
+ANSWERS = {ANSWER, "answer"}
 NOTES = json.load(open(os.path.join(HERE, "notes-tool.json")))["name"]
 
 
@@ -63,7 +68,8 @@ def verdict(lines, skills=False, installed=None, docs_read="par"):
             turn_task[l["turn"]] = l["task"]
             tasks.setdefault(l["task"], {"right": False, "graded": False, "asked_t": l.get("t", 0), "answered_t": None,
                                          "tool_calls": 0, "completion_tokens_before_answer": 0, "reasoning_chars_before_answer": 0,
-                                         "output_tokens": 0, "capped": 0, "docs_reads": [], "commands": []})
+                                         "output_tokens": 0, "capped": 0, "docs_reads": [], "commands": [], "trial_searches": 0,
+                                         "requests": []})
     # A response names its request, not its turn: the request does.
     req_turn = {l.get("seq"): l.get("turn") for l in lines if l.get("kind") == "request"}
     for l in lines:
@@ -80,14 +86,17 @@ def verdict(lines, skills=False, installed=None, docs_read="par"):
             continue
         before = task["answered_t"] is None
         if kind == "response":
-            used_tokens = (l.get("usage") or {}).get("completion_tokens", 0)
+            usage = l.get("usage") or {}
+            used_tokens = usage.get("completion_tokens", 0)
+            # Cache state moves the seconds, so each request's prompt and the part of it served from cache.
+            task["requests"].append({"prompt_tokens": usage.get("prompt_tokens", 0), "cached_tokens": usage.get("cached_tokens", 0)})
             task["output_tokens"] += used_tokens
             task["capped"] += l.get("finish_reason") == "length"
             if before:
                 task["completion_tokens_before_answer"] += used_tokens
                 task["reasoning_chars_before_answer"] += len(l.get("reasoning") or "")
         if kind == "tool_call":
-            if l.get("name") == ANSWER and l.get("outcome") != "refused" and before:
+            if l.get("name") in ANSWERS and l.get("outcome") != "refused" and before:
                 task["answered_t"] = l.get("t", 0)
                 continue
             if before:
@@ -97,7 +106,10 @@ def verdict(lines, skills=False, installed=None, docs_read="par"):
                 cmd, cwd = a.get("command", ""), l.get("cwd") or "/"
                 task["docs_reads"] += reads_of(cmd, os.path.join(cwd, ".agent-skills") if skills else None, cwd=cwd,
                                                home=os.path.expanduser("~"), installed=installed)
-                task["commands"] += [n for n in tools_of(cmd) if n not in task["commands"]]
+                ran = tools_of(cmd)
+                task["commands"] += [n for n in ran if n not in task["commands"]]
+                if before:  # a search against the project before the answer: trial, apart from help and docs reads
+                    task["trial_searches"] += ran.count("ast-grep")
     why = []
     for t, v in tasks.items():
         v["seconds"] = round((v.pop("answered_t") - v["asked_t"]) / 1000, 1) if v.get("answered_t") is not None else None
@@ -123,15 +135,17 @@ def selftest():
     resp = lambda n, reasoning="", finish="tool_calls": {"kind": "response", "to_request": 1, "usage": {"completion_tokens": n}, "reasoning": reasoning, "finish_reason": finish}
     note = lambda text: {"kind": "tool_call", "name": NOTES, "turn": 2, "outcome": "ran", "arguments": json.dumps({"notes": text})}
     bad = 0
-    full = [request, ask("a", 1000), resp(10, "think"), bash("ast-grep run --help", 2000), resp(20, "more"), answer("ast-grep run -p x src", 5500),
+    full = [request, ask("a", 1000), resp(10, "think"), bash("ast-grep run --help", 2000), bash("ast-grep run -p 'x' src", 3000), resp(20, "more"), answer("ast-grep run -p x src", 5500),
             resp(5), grade("a", True), note("use : $RET")]
     v = verdict(full)
     a = v["tasks"]["a"]
-    want = {"seconds": 4.5, "tool_calls": 1, "completion_tokens_before_answer": 30, "reasoning_chars_before_answer": 9, "output_tokens": 35,
-            "capped": 0, "tool_used": "other"}
+    want = {"seconds": 4.5, "tool_calls": 2, "trial_searches": 1, "completion_tokens_before_answer": 30, "reasoning_chars_before_answer": 9, "output_tokens": 35,
+            "capped": 0, "tool_used": "ast-grep"}
     for k, w in want.items():
         if a[k] != w:
             print(f"pass: instrument {k}: {a[k]}, expected {w}"); bad += 1
+    if [r["cached_tokens"] for r in a["requests"]] != [0, 0, 0]:
+        print(f"pass: requests {a['requests']}"); bad += 1
     if v["notes"] != "use : $RET":
         print(f"pass: notes {v['notes']!r}"); bad += 1
     cases = [

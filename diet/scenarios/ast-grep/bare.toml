@@ -27,9 +27,9 @@ interview_warrant = []
 refutation_interview = "off"
 self_capture = "off"
 
-# A nonce of the run's own first in the head, as the Lite arms draw it: no pass's prefix is one the server cached for
-# another. Its reset is a fresh session, not a cached prefix.
-head_nonce = "per_run"
+# No nonce (the maintainer, 2026-10-27: the shared prefix is the important bit). Passes with the same head and notes
+# share a cached prefix; a new notes version is a new prefix by its own text. pass.py records cached prompt tokens.
+head_nonce = "off"
 
 [reasoning]
 effort = "xhigh"

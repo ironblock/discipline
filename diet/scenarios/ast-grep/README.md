@@ -2,6 +2,7 @@
 
 The first slice of #971: ast-grep (`run`, `outline` and `scan`) on small TypeScript projects. Following the maintainer's ruling, "The pass" (2026-10-26):
 - **The model is told.** It's a technical demonstration of subject mastery: nothing runs, and only the answer's structure is checked.
+- **The command is never run** (2026-10-27). It's submitted through its own tool, `submit_answer`, and graded statically against the forms known to be right.
 - **Each operation is demonstrated once, in isolation.** Help and docs are allowed.
 - **The answer is a command.** A right answer reached any other way fails.
 - **A notes update** follows each demonstration.
@@ -27,13 +28,22 @@ Twelve operations: six tutorial and six held-out. Each asks for the command that
 | `$name` in double quotes is the shell's; lowercase `$x` is literal | t5 calls to `$emit(...)` | h5 calls to `$track(...)` |
 | `outline --match` is a regex to anchor, and on a directory outline lists only exports unless `--items structure` | t6 one function's outline | h6 one interface's outline |
 
-## The answer is a command: `answer-tool.json`, `command.py` and `check.py`
-- **The answer** comes through the `answer` tool's schema (`command`, a string), never parsed from prose.
-- **`check.py`** grades the turn's last well-formed answer:
-  - it runs the command out of the model's sight against a pristine copy of the instance (the fixture service's `pristine`, never the worktree, which the model could change);
-  - it's right when the matched lines are exactly the truth's, so equivalent spellings pass;
-  - `got` reports counts only, never what the command printed;
-  - commands run on macOS only, where the confinement is built.
+## The answer is a command, never run: `answer-tool.json`, `command.py`, `rubric.py` and `check.py`
+- **The answer** comes through `submit_answer`'s schema (`command`, a string), never parsed from prose. It's a tool of its own, so the model can see it isn't bash.
+- **`check.py`** judges the turn's last well-formed answer statically (`rubric.py`), with the instance's names.
+  - It's right only when the rubric says right. `unrecognized` and a refusal are wrong, and `got` says which and why.
+  - It runs nothing, so it works off macOS too.
+- **`rubric.py`** reads the command with `command.py`'s `parse`: the subcommand, options by long name with their values, and normalised paths. Then it applies a rubric per operation:
+  - **Patterns** are compared with metavariable names and whitespace dropped, so `$F`/`$NAME`/`$_` and `$$$A`/`$$$` are the same, and a reflow is the same. A literal `$emit` stays literal.
+  - **`--inline-rules`** is read through `yamlish.py` (block and flow YAML, the subset rules use; anything else is unrecognized). The rubric checks `kind`, `pattern`, `regex`, `field`, and that a relation which must reach any depth says `stopBy: end`.
+  - **Paths:** the whole project is `src`, `.` or none; the barrel is `src/index.ts` alone. `--lang`, if given, is TypeScript.
+  - **"As specific as necessary":** a form that also matches what the task excludes is wrong. Examples: an outline `--match` that isn't `^NAME$` (it matches names, signatures and first lines); an arrow rule without its `const`; `--items` left at exports for a function that isn't exported.
+  - **Selftest:** 30 right spellings (references and equivalents: flag order, long and short, `sg`, other metavariable names, other quoting, flow-style YAML, field-based rules) and 32 wrong ones. `ref.py` adds 20 seeds: every reference is right, and no naive command is.
+- **Operations whose gap the command can't show** (`tasks.py`'s `INVISIBLE`): the miss. A right `Z($$$)` reads the same whether or not the model knows a miss prints nothing or `nothing found`. Each carries a reshaped DRAFT ask, unused until the maintainer rules.
+- **`audit.py --execute PASS_DIR...`** is the offline audit (ast-grep only, macOS only, never the verdict). It runs each pass's answer confined against its pristine instance, compares the result with the static verdict, and prints `disagree` where they differ. It isn't a general mechanism: a tool with destructive actions gets no execution audit.
+  - On the first 24 live answers (the Flash-Next instance) it found 4 disagreements:
+    - three unanchored outline `--match` answers that execution passed, because their fixtures had no near-name;
+    - one type-only-export rule built from `all`/`any`/`not`, which the rubric doesn't know.
 - **`command.py`** stands between the model's text and anything that runs:
   - **Parsed with `shlex`, never a shell.** Refused: any operator (`;`, `|`, `&`, a redirection, a subshell, `$(...)`), a backtick, a `$` inside double quotes (a shell expands it, so the command is wrong as typed), a variable assignment, and a parse error.
   - **ast-grep only.** The first word must be `ast-grep` or `sg`, by name. It runs the `ast-grep` on PATH, never `sg`, which is `newgrp` on Linux.
@@ -42,8 +52,9 @@ Twelve operations: six tutorial and six held-out. Each asks for the command that
     - Refused: `-U`/`--update-all`; `-i`/`--interactive`; config and rule files (`-c`, `--config`, scan's `-r`, `--rule`, `--outline-rules`; a rule goes in `--inline-rules`); an option the filter doesn't know; and absolute, `~` or `..` paths, after `--` too.
     - run's `-r` is `--rewrite`, which only prints.
   - **Run confined.** No shell; a bare environment; a 20 s timeout; a 4 MB output cap; `--json=stream` in place of any `--json` it gave; and on macOS, Seatbelt with no network, no writes, and no reads under the home directory except the copy.
-  - Every refusal is a red test (39), beside 16 searches that must be allowed. The confinement is tested on the profile itself, and goes red without it.
-- **`ref.py`** (needs ast-grep and macOS; not in `./verify.sh`) grades one reference and one naive command per family through the same path, on 20 fresh seeds. Every reference is right on every seed, and every naive command is wrong on at least one. The references are also the canned answers. It found two gotchas:
+  - Every refusal is a red test (39), beside 16 searches that must be allowed. In double quotes, `\$` is read as bash reads it, as `$`.
+  - The confined execution below is now the audit's, never the verdict's. The confinement is tested on the profile itself, and goes red without it.
+- **`ref.py`** (needs ast-grep and macOS; not in `./verify.sh`) grades one reference and one naive command per family, statically and by execution, on 20 fresh seeds. Statically, every reference is right and no naive command is. By execution, the naive outlines pass where a fixture has no near-name. The references are also the canned answers. It found two gotchas:
   - `export { $$$S } from $P` doesn't parse ("Multiple AST nodes"), but `from $$$P` does;
   - `outline` on a directory lists only exports, so a non-exported function needs `--items structure`.
 
@@ -68,15 +79,18 @@ Twelve operations: six tutorial and six held-out. Each asks for the command that
   - `bare.toml` runs the production GPU host's registry entry; `bare-floor.toml` runs the floor's 27B line. Both are bash plus the two tools, with no memory levers.
   - Output has no hard cap, as ruled. `max_output_tokens` is the largest job each pool admits (cache_size less two 2048-token chunks: 520192 and 159744), and the drive cuts each request to what is left of the pool (#826). This value is DRAFT.
   - `canned.toml` is the rehearsal twin.
+  - **A shared prefix:** `head_nonce = "off"` (the maintainer, 2026-10-27: "the shared prefix is the important bit"). Passes with the same head and notes share a cached prefix, and a new notes version is a new prefix by its own text.
 - **`pass.py RUN_DIR [--skills] [--docs-read par|fail]`**, per task:
   - `right`;
   - the par instruments, recorded only: `seconds` from the ask to the answer, `tool_calls`, `completion_tokens_before_answer` and `reasoning_chars_before_answer`;
   - `output_tokens`, and `capped` (responses cut at their cap);
+  - `trial_searches`: ast-grep searches against the project before the answer, recorded only (whether trial is allowed now is the maintainer's open question);
+  - `requests`: each response's `prompt_tokens` and `cached_tokens`, since cache state moves the seconds;
   - `docs_reads`, `commands` and `tool_used` (descriptive);
   - then the pass's `notes`.
 
-  A pass is clean when every task is right and none was capped. A docs read costs against par by default, reported and never failing; that's Dispatch's reading, unconfirmed. `--docs-read fail` makes one fail.
-- **`run_pass.py TASK --out DIR [--skills] [--notes FILE] [--floor] [-- DRIVE_ARGS]`** writes a self-contained copy of the pass, its head carrying the notes so far, and runs it. It writes `pass.json` and `notes.md`, the next pass's `--notes`. Rolling across passes, re-planning after ten failures over par, and choosing note writers are Dispatch's experiments.
+  A pass is clean when every task is right and none was capped. A docs read costs against par, reported and never failing: confirmed by the maintainer on 2026-10-27. `--docs-read fail` remains as a switch.
+- **`run_pass.py TASK --out DIR [--skills] [--notes FILE] [--floor] [-- DRIVE_ARGS]`** writes a self-contained copy of the pass, its head carrying the notes so far, and runs it from the tree, since the drive finds its assembler by a relative path. It writes `pass.json` and `notes.md`, the next pass's `--notes`. Rolling across passes, re-planning after ten failures over par, and choosing note writers are Dispatch's experiments.
 - **Canned:** `DIET_AST_GREP_SEED=7 python3 -I run_pass.py t1-ret-decl --out DIR` rehearses on the canned substrate. t1's canned answer is the naive command, so it grades wrong; every other task's grades right.
 
 ## Declared limits
@@ -90,6 +104,8 @@ In `./verify.sh`'s scenarios check:
 - `check.py --selftest`, whose command cases run on macOS only;
 - `docs_reads.py --selftest`;
 - `command.py --selftest`;
+- `yamlish.py`;
+- `rubric.py`;
 - `make_scenario.py --check`;
 - `pass.py --selftest`;
 - `probe_key.py --selftest`.

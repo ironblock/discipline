@@ -1,5 +1,5 @@
 {"answer_tool": ["../answer-tool.json", "../notes-tool.json"], "head": "../head.md", "live_regimen": "../bare.toml", "regimen": "../canned.toml", "sandbox_secrets": ["service.fixture.dir"], "sandbox_tools": ["ast-grep"], "scenario": "ast-grep-h3-public-types", "services": [{"name": "fixture", "ready": {"command": "test -s \"$DIET_SERVICE_DIR/provides.json\""}, "start": "python3 -I ../services/fixture.py start", "stop": "python3 -I ../services/fixture.py stop"}]}
-{"reply": {"calls": [{"arguments": "{\"command\": \"ast-grep run -l ts -p 'export type { $$$S } from $$$P' src/index.ts\"}", "id": "canned-answer", "name": "answer"}], "text": "", "when": "Task `h3-public-types`"}}
+{"reply": {"calls": [{"arguments": "{\"command\": \"ast-grep run -l ts -p 'export type { $$$S } from $$$P' src/index.ts\"}", "id": "canned-answer", "name": "submit_answer"}], "text": "", "when": "Task `h3-public-types`"}}
 {"reply": {"text": "Canned: answered.", "when": "Answer recorded"}}
 {"reply": {"calls": [{"arguments": "{\"notes\": \"DRAFT. Canned notes.\"}", "id": "canned-notes", "name": "notes"}], "text": "", "when": "Notes update:"}}
 {"reply": {"text": "Canned: noted.", "when": "Notes saved"}}

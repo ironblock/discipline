@@ -48,10 +48,15 @@ def words(command):
     """The command's words, or Refused: no operators, no backticks, no `$` a shell would expand."""
     if "`" in command:
         raise Refused("a backtick")
-    quote, i = None, 0
+    # In double quotes bash turns `\$` into `$`, where shlex would keep the backslash: cook it as bash would.
+    quote, i, cooked = None, 0, []
     while i < len(command):
         c = command[i]
         if c == "\\" and quote != "'":
+            if quote == '"' and command[i + 1:i + 2] == "$":
+                cooked.append("$")
+            else:
+                cooked.append(command[i:i + 2])
             i += 2
             continue
         if quote is None and c in "'\"":
@@ -60,8 +65,9 @@ def words(command):
             quote = None
         elif quote == '"' and c == "$":
             raise Refused("a `$` in double quotes, which the shell expands")
+        cooked.append(c)
         i += 1
-    lex = shlex.shlex(command, posix=True, punctuation_chars=";&|<>()")
+    lex = shlex.shlex("".join(cooked), posix=True, punctuation_chars=";&|<>()")
     lex.whitespace_split = True
     try:
         toks = list(lex)
@@ -75,8 +81,13 @@ def words(command):
     return toks
 
 
-def checked(command):
-    """The argv to run, or Refused."""
+LONG_OF = {"p": "--pattern", "k": "--kind", "r": "--rewrite", "l": "--lang", "j": "--threads", "A": "--after",
+           "B": "--before", "C": "--context", "i": "--interactive", "U": "--update-all", "h": "--help", "c": "--config"}
+
+
+def parse(command):
+    """The command's canonical form, or Refused: `{"sub", "opts": {long name: [values]}, "flags": [long names],
+    "paths": [normalised]}`. A bare optional value (`--json`) is a flag; with `=`, an option."""
     argv = words(command)
     if "=" in argv[0] and not argv[0].startswith("-"):
         raise Refused("a variable assignment")
@@ -90,6 +101,8 @@ def checked(command):
         sub, rest = args[0], args[1:]
     else:
         rest = args
+    form = {"sub": sub, "opts": {}, "flags": [], "paths": [], "argv": ["ast-grep"] + args}
+    put = lambda name, value: form["opts"].setdefault(name, []).append(value)
     i, ended = 0, False
     while i < len(rest):
         a = rest[i]
@@ -97,30 +110,53 @@ def checked(command):
         if ended or not a.startswith("-") or a == "-":
             if a.startswith(("/", "~")) or ".." in a.split("/"):
                 raise Refused(f"the path `{a}` leaves the project")
+            p = a.rstrip("/") or "."
+            while p.startswith("./"):
+                p = p[2:]
+            form["paths"].append(p or ".")
             continue
         if a == "--":
             ended = True
             continue
         if a.startswith("--"):
-            flag = a.split("=", 1)[0]
+            flag, eq, val = a.partition("=")
             if flag in LONG_FORBIDDEN or (sub != "scan" and flag == "--rule") or (sub == "scan" and flag == "--rewrite"):
                 raise Refused(f"`{flag}` is not allowed in an answer")
             if flag in LONG_VALUED:
-                if "=" not in a:
+                if not eq:
+                    if i >= len(rest):
+                        raise Refused(f"`{flag}` has no value")
+                    val = rest[i]
                     i += 1
-            elif flag not in LONG_OPTIONAL | LONG_PLAIN:
+                put(flag, val)
+            elif flag in LONG_OPTIONAL:
+                put(flag, val) if eq else form["flags"].append(flag)
+            elif flag in LONG_PLAIN:
+                form["flags"].append(flag)
+            else:
                 raise Refused(f"`{flag}` is not an option the filter knows")
             continue
         for k, c in enumerate(a[1:], 1):  # a short flag, or a cluster of them
             if c in SHORT_FORBIDDEN[sub]:
                 raise Refused(f"`-{c}` is not allowed in `{sub}` in an answer")
             if c in SHORT_VALUED[sub]:
-                if k == len(a) - 1:
-                    i += 1  # its value is the next word
-                break  # else the rest of the token is its value
+                if k == len(a) - 1:  # its value is the next word
+                    if i >= len(rest):
+                        raise Refused(f"`-{c}` has no value")
+                    put(LONG_OF[c], rest[i])
+                    i += 1
+                else:  # the rest of the token is its value
+                    put(LONG_OF[c], a[k + 1:])
+                break
             if c not in SHORT_PLAIN[sub]:
                 raise Refused(f"`-{c}` is not an option of `{sub}` the filter knows")
-    return ["ast-grep"] + args
+            form["flags"].append(LONG_OF[c])
+    return form
+
+
+def checked(command):
+    """The argv to run, or Refused."""
+    return parse(command)["argv"]
 
 
 def profile(root):
