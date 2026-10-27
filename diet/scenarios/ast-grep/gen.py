@@ -199,7 +199,8 @@ def build(seed):
     line_fn = rng.choice(decls)
     line_itf = rng.choice(interfaces)
     truth["params"] = {"target": target, "arrow_target": arrow_target, "zero_fn": zero_fn, "maybe": maybe,
-                       "log_fn": log_fn, "line_fn": line_fn["name"], "line_itf": line_itf["name"]}
+                       "log_fn": log_fn, "line_fn": line_fn["name"], "line_fn_exported": line_fn["export"],
+                       "line_itf": line_itf["name"]}
     # Each family's truth is the set of lines a right command matches, `path:line` with lines from 1: what the
     # generator wrote there, never what ast-grep says.
     at = lambda f: f"{f['path']}:{f['line']}"

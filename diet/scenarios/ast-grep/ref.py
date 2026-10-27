@@ -9,7 +9,7 @@ import os, sys, tempfile
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
-import command, gen  # noqa: E402
+import command, gen, rubric  # noqa: E402
 
 RULE = lambda body: "ast-grep scan --inline-rules 'id: q\nlanguage: ts\nrule:\n" + body + "' src"
 
@@ -65,6 +65,15 @@ def main():
             truth = gen.write(seed * 101, root, os.path.join(d, f"s{seed}.json"))
             total += 1
             for fam, want in truth["answers"].items():
+                # The verdict that counts is the static one (rubric.py): the reference must be right, the naive not.
+                static_ref = rubric.judge(reference(fam, truth["params"]), fam, truth["params"])
+                if static_ref[0] != "right":
+                    ref_wrong[fam] = ref_wrong.get(fam, 0) + 1
+                    print(f"ref: seed {seed * 101} {fam}: the rubric calls the reference {static_ref}")
+                if rubric.judge(naive(fam, truth["params"]), fam, truth["params"])[0] == "right":
+                    naive_right[fam] = naive_right.get(fam, 0) + 1
+                    print(f"ref: seed {seed * 101} {fam}: the rubric calls the naive command right")
+                # Execution, the audit's way, checks the same references against the truth.
                 if not right(reference(fam, truth["params"]), root, want):
                     ref_wrong[fam] = ref_wrong.get(fam, 0) + 1
                     print(f"ref: seed {seed * 101} {fam}: {command.matches(command.checked(reference(fam, truth['params'])), root)} != {want}")

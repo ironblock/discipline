@@ -20,6 +20,20 @@ GAPS = {
 
 ASK = "DRAFT. Give the ast-grep command, run from this directory, that {what}"
 
+# Operations whose gap a command can't show (Dispatch, 2026-10-27): the answer is never run, so a lesson about reading
+# the tool's output is invisible in it. A right `Z($$$)` reads the same whether the model believes a miss or not.
+# Each carries a reshaped DRAFT ask for the maintainer, never used until he rules.
+INVISIBLE = {
+    "miss": {"why": "the right command is the same whether or not the model knows a miss prints nothing (run, exit 1) "
+                    "or `nothing found` (outline, exit 0): that lesson is about reading output, and no output is read",
+             "reshaped": {
+                 "t2-zero-calls": "DRAFT. Give the ast-grep command that matches every direct call to `{service.fixture.zero_fn}` "
+                                  "under src/, and say what it prints, and its exit status, when there is no such call.",
+                 "h2-maybe-defined": "DRAFT. Give the ast-grep outline command that shows the definition of "
+                                     "`{service.fixture.maybe}` under src/, and say what it prints, and its exit status, when "
+                                     "there is none."}},
+}
+
 TASKS = [
     {"id": "t1-ret-decl", "split": "tutorial", "family": "ret-decl", "gap": "return-type",
      "what": "matches every function declared with the `function` keyword under src/ whose declared return type is exactly `{service.fixture.target}`, and nothing else."},

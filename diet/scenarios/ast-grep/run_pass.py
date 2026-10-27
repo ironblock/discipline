@@ -54,10 +54,12 @@ def main(argv):
     task, out = argv[0], argv[argv.index("--out") + 1]
     notes = open(argv[argv.index("--notes") + 1]).read() if "--notes" in argv else ""
     skills, floor = "--skills" in argv, "--floor" in argv
+    out = os.path.abspath(out)
     os.makedirs(out, exist_ok=False)
     path = scenario(task, skills, notes, floor, out)
     drive = os.environ.get("DIET_DRIVE") or os.path.join(ROOT, "target", "debug", "diet-drive")
-    ran = subprocess.run([drive, "scenario", path, "--out", os.path.join(out, "run")] + drive_args)
+    # From the tree: the drive runs its assembler by a relative path (scripts/assemble-run.py).
+    ran = subprocess.run([drive, "scenario", path, "--out", os.path.abspath(os.path.join(out, "run"))] + drive_args, cwd=ROOT)
     log = os.path.join(out, "run", "session.log")
     if not os.path.exists(log):
         sys.exit(f"run_pass: the drive wrote no log (exit {ran.returncode})")

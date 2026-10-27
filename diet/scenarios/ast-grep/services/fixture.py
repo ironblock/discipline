@@ -23,7 +23,7 @@ def start():
     gen.write(seed, pristine, os.path.join(here, "truth-again.json"))
     open(os.path.join(here, "pids"), "w").close()
     with open(os.path.join(here, "provides.json"), "w") as f:
-        json.dump({"truth": truth_path, "pristine": pristine, "dir": here, "seed": str(truth["seed"]), **truth["params"]}, f)
+        json.dump({"truth": truth_path, "pristine": pristine, "dir": here, "seed": str(truth["seed"]), **{k: str(v).lower() if isinstance(v, bool) else v for k, v in truth["params"].items()}}, f)  # a service provides text
 
 
 if __name__ == "__main__":
