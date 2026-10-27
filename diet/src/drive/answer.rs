@@ -238,21 +238,25 @@ mod tests {
         }
     }
 
-    /// The tool goes after the tools already declared; a name one of them
-    /// has is refused, naming it.
+    /// Each tool goes after the tools already declared, in the order given;
+    /// a name one of them has -- another supplied tool's among them -- is
+    /// refused, naming it.
     #[test]
     fn the_answer_tool_is_declared_last_and_never_over_another() {
         let tool = AnswerTool::read(TOOL).expect("it reads");
         let mut shape = crate::drive::session::tests::template();
         shape.tools.push(crate::drive::prune::definition());
         declare(&mut shape, &tool).expect("declared");
+        let mut notes = tool.clone();
+        notes.definition.name = "notes".to_owned();
+        declare(&mut shape, &notes).expect("a second, by another name");
         assert_eq!(
             shape
                 .tools
                 .iter()
                 .map(|tool| tool.name.as_str())
                 .collect::<Vec<_>>(),
-            ["prune_output", "answer"]
+            ["prune_output", "answer", "notes"]
         );
         let why = declare(&mut shape, &tool).expect_err("a second `answer`");
         assert!(why.contains("`answer`"), "{why}");

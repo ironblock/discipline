@@ -268,6 +268,15 @@
 //! log that declares 28 or less and carries it is refused. For a reader of
 //! earlier logs, the migration is nothing: no session declared one.
 //!
+//! v30 (#971) names several supplied tools. `serve --answer-tool FILE` may
+//! be given more than once, each tool declared in the order given, and
+//! `session.start` names each file's sha256 in that order as the list
+//! `answer_tools_sha256`, where v29 wrote one `answer_tool_sha256`. A log
+//! that declares 29 or less and carries the list is refused, and so is one
+//! that declares 30 or more and carries v29's key. For a reader of v29
+//! logs, the migration is nothing: their `answer_tool_sha256` is a list of
+//! one.
+//!
 //! v28 (#948) names a rerooted carry. A carried session runs in a worktree
 //! of its own, and the carried text -- the refilled trunk and the working
 //! object -- named the first session's. Every occurrence of the first
@@ -347,12 +356,12 @@ use super::record::vocabulary;
 struct LogParser;
 
 /// The version this module writes, as `session.start` states it.
-pub const VERSION: i64 = 29;
+pub const VERSION: i64 = 30;
 
 /// Every version this module reads.
 pub const READS: &[i64] = &[
     0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25,
-    26, 27, 28, 29,
+    26, 27, 28, 29, 30,
 ];
 
 /// How recent an input event must be, at the moment a turn settles, for the
@@ -1453,8 +1462,12 @@ pub enum Event {
         /// in place of the pinned template (v27, #948).
         phase_tool_description_sha256: Option<String>,
         /// The sha256 of the answer tool's file, when the session declared
-        /// one (v29, #971).
+        /// one (v29, #971); read in a v29 log, never written: v30 writes
+        /// `answer_tools_sha256`.
         answer_tool_sha256: Option<String>,
+        /// The sha256 of each supplied tool's file, in the order the tools
+        /// are declared, when the session declared any (v30, #971).
+        answer_tools_sha256: Option<Vec<String>>,
         /// The session's start from another's meditation (v24, #948): the
         /// first log, the meditation and what it carried.
         carried_from: Option<CarriedFrom>,
@@ -3796,6 +3809,19 @@ fn check(lines: &[Line]) -> Result<(), LogError> {
             Event::SessionStart { .. } if index > 0 => {
                 return Err(at(index, "a second `session.start`".to_owned()));
             }
+            Event::SessionStart {
+                answer_tool_sha256: Some(_),
+                ..
+            } if declared >= 30 => {
+                // v30 replaced the one answer tool's digest with the list (#971).
+                return Err(at(
+                    index,
+                    format!(
+                        "`session.start` carries `answer_tool_sha256`, which v30 replaced \
+                         with `answer_tools_sha256`, and this log declares v{declared}"
+                    ),
+                ));
+            }
             Event::SessionStart { claim, .. } => {
                 // v7 replaced the claim's two older keys with `served` (#509).
                 if declared >= 7
@@ -4172,6 +4198,19 @@ fn from_object(object: &BTreeMap<String, Value>) -> Result<Line, String> {
                 answer_tool_sha256: match object.get("answer_tool_sha256") {
                     None => None,
                     Some(_) => Some(fields.digest("answer_tool_sha256")?),
+                },
+                answer_tools_sha256: match fields.optional_strings("answer_tools_sha256")? {
+                    Some(digests) if digests.is_empty() => {
+                        return Err("`answer_tools_sha256` is an empty list".to_owned());
+                    }
+                    Some(digests) if !digests.iter().all(|digest| is_a_digest(digest)) => {
+                        return Err(
+                            "`answer_tools_sha256` holds an item that is not a sha256 of 64 \
+                             lowercase hex digits"
+                                .to_owned(),
+                        );
+                    }
+                    digests => digests,
                 },
                 carried_from: if object.contains_key("carried_from") {
                     Some(fields.carried_from("carried_from")?)
@@ -5875,6 +5914,16 @@ const fn must_v8(key: &'static str, holds: Holds) -> Field {
     }
 }
 
+/// A key that arrived in v30, optional wherever its object is written.
+const fn may_v30(key: &'static str, holds: Holds) -> Field {
+    Field {
+        key,
+        holds,
+        required: false,
+        since: 30,
+    }
+}
+
 /// A key that arrived in v29, optional wherever its object is written.
 const fn may_v29(key: &'static str, holds: Holds) -> Field {
     Field {
@@ -6525,6 +6574,7 @@ pub fn schema(kind: Kind) -> &'static [Field] {
                 may_v20("head_nonce", Text),
                 may_v27("phase_tool_description_sha256", Holds::Digest),
                 may_v29("answer_tool_sha256", Holds::Digest),
+                may_v30("answer_tools_sha256", Holds::Strings),
                 may_v24("carried_from", Holds::CarriedFrom),
                 may_v24("carried_source", Holds::Strings),
             ];
@@ -7337,6 +7387,7 @@ fn to_value(line: &Line) -> Value {
             head_nonce,
             phase_tool_description_sha256,
             answer_tool_sha256,
+            answer_tools_sha256,
             carried_from,
             carried_source,
             phases,
@@ -7450,6 +7501,12 @@ fn to_value(line: &Line) -> Value {
             }
             if let Some(answer) = answer_tool_sha256 {
                 put("answer_tool_sha256", text(answer));
+            }
+            if let Some(answers) = answer_tools_sha256 {
+                put(
+                    "answer_tools_sha256",
+                    Value::Array(answers.iter().map(|digest| text(digest)).collect()),
+                );
             }
             if let Some(carried) = carried_from {
                 put("carried_from", carried_from_value(carried));
@@ -9804,15 +9861,15 @@ mod tests {
         assert!(refused.why.contains("v8"), "{refused}");
     }
 
-    /// #583, #878, #904, #555, #931, #936, #910, #942, #926, #932, #948, #971: this module writes v29.
+    /// #583, #878, #904, #555, #931, #936, #910, #942, #926, #932, #948, #971: this module writes v30.
     #[test]
-    fn this_module_writes_v29_and_reads_every_version_before_it() {
-        assert_eq!(super::VERSION, 29);
+    fn this_module_writes_v30_and_reads_every_version_before_it() {
+        assert_eq!(super::VERSION, 30);
         assert_eq!(
             super::READS,
             &[
                 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22,
-                23, 24, 25, 26, 27, 28, 29
+                23, 24, 25, 26, 27, 28, 29, 30
             ]
         );
     }
@@ -9836,7 +9893,8 @@ mod tests {
                 rehearsing_as: Some("a-hosted-rung".to_owned()),
                 head_nonce: Some("0123456789abcdef".to_owned()),
                 phase_tool_description_sha256: Some("e".repeat(64)),
-                answer_tool_sha256: Some("f".repeat(64)),
+                answer_tool_sha256: None,
+                answer_tools_sha256: Some(vec!["f".repeat(64), "e".repeat(64)]),
                 run: Some(Run {
                     script_sha256: "a".repeat(64),
                     repeat: 2,
@@ -11291,7 +11349,7 @@ mod tests {
             rehearsing_as,
             head_nonce,
             phase_tool_description_sha256,
-            answer_tool_sha256,
+            answer_tools_sha256,
             ..
         } = &mut lines[0].event
         else {
@@ -11302,7 +11360,7 @@ mod tests {
         *rehearsing_as = None;
         *head_nonce = None;
         *phase_tool_description_sha256 = None;
-        *answer_tool_sha256 = None;
+        *answer_tools_sha256 = None;
         // A v7 key on the first line would be the one named; the check is of
         // what arrived in v1, further down.
         *tool_output = None;
