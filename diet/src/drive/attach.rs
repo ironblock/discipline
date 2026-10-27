@@ -1360,7 +1360,10 @@ pub(in crate::drive) mod tests {
     /// A FIFO named `x.png` is refused, and the ask answered, rather than the
     /// read waiting for a writer forever (#461 F2): before the read, and,
     /// under the sandbox, by the read's patience when the path check never
-    /// saw it.
+    /// saw it. That second leg calls the confined read itself with the FIFO
+    /// already in place (#988): `read_through`'s metadata check refuses a
+    /// FIFO before any read starts, so through it the patience was never
+    /// what answered.
     #[test]
     fn a_fifo_named_png_is_refused_rather_than_waited_on() {
         let fixture = Fixture::new("fifo");
@@ -1390,13 +1393,23 @@ pub(in crate::drive) mod tests {
         }));
         assert_eq!(refused, Some(Check::Unreadable));
         if sandboxed(&attaching) {
-            // Past the path check, as a FIFO swapped in after it would be.
+            // Past the path check, as a FIFO swapped in after it would be:
+            // the confined `cat` opens it and waits for a writer, and only
+            // the read's patience ends it.
             let began = Instant::now();
             let read = within(Box::new(move || {
                 let policy = attaching.policy.clone().expect("a policy");
-                read_through(&attaching, &policy, &fifo, Duration::from_millis(300))
-                    .err()
-                    .map(|(check, _)| check)
+                let confinement = attaching.confinement.clone().expect("a confinement");
+                let tree = attaching.worktree.clone().expect("a worktree");
+                crate::drive::attach::confined(
+                    &confinement,
+                    &policy,
+                    &tree,
+                    &fifo,
+                    Duration::from_millis(300),
+                )
+                .err()
+                .map(|(check, _)| check)
             }));
             assert_eq!(read, Some(Check::Unreadable));
             assert!(began.elapsed() < Duration::from_secs(5));
