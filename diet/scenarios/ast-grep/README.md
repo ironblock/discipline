@@ -1,88 +1,95 @@
 # The ast-grep tutorial (#971)
 
-The first slice of #971: one model and ast-grep (`run` and `outline`) on small TypeScript projects. This directory holds what the tutorial is graded with, and the scenarios that run a pass of it.
+The first slice of #971: ast-grep (`run`, `outline` and `scan`) on small TypeScript projects. Following the maintainer's ruling, "The pass" (2026-10-26):
+- **The model is told.** It's a technical demonstration of subject mastery: nothing runs, and only the answer's structure is checked.
+- **Each operation is demonstrated once, in isolation.** Help and docs are allowed.
+- **The answer is a command.** A right answer reached any other way fails.
+- **A notes update** follows each demonstration.
+- **No hard cap on output.** Length is graded instead.
 
-**Model-facing text here is a DRAFT.** That covers every ask in `tasks.py`, the answer tool's description and result in `answer-tool.json`, and any framing. The wording is the maintainer's. Each such text says `DRAFT.` until he settles it.
+**Everything here is DRAFT and provisional.** In the maintainer's words, building it is "an experiment in itself: strong convictions, weakly held". Model-facing text is his: every ask, both tools' descriptions and results, the heads, and the notes prompt and heading each say `DRAFT.` until he edits them.
 
 ## Fixtures: `gen.py`
-`python3 -I gen.py SEED OUT TRUTH` writes one instance: a project under `OUT` (`package.json`, `src/` in three directories, a barrel `src/index.ts`) and the answer to every task family in `TRUTH`.
-- **Every pass gets a fresh instance.** It has the same families, with a new layout, new names (verb + noun functions, noun interfaces) and new values (return types, call counts, which names the barrel re-exports and under what alias).
-- **The truth comes from the construction, never from ast-grep.** The generator places each function, call, export and line itself and records where. Grading the tool under test with itself would be circular.
-- **Every instance has an answer for every family.** A seed whose draw leaves a list empty moves on to the next seed, so no answer is "none" by construction. The counts may be 0, on purpose.
+`python3 -I gen.py SEED OUT TRUTH` writes one instance: a project under `OUT` (`package.json`, `src/` in three directories, a barrel `src/index.ts`), and its truth in `TRUTH`.
+- **Every pass gets a fresh instance.** The same families, with a new layout, new names and new values.
+- **The truth is, per family, the lines a right command matches** (`path:line`, lines from 1). It comes from the generator's own construction: it records what it wrote where, never what ast-grep says.
+- **Every family but the two misses matches something.** The misses, `zero-calls` and `maybe-defined`, may match nothing, on purpose.
 
 ## Tasks: `tasks.py`
-Six tutorial and six held-out tasks. Each is one truth family and one of the known gaps (`GAPS`). A held-out task tests the same gap on another surface:
+Twelve operations: six tutorial and six held-out. Each asks for the command that matches a family's lines "and nothing else". A held-out task tests the same gap on another surface:
 
 | gap | tutorial | held-out |
 |---|---|---|
 | a function pattern needs its return type, `: $RET` | t1 `function` declarations returning a type | h1 arrow constants returning a type |
-| a miss: `run` prints nothing and exits 1, `outline` prints `nothing found` and exits 0 | t2 a call count that is often 0, with comment and string decoys | h2 is a name defined (often only in a comment and a string)? |
-| a directory's exports are not the barrel's public surface | t3 the public functions, aliases included | h3 the interfaces exported but not public |
-| `has` and `inside` look one level down unless `stopBy: end` | t4 functions with an `await` at any depth | h4 functions calling the log function inside a `try` |
-| `$name` in double quotes is the shell's; lowercase `$x` in a pattern is literal | t5 callers of `$emit(...)` | h5 the count of `$track(...)` |
-| `--json` is one bare array, and its lines are 0-based | t6 a function's file and 1-based line | h6 an interface's file and 1-based line |
+| a miss matches nothing: `run` exits 1, `outline` prints `nothing found` and exits 0 | t2 direct calls to a function that is often never called | h2 a name's definition, often only in a comment and a string |
+| a directory's exports are not the barrel's public surface | t3 the barrel's exports | h3 the barrel's type-only exports |
+| `has` and `inside` look one level down unless `stopBy: end` | t4 functions with an `await` at any depth | h4 calls inside a `try` at any depth |
+| `$name` in double quotes is the shell's; lowercase `$x` is literal | t5 calls to `$emit(...)` | h5 calls to `$track(...)` |
+| `outline --match` is a regex to anchor, and on a directory outline lists only exports unless `--items structure` | t6 one function's outline | h6 one interface's outline |
 
-## Answers: `answer-tool.json` and `check.py`
-- Answers come through a tool with a schema (the structured-answers rule), never parsed from prose: `answer`, with `task` and `answer`, a list of strings.
-- `check.py` is the `grade` step's check. It grades the last well-formed `answer` call naming the task, in the turn the grade reads (`DIET_GRADE_TURN`), against the instance's truth (`DIET_SERVICE_FIXTURE_TRUTH`). It never grades an exit status.
-  - A list is graded as a set: no item missing, none extra, none twice.
-  - A count is digits; a yes or no is one word; a location is a path, then a 1-based line.
-  - Names may carry backticks or `()`, and a path may lead with `./`.
-- An answer given in prose, with no call, is wrong.
+## The answer is a command: `answer-tool.json`, `command.py` and `check.py`
+- **The answer** comes through the `answer` tool's schema (`command`, a string), never parsed from prose.
+- **`check.py`** grades the turn's last well-formed answer:
+  - it runs the command out of the model's sight against a pristine copy of the instance (the fixture service's `pristine`, never the worktree, which the model could change);
+  - it's right when the matched lines are exactly the truth's, so equivalent spellings pass;
+  - `got` reports counts only, never what the command printed;
+  - commands run on macOS only, where the confinement is built.
+- **`command.py`** stands between the model's text and anything that runs:
+  - **Parsed with `shlex`, never a shell.** Refused: any operator (`;`, `|`, `&`, a redirection, a subshell, `$(...)`), a backtick, a `$` inside double quotes (a shell expands it, so the command is wrong as typed), a variable assignment, and a parse error.
+  - **ast-grep only.** The first word must be `ast-grep` or `sg`, by name. It runs the `ast-grep` on PATH, never `sg`, which is `newgrp` on Linux.
+  - **Searches only.** The subcommand is `run` (or none), `outline` or `scan`, and every option one the filter knows: ast-grep 0.44.0's, per subcommand.
+    - Options are read as clap reads them: short flags cluster (`-Uj1` is `-U -j 1`); a valued short flag takes the rest of its token or the next word; an optional value (`--debug-query`) is only its `=` form.
+    - Refused: `-U`/`--update-all`; `-i`/`--interactive`; config and rule files (`-c`, `--config`, scan's `-r`, `--rule`, `--outline-rules`; a rule goes in `--inline-rules`); an option the filter doesn't know; and absolute, `~` or `..` paths, after `--` too.
+    - run's `-r` is `--rewrite`, which only prints.
+  - **Run confined.** No shell; a bare environment; a 20 s timeout; a 4 MB output cap; `--json=stream` in place of any `--json` it gave; and on macOS, Seatbelt with no network, no writes, and no reads under the home directory except the copy.
+  - Every refusal is a red test (39), beside 16 searches that must be allowed. The confinement is tested on the profile itself, and goes red without it.
+- **`ref.py`** (needs ast-grep and macOS; not in `./verify.sh`) grades one reference and one naive command per family through the same path, on 20 fresh seeds. Every reference is right on every seed, and every naive command is wrong on at least one. The references are also the canned answers. It found two gotchas:
+  - `export { $$$S } from $P` doesn't parse ("Multiple AST nodes"), but `from $$$P` does;
+  - `outline` on a directory lists only exports, so a non-exported function needs `--items structure`.
 
 ## Reading the docs: `docs_reads.py`
-A pass that reads the docs rolls back, so what counts as a read is parsed, never matched as text. `reads_of(cmd, skills)` returns one bash call's reads:
-- `help`: `--help`, `-h` or `help` to `ast-grep` or `sg`, on any subcommand;
-- `man`: `man`, `tldr` or `cheat` of the tool;
-- `web`: a fetch of ast-grep's site or repository;
-- `skill`: any reading command on a path under the official skills' root, when the condition gives them.
+`reads_of(cmd, skills, installed=...)` parses one bash call's docs reads:
+- `help`: `--help`, `-h`, `help`, or the tool run bare;
+- `man`: man, tldr or cheat of the tool;
+- `web`: a fetch of the site or the repository;
+- `installed`: a read under the tool's install prefix, but the binary;
+- `skill`: a read under the official skills' root.
 
-Option values are never flags, `cd` is followed, `$(...)` counts as a command, and a heredoc's body counts only when it is fed to a shell. The tool run bare prints its whole help, so it is a read, but a subcommand given nothing is not (0.44.0: `run` prints only its usage error, and `outline` outlines the working directory). A read under the tool's install prefix, but the binary, is `installed`. `docs_reads_fixtures.json` holds 27 reads and 20 non-reads.
+`docs_reads_fixtures.json` holds 27 reads and 20 non-reads.
 
-## Solvable, and the gaps are real: `ref.py`
-`python3 -I ref.py [SEEDS]` needs `ast-grep` and runs outside `./verify.sh`. On each fresh instance it runs one reference solution per family and one naive try that walks into the family's gap, and grades both against the truth.
-- The references only show the tasks can be answered; they never feed the truth.
-- With ast-grep 0.44.0 on 20 seeds:
-  - every reference is right on every seed;
-  - every naive try is wrong on every seed, except h2's text search, which is right whenever the name really is defined (11 of 20).
-- One more gap it found: `export { $$$S } from $P` doesn't parse as a pattern ("Multiple AST nodes"). The barrel is read by `kind: export_statement`.
+## A pass: `make_scenario.py`, `pass.py` and `run_pass.py`
+- **One operation per fresh instance** is Dispatch's reading of "in isolation", unconfirmed. `make_scenario.py` writes `passes/<task>.jsonl`, and `passes/<task>-skills.jsonl` for the official skills' condition, from `tasks.py`; `--check` runs in verify. Each pass is one session:
+  1. the task, asked once and graded once, with no feedback;
+  2. then a notes update through the `notes` tool (`notes-tool.json`). The prompt is a DRAFT stub, and Dispatch will supply experimental ones.
+- **Two supplied tools.** The header's `answer_tool` lists both (#971's engine PR).
+- **The answer key is denied.** The fixture's directory is the header's `sandbox_secrets`, and `probe_key.py` proves the model can't read it (macOS only; off macOS it skips and says so).
+- **The skills' condition.** `services/skills.py` fetches ast-grep/agent-skill at a pinned commit and checks its digests. It has no license, so it is never in this tree.
+- **Regimens.**
+  - `bare.toml` runs the production GPU host's registry entry; `bare-floor.toml` runs the floor's 27B line. Both are bash plus the two tools, with no memory levers.
+  - Output has no hard cap, as ruled. `max_output_tokens` is the largest job each pool admits (cache_size less two 2048-token chunks: 520192 and 159744), and the drive cuts each request to what is left of the pool (#826). This value is DRAFT.
+  - `canned.toml` is the rehearsal twin.
+- **`pass.py RUN_DIR [--skills] [--docs-read par|fail]`**, per task:
+  - `right`;
+  - the par instruments, recorded only: `seconds` from the ask to the answer, `tool_calls`, `completion_tokens_before_answer` and `reasoning_chars_before_answer`;
+  - `output_tokens`, and `capped` (responses cut at their cap);
+  - `docs_reads`, `commands` and `tool_used` (descriptive);
+  - then the pass's `notes`.
 
-## Running a pass
-`make_scenario.py` writes four scenarios from `tasks.py`, one pass each: `tutorial.jsonl` and `held-out.jsonl`, bare, and their `-skills` twins, the official skills' condition. `--check` says when one is stale.
-- **A pass is one session on a fresh instance.** The `fixture` service (`services/fixture.py`) writes a `gen.py` instance into the run's worktree before serve starts, and its truth into the service's own directory, where the model can't read it.
-  - Its seed is `$DIET_AST_GREP_SEED`, else drawn fresh.
-  - The asks fill each instance's names from it (`{service.fixture.target}`).
-- **The model can't read the answer key.** `sandbox_reads` is `all`, so the fixture's directory, which holds the truth, is the header's `sandbox_secrets` (`service.fixture.dir`), denied to the model's commands. The check runs outside the sandbox and still reads it.
-  - `probe_key.py` proves it. It runs a canned pass of `tutorial.jsonl` and `tutorial-skills.jsonl` whose one reply `cat`s the truth by its absolute path; the call must run, fail, and print nothing of the truth.
-  - It was red before the deny (exit 0, the answers printed) and is green after it.
-  - Off macOS it skips and says why (below). On macOS, where the live runs are, it never skips: an unbuilt drive, or a run the sandbox can't confine, fails it.
-  - The skills service keeps no cache: the archive is read in memory, and only the three skill files are written.
-- **Each task is asked once and graded once** (`attempts` 1), on its `answer` call (`check.py`), with no feedback inside the pass. The header's `answer_tool` hands serve `answer-tool.json`.
-- **The bare regimen** (`bare.toml`) runs bash and the answer tool, with no memory levers. `canned.toml` is its rehearsal twin.
-  - Its `max_output_tokens`, 8192 per response, is a DRAFT: the cap isn't ruled.
-- **The official skills** (github.com/ast-grep/agent-skill) carry no license, so they are never in this tree. The `skills` service fetches the repository's archive at a pinned commit and checks each file against its digest. It then writes the files under the worktree's `.agent-skills/`, where `head-skills.md` points.
-- **`pass.py RUN_DIR [--skills]`** gives the pass's verdict, from the log:
-  - each task's grade;
-  - each bash call's docs reads (`docs_reads.py`), with `.agent-skills` under the call's working directory as the skills' root under `--skills`.
-
-  A pass is clean when every task is right and nothing read the docs.
-  - Each task also reports `tool_used`, which is descriptive only: whether a clean pass must use ast-grep isn't ruled.
-    - `ast-grep` when its calls searched with `run`, `outline` or `scan` (an option-led call runs `run`);
-    - `other` when they ran only something else (rg, grep, a script; help alone counts here);
-    - `none` when they ran nothing. The tutorial ends on a clean pass and rolls back from any other.
-- **The canned replies** are a real ast-grep command and then an answer call, for the instance at `CANNED_SEED` (7). The first task's answer is wrong on purpose, the return-type miss. So `DIET_AST_GREP_SEED=7 diet-drive scenario tutorial.jsonl --out DIR` grades both ways: t1 wrong, t2–t6 right, and the pass unclean on t1. The skills and held-out scenarios do the same.
+  A pass is clean when every task is right and none was capped. A docs read costs against par by default, reported and never failing; that's Dispatch's reading, unconfirmed. `--docs-read fail` makes one fail.
+- **`run_pass.py TASK --out DIR [--skills] [--notes FILE] [--floor] [-- DRIVE_ARGS]`** writes a self-contained copy of the pass, its head carrying the notes so far, and runs it. It writes `pass.json` and `notes.md`, the next pass's `--notes`. Rolling across passes, re-planning after ten failures over par, and choosing note writers are Dispatch's experiments.
+- **Canned:** `DIET_AST_GREP_SEED=7 python3 -I run_pass.py t1-ret-decl --out DIR` rehearses on the canned substrate. t1's canned answer is the naive command, so it grades wrong; every other task's grades right.
 
 ## Declared limits
-- **Other copies of ast-grep's docs stay readable** under `sandbox_reads = "all"`, outside the skills condition too. The classifier counts the ones it knows as docs reads, which roll a pass back:
-  - the help, man and web reads above;
-  - the official skills' root;
-  - the tool's install prefix (`installed_prefix()`, where Homebrew keeps its README, changelog and completions beside the binary), which `pass.py` reads on the machine that grades.
-- **The live run's deny list covers the agents' plugin and skills caches** (`~/.claude`; see `../README.md`). A copy anywhere else, such as a package cache holding the tool's README, is neither denied nor counted.
-- **The tutorial runs on macOS only.** Its regimens read all (`sandbox_reads = "all"`), which the drive builds for macOS alone; elsewhere serve refuses to start. So `probe_key.py` skips off macOS, saying so, and a pass can't run there.
-- **The live substrate is the production GPU host's registry entry (`ada48-tabbyapi-exl3-qwen38flashnext-2p05`) by default.** Which model runs the tutorial is the maintainer's open question.
+- **macOS only.** The regimens read all (`sandbox_reads = "all"`), which the drive builds for macOS alone, and the check confines commands there only.
+- **Other readable copies of ast-grep's docs.** The classifier counts the ones it knows. The live deny list covers the agents' plugin caches (`~/.claude`). Any other copy, such as a package cache, is neither denied nor counted.
+- **Which model, the note writers, and the par values** are the maintainer's and Dispatch's.
 
 ## Checks
-`gen.py --selftest`, `check.py --selftest`, `docs_reads.py --selftest`, `make_scenario.py --check`, `pass.py --selftest` and `probe_key.py --selftest` run in `./verify.sh`'s scenarios check, with no ast-grep needed. Each was seen to go red on a mutant:
-- the generator, its line numbers off by one;
-- the grader, a refused call counted;
-- the classifier, its option values read as flags.
+In `./verify.sh`'s scenarios check:
+- `gen.py --selftest`;
+- `check.py --selftest`, whose command cases run on macOS only;
+- `docs_reads.py --selftest`;
+- `command.py --selftest`;
+- `make_scenario.py --check`;
+- `pass.py --selftest`;
+- `probe_key.py --selftest`.

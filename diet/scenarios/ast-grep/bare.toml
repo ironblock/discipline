@@ -18,8 +18,9 @@ sandbox_secrets = ["~/.config/git", "~/.git-credentials"]
 approval = "none"
 approval_policy = "approvals are off: every command runs without a gate decision or a prompt; the sandbox confines writes to the worktree"
 
-# DRAFT: the output cap per response is not ruled (8192 is Dispatch's lean, the ledger probe's cap).
-max_output_tokens = 8192
+# DRAFT: no hard cap (the maintainer, 2026-10-26): output length is graded instead. The largest job the pool admits:
+# cache_size 524288 less two 2048-token chunks of headroom; the drive cuts each request to what is left (#826).
+max_output_tokens = 520192
 
 # No interviews and no working memory.
 interview_warrant = []
