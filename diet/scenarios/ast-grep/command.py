@@ -6,9 +6,12 @@ The model's answer is model-written text, run by the grader out of the model's s
   variable assignment, and a parse error.
 - **Only ast-grep.** The first word is `ast-grep` or `sg`, by name alone (not a path); it runs the binary
   `ast-grep` names on PATH, never `sg`, which is `newgrp` on Linux.
-- **Only a search.** The subcommand is `run` (or none, which is `run`), `outline` or `scan`. Refused: rewriting
-  in place (`-U`, `--update-all`), `--interactive`, a config or rule file (`-c`, `--config`, `-r`, `--rule`: the
-  answer must hold its rule, `--inline-rules`), and any path that is absolute, home-relative or climbs (`..`).
+- **Only a search.** The subcommand is `run` (or none, which is `run`), `outline` or `scan`, and every option one the
+  filter knows (ast-grep 0.44.0's, per subcommand), read as clap reads them: short flags cluster (`-Uj1`), a valued
+  one takes the rest of its token or the next word, and an optional value (`--debug-query`) only its `=` form.
+  Refused: rewriting in place (`-U`, `--update-all`), `--interactive`, a config or rule file (`-c`, `--config`,
+  scan's `-r`, `--rule`, `--outline-rules`: the answer holds its rule, `--inline-rules`; run's `-r` is `--rewrite`,
+  which only prints), an option it doesn't know, and any path that is absolute, home-relative or climbs (`..`).
 - **Confined.** It runs with no shell, in a pristine copy of the fixture, with a bare environment, a timeout and an
   output cap; on macOS under Seatbelt with no network, no writes, and no reads under the home directory but the copy.
 
@@ -19,10 +22,21 @@ import json, os, shlex, shutil, subprocess, sys, tempfile
 
 TOOLS = {"ast-grep", "sg"}
 SEARCHES = {"run", "outline", "scan"}
-FORBIDDEN = {"-U", "--update-all", "-i", "--interactive", "-c", "--config", "-r", "--rule"}
-VALUED = {"-p", "--pattern", "--rewrite", "--inline-rules", "-m", "--match", "--filter", "-l", "--lang",
-          "--selector", "--strictness", "--globs", "-A", "-B", "-C", "--context", "--items", "--view", "-j",
-          "--threads", "--kind", "--color", "--format", "--report-style", "--debug-query"}
+# ast-grep 0.44.0's options, per subcommand, read from its `--help`. A short flag that takes a value takes the rest of
+# its token (`-lts`, `-j1`) or the next word; others may cluster (`-Uj1` is `-U -j 1`), so a cluster is read letter
+# by letter. An option not listed here is refused: an answer has no business with one the filter doesn't know.
+SHORT_VALUED = {"run": set("pkrlcjABC"), "scan": set("rcjABC"), "outline": set("lcj")}
+SHORT_PLAIN = {"run": set("iUh"), "scan": set("iUh"), "outline": set("h")}
+SHORT_FORBIDDEN = {"run": set("iUc"), "scan": set("iUcr"), "outline": set("c")}  # `-r` is `--rewrite` in run, `--rule` in scan
+LONG_VALUED = {"--pattern", "--kind", "--rewrite", "--lang", "--config", "--threads", "--after", "--before", "--context",
+               "--color", "--filter", "--format", "--globs", "--heading", "--inline-rules", "--inspect", "--items", "--match",
+               "--max-results", "--no-ignore", "--outline-rules", "--report-style", "--selector", "--strictness", "--type",
+               "--view", "--rule"}
+# Options whose value is optional: only `--flag=value` carries one, so the next word is never theirs.
+LONG_OPTIONAL = {"--debug-query", "--error", "--hint", "--info", "--json", "--off", "--warning"}
+LONG_PLAIN = {"--files-with-matches", "--follow", "--include-metadata", "--no-default-outline-rules", "--pub-members",
+              "--stdin", "--update-all", "--interactive", "--help"}
+LONG_FORBIDDEN = {"--update-all", "--interactive", "--config", "--rule", "--outline-rules"}
 TIMEOUT_S, MAX_BYTES = 20, 4 << 20
 
 
@@ -69,21 +83,43 @@ def checked(command):
     if argv[0] not in TOOLS:
         raise Refused(f"`{argv[0]}` is not ast-grep")
     args = argv[1:]
-    sub = args[0] if args and not args[0].startswith("-") and args[0] in SEARCHES | {"new", "lsp", "test", "completions", "help"} else None
-    if sub is not None and sub not in SEARCHES:
-        raise Refused(f"`{sub}` is not a search")
-    i = 1 if sub else 0
-    while i < len(args):
-        a = args[i]
-        flag = a.split("=", 1)[0]
-        if flag in FORBIDDEN:
-            raise Refused(f"`{flag}` is not allowed in an answer")
-        if flag in VALUED and "=" not in a:
-            i += 2
-            continue
-        if not a.startswith("-") and (a.startswith(("/", "~")) or ".." in a.split("/")):
-            raise Refused(f"the path `{a}` leaves the project")
+    sub = "run"
+    if args and not args[0].startswith("-"):
+        if args[0] not in SEARCHES:
+            raise Refused(f"`{args[0]}` is not a search")
+        sub, rest = args[0], args[1:]
+    else:
+        rest = args
+    i, ended = 0, False
+    while i < len(rest):
+        a = rest[i]
         i += 1
+        if ended or not a.startswith("-") or a == "-":
+            if a.startswith(("/", "~")) or ".." in a.split("/"):
+                raise Refused(f"the path `{a}` leaves the project")
+            continue
+        if a == "--":
+            ended = True
+            continue
+        if a.startswith("--"):
+            flag = a.split("=", 1)[0]
+            if flag in LONG_FORBIDDEN or (sub != "scan" and flag == "--rule") or (sub == "scan" and flag == "--rewrite"):
+                raise Refused(f"`{flag}` is not allowed in an answer")
+            if flag in LONG_VALUED:
+                if "=" not in a:
+                    i += 1
+            elif flag not in LONG_OPTIONAL | LONG_PLAIN:
+                raise Refused(f"`{flag}` is not an option the filter knows")
+            continue
+        for k, c in enumerate(a[1:], 1):  # a short flag, or a cluster of them
+            if c in SHORT_FORBIDDEN[sub]:
+                raise Refused(f"`-{c}` is not allowed in `{sub}` in an answer")
+            if c in SHORT_VALUED[sub]:
+                if k == len(a) - 1:
+                    i += 1  # its value is the next word
+                break  # else the rest of the token is its value
+            if c not in SHORT_PLAIN[sub]:
+                raise Refused(f"`-{c}` is not an option of `{sub}` the filter knows")
     return ["ast-grep"] + args
 
 
@@ -165,11 +201,20 @@ REFUSED = [
     ("rewriting in place, long", "ast-grep run -p 'x' --rewrite 'y' --update-all src"),
     ("interactive", "ast-grep run -p 'x' -i src"),
     ("a config file", "ast-grep scan -c sgconfig.yml"),
-    ("a rule file", "ast-grep scan -r rule.yml src"),
     ("a rule file, joined", "ast-grep scan --rule=rule.yml src"),
     ("an absolute path", "ast-grep run -p 'x' /etc"),
     ("a home path", "ast-grep run -p 'x' ~/secrets"),
     ("a climbing path", "ast-grep run -p 'x' ../services"),
+    ("in-place rewrite in a cluster", "ast-grep run -p 'foo()' --rewrite 'bar()' -Uj1 src"),
+    ("interactive in a cluster", "ast-grep run -p 'x' -iU src"),
+    ("a path after an optional-value flag", "ast-grep run -p 'x' --debug-query /etc"),
+    ("a scan's rule file, short", "ast-grep scan -r rule.yml src"),
+    ("outline rules from a file", "ast-grep outline src --outline-rules rules.yml"),
+    ("a config file at a cluster's end", "ast-grep run -p 'x' -hc sgconfig.yml src"),
+    ("an option the filter doesn't know", "ast-grep run -p 'x' --frobnicate src"),
+    ("a short option the filter doesn't know", "ast-grep run -p 'x' -Z src"),
+    ("a run with a scan's rule flag", "ast-grep run --rule rule.yml src"),
+    ("a path after the options' end", "ast-grep run -p 'x' -- /etc"),
 ]
 ALLOWED = [
     ("a run search", "ast-grep run -l ts -p 'function $F($$$A): T { $$$B }' src"),
@@ -182,6 +227,12 @@ ALLOWED = [
     ("its own json flag", "ast-grep run -p 'x' --json src"),
     ("a single-quoted lowercase dollar", "ast-grep run -p '$emit($$$A)' src"),
     ("an escaped dollar in double quotes", 'ast-grep run -p "\\$emit(\\$\\$\\$A)" src'),
+    ("run's -r is a printed rewrite", "ast-grep run -p 'x' -r 'y' src"),
+    ("a value glued to its short flag", "ast-grep run -lts -p 'x' src"),
+    ("a cluster ending in a valued flag", "ast-grep run -p 'x' -A2 -j1 src"),
+    ("a valued flag swallows the rest, as clap reads it", "ast-grep run -p 'x' -jc src"),
+    ("an optional value given with =", "ast-grep run -l ts -p 'x' --debug-query=ast src"),
+    ("an outline's language", "ast-grep outline -l ts src --match '^Foo$'"),
 ]
 
 

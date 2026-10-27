@@ -37,9 +37,12 @@ Twelve operations: six tutorial and six held-out. Each asks for the command that
 - **`command.py`** stands between the model's text and anything that runs:
   - **Parsed with `shlex`, never a shell.** Refused: any operator (`;`, `|`, `&`, a redirection, a subshell, `$(...)`), a backtick, a `$` inside double quotes (a shell expands it, so the command is wrong as typed), a variable assignment, and a parse error.
   - **ast-grep only.** The first word must be `ast-grep` or `sg`, by name. It runs the `ast-grep` on PATH, never `sg`, which is `newgrp` on Linux.
-  - **Searches only.** The subcommand is `run` (or none), `outline` or `scan`. Refused: `-U`/`--update-all`, `-i`/`--interactive`, config and rule files (`-c`, `--config`, `-r`, `--rule`; a rule goes in `--inline-rules`), and absolute, `~` or `..` paths.
+  - **Searches only.** The subcommand is `run` (or none), `outline` or `scan`, and every option one the filter knows: ast-grep 0.44.0's, per subcommand.
+    - Options are read as clap reads them: short flags cluster (`-Uj1` is `-U -j 1`); a valued short flag takes the rest of its token or the next word; an optional value (`--debug-query`) is only its `=` form.
+    - Refused: `-U`/`--update-all`; `-i`/`--interactive`; config and rule files (`-c`, `--config`, scan's `-r`, `--rule`, `--outline-rules`; a rule goes in `--inline-rules`); an option the filter doesn't know; and absolute, `~` or `..` paths, after `--` too.
+    - run's `-r` is `--rewrite`, which only prints.
   - **Run confined.** No shell; a bare environment; a 20 s timeout; a 4 MB output cap; `--json=stream` in place of any `--json` it gave; and on macOS, Seatbelt with no network, no writes, and no reads under the home directory except the copy.
-  - Every refusal is a red test (30), beside 10 searches that must be allowed. The confinement is tested on the profile itself, and goes red without it.
+  - Every refusal is a red test (39), beside 16 searches that must be allowed. The confinement is tested on the profile itself, and goes red without it.
 - **`ref.py`** (needs ast-grep and macOS; not in `./verify.sh`) grades one reference and one naive command per family through the same path, on 20 fresh seeds. Every reference is right on every seed, and every naive command is wrong on at least one. The references are also the canned answers. It found two gotchas:
   - `export { $$$S } from $P` doesn't parse ("Multiple AST nodes"), but `from $$$P` does;
   - `outline` on a directory lists only exports, so a non-exported function needs `--items structure`.
