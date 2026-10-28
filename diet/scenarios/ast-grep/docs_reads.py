@@ -6,8 +6,10 @@ A pass that reads the docs rolls back, so what counts is parsed, never matched a
   (a pattern, a rule, a rewrite) is never a flag, so `-p '--help'` is no read.
 - `man`: `man ast-grep` or `man sg`; `tldr` and `cheat` the same.
 - `web`: `curl`, `wget` or `open` of an ast-grep.github.io or ast-grep repository page.
-- `installed`: any reading command on a path under INSTALLED, the tool's install prefix (`installed_prefix()`), but
-  the binary: its README, changelog and completions.
+- `installed`: any reading command on a path under INSTALLED, the tool's install prefix (`installed_prefix()`): its
+  README, changelog and completions, and the binary itself (`strings` on it holds its embedded rules; rubric review,
+  2026-10-27). Listing it or the `bin` directory (`ls`, `file`, `stat`) is no read, and a substitution naming the
+  binary (`$(which ast-grep)`, `$(command -v sg)`) stands for its path.
 - `skill`: any reading command (`cat`, `head`, `sed`, `grep`, `ls`, ...) on a path under SKILLS, the official skills'
   root when the condition gives them, with `cd` followed and `~` read as the home directory on both sides.
 
@@ -24,6 +26,10 @@ VALUED = {"-p", "--pattern", "-r", "--rewrite", "--rule", "--inline-rules", "-m"
 READERS = {"cat", "head", "tail", "sed", "awk", "less", "more", "bat", "grep", "rg", "ls", "find", "tree", "wc", "nl",
            "cut", "sort", "uniq", "diff", "file", "stat", "xxd", "od", "strings", "jq", "python3", "python", "node", "open"}
 WRAPPERS = {"command", "env", "exec", "time", "nice", "nohup", "sudo", "npx", "xargs", "builtin"}
+# Commands that list or locate a file without reading what it holds.
+LISTERS = {"ls", "file", "stat", "find", "tree", "wc"}
+# A substitution that names the binary, `$(which ast-grep)` or `` `command -v sg` ``: the binary's path, not a command.
+BINARY_SUB = re.compile(r"\$\(\s*(?:which|command\s+-v|type\s+-p)\s+(?:ast-grep|sg)\s*\)|`\s*(?:which|command\s+-v|type\s+-p)\s+(?:ast-grep|sg)\s*`")
 WEB = re.compile(r"ast-grep\.github\.io|github\.com/ast-grep|raw\.githubusercontent\.com/ast-grep")
 
 
@@ -98,6 +104,8 @@ def installed_prefix():
 def reads_of(cmd, skills=None, cwd="/work", home="/HOME", installed=None):
     """The docs reads one bash call makes: a list of {"kind", "what"}."""
     found = []
+    if installed:
+        cmd = BINARY_SUB.sub(os.path.join(installed, "bin", "ast-grep"), cmd)
     for words in simple_commands(cmd):
         words = strip_wrappers([w for w in words if w not in {"<", ">", ">>", "2>", "2>&1"}])
         if not words:
@@ -132,8 +140,9 @@ def reads_of(cmd, skills=None, cwd="/work", home="/HOME", installed=None):
             found.append({"kind": "web", "what": next(w for w in words[1:] if WEB.search(w))})
             continue
         if installed and name in READERS:
+            # The binary itself is read too (`strings` on it holds its embedded rules); only listing it is no read.
             hit = next((w for w in words[1:] if not w.startswith("-") and under(w, installed, cwd, home)
-                        and os.path.basename(w) not in TOOLS and not w.rstrip("/").endswith("/bin")), None)
+                        and not (name in LISTERS and (os.path.basename(w) in TOOLS or w.rstrip("/").endswith("/bin")))), None)
             if hit:
                 found.append({"kind": "installed", "what": hit})
                 continue

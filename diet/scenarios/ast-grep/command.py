@@ -38,6 +38,7 @@ LONG_PLAIN = {"--files-with-matches", "--follow", "--include-metadata", "--no-de
               "--stdin", "--update-all", "--interactive", "--help"}
 LONG_FORBIDDEN = {"--update-all", "--interactive", "--config", "--rule", "--outline-rules"}
 TIMEOUT_S, MAX_BYTES = 20, 4 << 20
+FORMAT = {"--report-style", "--color", "--heading", "--format"}
 
 
 class Refused(Exception):
@@ -175,7 +176,21 @@ def run(argv, root):
     binary = shutil.which("ast-grep")
     if not binary:
         raise Refused("no ast-grep on PATH")
-    args = [a for a in argv[1:] if a.split("=", 1)[0] != "--json"] + ["--json=stream"]
+    # The audit reads JSON, so it drops the command's own output format (--json, and --report-style, --color, --heading
+    # and --format, which ast-grep won't take beside --json), with a separate value, then asks for --json=stream.
+    args, skip = [], False
+    for a in argv[1:]:
+        if skip:
+            skip = False
+            continue
+        flag = a.split("=", 1)[0]
+        if flag == "--json":
+            continue
+        if flag in FORMAT:
+            skip = "=" not in a
+            continue
+        args.append(a)
+    args.append("--json=stream")
     cmd = confine([binary] + args, root)
     env = {"PATH": "/usr/bin:/bin", "HOME": root, "NO_COLOR": "1"}
     try:
@@ -290,6 +305,12 @@ def selftest():
             got = matches(checked("ast-grep run -p 'foo()' src"), root)
             if got != ["src/a.ts:2"]:
                 print(f"command: a search in the copy matched {got}"); bad += 1
+            # Output-format flags can't sit beside --json (ast-grep refuses --report-style with it): the audit drops them.
+            for styled in ("ast-grep scan --inline-rules 'id: q\nlanguage: ts\nrule:\n  pattern: foo()' --report-style short src",
+                           "ast-grep run -p 'foo()' --color never --heading never src"):
+                got = matches(checked(styled), root)
+                if got != ["src/a.ts:2"]:
+                    print(f"command: an output-format flag voided the audit's matches: {got}: {styled!r}"); bad += 1
             # The confinement itself, tested on the profile: no write in the copy, no read under home outside it.
             target = os.path.join(root, "written")
             subprocess.run(confine(["/usr/bin/touch", target], root), capture_output=True)

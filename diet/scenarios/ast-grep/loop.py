@@ -4,7 +4,8 @@
 For each tutorial operation t1..t6 in order, a fresh instance with the current notes (`run_pass.py`). Its notes turn
 is the grade's feedback, its ask chosen by the attempt's failure kind (check.py's writer map, `--writers`). A pass
 that isn't clean is retried on the same operation, with the notes it left, up to N attempts (4); then the loop moves
-on, carrying the notes. After t6, h1..h6 run once each with the final notes and no notes turns: the held-out check.
+on, carrying the notes. An unrecognized attempt is never retried (Dispatch, 2026-10-27): its notes turn gives no
+signal, so it is recorded `queued_for_review` and the loop moves on. After t6, h1..h6 run once each with the final notes and no notes turns: the held-out check.
 
 Per attempt it records, in DIR/loop.jsonl: the operation, attempt, pass dir, clean, failure kind, writer, the notes'
 character lengths before and after, and pass.json's path. `--before CMD` runs before every pass (the host's idle
@@ -59,7 +60,7 @@ def one(task, attempt, notes, args, held_out):
            "seconds": round(time.time() - started), "clean": bool(v.get("clean")) and not stopped, "failure": t.get("failure"),
            "writer": t.get("writer"), "notes_before_chars": len(open(notes).read().strip()),
            "notes_after_chars": len(open(after).read().strip()) if os.path.exists(after) and not held_out else None,
-           "pass_json": p if v else None}
+           "pass_json": p if v else None, "queued_for_review": t.get("failure") == "unrecognized"}
     with open(os.path.join(args["out"], "loop.jsonl"), "a") as f:
         f.write(json.dumps(row) + "\n")
     print(json.dumps(row), flush=True)
@@ -86,7 +87,7 @@ def main(argv):
     for task in TUTORIAL:
         for attempt in range(1, args["attempts"] + 1):
             row, notes = one(task["id"], attempt, notes, args, False)
-            if row["clean"]:
+            if row["clean"] or row["queued_for_review"]:
                 break
     for task in HELD_OUT:
         one(task["id"], 1, notes, args, True)

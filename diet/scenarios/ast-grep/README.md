@@ -21,6 +21,7 @@ The first slice of #971: ast-grep (`run`, `outline` and `scan`) on small TypeScr
   - a near-name beside each outlined item (`<name>View`), which an unanchored `--match` also catches;
   - a second call inside every `try`, which "any call in a try" also catches;
   - a `let` arrow returning the arrow type, which a rule without its `const` also catches;
+  - the maybe-defined name, when it's defined, as one of four kinds (type alias, interface, function, class), so a `--type` filter the ask doesn't name also goes wrong (rubric review, 2026-10-27);
   - `Promise<T>` returns beside `T`, already present.
 
 ## Tasks: `tasks.py`
@@ -51,8 +52,13 @@ Twelve operations: six tutorial and six held-out. Each asks for the command that
   - That truth is measured per ast-grep version. On 0.44.0: `run` prints nothing and exits 1; `outline` prints `nothing found` and exits 0; `scan` prints nothing and exits 0.
   - A version not measured there is unrecognized. `tasks.py`'s `INVISIBLE` keeps the record of why: a command alone can't show the lesson.
 - **No trial searches:** `check.py` counts ast-grep searches among the calls before the answer, never help or docs reads, and a count above 0 fails the attempt. `$DIET_AST_GREP_TRIAL=par` records them without failing.
+- **Rubric review, 2026-10-27 (Dispatch; provisional, reported to the maintainer).** Each form below went in RED first, and each executes right on all 20 seeds with distractors (`ref.py`'s alternatives):
+  - **Return types:** an anchored regex on the annotation itself, `has: {field: return_type, kind: type_annotation, regex: '^:\s*T$'}`, for functions and, within a `const`, for arrows. Named wrongs: an unanchored annotation regex, and a type identifier at any depth (`stopBy: end`), which also matches `Promise<T>`.
+  - **Public surface:** `run -k export_statement src/index.ts`, every export statement of the entry point.
+  - **Log in try:** `all: [pattern, inside: {kind: try_statement, stopBy: end}]`, in either order. Without `stopBy` it's wrong.
+  - **Rejected:** a `--type` filter on a kind the ask doesn't name. It was right only because the generator always made a type alias; now `ref.py`'s kind filter executes wrong on 7 of 20 seeds.
 - **Unrecognized, never a false wrong:** a form the rubric doesn't know is `unrecognized`, never `wrong`, unless the rubric names why it's wrong (no return type, one argument, unanchored, a kind selector over every call in a try). `--lang` and a rule's `language` are case-insensitive.
-- **`audit.py --execute PASS_DIR...`** is the offline audit (ast-grep only, macOS only, never the verdict). It runs each pass's answer confined against its pristine instance, compares the result with the static verdict, and prints `disagree` where they differ. It isn't a general mechanism: a tool with destructive actions gets no execution audit.
+- **`audit.py --execute PASS_DIR...`** is the offline audit (ast-grep only, macOS only, never the verdict). It runs each pass's answer confined against its pristine instance, compares the result with the static verdict, and prints `disagree` where they differ. It drops the answer's own output format (`--json`, `--report-style`, `--color`, `--heading`, `--format`) before asking for `--json=stream`, since ast-grep refuses `--report-style` beside `--json`. It isn't a general mechanism: a tool with destructive actions gets no execution audit.
   - On the first 24 live answers (the Flash-Next instance) it found 4 disagreements:
     - three unanchored outline `--match` answers that execution passed, because their fixtures had no near-name;
     - one type-only-export rule built from `all`/`any`/`not`, which the rubric doesn't know.
@@ -78,7 +84,7 @@ Twelve operations: six tutorial and six held-out. Each asks for the command that
 - `help`: `--help`, `-h`, `help`, or the tool run bare;
 - `man`: man, tldr or cheat of the tool;
 - `web`: a fetch of the site or the repository;
-- `installed`: a read under the tool's install prefix, but the binary;
+- `installed`: a read under the tool's install prefix, the binary included (`strings $(which ast-grep)` reads its embedded rules); listing it is no read (rubric review, 2026-10-27);
 - `skill`: a read under the official skills' root.
 
 `docs_reads_fixtures.json` holds 27 reads and 20 non-reads.
@@ -120,7 +126,9 @@ The note-writer experiment (Dispatch, 2026-10-27). Its asks are the experiment's
     - trial → W3: the command was right, but searches were run;
     - right with a docs read → W2, read-replacement;
     - right and clean → W0;
-    - unrecognized and no answer → **W0n**, a neutral ask that never says the command was right or wrong.
+    - unrecognized and no answer → **W0n**, a neutral ask that never says the command was right or wrong;
+    - unrecognized with trial searches → **W3n**, which names the searches and never says right or wrong;
+    - a wrong command → W1, whatever its searches.
 
     W0 opens "That command was right", which an unrecognized command must never be told; W1 opens "That command was graded wrong", which a right command with wrong miss fields must never be told.
 - **`run_pass.py --writers FILE`** passes the table to the check. **`--no-notes`** takes a pass without its notes turn, as a held-out check.
@@ -128,6 +136,7 @@ The note-writer experiment (Dispatch, 2026-10-27). Its asks are the experiment's
 - **`loop.py --out DIR [--writers FILE] [--skills] [--floor] [--attempts N] [--notes FILE] [--before CMD] [--max-seconds S] [-- DRIVE_ARGS]`:**
   - `--floor` takes every pass under the floor's regimen (`bare-floor.toml`), as `run_pass.py --floor` does. Without it, a floor endpoint would run under the production entry's regimen.
   - For t1..t6 in order, it runs a fresh instance with the current notes. An attempt that isn't clean is retried on the same operation, with the notes it left, up to N times (4). Then the loop moves on, carrying the notes.
+  - An unrecognized attempt is never retried: its notes turn gives the model no signal (the first notes loop on the Flash-Next instance spent 8 attempts that way). It is recorded `queued_for_review`, for rubric review, and the loop moves on.
   - After t6, h1..h6 run once each with the final notes and no notes turns.
   - Per attempt, `DIR/loop.jsonl` records the operation, attempt, clean, failure kind, writer, and the notes' character lengths before and after.
   - `--before` runs the host's idle gate before each pass. `--max-seconds` (3600) stops a pass's process group and records it `stopped`, never graded.

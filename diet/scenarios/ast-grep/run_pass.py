@@ -70,18 +70,40 @@ def kind_into(v, lines, task, truth_path, writers, no_notes):
     table = json.load(open(writers)) if writers else None
     t["writer"] = None
     if not no_notes and len(asks) > 1:
-        for w in ("W0", "W0n", "W1", "W2", "W3", "W4"):
-            if check.notes_ask(*_kind_read(w), table)[1] in asks[1]:
-                t["writer"] = w
-                break
-        if t["writer"] is None and check.STUB in asks[1]:
-            t["writer"] = "stub"
+        t["writer"] = writer_of(asks[1], table)
 
 
 def _kind_read(writer):
-    """A (kind, read) that check.notes_ask maps to WRITER: to tell which ask the log holds."""
-    return {"W0": ("right", False), "W2": ("right", True), "W1": ("rubric", False), "W3": ("trial", False), "W4": ("miss fields", False),
-            "W0n": ("unrecognized", False)}[writer]
+    """A (kind, read, trials) that check.notes_ask maps to WRITER: to tell which ask the log holds."""
+    return {"W0": ("right", False, 0), "W2": ("right", True, 0), "W1": ("rubric", False, 0), "W3": ("trial", False, 1),
+            "W4": ("miss fields", False, 0), "W0n": ("unrecognized", False, 0), "W3n": ("unrecognized", False, 1)}[writer]
+
+
+def writer_of(ask_text, table):
+    """Which writer's ask ASK_TEXT holds, by check.notes_ask's own text for each: None when none does."""
+    check = importlib.import_module("check")
+    if table is None:  # with no table every kind gets the stub, so the writer can't be told
+        return "stub" if check.STUB in ask_text else None
+    for w in ("W0", "W0n", "W1", "W2", "W3", "W3n", "W4"):
+        kind, read, trials = _kind_read(w)
+        if check.notes_ask(kind, read, table, trials)[1] in ask_text:
+            return w
+    return None
+
+
+def selftest():
+    check = importlib.import_module("check")
+    table = {"tail": "TAIL.", "W0": "w0.", "W0n": "w0n.", "W1": "w1.", "W2": "w2.", "W3": "w3.", "W3n": "w3n.", "W4": "w4."}
+    bad = 0
+    for w in ("W0", "W0n", "W1", "W2", "W3", "W3n", "W4"):
+        kind, read, trials = _kind_read(w)
+        got_w, ask = check.notes_ask(kind, read, table, trials)
+        if got_w != w or writer_of(ask, table) != w:
+            print(f"run_pass: writer {w}: notes_ask says {got_w}, matching says {writer_of(ask, table)}"); bad += 1
+    if writer_of(check.STUB, None) != "stub" or writer_of("something else", table) is not None:
+        print("run_pass: the stub, or an unknown ask, misread"); bad += 1
+    print(f"run_pass: 7 writers matched from their asks, {bad} wrong")
+    return 1 if bad else 0
 
 
 def main(argv):
@@ -116,4 +138,4 @@ def main(argv):
 
 
 if __name__ == "__main__":
-    sys.exit(main(sys.argv[1:]))
+    sys.exit(selftest() if sys.argv[1:] == ["--selftest"] else main(sys.argv[1:]))

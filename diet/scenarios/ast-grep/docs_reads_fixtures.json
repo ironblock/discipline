@@ -192,6 +192,27 @@
    "kinds": [
     "installed"
    ]
+  },
+  {
+   "why": "strings on the binary by path: its embedded rules and help text",
+   "cmd": "strings /opt/tool/ast-grep/0.44.0/bin/ast-grep | grep -i rule",
+   "kinds": [
+    "installed"
+   ]
+  },
+  {
+   "why": "strings on the binary found by which",
+   "cmd": "strings $(which ast-grep) | grep -i outline",
+   "kinds": [
+    "installed"
+   ]
+  },
+  {
+   "why": "the binary dumped by xxd, found by command -v",
+   "cmd": "xxd \"$(command -v sg)\" | head",
+   "kinds": [
+    "installed"
+   ]
   }
  ],
  "non_reads": [
@@ -274,6 +295,14 @@
   {
    "why": "listing the install's bin directory",
    "cmd": "ls /opt/tool/ast-grep/0.44.0/bin"
+  },
+  {
+   "why": "listing the binary is not reading it",
+   "cmd": "ls -l $(which ast-grep)"
+  },
+  {
+   "why": "asking where the binary is",
+   "cmd": "which ast-grep"
   }
  ],
  "installed": "/opt/tool/ast-grep/0.44.0"
