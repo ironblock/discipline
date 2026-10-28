@@ -44,7 +44,7 @@ Twelve operations: six tutorial and six held-out. Each asks for the command that
   - **Patterns** are compared with metavariable names and whitespace dropped, so `$F`/`$NAME`/`$_` and `$$$A`/`$$$` are the same, and a reflow is the same. A literal `$emit` stays literal.
   - **`--inline-rules`** is read through `yamlish.py` (block and flow YAML, the subset rules use; anything else is unrecognized). The rubric checks `kind`, `pattern`, `regex`, `field`, and that a relation which must reach any depth says `stopBy: end`.
   - **Paths:** the whole project is `src`, `.` or none; the barrel is `src/index.ts` alone. `--lang`, if given, is TypeScript.
-  - **"As specific as necessary":** a form that also matches what the task excludes is wrong. Examples: an outline `--match` that isn't `^NAME$` (it matches names, signatures and first lines); an arrow rule without its `const`; `--items` left at exports for a function that isn't exported.
+  - **"As specific as necessary":** a form that also matches what the task excludes is wrong. Examples: an outline `--match` that isn't `^NAME$` (it matches names, signatures and first lines; ruled wrong by the maintainer, 2026-10-27); an arrow rule without its `const`; `--items` left at exports for a function that isn't exported.
   - **Selftest:** 30 right spellings (references and equivalents: flag order, long and short, `sg`, other metavariable names, other quoting, flow-style YAML, field-based rules, the `=> $$$` body, `from $P`, a capitalised `--lang`) and 34 not right (26 wrong with a named reason, 8 unrecognized), the floor's over-broad answers among them. `ref.py` adds 20 seeds: every reference is right, and no naive command is.
 - **The miss** (t2, h2) answers through `answer-tool-miss.json`, the same `submit_answer` with `exit_status_when_none` (an integer) and `prints_nothing_when_none` (a boolean), all required.
   - It's right only when the command passes the rubric and both fields match `miss_truth.json` for its subcommand.
@@ -99,7 +99,7 @@ Twelve operations: six tutorial and six held-out. Each asks for the command that
   - `right`;
   - the par instruments, recorded only: `seconds` from the ask to the answer, `tool_calls`, `completion_tokens_before_answer` and `reasoning_chars_before_answer`;
   - `output_tokens`, and `capped` (responses cut at their cap);
-  - `trial_searches`: ast-grep searches against the project before the answer, recorded only (whether trial is allowed now is the maintainer's open question);
+  - `trial_searches`: ast-grep searches against the project before the answer. A count above 0 fails the attempt (ruled 2026-10-27; `--trial par` records them only);
   - `requests`: each response's `prompt_tokens` and `cached_tokens`, since cache state moves the seconds;
   - `docs_reads`, `commands` and `tool_used` (descriptive);
   - then the pass's `notes`.
@@ -109,6 +109,27 @@ Twelve operations: six tutorial and six held-out. Each asks for the command that
   - A step waits up to 3600 s (`patience`), as long as the 60-minute guard, never the drive's 900 s default: two floor passes voided on it.
 - **`run_pass.py TASK --out DIR [--skills] [--notes FILE] [--floor] [-- DRIVE_ARGS]`** writes a self-contained copy of the pass, its head carrying the notes so far, and runs it from the tree, since the drive finds its assembler by a relative path. It writes `pass.json` and `notes.md`, the next pass's `--notes`. Rolling across passes, re-planning after ten failures over par, and choosing note writers are Dispatch's experiments.
 - **Canned:** `DIET_AST_GREP_SEED=7 python3 -I run_pass.py t1-ret-decl --out DIR` rehearses on the canned substrate. t1's canned answer is the naive command, so it grades wrong; every other task's grades right.
+
+## The notes loop: `check.py`'s writer map and `loop.py`
+The note-writer experiment (Dispatch, 2026-10-27). Its asks are the experiment's text, never the maintainer's wording.
+- **The notes turn rides on the grade.** The check names the attempt's failure kind and prints, as `got`, the notes ask for that kind. The grade step sends it as its feedback (`right` and `last` are `{got}`), so the model is sent only the ask, never the verdict or its reason. That is the conditional step, chosen over a fork from carry, and it needs no engine change.
+  - The asks come from a writer table, `$DIET_AST_GREP_WRITERS` (a JSON file kept out of this tree: `tail`, `W0`, `W0n`, `W1`, `W2`, `W3`). Without it, every kind gets the DRAFT stub.
+  - **The map:**
+    - rubric and miss fields → W1, refutation;
+    - trial → W3: the command was right, but searches were run;
+    - right with a docs read → W2, read-replacement;
+    - right and clean → W0;
+    - unrecognized and no answer → **W0n**, a neutral ask that never says the command was right or wrong.
+
+    W0 opens "That command was right", which an unrecognized command must never be told.
+- **`run_pass.py --writers FILE`** passes the table to the check. **`--no-notes`** takes a pass without its notes turn, as a held-out check.
+- **pass.json gains, per task,** `failure` (the kind, re-derived with `check.grade` from the turn's own calls and the pass's truth) and `writer` (which ask followed the grade, by its text).
+- **`loop.py --out DIR [--writers FILE] [--skills] [--attempts N] [--notes FILE] [--before CMD] [--max-seconds S] [-- DRIVE_ARGS]`:**
+  - For t1..t6 in order, it runs a fresh instance with the current notes. An attempt that isn't clean is retried on the same operation, with the notes it left, up to N times (4). Then the loop moves on, carrying the notes.
+  - After t6, h1..h6 run once each with the final notes and no notes turns.
+  - Per attempt, `DIR/loop.jsonl` records the operation, attempt, clean, failure kind, writer, and the notes' character lengths before and after.
+  - `--before` runs the host's idle gate before each pass. `--max-seconds` (3600) stops a pass's process group and records it `stopped`, never graded.
+- **Canned:** `DIET_AST_GREP_SEED=7`. t1's canned answer is wrong, so it takes 4 attempts with W1; t2–t6 are clean with W0; the held-out six run without notes turns. The writer's ask, tail included, is what the model receives, and the notes ride into the next pass's head.
 
 ## Declared limits
 - **macOS only.** The regimens read all (`sandbox_reads = "all"`), which the drive builds for macOS alone, and the check confines commands there only.
