@@ -50,7 +50,13 @@ def details(lines, task, truth):
     reasoning = "".join(l.get("reasoning") or "" for l in lines if l.get("kind") == "response" and req_turn.get(l.get("to_request")) == turn
                         and (answer_seq is None or (l.get("seq") or 0) < answer_seq))
     verdict, _, why = g["got"].partition(": ")
-    return {"ask": ask.get("text", ""), "right": g["right"], "kind": g["kind"], "verdict": verdict, "reason": why,
+    kind = g["kind"]
+    # A generation cut at its output cap before any answer is a typed outcome, never wrong (diet/AGENTS.md): "capped",
+    # listed for the tutor with its reasoning tail (Dispatch, 2026-10-28).
+    cut = [l for l in lines if l.get("kind") == "response" and req_turn.get(l.get("to_request")) == turn and l.get("finish_reason") == "length"]
+    if answer is None and cut:
+        kind, verdict, why = "capped", "capped", f"the generation hit its output cap ({len(cut)} response(s) cut) before an answer"
+    return {"ask": ask.get("text", ""), "right": g["right"], "kind": kind, "verdict": verdict, "reason": why,
             "command": (answer or {}).get("command"), "miss_fields": {k: (answer or {}).get(k) for k in check.FIELDS if answer and k in answer},
             "trial_commands": trials, "reasoning_tail": reasoning[-REASONING_TAIL:]}
 
@@ -141,6 +147,12 @@ def selftest():
             print(f"tutor_round: {k}: {d[k]!r}, expected {w!r}"); bad += 1
     if not d["reasoning_tail"].endswith("END") or len(d["reasoning_tail"]) != REASONING_TAIL or "AFTER" in d["reasoning_tail"]:
         print(f"tutor_round: the reasoning tail is not the last {REASONING_TAIL} characters before the answer"); bad += 1
+    # A turn cut at its output cap before any answer is typed "capped", never wrong (Dispatch, 2026-10-28).
+    cut = [{"kind": "ask", "seq": 1, "turn": 1, "task": "t1-ret-decl", "text": "the ask"}, req(2, 1),
+           dict(resp(3, 2, "unsure whether it reaches any depth"), finish_reason="length")]
+    c = details(cut, "t1-ret-decl", {"params": check.rubric.P})
+    if c["kind"] != "capped" or c["right"] or "unsure" not in c["reasoning_tail"] or "cap" not in c["reason"]:
+        print(f"tutor_round: a capped turn: {c['kind']!r}, {c['reason']!r}"); bad += 1
     md = failure_md(dict(d, task="t1-ret-decl"))
     if "the ask" not in md or wrong not in md or "ast-grep run -p 'x' src" not in md:
         print("tutor_round: failures.md lacks the ask, command or trial"); bad += 1
