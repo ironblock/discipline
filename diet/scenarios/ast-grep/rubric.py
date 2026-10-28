@@ -156,7 +156,7 @@ def judge(cmd, family, p):
         if r and r.get("kind") == "function_declaration" and type_wrong(r.get("has"), p["target"]):
             return "wrong", type_wrong(r.get("has"), p["target"])
         if f["sub"] == "run" and canon(one(f, "--pattern") or "") == canon("function $F($$$A) { $$$B }"):
-            return "wrong", "no return type: it matches untyped functions instead"
+            return "wrong", "a function pattern without a return type matches only functions declared without one"
         return "unrecognized", "not a form the rubric knows"
     if family == "ret-arrow":
         if not whole_project(f):
