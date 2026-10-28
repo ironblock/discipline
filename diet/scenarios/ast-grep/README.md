@@ -125,7 +125,8 @@ The note-writer experiment (Dispatch, 2026-10-27). Its asks are the experiment's
     W0 opens "That command was right", which an unrecognized command must never be told; W1 opens "That command was graded wrong", which a right command with wrong miss fields must never be told.
 - **`run_pass.py --writers FILE`** passes the table to the check. **`--no-notes`** takes a pass without its notes turn, as a held-out check.
 - **pass.json gains, per task,** `failure` (the kind, re-derived with `check.grade` from the turn's own calls and the pass's truth) and `writer` (which ask followed the grade, by its text).
-- **`loop.py --out DIR [--writers FILE] [--skills] [--attempts N] [--notes FILE] [--before CMD] [--max-seconds S] [-- DRIVE_ARGS]`:**
+- **`loop.py --out DIR [--writers FILE] [--skills] [--floor] [--attempts N] [--notes FILE] [--before CMD] [--max-seconds S] [-- DRIVE_ARGS]`:**
+  - `--floor` takes every pass under the floor's regimen (`bare-floor.toml`), as `run_pass.py --floor` does. Without it, a floor endpoint would run under the production entry's regimen.
   - For t1..t6 in order, it runs a fresh instance with the current notes. An attempt that isn't clean is retried on the same operation, with the notes it left, up to N times (4). Then the loop moves on, carrying the notes.
   - After t6, h1..h6 run once each with the final notes and no notes turns.
   - Per attempt, `DIR/loop.jsonl` records the operation, attempt, clean, failure kind, writer, and the notes' character lengths before and after.
