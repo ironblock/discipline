@@ -15,9 +15,9 @@ Right only when all of it holds; `unrecognized` and a refusal are wrong.
 **The notes turn rides on the grade** (#971's notes loop, Dispatch 2026-10-27): the check also names the attempt's
 failure kind (`right`, `rubric`, `miss fields`, `trial`, `unrecognized`, `no answer`) as `expected`, and prints as
 `got` the notes ask for it, which the scenario's grade step sends as its feedback (`right` and `last` are `{got}`).
-The asks are a writer table, `$DIET_AST_GREP_WRITERS` (JSON: `tail`, and `W0`, `W0n`, `W1`, `W2`, `W3`), experiment
-text kept out of this tree; without it, every kind gets the DRAFT stub. The map: rubric and miss fields → W1, trial
-(the command was right) → W3, right with a docs read → W2, right and clean → W0, unrecognized or no answer → W0n, a
+The asks are a writer table, `$DIET_AST_GREP_WRITERS` (JSON: `tail`, and `W0`, `W0n`, `W1`, `W2`, `W3`, `W4`), experiment
+text kept out of this tree; without it, every kind gets the DRAFT stub. The map: rubric → W1, miss fields (the command was
+right, its miss fields weren't) → W4, trial (the command was right) → W3, right with a docs read → W2, right and clean → W0, unrecognized or no answer → W0n, a
 neutral ask that never says the command was right or wrong. An answer in prose,
 or through another tool, is no answer. Prints one line, `{"right", "expected", "got"}`. `--selftest` grades known
 answers. The confined execution (`audit.py`) is an offline audit, never the verdict.
@@ -32,7 +32,7 @@ from docs_reads import installed_prefix, reads_of  # noqa: E402
 TOOL = json.load(open(os.path.join(HERE, "answer-tool.json")))["name"]
 # The DRAFT notes ask every kind gets when no writer table is given.
 STUB = "DRAFT. Notes update: update your notes on ast-grep through the notes tool, as concise as you can make them."
-WRITER_OF = {"rubric": "W1", "miss fields": "W1", "trial": "W3", "unrecognized": "W0n", "no answer": "W0n"}
+WRITER_OF = {"rubric": "W1", "miss fields": "W4", "trial": "W3", "unrecognized": "W0n", "no answer": "W0n"}
 MISS = ("zero-calls", "maybe-defined")
 FIELDS = ("exit_status_when_none", "prints_nothing_when_none")
 
@@ -199,8 +199,8 @@ def selftest():
         got = grade(t, task, truth, version=v)["kind"]
         if got != want:
             print(f"check: kind {want}: got {got}"); bad += 1
-    table = {"tail": "TAIL.", "W0": "w0.", "W0n": "w0n.", "W1": "w1.", "W2": "w2.", "W3": "w3."}
-    for kind, read, writer in [("right", False, "W0"), ("right", True, "W2"), ("rubric", True, "W1"), ("miss fields", False, "W1"),
+    table = {"tail": "TAIL.", "W0": "w0.", "W0n": "w0n.", "W1": "w1.", "W2": "w2.", "W3": "w3.", "W4": "w4."}
+    for kind, read, writer in [("right", False, "W0"), ("right", True, "W2"), ("rubric", True, "W1"), ("miss fields", False, "W4"),
                                ("trial", True, "W3"), ("unrecognized", False, "W0n"), ("no answer", True, "W0n")]:
         w, ask = notes_ask(kind, read, table)
         if w != writer or ask != table[writer] + " TAIL." or notes_ask(kind, read, None) != (writer, STUB):

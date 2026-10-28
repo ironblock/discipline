@@ -113,15 +113,16 @@ Twelve operations: six tutorial and six held-out. Each asks for the command that
 ## The notes loop: `check.py`'s writer map and `loop.py`
 The note-writer experiment (Dispatch, 2026-10-27). Its asks are the experiment's text, never the maintainer's wording.
 - **The notes turn rides on the grade.** The check names the attempt's failure kind and prints, as `got`, the notes ask for that kind. The grade step sends it as its feedback (`right` and `last` are `{got}`), so the model is sent only the ask, never the verdict or its reason. That is the conditional step, chosen over a fork from carry, and it needs no engine change.
-  - The asks come from a writer table, `$DIET_AST_GREP_WRITERS` (a JSON file kept out of this tree: `tail`, `W0`, `W0n`, `W1`, `W2`, `W3`). Without it, every kind gets the DRAFT stub.
+  - The asks come from a writer table, `$DIET_AST_GREP_WRITERS` (a JSON file kept out of this tree: `tail`, `W0`, `W0n`, `W1`, `W2`, `W3`, `W4`). Without it, every kind gets the DRAFT stub.
   - **The map:**
-    - rubric and miss fields → W1, refutation;
+    - rubric → W1, refutation;
+    - miss fields → W4: the command was right, but what it was said to print or exit with on a miss wasn't;
     - trial → W3: the command was right, but searches were run;
     - right with a docs read → W2, read-replacement;
     - right and clean → W0;
     - unrecognized and no answer → **W0n**, a neutral ask that never says the command was right or wrong.
 
-    W0 opens "That command was right", which an unrecognized command must never be told.
+    W0 opens "That command was right", which an unrecognized command must never be told; W1 opens "That command was graded wrong", which a right command with wrong miss fields must never be told.
 - **`run_pass.py --writers FILE`** passes the table to the check. **`--no-notes`** takes a pass without its notes turn, as a held-out check.
 - **pass.json gains, per task,** `failure` (the kind, re-derived with `check.grade` from the turn's own calls and the pass's truth) and `writer` (which ask followed the grade, by its text).
 - **`loop.py --out DIR [--writers FILE] [--skills] [--attempts N] [--notes FILE] [--before CMD] [--max-seconds S] [-- DRIVE_ARGS]`:**

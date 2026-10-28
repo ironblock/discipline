@@ -70,7 +70,7 @@ def kind_into(v, lines, task, truth_path, writers, no_notes):
     table = json.load(open(writers)) if writers else None
     t["writer"] = None
     if not no_notes and len(asks) > 1:
-        for w in ("W0", "W0n", "W1", "W2", "W3"):
+        for w in ("W0", "W0n", "W1", "W2", "W3", "W4"):
             if check.notes_ask(*_kind_read(w), table)[1] in asks[1]:
                 t["writer"] = w
                 break
@@ -80,7 +80,8 @@ def kind_into(v, lines, task, truth_path, writers, no_notes):
 
 def _kind_read(writer):
     """A (kind, read) that check.notes_ask maps to WRITER: to tell which ask the log holds."""
-    return {"W0": ("right", False), "W2": ("right", True), "W1": ("rubric", False), "W3": ("trial", False), "W0n": ("unrecognized", False)}[writer]
+    return {"W0": ("right", False), "W2": ("right", True), "W1": ("rubric", False), "W3": ("trial", False), "W4": ("miss fields", False),
+            "W0n": ("unrecognized", False)}[writer]
 
 
 def main(argv):
