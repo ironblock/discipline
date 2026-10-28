@@ -18,7 +18,7 @@ The first slice of #971: ast-grep (`run`, `outline` and `scan`) on small TypeScr
 - **The truth is, per family, the lines a right command matches** (`path:line`, lines from 1). It comes from the generator's own construction: it records what it wrote where, never what ast-grep says.
 - **Every family but the two misses matches something.** The misses, `zero-calls` and `maybe-defined`, may match nothing, on purpose.
 - **Distractors** (2026-10-27), so execution separates a right form from an over-broad one. A wrong form that catches them executes wrong, rather than passing because the fixture has nothing for it to catch. None of them is in any family's truth:
-  - a near-name beside each outlined item (`<name>View`), which an unanchored `--match` also catches;
+  - a near-name beside each outlined item (`<name>View`), which an unanchored `--match` also catches, and a suffix near-name (`pre<name>`, `Legacy<Name>`), which a `--match` anchored at one end only also catches (round 4);
   - a second call inside every `try`, which "any call in a try" also catches;
   - a `let` arrow returning the arrow type, which a rule without its `const` also catches;
   - the maybe-defined name, when it's defined, as one of four kinds (type alias, interface, function, class), so a `--type` filter the ask doesn't name also goes wrong (rubric review, 2026-10-27);
@@ -57,6 +57,12 @@ Twelve operations: six tutorial and six held-out. Each asks for the command that
   - **Public surface:** `run -k export_statement src/index.ts`, every export statement of the entry point.
   - **Log in try:** `all: [pattern, inside: {kind: try_statement, stopBy: end}]`, in either order. Without `stopBy` it's wrong.
   - **Rejected:** a `--type` filter on a kind the ask doesn't name. It was right only because the generator always made a type alias; now `ref.py`'s kind filter executes wrong on 7 of 20 seeds.
+- **Round 4 (Dispatch, 2026-10-28; provisional).** Each went in RED first and was executed on all 20 seeds:
+  - **Named wrongs:** "`export $$$` doesn't parse as a pattern", and "a function pattern without its return type matches no typed function", also inside an `all:` rule. Each executes wrong on 20 of 20 seeds.
+  - **Learned:** h3's escaped `"export type { \$\$\$ } from '\$PATH';"`, with its trailing `;`, and `inside: {pattern: "try { $$$ }", stopBy: end}`. Each executes right on all 20.
+  - **A `--match` anchored at one end only is wrong**, by the maintainer's unanchored ruling. The suffix near-names make it execute wrong on all 20 seeds; before them it executed right on all 20.
+  - **t6 holds the ask's word:** it asks for an outline.
+  - **Every wrong's reason is model-facing now** (W1r, below), so it states an ast-grep fact or the ask's terms, never the fix. `rubric.py`'s `LEAKS` test fails if any reason names one (for example `--items structure`, or `stopBy: end` as the remedy).
 - **Unrecognized, never a false wrong:** a form the rubric doesn't know is `unrecognized`, never `wrong`, unless the rubric names why it's wrong (no return type, one argument, unanchored, a kind selector over every call in a try). `--lang` and a rule's `language` are case-insensitive.
 - **`audit.py --execute PASS_DIR...`** is the offline audit (ast-grep only, macOS only, never the verdict). It runs each pass's answer confined against its pristine instance, compares the result with the static verdict, and prints `disagree` where they differ. It drops the answer's own output format (`--json`, `--report-style`, `--color`, `--heading`, `--format`) before asking for `--json=stream`, since ast-grep refuses `--report-style` beside `--json`. It isn't a general mechanism: a tool with destructive actions gets no execution audit.
   - On the first 24 live answers (the Flash-Next instance) it found 4 disagreements:
@@ -128,7 +134,7 @@ The note-writer experiment (Dispatch, 2026-10-27). Its asks are the experiment's
     - right and clean → W0;
     - unrecognized and no answer → **W0n**, a neutral ask that never says the command was right or wrong;
     - unrecognized with trial searches → **W3n**, which names the searches and never says right or wrong;
-    - a wrong command → W1, whatever its searches.
+    - a wrong command → W1, whatever its searches. When the rubric names a reason (round 4), W1 becomes **W1r**: "That command was graded wrong: <reason>." followed by the rest of W1. Never for unrecognized. W1 alone moved nothing: the 27B took it four times on t6.
 
     W0 opens "That command was right", which an unrecognized command must never be told; W1 opens "That command was graded wrong", which a right command with wrong miss fields must never be told.
 - **`run_pass.py --writers FILE`** passes the table to the check. **`--no-notes`** takes a pass without its notes turn, as a held-out check.

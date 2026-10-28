@@ -104,13 +104,19 @@ def kind_of(verdict, why):
     return "rubric"
 
 
-def notes_ask(kind, read, writers, trials=0):
+def notes_ask(kind, read, writers, trials=0, why=None):
     """The writer and the ask for KIND: W2 for a right attempt that read the docs; W3n for an unrecognized attempt that
     ran trial searches (a wrong one stays W1, whatever its searches)."""
     writer = "W3n" if kind == "unrecognized" and trials else WRITER_OF.get(kind) or ("W2" if read else "W0")
     if writers is None:
         return writer, STUB
-    return writer, (writers[writer].rstrip() + " " + writers["tail"].strip()).strip()
+    text = writers[writer].rstrip()
+    if writer == "W1" and why:
+        # W1r (round 4): the rubric's named reason, which states an ast-grep fact or the ask's terms, never the fix
+        # (rubric.py's LEAKS test), in place of W1's own opening sentence.
+        rest = text.split(".", 1)[1].strip() if text.startswith("That command was graded wrong.") else text
+        writer, text = "W1r", f"That command was graded wrong: {why.rstrip('.')}. {rest}".rstrip()
+    return writer, (text + " " + writers["tail"].strip()).strip()
 
 
 def installed_version():
@@ -154,7 +160,8 @@ def main():
     g = grade(turn, os.environ["DIET_GRADE_TASK"], truth, trial)
     path = os.environ.get("DIET_AST_GREP_WRITERS")
     writers = json.load(open(path)) if path else None
-    writer, ask = notes_ask(g["kind"], g["kind"] == "right" and docs_read(g["before"]), writers, g["trials"])
+    why = g["got"].split(": ", 1)[1] if g["kind"] == "rubric" and ": " in g["got"] else None
+    writer, ask = notes_ask(g["kind"], g["kind"] == "right" and docs_read(g["before"]), writers, g["trials"], why)
     # What the model is sent is only the notes ask; the verdict and its reason stay in `expected` and the log.
     print(json.dumps({"right": g["right"], "expected": f"{g['kind']} ({writer}): {g['got']}", "got": ask}))
 
@@ -210,10 +217,18 @@ def selftest():
         w, ask = notes_ask(kind, read, table, trials)
         if w != writer or ask != table[writer] + " TAIL." or notes_ask(kind, read, None, trials) != (writer, STUB):
             print(f"check: writer for {kind} (docs {read}): {w} {ask!r}"); bad += 1
+    # W1r (round 4): a wrong with a named reason carries it; W1's own opening isn't repeated; never for unrecognized.
+    table1 = {"tail": "TAIL.", "W0": "w0.", "W0n": "w0n.", "W1": "That command was graded wrong. What did you believe? Update.",
+              "W2": "w2.", "W3": "w3.", "W3n": "w3n.", "W4": "w4."}
+    w, ask = notes_ask("rubric", False, table1, 0, why="--lang is not TypeScript")
+    if w != "W1r" or ask != "That command was graded wrong: --lang is not TypeScript. What did you believe? Update. TAIL.":
+        print(f"check: W1r: {w} {ask!r}"); bad += 1
+    if notes_ask("rubric", False, table1, 0)[0] != "W1" or notes_ask("unrecognized", False, table1, 0, why="x")[0] != "W0n":
+        print("check: W1 without a reason, or unrecognized with one, misrouted"); bad += 1
     unmeasured = grade(turn(call(zero, exit_status_when_none=1, prints_nothing_when_none=True)), "t2-zero-calls", truth, version="ast-grep 9.9.9")
     if not unmeasured["got"].startswith("unrecognized"):
         print(f"check: an unmeasured version graded {unmeasured}"); bad += 1
-    print(f"check: {sum(c[4] for c in cases)} right and {sum(not c[4] for c in cases) + 1} not right, 6 kinds and 9 writer choices, {bad} wrong")
+    print(f"check: {sum(c[4] for c in cases)} right and {sum(not c[4] for c in cases) + 1} not right, 6 kinds, 9 writer choices and W1r, {bad} wrong")
     return 1 if bad else 0
 
 

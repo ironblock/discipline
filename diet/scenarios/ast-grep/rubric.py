@@ -119,7 +119,7 @@ def outline_named(form, name, kind, need_structure):
         if m == name:
             return "wrong", "--match is not anchored: it matches names, signatures and first lines"
         if m.strip("^$") == name:
-            return "wrong", "--match is anchored at one end only"
+            return "wrong", "--match is anchored at one end only: it also matches every name that begins or ends with it"
         return ("wrong", "--match is not anchored: it matches names, signatures and first lines") if name in m else ("wrong", "--match names another item")
     types = one(form, "--type")
     if types is not None:
@@ -129,8 +129,13 @@ def outline_named(form, name, kind, need_structure):
             return "wrong", f"--type leaves out {kind}"
     items = one(form, "--items")
     if need_structure and items != "structure":
-        return "wrong", "on a directory outline lists only exports; this item isn't exported (--items structure)"
+        return "wrong", "on a directory, outline lists only exported items, and this item isn't exported"
     return "right", "an anchored outline"
+
+
+def untyped_function(node):
+    """A rule node whose pattern is a function declaration without its return type."""
+    return isinstance(node, dict) and pattern_is(node, "function $F($$$A) { $$$B }")
 
 
 def judge(cmd, family, p):
@@ -151,7 +156,7 @@ def judge(cmd, family, p):
         if r and r.get("kind") == "function_declaration" and type_wrong(r.get("has"), p["target"]):
             return "wrong", type_wrong(r.get("has"), p["target"])
         if f["sub"] == "run" and canon(one(f, "--pattern") or "") == canon("function $F($$$A) { $$$B }"):
-            return "wrong", "no return type: it matches untyped functions instead"
+            return "wrong", "a function pattern without a return type matches only functions declared without one"
         return "unrecognized", "not a form the rubric knows"
     if family == "ret-arrow":
         if not whole_project(f):
@@ -175,7 +180,7 @@ def judge(cmd, family, p):
             return "right", "the call pattern"
         pat = one(f, "--pattern") or ""
         if canon(pat) == canon(f"{name}($A)"):
-            return "wrong", "one argument only: `$$$` takes any number"
+            return "wrong", "`$A` matches exactly one argument, and a call may take more or none"
         return "unrecognized", "not a call pattern the rubric knows"
     if family == "maybe-defined":
         return outline_named(f, p["maybe"], None, False)
@@ -183,6 +188,8 @@ def judge(cmd, family, p):
         return outline_named(f, p["line_fn"], "function", not p.get("line_fn_exported", True))
     if family == "itf-outline":
         return outline_named(f, p["line_itf"], "interface", False)
+    if family in ("public-surface", "public-types") and canon(one(f, "--pattern") or "") == canon("export $$$"):
+        return "wrong", "`export $$$` doesn't parse as a pattern"
     if family == "public-surface":
         if f["sub"] == "run" and one(f, "--kind") == "export_statement" and not one(f, "--pattern"):
             if not only(f, "src/index.ts"):
@@ -198,19 +205,23 @@ def judge(cmd, family, p):
     if family == "public-types":
         if not only(f, "src/index.ts"):
             return "wrong", "not the entry point alone"
-        if search(f, "export type { $$$S }", "export type { $$$S } from $$$P", "export type { $$$S } from $P", "export type { $$$S } from '$P'"):
+        if search(f, "export type { $$$S }", "export type { $$$S } from $$$P", "export type { $$$S } from $P", "export type { $$$S } from '$P'",
+                  "export type { $$$S } from '$P';"):
             return "right", "the type-export pattern"
         return "unrecognized", "not a form the rubric knows"
     if family == "await-any":
         r = rule_of(f) if f["sub"] == "scan" else None
         if not r or not whole_project(f):
             return ("wrong", "a relation needs a rule") if f["sub"] != "scan" else ("unrecognized", "a rule the rubric can't read")
+        items = r.get("all") if isinstance(r.get("all"), list) else [r]
+        if any(untyped_function(x) for x in items):
+            return "wrong", "a function pattern without its return type matches no typed function"
         has = r.get("has")
         if r.get("kind") != "function_declaration" or not isinstance(has, dict):
             return "unrecognized", "not a function_declaration with `has`"
         if not (pattern_is(has, "await $E") or has.get("kind") == "await_expression"):
             return "unrecognized", "`has` is not an await"
-        return ("right", "has await, stopBy end") if deep(has) else ("wrong", "`has` without stopBy: end looks one level down")
+        return ("right", "has await, stopBy end") if deep(has) else ("wrong", "`has` looks only at a node's direct children by default")
     if family == "log-in-try":
         r = rule_of(f) if f["sub"] == "scan" else None
         if not r or not whole_project(f):
@@ -224,9 +235,11 @@ def judge(cmd, family, p):
                 merged.update(x)
             r = merged or r
         inside = r.get("inside")
-        if not pattern_is(r, f"{p['log_fn']}($$$A)") or not isinstance(inside, dict) or inside.get("kind") != "try_statement":
+        # `inside: {pattern: "try { $$$ }"}` is the try statement too (round 4).
+        is_try = isinstance(inside, dict) and (inside.get("kind") == "try_statement" or pattern_is(inside, "try { $$$ }"))
+        if not pattern_is(r, f"{p['log_fn']}($$$A)") or not is_try:
             return "unrecognized", "not the call inside a try_statement"
-        return ("right", "inside try, stopBy end") if deep(inside) else ("wrong", "`inside` without stopBy: end looks one level up")
+        return ("right", "inside try, stopBy end") if deep(inside) else ("wrong", "`inside` looks only at a node's direct parent by default")
     raise KeyError(family)
 
 
@@ -280,6 +293,7 @@ CASES = {
                        ["ast-grep outline src --items exports", "ast-grep outline src", "ast-grep outline src/index.ts --match Relay"]),
     "public-types": (["ast-grep run -l typescript -p 'export type { $$$ }' src/index.ts",
                       "ast-grep run --pattern 'export type { $$$NAMES } from $MODULE' --lang typescript src/index.ts",
+                      "ast-grep run -p \"export type { \\$\\$\\$ } from '\\$PATH';\" -l ts src/index.ts",
                       "ast-grep run -p 'export type { $$$S } from $$$P' src/index.ts"],
                      ["ast-grep run -p 'export type { $$$S }' src", "ast-grep outline src/index.ts"]),
     "await-any": ([RULE("  kind: function_declaration\n  has:\n    pattern: await $E\n    stopBy: end"),
@@ -288,11 +302,24 @@ CASES = {
     "log-in-try": ([RULE("  pattern: loadMeadow($$$A)\n  inside:\n    kind: try_statement\n    stopBy: end"),
                     RULE("  pattern: loadMeadow($$$)\n  inside:\n    kind: try_statement\n    field: body\n    stopBy: end"),
                     RULE("  all:\n    - pattern: loadMeadow($$$)\n    - inside:\n        kind: try_statement\n        stopBy: end"),
-                    RULE("  all:\n    - inside:\n        kind: try_statement\n        stopBy: end\n    - pattern: loadMeadow($$$)")],
+                    RULE("  all:\n    - inside:\n        kind: try_statement\n        stopBy: end\n    - pattern: loadMeadow($$$)"),
+                    RULE("  all:\n    - pattern: loadMeadow($$$)\n    - inside:\n        pattern: \"try { $$$ }\"\n        stopBy: end")],
                    [RULE("  pattern: loadMeadow($$$A)\n  inside:\n    kind: try_statement"), "ast-grep run -p 'loadMeadow($$$A)' src",
                     "ast-grep run -k 'try_statement > statement_block call_expression' -l TypeScript src",
                     RULE("  all:\n    - pattern: loadMeadow($$$)\n    - inside:\n        kind: try_statement")]),
 }
+
+
+# Named wrongs (round 4): the verdict must be `wrong`, and its reason must say so.
+NAMED = [
+    ("public-surface", "ast-grep run -p 'export $$$' -l ts src/index.ts", "doesn't parse"),
+    ("await-any", RULE("  all:\n    - pattern: function $N($$$) { $$$ }\n    - has:\n        pattern: await $X\n        stopBy: end"), "without its return type"),
+    ("fn-outline", "ast-grep outline src --match 'loadQuota$'", "one end"),
+    ("itf-outline", "ast-grep outline src --type interface --match 'GarnetRow$'", "one end"),
+    ("t6-run", "ast-grep run -p 'function loadQuota($$$): $$$ { $$$ }' -l ts src", "outline"),
+]
+# W1r carries a wrong's reason to the model (round 4): no reason may hand it the fix itself.
+LEAKS = ["--items structure", "`$$$`", "stopBy: end looks", "without stopBy"]
 
 
 def selftest():
@@ -310,6 +337,18 @@ def selftest():
                 print(f"rubric: {fam}: graded right: {c!r}"); bad += 1
             elif v == "unrecognized":
                 unknown += 1
+    reasons = []
+    for fam, c, part in NAMED:
+        v, why = judge(c, "fn-outline" if fam == "t6-run" else fam, P)
+        reasons.append(why)
+        if v != "wrong" or part not in why:
+            print(f"rubric: named wrong {fam}: {v}: {why!r}"); bad += 1
+    for fam, (rights, wrongs) in CASES.items():
+        reasons += [judge(c, fam, P)[1] for c in wrongs]
+    leaked = [r for r in reasons if any(l in r for l in LEAKS)]
+    if leaked:
+        print(f"rubric: reasons that name the fix: {leaked}"); bad += 1
+    print(f"rubric: {len(NAMED)} named wrongs, {len(reasons)} reasons checked for the fix;", end=" ")
     print(f"rubric: {n_right} right spellings and {n_wrong} not right ({n_wrong - unknown} wrong, {unknown} unrecognized) over "
           f"{len(CASES)} operations, {bad} misjudged")
     return 1 if bad else 0
