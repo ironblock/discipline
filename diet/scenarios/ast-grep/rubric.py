@@ -206,6 +206,7 @@ def judge(cmd, family, p):
         if search(f, f"function $F($$$A): {p['target']} {{ $$$B }}"):
             return "right", "the return-type pattern"
         r = rule_of(f) if f["sub"] == "scan" else None
+        r = merged_all(r) if r else r  # `all:` of the kind and the `has` is the one rule (the floor's gap-fill t1)
         if r and r.get("kind") == "function_declaration" and direct_type(r.get("has"), p["target"]):
             return "right", "a return-type rule"
         if r and r.get("kind") == "function_declaration" and type_wrong(r.get("has"), p["target"]):
@@ -273,6 +274,14 @@ def judge(cmd, family, p):
             return "wrong", "`$X` matches exactly one export specifier"
         return "unrecognized", "not a form the rubric knows"
     if family == "await-any":
+        # A `:has()` selector reaches any depth, as `has` with stopBy: end does (Dispatch, 2026-10-28; the floor's
+        # gap-fill iter-2 t4). `:has(await $X)` matches nothing in 0.44.0, and another kind inside stays wrong.
+        sel = re.sub(r"\s+", "", one(f, "--kind") or "")
+        if f["sub"] == "run" and not one(f, "--pattern") and sel.startswith("function_declaration:has("):
+            if not whole_project(f):
+                return "wrong", "not the whole project"
+            if sel == "function_declaration:has(await_expression)":
+                return "right", "a :has() selector, any depth"
         r = rule_of(f) if f["sub"] == "scan" else None
         if not r or not whole_project(f):
             return ("wrong", "a relation needs a rule") if f["sub"] != "scan" else ("unrecognized", "a rule the rubric can't read")
@@ -280,6 +289,9 @@ def judge(cmd, family, p):
         if any(untyped_function(x) for x in items):
             return "wrong", "a function pattern without its return type matches no typed function"
         r = merged_all(r)  # `all:` of the kind and the `has` is the one rule
+        alts = r.get("any") if isinstance(r.get("any"), list) else []
+        if r.get("kind") == "function_expression" or any(isinstance(x, dict) and x.get("kind") == "function_expression" for x in alts):
+            return "wrong", "`function_expression` is a function written as a value, not a function declaration"
         has = r.get("has")
         if not declares_functions(r) or not isinstance(has, dict):
             return "unrecognized", "not a function_declaration with `has`"
@@ -320,7 +332,9 @@ CASES = {
          'ast-grep run -p "function \\$F(\\$\\$\\$A): Relay { \\$\\$\\$B }" src',
          RULE("  kind: function_declaration\n  has:\n    field: return_type\n    kind: type_annotation\n    has:\n      kind: type_identifier\n      regex: ^Relay$"),
          # The live answers' form (rubric review, 2026-10-27): an anchored regex on the annotation, its colon included.
-         RULE("  kind: function_declaration\n  has:\n    field: return_type\n    kind: type_annotation\n    regex: ^:\\s*Relay$")],
+         RULE("  kind: function_declaration\n  has:\n    field: return_type\n    kind: type_annotation\n    regex: ^:\\s*Relay$"),
+         # `all:` of the kind and the `has` is the one rule (the floor's gap-fill iter-3 t1).
+         RULE("  all:\n    - kind: function_declaration\n    - has:\n        field: return_type\n        regex: \"^: Relay$\"")],
         ["ast-grep run -l ts -p 'function $F($$$A) { $$$B }' src",
          "ast-grep run -p 'export function $F($$$A): Relay { $$$B }' src",
          "ast-grep run -p 'function $F($$$A): Relay { $$$B }' -l TypeScript src/core",
@@ -328,6 +342,7 @@ CASES = {
          "ast-grep run -p 'function $F($$$A): Relay { $$$B }' -l rust src",
          'ast-grep run -p "function $F($$$A): Relay { $$$B }" src',
          RULE("  kind: function_declaration\n  has:\n    field: return_type\n    kind: type_annotation\n    regex: Relay"),
+         RULE("  all:\n    - kind: function_declaration\n    - has:\n        field: return_type\n        regex: Relay"),
          RULE("  kind: function_declaration\n  has:\n    field: return_type\n    has:\n      kind: type_identifier\n      regex: ^Relay$\n      stopBy: end")]),
     "ret-arrow": (
         ["ast-grep run -p 'const $N = ($$$A): Socket => $B' src", "ast-grep -p 'const $V = ($$$): Socket => $BODY' -l ts src/",
@@ -371,12 +386,16 @@ CASES = {
                    # `function` keyword" arguably covers `function*`, so either set is right.
                    RULE("  any:\n    - kind: function_declaration\n    - kind: generator_function_declaration\n  has:\n    field: body\n    kind: statement_block\n    has:\n      kind: await_expression\n      stopBy: end"),
                    RULE("  any:\n    - kind: function_declaration\n  has:\n    pattern: await $E\n    stopBy: end"),
+                   # A `:has()` selector reaches any depth, as `has` with stopBy: end does (the floor's gap-fill iter-2 t4).
+                   "ast-grep run -k 'function_declaration:has(await_expression)' src/",
                    # `all:` of the kind and the `has` is the one rule (the floor's gap-fill t4).
                    RULE("  all:\n    - kind: function_declaration\n    - has:\n        pattern: await $A\n        stopBy: end")],
                   [RULE("  kind: function_declaration\n  has:\n    pattern: await $E"), "ast-grep run -p 'await $E' src",
                    RULE("  kind: function_declaration\n  has:\n    field: body\n    kind: statement_block\n    has:\n      kind: await_expression"),
                    RULE("  any:\n    - kind: function_declaration\n    - kind: generator_function_declaration\n  has:\n    pattern: await $E"),
                    RULE("  any:\n    - kind: generator_function_declaration\n  has:\n    pattern: await $E\n    stopBy: end"),
+                   "ast-grep run -k 'function_declaration:has(await $X)' src", "ast-grep run -k 'function_declaration:has(call_expression)' src",
+                   "ast-grep run -k 'function_expression:has(await_expression)' src",
                    RULE("  any:\n    - kind: function_declaration\n    - kind: arrow_function\n  has:\n    pattern: await $E\n    stopBy: end")]),
     "log-in-try": ([RULE("  pattern: loadMeadow($$$A)\n  inside:\n    kind: try_statement\n    stopBy: end"),
                     RULE("  pattern: loadMeadow($$$)\n  inside:\n    kind: try_statement\n    field: body\n    stopBy: end"),
@@ -402,6 +421,7 @@ NAMED = [
     ("ret-arrow", "ast-grep run -p 'const $NAME = ($ARG): Socket => $BODY' --selector arrow_function -l TypeScript src", "exactly one parameter"),
     ("ret-decl", "ast-grep run -p 'function $F($A): Relay { $$$B }' -l ts src", "exactly one parameter"),
     ("public-types", "ast-grep run -p 'export type { $X }' -l typescript src/index.ts", "exactly one export specifier"),
+    ("await-any", RULE("  any:\n    - kind: function_declaration\n    - kind: function_expression\n    - kind: generator_function_declaration\n  has:\n    pattern: await $X\n    stopBy: end"), "written as a value"),
     ("log-in-try", RULE("  all:\n    - pattern: loadMeadow($A)\n    - inside:\n        kind: try_statement\n        stopBy: end"), "exactly one argument"),
 ]
 # W1r carries a wrong's reason to the model (round 4): no reason may hand it the fix itself.
