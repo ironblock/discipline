@@ -1,8 +1,8 @@
 """The execution audit of the static grader (#971; the maintainer, 2026-10-27): python3 -I audit.py --execute PASS_DIR...
 
 Offline, after the passes, out of the model's sight, and never the verdict. For each pass directory (`run_pass.py`'s
-DIR, its log at `run/session.log` and its instance at `run/services/fixture/`), it takes the last well-formed answer
-command, judges it statically (`rubric.py`, the verdict), runs it confined against the instance's pristine copy
+DIR, its log at `run/session.log` and its instance at `run/services/fixture/`), it takes the task turn's last well-formed
+answer command (as `check.py` does: an answer resubmitted in the notes turn is reported as `resubmitted`, never audited), judges it statically (`rubric.py`, the verdict), runs it confined against the instance's pristine copy
 (`command.py`, macOS only) and compares its matched lines with the truth. It prints one JSON line per pass, and
 `disagree` when the two verdicts differ, which is where the rubric should be looked at.
 
@@ -20,9 +20,12 @@ from tasks import TASKS  # noqa: E402
 ANSWER_NAMES = {json.load(open(os.path.join(HERE, "answer-tool.json")))["name"], "answer"}
 
 
-def last_answer(log):
+def last_answer(log, turn=None):
+    """The last well-formed answer command in the log, or in TURN only."""
     cmd = None
     for line in log:
+        if turn is not None and line.get("turn") != turn:
+            continue
         if line.get("kind") == "tool_call" and line.get("name") in ANSWER_NAMES and line.get("outcome") != "refused":
             try:
                 args = json.loads(line.get("arguments") or "")
@@ -35,12 +38,15 @@ def last_answer(log):
 
 def audit(pass_dir):
     log = [json.loads(l) for l in open(os.path.join(pass_dir, "run", "session.log")) if l.strip()]
-    task = next(l["task"] for l in log if l.get("kind") == "ask" and l.get("task"))
+    ask = next(l for l in log if l.get("kind") == "ask" and l.get("task"))
+    task, turn = ask["task"], ask["turn"]
     family = next(t["family"] for t in TASKS if t["id"] == task)
     fixture = os.path.join(pass_dir, "run", "services", "fixture")
     truth = json.load(open(os.path.join(fixture, "truth.json")))
-    cmd = last_answer(log)
-    row = {"pass": os.path.relpath(pass_dir), "task": task, "command": cmd}
+    cmd = last_answer(log, turn)
+    later = last_answer([l for l in log if isinstance(l.get("turn"), int) and l["turn"] > turn])
+    row = {"pass": os.path.relpath(pass_dir), "task": task, "command": cmd, "resubmitted": later is not None,
+           **({"resubmitted_command": later} if later is not None else {})}
     if cmd is None:
         return dict(row, static="no answer", executed=None, disagree=False)
     verdict, why = rubric.judge(cmd, family, truth["params"])
@@ -52,7 +58,20 @@ def audit(pass_dir):
     return dict(row, static=verdict, why=why, executed=executed, disagree=(verdict == "right") != (executed == "right"))
 
 
+def selftest():
+    """The task turn decides: a notes-turn resubmission is reported, never audited (round 5)."""
+    call = lambda turn, cmd: {"kind": "tool_call", "name": "submit_answer", "turn": turn, "outcome": "ran", "arguments": json.dumps({"command": cmd})}
+    log = [{"kind": "ask", "task": "t", "turn": 1}, call(1, "a"), call(1, "b"), {"kind": "ask", "task": "t", "turn": 2}, call(2, "c")]
+    bad = 0
+    if last_answer(log, 1) != "b" or last_answer(log) != "c" or last_answer(log[:3], 2) is not None:
+        print(f"audit: task turn {last_answer(log, 1)!r}, whole log {last_answer(log)!r}"); bad += 1
+    print(f"audit: the task turn's answer and a resubmission, {bad} wrong")
+    return 1 if bad else 0
+
+
 if __name__ == "__main__":
+    if sys.argv[1:] == ["--selftest"]:
+        sys.exit(selftest())
     if sys.argv[1:2] != ["--execute"] or len(sys.argv) < 3:
         sys.exit(__doc__)
     if sys.platform != "darwin":

@@ -63,6 +63,9 @@ def overbroad(family, p):
         "log-in-try": "ast-grep run -k 'try_statement > statement_block call_expression' -l ts src",
         "ret-arrow": RULE(f"  kind: arrow_function\n  has:\n    field: return_type\n    has:\n      kind: type_identifier\n      regex: ^{p['arrow_target']}$"),
         "ret-decl": RULE(f"  kind: function_declaration\n  has:\n    field: return_type\n    has:\n      kind: type_identifier\n      regex: ^{p['target']}$\n      stopBy: end"),
+        # Round 5: a two-argument log call in a try, and a barrel line exporting two types at once.
+        "log-in-try-onearg": RULE(f"  all:\n    - pattern: {p['log_fn']}($A)\n    - inside:\n        kind: try_statement\n        stopBy: end"),
+        "public-types-onename": "ast-grep run -p 'export type { $X }' -l typescript src/index.ts",
     }.get(family)
 
 
@@ -72,7 +75,13 @@ def alternatives(family, p):
     return {
         "ret-decl": [RULE(f"  kind: function_declaration\n  has:\n    field: return_type\n    kind: type_annotation\n    regex: ^:\\s*{p['target']}$")],
         "ret-arrow": [RULE(f"  kind: arrow_function\n  has:\n    field: return_type\n    kind: type_annotation\n    regex: ^:\\s*{p['arrow_target']}$\n"
-                           "  inside:\n    kind: variable_declarator\n    inside:\n      kind: lexical_declaration\n      regex: ^const")],
+                           "  inside:\n    kind: variable_declarator\n    inside:\n      kind: lexical_declaration\n      regex: ^const"),
+                      # Round 5, the Flash-Next instance's h1: flow style, `all:` of the return type and the const.
+                      "ast-grep scan --inline-rules '{language: typescript, id: q, rule: {kind: arrow_function, all: [{has: {field: return_type, "
+                      f"kind: type_annotation, has: {{kind: type_identifier, regex: ^{p['arrow_target']}$}}}}}}, {{inside: {{kind: variable_declarator, "
+                      "field: value, inside: {kind: lexical_declaration, regex: ^const}}}]}}' src"],
+        # Round 5, the Flash-Next instance's t4: the body, then an await at any depth within it.
+        "await-any": [RULE("  kind: function_declaration\n  has:\n    field: body\n    kind: statement_block\n    has:\n      kind: await_expression\n      stopBy: end")],
         "public-surface": ["ast-grep run -l ts -k export_statement src/index.ts"],
         "public-types": ["ast-grep run -p \"export type { \\$\\$\\$ } from '\\$PATH';\" -l ts src/index.ts"],
         "log-in-try": [RULE(f"  all:\n    - pattern: {p['log_fn']}($$$)\n    - inside:\n        pattern: \"try {{ $$$ }}\"\n        stopBy: end"),
@@ -86,6 +95,12 @@ def named_wrongs(family, p):
     return {
         "public-surface": ["ast-grep run -p 'export $$$' -l ts src/index.ts"],
         "await-any": [RULE("  all:\n    - pattern: function $N($$$) { $$$ }\n    - has:\n        pattern: await $X\n        stopBy: end")],
+        # Round 5, the floor's answers: `...` as literal text, and `$A` as one parameter.
+        "ret-decl": [f"ast-grep run -p 'function $NAME(...$ARGS): {p['target']} {{}}' src",
+                     f"ast-grep run -p 'function $F($A): {p['target']} {{ $$$B }}' -l ts src"],
+        "zero-calls": [f"ast-grep run -p '{p['zero_fn']}(...)' src"],
+        "ret-arrow": [f"ast-grep run -p 'const $NAME = ($ARG): {p['arrow_target']} => $BODY' --selector arrow_function -l TypeScript src",
+                      f"ast-grep run -p 'const $NAME = ($ARG): {p['arrow_target']} => $BODY' -l ts src"],
     }.get(family, [])
 
 
@@ -102,7 +117,10 @@ def right(cmd, root, want):
         return False
 
 
-ALTERNATIVES = ("ret-decl", "ret-arrow", "public-surface", "public-types", "log-in-try")
+ALTERNATIVES = ("ret-decl", "ret-arrow", "public-surface", "public-types", "log-in-try", "await-any")
+# Over-broad forms caught by a distractor (round 4's suffix near-name; round 5's two-argument call and two-name export):
+# each must execute wrong on every seed.
+VARIANTS = {"fn-outline": "suffix", "itf-outline": "suffix", "log-in-try": "onearg", "public-types": "onename"}
 OVERBROAD = ("fn-outline", "itf-outline", "maybe-defined", "log-in-try", "ret-arrow", "ret-decl")
 
 
@@ -131,12 +149,12 @@ def main():
                 kf = kind_filtered(fam, truth["params"])
                 if kf and not right(kf, root, want):
                     kind_wrong[fam] = kind_wrong.get(fam, 0) + 1
-                for nw in named_wrongs(fam, truth["params"]):
+                for i, nw in enumerate(named_wrongs(fam, truth["params"])):
                     if not right(nw, root, want):
-                        named_wrong_wrong[fam] = named_wrong_wrong.get(fam, 0) + 1
-                for suffix in (overbroad(fam + "-suffix", truth["params"]),):
-                    if suffix and right(suffix, root, want):
-                        broad_right[fam + "-suffix"] = broad_right.get(fam + "-suffix", 0) + 1
+                        named_wrong_wrong[(fam, i)] = named_wrong_wrong.get((fam, i), 0) + 1
+                variant = overbroad(f"{fam}-{VARIANTS[fam]}", truth["params"]) if fam in VARIANTS else None
+                if variant and right(variant, root, want):
+                    broad_right[f"{fam}-{VARIANTS[fam]}"] = broad_right.get(f"{fam}-{VARIANTS[fam]}", 0) + 1
                 broad = overbroad(fam, truth["params"])
                 if broad and right(broad, root, want):
                     broad_right[fam] = broad_right.get(fam, 0) + 1
@@ -154,13 +172,13 @@ def main():
         if fam in ALTERNATIVES:
             print(f"ref: {fam}: alternatives executed wrong {alt_wrong.get(fam, 0)}")
             bad += alt_wrong.get(fam, 0) > 0
-        if fam in ("fn-outline", "itf-outline"):
-            sb = broad_right.get(fam + "-suffix", 0)
-            print(f"ref: {fam}: one-end anchored executed right {sb}/{total}")
+        if fam in VARIANTS:
+            sb = broad_right.get(f"{fam}-{VARIANTS[fam]}", 0)
+            print(f"ref: {fam}: the {VARIANTS[fam]} over-broad form executed right {sb}/{total}")
             bad += sb > 0
-        if fam in ("public-surface", "await-any"):
-            nw = named_wrong_wrong.get(fam, 0)
-            print(f"ref: {fam}: the named wrong executed wrong on {nw}/{total} seeds")
+        for i, _ in enumerate(named_wrongs(fam, gen.build(1)[1]["params"])):
+            nw = named_wrong_wrong.get((fam, i), 0)
+            print(f"ref: {fam}: named wrong {i + 1} executed wrong on {nw}/{total} seeds")
             bad += nw == 0
         if fam == "maybe-defined":
             k = kind_wrong.get(fam, 0)
