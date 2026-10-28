@@ -22,7 +22,8 @@ The first slice of #971: ast-grep (`run`, `outline` and `scan`) on small TypeScr
   - a second call inside every `try`, which "any call in a try" also catches;
   - a `let` arrow returning the arrow type, which a rule without its `const` also catches;
   - the maybe-defined name, when it's defined, as one of four kinds (type alias, interface, function, class), so a `--type` filter the ask doesn't name also goes wrong (rubric review, 2026-10-27);
-  - `Promise<T>` returns beside `T`, already present.
+  - `Promise<T>` returns beside `T`, already present;
+  - round 5, in their families' truth: a log call with two arguments inside a `try`, which `log($A)` misses; a barrel line exporting two types at once, `export type { A, B }`, which `export type { $X }` misses; and a function and a `const` arrow of the target types with two parameters, which `($A)` misses. Before them, all three forms executed right on all 20 seeds, since every such call, export and arrow had one.
 
 ## Tasks: `tasks.py`
 Twelve operations: six tutorial and six held-out. Each asks for the command that matches a family's lines "and nothing else". A held-out task tests the same gap on another surface:
@@ -46,7 +47,7 @@ Twelve operations: six tutorial and six held-out. Each asks for the command that
   - **`--inline-rules`** is read through `yamlish.py` (block and flow YAML, the subset rules use; anything else is unrecognized). The rubric checks `kind`, `pattern`, `regex`, `field`, and that a relation which must reach any depth says `stopBy: end`.
   - **Paths:** the whole project is `src`, `.` or none; the barrel is `src/index.ts` alone. `--lang`, if given, is TypeScript.
   - **"As specific as necessary":** a form that also matches what the task excludes is wrong. Examples: an outline `--match` that isn't `^NAME$` (it matches names, signatures and first lines; ruled wrong by the maintainer, 2026-10-27); an arrow rule without its `const`; `--items` left at exports for a function that isn't exported.
-  - **Selftest:** 30 right spellings (references and equivalents: flag order, long and short, `sg`, other metavariable names, other quoting, flow-style YAML, field-based rules, the `=> $$$` body, `from $P`, a capitalised `--lang`) and 34 not right (26 wrong with a named reason, 8 unrecognized), the floor's over-broad answers among them. `ref.py` adds 20 seeds: every reference is right, and no naive command is.
+  - **Selftest:** 42 right spellings (references and equivalents: flag order, long and short, `sg`, other metavariable names, other quoting, flow-style YAML, field-based rules, the `=> $$$` body, `from $P`, a capitalised `--lang`) and 39 not right (31 wrong with a named reason, 8 unrecognized), the floor's over-broad answers among them, and 11 named wrongs whose reasons must say why. `ref.py` adds 20 seeds: every reference is right, and no naive command is.
 - **The miss** (t2, h2) answers through `answer-tool-miss.json`, the same `submit_answer` with `exit_status_when_none` (an integer) and `prints_nothing_when_none` (a boolean), all required.
   - It's right only when the command passes the rubric and both fields match `miss_truth.json` for its subcommand.
   - That truth is measured per ast-grep version. On 0.44.0: `run` prints nothing and exits 1; `outline` prints `nothing found` and exits 0; `scan` prints nothing and exits 0.
@@ -63,8 +64,11 @@ Twelve operations: six tutorial and six held-out. Each asks for the command that
   - **A `--match` anchored at one end only is wrong**, by the maintainer's unanchored ruling. The suffix near-names make it execute wrong on all 20 seeds; before them it executed right on all 20.
   - **t6 holds the ask's word:** it asks for an outline.
   - **Every wrong's reason is model-facing now** (W1r, below), so it states an ast-grep fact or the ask's terms, never the fix. `rubric.py`'s `LEAKS` test fails if any reason names one (for example `--items structure`, or `stopBy: end` as the remedy).
+- **Round 5 (Dispatch, 2026-10-28; provisional).** Each went in RED first and was executed on all 20 seeds (`ref.py`):
+  - **Named wrongs, from the floor's unrecognized answers:** "`...` in a pattern is literal text: it matches only code that has `...` there" (t1's `(...$ARGS)`, t2's `name(...)`; executes wrong on 20 of 20 and, for the miss, on the 6 seeds that have calls); "`$A` in a parameter list matches exactly one parameter" (h1, and t1's declaration form; 20 of 20 each); "`$X` matches exactly one export specifier" (h3; 20 of 20); and h4's `log($A)` inside a `try` takes the one-argument reason (20 of 20). The selector forms (t5, h5) stay unrecognized.
+  - **Learned, from the Flash-Next instance's answers:** t4's `has: {field: body, kind: statement_block, has: {kind: await_expression, stopBy: end}}` (graded wrong without its inner `stopBy`, as any `has` is), and h1's flow-style `all:` of the return type and the `const`. Each executes right on all 20.
 - **Unrecognized, never a false wrong:** a form the rubric doesn't know is `unrecognized`, never `wrong`, unless the rubric names why it's wrong (no return type, one argument, unanchored, a kind selector over every call in a try). `--lang` and a rule's `language` are case-insensitive.
-- **`audit.py --execute PASS_DIR...`** is the offline audit (ast-grep only, macOS only, never the verdict). It runs each pass's answer confined against its pristine instance, compares the result with the static verdict, and prints `disagree` where they differ. It drops the answer's own output format (`--json`, `--report-style`, `--color`, `--heading`, `--format`) before asking for `--json=stream`, since ast-grep refuses `--report-style` beside `--json`. It isn't a general mechanism: a tool with destructive actions gets no execution audit.
+- **`audit.py --execute PASS_DIR...`** is the offline audit (ast-grep only, macOS only, never the verdict). It runs each pass's answer, the task turn's last as `check.py` grades it (round 5; it had read the last in the whole log, so a notes-turn resubmission was audited in its place), confined against its pristine instance, compares the result with the static verdict, and prints `disagree` where they differ. It drops the answer's own output format (`--json`, `--report-style`, `--color`, `--heading`, `--format`) before asking for `--json=stream`, since ast-grep refuses `--report-style` beside `--json`. It isn't a general mechanism: a tool with destructive actions gets no execution audit.
   - On the first 24 live answers (the Flash-Next instance) it found 4 disagreements:
     - three unanchored outline `--match` answers that execution passed, because their fixtures had no near-name;
     - one type-only-export rule built from `all`/`any`/`not`, which the rubric doesn't know.
@@ -139,6 +143,7 @@ The note-writer experiment (Dispatch, 2026-10-27). Its asks are the experiment's
     W0 opens "That command was right", which an unrecognized command must never be told; W1 opens "That command was graded wrong", which a right command with wrong miss fields must never be told.
 - **`run_pass.py --writers FILE`** passes the table to the check. **`--no-notes`** takes a pass without its notes turn, as a held-out check.
 - **pass.json gains, per task,** `failure` (the kind, re-derived with `check.grade` from the turn's own calls and the pass's truth) and `writer` (which ask followed the grade, by its text).
+  - And `resubmitted` (Dispatch, 2026-10-28): `submit_answer` stays available in the notes turn, and a call there is recorded, with `resubmitted_command`, never graded. A descriptor: a sign the reason landed. `loop.jsonl` carries both.
 - **`loop.py --out DIR [--writers FILE] [--skills] [--floor] [--attempts N] [--notes FILE] [--before CMD] [--max-seconds S] [-- DRIVE_ARGS]`:**
   - `--floor` takes every pass under the floor's regimen (`bare-floor.toml`), as `run_pass.py --floor` does. Without it, a floor endpoint would run under the production entry's regimen.
   - For t1..t6 in order, it runs a fresh instance with the current notes. An attempt that isn't clean is retried on the same operation, with the notes it left, up to N times (4). Then the loop moves on, carrying the notes.
@@ -163,4 +168,6 @@ In `./verify.sh`'s scenarios check:
 - `rubric.py`;
 - `make_scenario.py --check`;
 - `pass.py --selftest`;
+- `loop.py --selftest` and `run_pass.py --selftest`;
+- `audit.py --selftest`;
 - `probe_key.py --selftest`.

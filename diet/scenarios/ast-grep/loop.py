@@ -60,7 +60,8 @@ def one(task, attempt, notes, args, held_out):
            "seconds": round(time.time() - started), "clean": bool(v.get("clean")) and not stopped, "failure": t.get("failure"),
            "writer": t.get("writer"), "notes_before_chars": len(open(notes).read().strip()),
            "notes_after_chars": len(open(after).read().strip()) if os.path.exists(after) and not held_out else None,
-           "pass_json": p if v else None, "queued_for_review": t.get("failure") == "unrecognized"}
+           "pass_json": p if v else None, "queued_for_review": t.get("failure") == "unrecognized",
+           "resubmitted": t.get("resubmitted"), **({"resubmitted_command": t["resubmitted_command"]} if "resubmitted_command" in t else {})}
     with open(os.path.join(args["out"], "loop.jsonl"), "a") as f:
         f.write(json.dumps(row) + "\n")
     print(json.dumps(row), flush=True)

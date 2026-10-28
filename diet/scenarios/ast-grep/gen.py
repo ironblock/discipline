@@ -73,8 +73,8 @@ def build(seed):
 
     # Helpers every body calls: the log function, the event emitter, the tracker and the zero-call function.
     helper = paths[0]
-    g.emit(helper, f"export function {log_fn}(message: string): void {{")
-    g.emit(helper, "  console.log(message);")
+    g.emit(helper, f"export function {log_fn}(message: string, detail?: string): void {{")
+    g.emit(helper, "  console.log(message, detail);")
     g.emit(helper, "}")
     g.emit(helper, "")
     g.emit(helper, "export const $emit = (event: string): string => event;")
@@ -228,6 +228,38 @@ def build(seed):
     g.emit(near, "")
     g.emit(near, f"export let {g.fn_name()} = (id: string): {arrow_target} => ({{ id }} as never);")
     g.emit(near, "")
+    # Round 5 (Dispatch, 2026-10-28): a two-argument log call inside a try, so `log($A)` misses it, and a barrel line
+    # exporting two types at once, so `export type { $X }` misses it. Both are in their families' truth.
+    two = rng.choice(paths[1:])
+    two_fn = g.fn_name()
+    g.emit(two, f"export function {two_fn}(id: string): void {{")
+    g.emit(two, "  try {")
+    lines_of["log-in-try"].append(f"{two}:{g.emit(two, f'    {log_fn}(id, {rng.choice(NOUNS)!r});')}")
+    g.emit(two, "  } catch (err) {")
+    g.emit(two, "    void err;")
+    g.emit(two, "  }")
+    g.emit(two, "}")
+    g.emit(two, "")
+    # And two parameters on a function and a const arrow of the target types, so `($A)` misses them.
+    wide = rng.choice(paths[1:])
+    wide_decl = {"name": g.fn_name(), "kind": "decl", "path": wide, "ret": target, "awaits": "none"}
+    wide_decl["line"] = g.emit(wide, f"export function {wide_decl['name']}(id: string, size: number): {target} {{")
+    g.emit(wide, "  return { id, size } as never;")
+    g.emit(wide, "}")
+    g.emit(wide, "")
+    wide_arrow = {"name": g.fn_name(), "kind": "arrow", "path": wide, "ret": arrow_target}
+    wide_arrow["line"] = g.emit(wide, f"export const {wide_arrow['name']} = (id: string, size: number): {arrow_target} => ({{ id, size }} as never);")
+    g.emit(wide, "")
+    pair_path = rng.choice(paths[1:])
+    pair = [g.word(NOUNS, lambda w: cap(w) + "Pair") for _ in range(2)]
+    for name in pair:
+        g.emit(pair_path, f"export interface {name} {{")
+        g.emit(pair_path, "  id: string;")
+        g.emit(pair_path, "}")
+        g.emit(pair_path, "")
+    at_pair = f"src/index.ts:{g.emit('src/index.ts', f'export type {{ {pair[0]}, {pair[1]} }} from {chr(39)}./{pair_path[4:-3]}{chr(39)};')}"
+    barrel_lines.append(at_pair)
+    type_lines.append(at_pair)
     truth["params"] = {"target": target, "arrow_target": arrow_target, "zero_fn": zero_fn, "maybe": maybe,
                        "log_fn": log_fn, "line_fn": line_fn["name"], "line_fn_exported": line_fn["export"],
                        "line_itf": line_itf["name"]}
@@ -235,8 +267,8 @@ def build(seed):
     # generator wrote there, never what ast-grep says.
     at = lambda f: f"{f['path']}:{f['line']}"
     a = truth["answers"]
-    a["ret-decl"] = sorted(at(f) for f in decls if f["ret"] == target)
-    a["ret-arrow"] = sorted(at(f) for f in funcs if f["kind"] == "arrow" and f["ret"] == arrow_target)
+    a["ret-decl"] = sorted([at(f) for f in decls if f["ret"] == target] + [at(wide_decl)])
+    a["ret-arrow"] = sorted([at(f) for f in funcs if f["kind"] == "arrow" and f["ret"] == arrow_target] + [at(wide_arrow)])
     a["zero-calls"] = sorted(lines_of["zero-calls"])
     a["maybe-defined"] = [maybe_line] if defined else []
     a["public-surface"] = sorted(barrel_lines)
@@ -293,7 +325,7 @@ def selftest():
                      "zero-calls": lambda t: f"{p['zero_fn']}(" in t and not t.lstrip().startswith(("//", "export")),
                      "maybe-defined": lambda t: any(f"export {k} {p['maybe']}" in t for k in ("type", "interface", "function", "class")),
                      "public-surface": lambda t: t.startswith("export "), "public-types": lambda t: t.startswith("export type {"),
-                     "await-any": lambda t: "async function " in t, "log-in-try": lambda t: f"{p['log_fn']}(id)" in t,
+                     "await-any": lambda t: "async function " in t, "log-in-try": lambda t: f"{p['log_fn']}(id" in t,
                      "emit-calls": lambda t: "$emit(" in t, "track-calls": lambda t: "$track(" in t,
                      "fn-outline": lambda t: f"function {p['line_fn']}(" in t, "itf-outline": lambda t: f"interface {p['line_itf']} " in t}
             for fam, lines in truth["answers"].items():

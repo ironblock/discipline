@@ -133,6 +133,45 @@ def outline_named(form, name, kind, need_structure):
     return "right", "an anchored outline"
 
 
+def patterns_of(form):
+    """Every pattern the command gives: `--pattern`, and each `pattern` key in its rule at any depth."""
+    found = list(form["opts"].get("--pattern", []))
+    stack = [rule_of(form)] if form["sub"] == "scan" else []
+    while stack:
+        node = stack.pop()
+        if isinstance(node, dict):
+            found += [v for k, v in node.items() if k == "pattern" and isinstance(v, str)]
+            stack += list(node.values())
+        elif isinstance(node, list):
+            stack += node
+    return found
+
+
+def one_meta(form, rights, inside):
+    """A run pattern that would be one of RIGHTS but for a single metavariable inside INSIDE (`(...)`, `{...}`) where
+    the right form has `$$$`."""
+    pat = one(form, "--pattern")
+    if form["sub"] != "run" or pat is None:
+        return False
+    one_ = inside[0] + "$M" + inside[1]
+    return one_ in canon(pat) and canon(pat).replace(one_, inside[0] + "$$$" + inside[1], 1) in {canon(r) for r in rights}
+
+
+def merged_all(r):
+    """A rule whose `all:` items are merged into it, when no key is given twice; else the rule as it is."""
+    if not isinstance(r.get("all"), list) or not all(isinstance(x, dict) for x in r["all"]):
+        return r
+    merged = {k: v for k, v in r.items() if k != "all"}
+    for x in r["all"]:
+        if set(x) & set(merged):
+            return r
+        merged.update(x)
+    return merged
+
+
+ONE_PARAM = "`$A` in a parameter list matches exactly one parameter"
+
+
 def untyped_function(node):
     """A rule node whose pattern is a function declaration without its return type."""
     return isinstance(node, dict) and pattern_is(node, "function $F($$$A) { $$$B }")
@@ -145,6 +184,9 @@ def judge(cmd, family, p):
         return "wrong", f"refused: {why}"
     if not langs_ok(f):
         return "wrong", "--lang is not TypeScript"
+    # Round 5 (Dispatch, 2026-10-28): the floor's `(...$ARGS)` and `name(...)`.
+    if any("..." in pat for pat in patterns_of(f)):
+        return "wrong", "`...` in a pattern is literal text: it matches only code that has `...` there"
     if family == "ret-decl":
         if not whole_project(f):
             return "wrong", "not the whole project"
@@ -155,6 +197,8 @@ def judge(cmd, family, p):
             return "right", "a return-type rule"
         if r and r.get("kind") == "function_declaration" and type_wrong(r.get("has"), p["target"]):
             return "wrong", type_wrong(r.get("has"), p["target"])
+        if one_meta(f, [f"function $F($$$A): {p['target']} {{ $$$B }}"], "()"):
+            return "wrong", ONE_PARAM
         if f["sub"] == "run" and canon(one(f, "--pattern") or "") == canon("function $F($$$A) { $$$B }"):
             return "wrong", "a function pattern without a return type matches only functions declared without one"
         return "unrecognized", "not a form the rubric knows"
@@ -163,7 +207,10 @@ def judge(cmd, family, p):
             return "wrong", "not the whole project"
         if search(f, f"const $N = ($$$A): {p['arrow_target']} => $B", f"const $N = ($$$A): {p['arrow_target']} => $$$B"):
             return "right", "the const arrow pattern"
+        if one_meta(f, [f"const $N = ($$$A): {p['arrow_target']} => $B"], "()"):
+            return "wrong", ONE_PARAM
         r = rule_of(f) if f["sub"] == "scan" else None
+        r = merged_all(r) if r else r  # `all:` of the return type and the const is the one rule (round 5)
         if r and r.get("kind") == "arrow_function" and type_wrong(r.get("has"), p["arrow_target"]):
             return "wrong", type_wrong(r.get("has"), p["arrow_target"])
         if r and r.get("kind") == "arrow_function" and direct_type(r.get("has"), p["arrow_target"]):
@@ -205,9 +252,12 @@ def judge(cmd, family, p):
     if family == "public-types":
         if not only(f, "src/index.ts"):
             return "wrong", "not the entry point alone"
-        if search(f, "export type { $$$S }", "export type { $$$S } from $$$P", "export type { $$$S } from $P", "export type { $$$S } from '$P'",
-                  "export type { $$$S } from '$P';"):
+        rights = ("export type { $$$S }", "export type { $$$S } from $$$P", "export type { $$$S } from $P", "export type { $$$S } from '$P'",
+                  "export type { $$$S } from '$P';")
+        if search(f, *rights):
             return "right", "the type-export pattern"
+        if one_meta(f, rights, "{}"):
+            return "wrong", "`$X` matches exactly one export specifier"
         return "unrecognized", "not a form the rubric knows"
     if family == "await-any":
         r = rule_of(f) if f["sub"] == "scan" else None
@@ -219,6 +269,11 @@ def judge(cmd, family, p):
         has = r.get("has")
         if r.get("kind") != "function_declaration" or not isinstance(has, dict):
             return "unrecognized", "not a function_declaration with `has`"
+        inner = has.get("has")
+        if has.get("field") == "body" and has.get("kind") == "statement_block" and isinstance(inner, dict) and (
+                pattern_is(inner, "await $E") or inner.get("kind") == "await_expression"):
+            # Round 5, the Flash-Next instance's t4: the body, then the await within it.
+            return ("right", "the body has await, stopBy end") if deep(inner) else ("wrong", "`has` looks only at a node's direct children by default")
         if not (pattern_is(has, "await $E") or has.get("kind") == "await_expression"):
             return "unrecognized", "`has` is not an await"
         return ("right", "has await, stopBy end") if deep(has) else ("wrong", "`has` looks only at a node's direct children by default")
@@ -226,17 +281,12 @@ def judge(cmd, family, p):
         r = rule_of(f) if f["sub"] == "scan" else None
         if not r or not whole_project(f):
             return ("wrong", "a relation needs a rule") if f["sub"] != "scan" else ("unrecognized", "a rule the rubric can't read")
-        if set(r) == {"all"} and isinstance(r["all"], list) and all(isinstance(x, dict) for x in r["all"]):
-            merged = {}
-            for x in r["all"]:  # `all:` of a pattern and an inside, in either order, is the one rule
-                if set(x) & set(merged):
-                    merged = None
-                    break
-                merged.update(x)
-            r = merged or r
+        r = merged_all(r)  # `all:` of a pattern and an inside, in either order, is the one rule
         inside = r.get("inside")
         # `inside: {pattern: "try { $$$ }"}` is the try statement too (round 4).
         is_try = isinstance(inside, dict) and (inside.get("kind") == "try_statement" or pattern_is(inside, "try { $$$ }"))
+        if is_try and pattern_is(r, f"{p['log_fn']}($A)"):
+            return "wrong", "`$A` matches exactly one argument, and a call may take more or none"
         if not pattern_is(r, f"{p['log_fn']}($$$A)") or not is_try:
             return "unrecognized", "not the call inside a try_statement"
         return ("right", "inside try, stopBy end") if deep(inside) else ("wrong", "`inside` looks only at a node's direct parent by default")
@@ -269,7 +319,10 @@ CASES = {
         ["ast-grep run -p 'const $N = ($$$A): Socket => $B' src", "ast-grep -p 'const $V = ($$$): Socket => $BODY' -l ts src/",
          "ast-grep run -p 'const $NAME = ($$$): Socket => $$$' -l ts src",
          RULE("  kind: arrow_function\n  has:\n    kind: type_annotation\n    field: return_type\n    has:\n      kind: type_identifier\n      regex: ^Socket$\n  inside:\n    kind: variable_declarator\n    inside:\n      kind: lexical_declaration\n      regex: ^const\\b"),
-         RULE("  kind: arrow_function\n  has:\n    field: return_type\n    kind: type_annotation\n    regex: ^:\\s*Socket$\n  inside:\n    kind: variable_declarator\n    inside:\n      kind: lexical_declaration\n      regex: ^const")],
+         RULE("  kind: arrow_function\n  has:\n    field: return_type\n    kind: type_annotation\n    regex: ^:\\s*Socket$\n  inside:\n    kind: variable_declarator\n    inside:\n      kind: lexical_declaration\n      regex: ^const"),
+         # Round 5, the Flash-Next instance's h1: flow style, `all:` of the return type and the const.
+         "ast-grep scan --inline-rules '{language: typescript, id: q, rule: {kind: arrow_function, all: [{has: {field: return_type, kind: type_annotation, "
+         "has: {kind: type_identifier, regex: ^Socket$}}}, {inside: {kind: variable_declarator, field: value, inside: {kind: lexical_declaration, regex: ^const}}}]}}' src"],
         ["ast-grep run -p 'const $N = ($$$A) => $B' src", "ast-grep run -p 'let $N = ($$$A): Socket => $B' src",
          RULE("  kind: arrow_function\n  has:\n    field: return_type\n    has:\n      kind: type_identifier\n      regex: ^Socket$")]),
     "zero-calls": (["ast-grep run -p 'probeMeadow($$$A)' src", "ast-grep --pattern 'probeMeadow($$$)' --lang ts .", RULE("  pattern: probeMeadow($$$)")],
@@ -297,8 +350,11 @@ CASES = {
                       "ast-grep run -p 'export type { $$$S } from $$$P' src/index.ts"],
                      ["ast-grep run -p 'export type { $$$S }' src", "ast-grep outline src/index.ts"]),
     "await-any": ([RULE("  kind: function_declaration\n  has:\n    pattern: await $E\n    stopBy: end"),
+                   # Round 5, the Flash-Next instance's t4: the body, then an await at any depth within it.
+                   RULE("  kind: function_declaration\n  has:\n    field: body\n    kind: statement_block\n    has:\n      kind: await_expression\n      stopBy: end"),
                    "ast-grep scan --inline-rules '{id: f, language: typescript, rule: {kind: function_declaration, has: {field: body, kind: await_expression, stopBy: end}}}' src/"],
-                  [RULE("  kind: function_declaration\n  has:\n    pattern: await $E"), "ast-grep run -p 'await $E' src"]),
+                  [RULE("  kind: function_declaration\n  has:\n    pattern: await $E"), "ast-grep run -p 'await $E' src",
+                   RULE("  kind: function_declaration\n  has:\n    field: body\n    kind: statement_block\n    has:\n      kind: await_expression")]),
     "log-in-try": ([RULE("  pattern: loadMeadow($$$A)\n  inside:\n    kind: try_statement\n    stopBy: end"),
                     RULE("  pattern: loadMeadow($$$)\n  inside:\n    kind: try_statement\n    field: body\n    stopBy: end"),
                     RULE("  all:\n    - pattern: loadMeadow($$$)\n    - inside:\n        kind: try_statement\n        stopBy: end"),
@@ -317,6 +373,13 @@ NAMED = [
     ("fn-outline", "ast-grep outline src --match 'loadQuota$'", "one end"),
     ("itf-outline", "ast-grep outline src --type interface --match 'GarnetRow$'", "one end"),
     ("t6-run", "ast-grep run -p 'function loadQuota($$$): $$$ { $$$ }' -l ts src", "outline"),
+    # Round 5 (Dispatch, 2026-10-28), the floor's answers.
+    ("ret-decl", "ast-grep run -p 'function $NAME(...$ARGS): Relay {}' src", "literal text"),
+    ("zero-calls", "ast-grep run -p 'probeMeadow(...)' src", "literal text"),
+    ("ret-arrow", "ast-grep run -p 'const $NAME = ($ARG): Socket => $BODY' --selector arrow_function -l TypeScript src", "exactly one parameter"),
+    ("ret-decl", "ast-grep run -p 'function $F($A): Relay { $$$B }' -l ts src", "exactly one parameter"),
+    ("public-types", "ast-grep run -p 'export type { $X }' -l typescript src/index.ts", "exactly one export specifier"),
+    ("log-in-try", RULE("  all:\n    - pattern: loadMeadow($A)\n    - inside:\n        kind: try_statement\n        stopBy: end"), "exactly one argument"),
 ]
 # W1r carries a wrong's reason to the model (round 4): no reason may hand it the fix itself.
 LEAKS = ["--items structure", "`$$$`", "stopBy: end looks", "without stopBy"]

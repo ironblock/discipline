@@ -10,7 +10,9 @@ next pass's `--notes`. The drive is `$DIET_DRIVE`, else the built `target/debug/
 
 `--writers FILE` is the notes asks' writer table (check.py, passed as `$DIET_AST_GREP_WRITERS`). `--no-notes` takes the
 pass without its notes turn (no feedback, no notes tool): a held-out check of notes, not a lesson. pass.json gains,
-per task, `failure` (check.py's kind, re-derived from the log's own calls and the pass's truth) and `writer`.
+per task, `failure` (check.py's kind, re-derived from the log's own calls and the pass's truth) and `writer`, and
+`resubmitted` (Dispatch, 2026-10-28): whether the model called the answer tool again in its notes turn, with
+`resubmitted_command`, the last such command. A descriptor only, a sign the reason landed: never graded.
 """
 import importlib, json, os, subprocess, sys
 
@@ -66,11 +68,19 @@ def kind_into(v, lines, task, truth_path, writers, no_notes):
              for l in lines if l.get("kind") == "tool_call" and l.get("turn") == turn]
     g = check.grade({"calls": calls}, task, json.load(open(truth_path)))
     t["failure"] = g["kind"]
+    t.update(resubmission(lines, turn))
     asks = [l.get("text", "") for l in lines if l.get("kind") == "ask"]
     table = json.load(open(writers)) if writers else None
     t["writer"] = None
     if not no_notes and len(asks) > 1:
         t["writer"] = writer_of(asks[1], table)
+
+
+def resubmission(lines, turn):
+    """`resubmitted`, and the command, when a turn after TURN (the notes turn) called the answer tool well-formed."""
+    audit = importlib.import_module("audit")
+    later = audit.last_answer([l for l in lines if isinstance(l.get("turn"), int) and l["turn"] > turn])
+    return {"resubmitted": later is not None, **({"resubmitted_command": later} if later is not None else {})}
 
 
 def _kind_read(writer):
@@ -107,7 +117,11 @@ def selftest():
         print(f"run_pass: a W1r ask read as {writer_of(w1r, table)}"); bad += 1
     if writer_of(check.STUB, None) != "stub" or writer_of("something else", table) is not None:
         print("run_pass: the stub, or an unknown ask, misread"); bad += 1
-    print(f"run_pass: 7 writers matched from their asks, {bad} wrong")
+    call = lambda turn, cmd: {"kind": "tool_call", "name": check.TOOL, "turn": turn, "outcome": "ran", "arguments": json.dumps({"command": cmd})}
+    if (resubmission([call(1, "a"), call(2, "b")], 1) != {"resubmitted": True, "resubmitted_command": "b"}
+            or resubmission([call(1, "a")], 1) != {"resubmitted": False}):
+        print("run_pass: a notes-turn resubmission misread"); bad += 1
+    print(f"run_pass: 7 writers matched from their asks and a resubmission, {bad} wrong")
     return 1 if bad else 0
 
 
