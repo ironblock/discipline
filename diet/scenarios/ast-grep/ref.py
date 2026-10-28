@@ -56,6 +56,9 @@ def overbroad(family, p):
     return {
         "fn-outline": f"ast-grep outline src --items structure --match '{p['line_fn']}'",
         "itf-outline": f"ast-grep outline src --type interface --match '{p['line_itf']}'",
+        # Anchored at one end only (round 4): a suffix near-name (`<prefix><Name>`) catches it.
+        "fn-outline-suffix": f"ast-grep outline src --items structure --match '{p['line_fn']}$'",
+        "itf-outline-suffix": f"ast-grep outline src --type interface --match '{p['line_itf']}$'",
         "maybe-defined": f"ast-grep outline src --match '{p['maybe']}'",
         "log-in-try": "ast-grep run -k 'try_statement > statement_block call_expression' -l ts src",
         "ret-arrow": RULE(f"  kind: arrow_function\n  has:\n    field: return_type\n    has:\n      kind: type_identifier\n      regex: ^{p['arrow_target']}$"),
@@ -71,8 +74,18 @@ def alternatives(family, p):
         "ret-arrow": [RULE(f"  kind: arrow_function\n  has:\n    field: return_type\n    kind: type_annotation\n    regex: ^:\\s*{p['arrow_target']}$\n"
                            "  inside:\n    kind: variable_declarator\n    inside:\n      kind: lexical_declaration\n      regex: ^const")],
         "public-surface": ["ast-grep run -l ts -k export_statement src/index.ts"],
-        "log-in-try": [RULE(f"  all:\n    - pattern: {p['log_fn']}($$$)\n    - inside:\n        kind: try_statement\n        stopBy: end"),
+        "public-types": ["ast-grep run -p \"export type { \\$\\$\\$ } from '\\$PATH';\" -l ts src/index.ts"],
+        "log-in-try": [RULE(f"  all:\n    - pattern: {p['log_fn']}($$$)\n    - inside:\n        pattern: \"try {{ $$$ }}\"\n        stopBy: end"),
+                       RULE(f"  all:\n    - pattern: {p['log_fn']}($$$)\n    - inside:\n        kind: try_statement\n        stopBy: end"),
                        RULE(f"  all:\n    - inside:\n        kind: try_statement\n        stopBy: end\n    - pattern: {p['log_fn']}($$$)")],
+    }.get(family, [])
+
+
+def named_wrongs(family, p):
+    """Forms the rubric names wrong (round 4): each must execute wrong on at least one seed."""
+    return {
+        "public-surface": ["ast-grep run -p 'export $$$' -l ts src/index.ts"],
+        "await-any": [RULE("  all:\n    - pattern: function $N($$$) { $$$ }\n    - has:\n        pattern: await $X\n        stopBy: end")],
     }.get(family, [])
 
 
@@ -89,14 +102,14 @@ def right(cmd, root, want):
         return False
 
 
-ALTERNATIVES = ("ret-decl", "ret-arrow", "public-surface", "log-in-try")
+ALTERNATIVES = ("ret-decl", "ret-arrow", "public-surface", "public-types", "log-in-try")
 OVERBROAD = ("fn-outline", "itf-outline", "maybe-defined", "log-in-try", "ret-arrow", "ret-decl")
 
 
 def main():
     seeds = int(sys.argv[1]) if len(sys.argv) > 1 else 20
     ref_wrong, naive_right, broad_right, total = {}, {}, {}, 0
-    alt_wrong, kind_wrong = {}, {}
+    alt_wrong, kind_wrong, named_wrong_wrong = {}, {}, {}
     with tempfile.TemporaryDirectory() as d:
         for seed in range(1, seeds + 1):
             root = os.path.join(d, f"s{seed}")
@@ -118,6 +131,12 @@ def main():
                 kf = kind_filtered(fam, truth["params"])
                 if kf and not right(kf, root, want):
                     kind_wrong[fam] = kind_wrong.get(fam, 0) + 1
+                for nw in named_wrongs(fam, truth["params"]):
+                    if not right(nw, root, want):
+                        named_wrong_wrong[fam] = named_wrong_wrong.get(fam, 0) + 1
+                for suffix in (overbroad(fam + "-suffix", truth["params"]),):
+                    if suffix and right(suffix, root, want):
+                        broad_right[fam + "-suffix"] = broad_right.get(fam + "-suffix", 0) + 1
                 broad = overbroad(fam, truth["params"])
                 if broad and right(broad, root, want):
                     broad_right[fam] = broad_right.get(fam, 0) + 1
@@ -135,6 +154,14 @@ def main():
         if fam in ALTERNATIVES:
             print(f"ref: {fam}: alternatives executed wrong {alt_wrong.get(fam, 0)}")
             bad += alt_wrong.get(fam, 0) > 0
+        if fam in ("fn-outline", "itf-outline"):
+            sb = broad_right.get(fam + "-suffix", 0)
+            print(f"ref: {fam}: one-end anchored executed right {sb}/{total}")
+            bad += sb > 0
+        if fam in ("public-surface", "await-any"):
+            nw = named_wrong_wrong.get(fam, 0)
+            print(f"ref: {fam}: the named wrong executed wrong on {nw}/{total} seeds")
+            bad += nw == 0
         if fam == "maybe-defined":
             k = kind_wrong.get(fam, 0)
             print(f"ref: {fam}: the kind filter executed wrong on {k}/{total} seeds")

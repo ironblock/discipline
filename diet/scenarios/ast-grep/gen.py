@@ -217,6 +217,15 @@ def build(seed):
     g.emit(near, "  id: string;")
     g.emit(near, "}")
     g.emit(near, "")
+    # And a suffix near-name (round 4): `--match 'Name$'`, anchored at one end only, catches it too.
+    g.emit(near, f"export function pre{line_fn['name']}(id: string): void {{")
+    g.emit(near, "  void id;")
+    g.emit(near, "}")
+    g.emit(near, "")
+    g.emit(near, f"export interface Legacy{line_itf['name']} {{")
+    g.emit(near, "  id: string;")
+    g.emit(near, "}")
+    g.emit(near, "")
     g.emit(near, f"export let {g.fn_name()} = (id: string): {arrow_target} => ({{ id }} as never);")
     g.emit(near, "")
     truth["params"] = {"target": target, "arrow_target": arrow_target, "zero_fn": zero_fn, "maybe": maybe,

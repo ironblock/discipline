@@ -84,6 +84,8 @@ def writer_of(ask_text, table):
     check = importlib.import_module("check")
     if table is None:  # with no table every kind gets the stub, so the writer can't be told
         return "stub" if check.STUB in ask_text else None
+    if "That command was graded wrong: " in ask_text:  # W1r carries the rubric's reason after the colon
+        return "W1r"
     for w in ("W0", "W0n", "W1", "W2", "W3", "W3n", "W4"):
         kind, read, trials = _kind_read(w)
         if check.notes_ask(kind, read, table, trials)[1] in ask_text:
@@ -100,6 +102,9 @@ def selftest():
         got_w, ask = check.notes_ask(kind, read, table, trials)
         if got_w != w or writer_of(ask, table) != w:
             print(f"run_pass: writer {w}: notes_ask says {got_w}, matching says {writer_of(ask, table)}"); bad += 1
+    w1r = check.notes_ask("rubric", False, table, 0, why="a reason")[1]
+    if writer_of(w1r, table) != "W1r":
+        print(f"run_pass: a W1r ask read as {writer_of(w1r, table)}"); bad += 1
     if writer_of(check.STUB, None) != "stub" or writer_of("something else", table) is not None:
         print("run_pass: the stub, or an unknown ask, misread"); bad += 1
     print(f"run_pass: 7 writers matched from their asks, {bad} wrong")
