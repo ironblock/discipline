@@ -162,7 +162,7 @@ The note-writer experiment (Dispatch, 2026-10-27). Its asks are the experiment's
 The maintainer's change of direction (2026-10-28): the self-written notes loop is set aside; a stronger model, the tutor, edits a model's notes until its failures disappear. `tutor_round.py` is the instrument it reads. DRAFT.
 - **`tutor_round.py --notes FILE --out DIR [--tasks ...] [--held-out] [--floor] [--before CMD] [--max-seconds S] [-- DRIVE_ARGS]`** runs each task once on a fresh instance with the notes FILE and no notes turn (`run_pass.py --no-notes`), under the loop's gates.
 - **`DIR/rows.jsonl`**, per task: right, kind and the rubric's reason, the command, the trial searches and their commands, the docs read, and `pass.py`'s par fields.
-- **`DIR/failures.md`**, the tutor's input, from the tutorial run (t1..t6 by default) only: per failed task, its ask, command, kind and reason, trial commands, and the last 1,500 characters of reasoning before the answer. A stopped or void pass is listed as not run, never as no failure. Private run data, never committed.
+- **`DIR/failures.md`**, the tutor's input, from the tutorial run (t1..t6 by default) only: per failed task, its ask, command, kind and reason, trial commands, and the last 1,500 characters of reasoning before the answer. A turn cut at its output cap before any answer is kind `capped`, never wrong, listed with its reasoning tail (Dispatch, 2026-10-28). A stopped or void pass is listed as not run, never as no failure. Private run data, never committed.
 - **`--held-out`** runs h1..h6 and writes no failures.md: the tutor never sees a held-out failure. A task list that mixes the splits is refused.
 
 ## Declared limits
