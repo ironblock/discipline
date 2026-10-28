@@ -250,6 +250,12 @@ def build(seed):
     wide_arrow = {"name": g.fn_name(), "kind": "arrow", "path": wide, "ret": arrow_target}
     wide_arrow["line"] = g.emit(wide, f"export const {wide_arrow['name']} = (id: string, size: number): {arrow_target} => ({{ id, size }} as never);")
     g.emit(wide, "")
+    # And an async function expression with an await (Dispatch, 2026-10-28): not a declaration, so a rule whose kinds
+    # include `function_expression` also catches it. Not in any family's truth.
+    g.emit(wide, f"export const {g.fn_name()} = async function (id: string): Promise<void> {{")
+    g.emit(wide, "  await Promise.resolve(id);")
+    g.emit(wide, "};")
+    g.emit(wide, "")
     pair_path = rng.choice(paths[1:])
     pair = [g.word(NOUNS, lambda w: cap(w) + "Pair") for _ in range(2)]
     for name in pair:

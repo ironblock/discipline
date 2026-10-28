@@ -73,7 +73,9 @@ def alternatives(family, p):
     """Other right forms, from the live answers (rubric review, Dispatch 2026-10-27): each must execute right on every
     seed, distractors included, before the rubric may call it right."""
     return {
-        "ret-decl": [RULE(f"  kind: function_declaration\n  has:\n    field: return_type\n    kind: type_annotation\n    regex: ^:\\s*{p['target']}$")],
+        "ret-decl": [RULE(f"  kind: function_declaration\n  has:\n    field: return_type\n    kind: type_annotation\n    regex: ^:\\s*{p['target']}$"),
+                     # `all:` of the kind and the `has` (the floor's gap-fill iter-3 t1).
+                     RULE(f"  all:\n    - kind: function_declaration\n    - has:\n        field: return_type\n        regex: \"^: {p['target']}$\"")],
         "ret-arrow": [RULE(f"  kind: arrow_function\n  has:\n    field: return_type\n    kind: type_annotation\n    regex: ^:\\s*{p['arrow_target']}$\n"
                            "  inside:\n    kind: variable_declarator\n    inside:\n      kind: lexical_declaration\n      regex: ^const"),
                       # Round 5, the Flash-Next instance's h1: flow style, `all:` of the return type and the const.
@@ -81,7 +83,13 @@ def alternatives(family, p):
                       f"kind: type_annotation, has: {{kind: type_identifier, regex: ^{p['arrow_target']}$}}}}}}, {{inside: {{kind: variable_declarator, "
                       "field: value, inside: {kind: lexical_declaration, regex: ^const}}}]}}' src"],
         # Round 5, the Flash-Next instance's t4: the body, then an await at any depth within it.
-        "await-any": [RULE("  kind: function_declaration\n  has:\n    field: body\n    kind: statement_block\n    has:\n      kind: await_expression\n      stopBy: end")],
+        "await-any": [RULE("  kind: function_declaration\n  has:\n    field: body\n    kind: statement_block\n    has:\n      kind: await_expression\n      stopBy: end"),
+                      # A `:has()` selector (Dispatch, 2026-10-28): the floor's gap-fill iter-2 t4.
+                      "ast-grep run -k 'function_declaration:has(await_expression)' src/",
+                      # `any:` of kinds (Dispatch, 2026-10-28): the Flash-Next instance's gap-fill t4.
+                      RULE("  any:\n    - kind: function_declaration\n    - kind: generator_function_declaration\n  has:\n    field: body\n    kind: statement_block\n    has:\n      kind: await_expression\n      stopBy: end"),
+                      RULE("  any:\n    - kind: function_declaration\n  has:\n    pattern: await $E\n    stopBy: end"),
+                      RULE("  all:\n    - kind: function_declaration\n    - has:\n        pattern: await $A\n        stopBy: end")],
         "public-surface": ["ast-grep run -l ts -k export_statement src/index.ts"],
         "public-types": ["ast-grep run -p \"export type { \\$\\$\\$ } from '\\$PATH';\" -l ts src/index.ts"],
         "log-in-try": [RULE(f"  all:\n    - pattern: {p['log_fn']}($$$)\n    - inside:\n        pattern: \"try {{ $$$ }}\"\n        stopBy: end"),
@@ -94,7 +102,10 @@ def named_wrongs(family, p):
     """Forms the rubric names wrong (round 4): each must execute wrong on at least one seed."""
     return {
         "public-surface": ["ast-grep run -p 'export $$$' -l ts src/index.ts"],
-        "await-any": [RULE("  all:\n    - pattern: function $N($$$) { $$$ }\n    - has:\n        pattern: await $X\n        stopBy: end")],
+        "await-any": [RULE("  all:\n    - pattern: function $N($$$) { $$$ }\n    - has:\n        pattern: await $X\n        stopBy: end"),
+                      # The floor's gap-fill iter-2 t4 is right: see alternatives.
+                      # The floor's gap-fill iter-1 t4: an async function expression is the distractor (Dispatch, 2026-10-28).
+                      RULE("  any:\n    - kind: function_declaration\n    - kind: function_expression\n    - kind: generator_function_declaration\n  has:\n    pattern: await $X\n    stopBy: end")],
         # Round 5, the floor's answers: `...` as literal text, and `$A` as one parameter.
         "ret-decl": [f"ast-grep run -p 'function $NAME(...$ARGS): {p['target']} {{}}' src",
                      f"ast-grep run -p 'function $F($A): {p['target']} {{ $$$B }}' -l ts src"],
