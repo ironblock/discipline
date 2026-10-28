@@ -77,12 +77,32 @@ def search(form, *patterns):
     return False
 
 
+ANNOTATION = ("^:\\s*{}$", "^: {}$", "^:\\s+{}$", "^:\\s?{}$")
+
+
+def type_wrong(node, name):
+    """Why a return-type relation is wrong by name, or None: an annotation regex not anchored at both ends, or a type
+    identifier reached at any depth (`stopBy: end`), which also matches `Promise<NAME>`."""
+    if not isinstance(node, dict) or not (node.get("field") == "return_type" or node.get("kind") == "type_annotation"):
+        return None
+    rx = node.get("regex")
+    if isinstance(rx, str) and name in rx and rx not in {a.format(name) for a in ANNOTATION}:
+        return "the annotation's regex isn't anchored to the whole annotation: it also matches what only contains the type"
+    inner = node.get("has")
+    if isinstance(inner, dict) and deep(inner) and inner.get("kind") == "type_identifier":
+        return "the type identifier at any depth (stopBy: end) also matches Promise<T> and other wrapped types"
+    return None
+
+
 def direct_type(node, name):
     """A `has` reaching the return type, whose own `has` is the type identifier NAME, one level down (so a
     `Promise<NAME>` doesn't match)."""
     if not isinstance(node, dict) or not (node.get("field") == "return_type" or node.get("kind") == "type_annotation"):
         return False
     if pattern_is(node, f": {name}"):
+        return True
+    # The annotation itself, its colon included, matched whole (the live answers' form, rubric review 2026-10-27).
+    if not deep(node) and node.get("regex") in {a.format(name) for a in ANNOTATION}:
         return True
     inner = node.get("has")
     return (isinstance(inner, dict) and not deep(inner) and inner.get("kind") == "type_identifier"
@@ -104,7 +124,7 @@ def outline_named(form, name, kind, need_structure):
     types = one(form, "--type")
     if types is not None:
         if kind is None:
-            return "unrecognized", "a --type filter here: which symbol type the item has is the rubric's open question"
+            return "wrong", "a --type filter on a kind the ask doesn't name: right only where the item happens to be that kind"
         if kind not in types.split(","):
             return "wrong", f"--type leaves out {kind}"
     items = one(form, "--items")
@@ -128,6 +148,8 @@ def judge(cmd, family, p):
         r = rule_of(f) if f["sub"] == "scan" else None
         if r and r.get("kind") == "function_declaration" and direct_type(r.get("has"), p["target"]):
             return "right", "a return-type rule"
+        if r and r.get("kind") == "function_declaration" and type_wrong(r.get("has"), p["target"]):
+            return "wrong", type_wrong(r.get("has"), p["target"])
         if f["sub"] == "run" and canon(one(f, "--pattern") or "") == canon("function $F($$$A) { $$$B }"):
             return "wrong", "no return type: it matches untyped functions instead"
         return "unrecognized", "not a form the rubric knows"
@@ -137,6 +159,8 @@ def judge(cmd, family, p):
         if search(f, f"const $N = ($$$A): {p['arrow_target']} => $B", f"const $N = ($$$A): {p['arrow_target']} => $$$B"):
             return "right", "the const arrow pattern"
         r = rule_of(f) if f["sub"] == "scan" else None
+        if r and r.get("kind") == "arrow_function" and type_wrong(r.get("has"), p["arrow_target"]):
+            return "wrong", type_wrong(r.get("has"), p["arrow_target"])
         if r and r.get("kind") == "arrow_function" and direct_type(r.get("has"), p["arrow_target"]):
             consts = str(r.get("inside", "")).count("const")
             return ("right", "an arrow return-type rule within a const") if consts else ("wrong", "not only const arrows")
@@ -160,6 +184,10 @@ def judge(cmd, family, p):
     if family == "itf-outline":
         return outline_named(f, p["line_itf"], "interface", False)
     if family == "public-surface":
+        if f["sub"] == "run" and one(f, "--kind") == "export_statement" and not one(f, "--pattern"):
+            if not only(f, "src/index.ts"):
+                return "wrong", "not the entry point alone: a directory's exports are not the surface"
+            return "right", "every export statement of the entry point"
         if f["sub"] != "outline":
             return "unrecognized", "not an outline"
         if not only(f, "src/index.ts"):
@@ -187,6 +215,14 @@ def judge(cmd, family, p):
         r = rule_of(f) if f["sub"] == "scan" else None
         if not r or not whole_project(f):
             return ("wrong", "a relation needs a rule") if f["sub"] != "scan" else ("unrecognized", "a rule the rubric can't read")
+        if set(r) == {"all"} and isinstance(r["all"], list) and all(isinstance(x, dict) for x in r["all"]):
+            merged = {}
+            for x in r["all"]:  # `all:` of a pattern and an inside, in either order, is the one rule
+                if set(x) & set(merged):
+                    merged = None
+                    break
+                merged.update(x)
+            r = merged or r
         inside = r.get("inside")
         if not pattern_is(r, f"{p['log_fn']}($$$A)") or not isinstance(inside, dict) or inside.get("kind") != "try_statement":
             return "unrecognized", "not the call inside a try_statement"
@@ -205,17 +241,22 @@ CASES = {
          "sg -p 'function $NAME($$$ARGS): Relay {$$$BODY}' --lang typescript ./src/",
          "ast-grep --pattern 'function $_($$$): Relay { $$$ }' src",
          'ast-grep run -p "function \\$F(\\$\\$\\$A): Relay { \\$\\$\\$B }" src',
-         RULE("  kind: function_declaration\n  has:\n    field: return_type\n    kind: type_annotation\n    has:\n      kind: type_identifier\n      regex: ^Relay$")],
+         RULE("  kind: function_declaration\n  has:\n    field: return_type\n    kind: type_annotation\n    has:\n      kind: type_identifier\n      regex: ^Relay$"),
+         # The live answers' form (rubric review, 2026-10-27): an anchored regex on the annotation, its colon included.
+         RULE("  kind: function_declaration\n  has:\n    field: return_type\n    kind: type_annotation\n    regex: ^:\\s*Relay$")],
         ["ast-grep run -l ts -p 'function $F($$$A) { $$$B }' src",
          "ast-grep run -p 'export function $F($$$A): Relay { $$$B }' src",
          "ast-grep run -p 'function $F($$$A): Relay { $$$B }' -l TypeScript src/core",
          "ast-grep run -p 'function $F($$$A): Relay { $$$B }' src/core",
          "ast-grep run -p 'function $F($$$A): Relay { $$$B }' -l rust src",
-         'ast-grep run -p "function $F($$$A): Relay { $$$B }" src']),
+         'ast-grep run -p "function $F($$$A): Relay { $$$B }" src',
+         RULE("  kind: function_declaration\n  has:\n    field: return_type\n    kind: type_annotation\n    regex: Relay"),
+         RULE("  kind: function_declaration\n  has:\n    field: return_type\n    has:\n      kind: type_identifier\n      regex: ^Relay$\n      stopBy: end")]),
     "ret-arrow": (
         ["ast-grep run -p 'const $N = ($$$A): Socket => $B' src", "ast-grep -p 'const $V = ($$$): Socket => $BODY' -l ts src/",
          "ast-grep run -p 'const $NAME = ($$$): Socket => $$$' -l ts src",
-         RULE("  kind: arrow_function\n  has:\n    kind: type_annotation\n    field: return_type\n    has:\n      kind: type_identifier\n      regex: ^Socket$\n  inside:\n    kind: variable_declarator\n    inside:\n      kind: lexical_declaration\n      regex: ^const\\b")],
+         RULE("  kind: arrow_function\n  has:\n    kind: type_annotation\n    field: return_type\n    has:\n      kind: type_identifier\n      regex: ^Socket$\n  inside:\n    kind: variable_declarator\n    inside:\n      kind: lexical_declaration\n      regex: ^const\\b"),
+         RULE("  kind: arrow_function\n  has:\n    field: return_type\n    kind: type_annotation\n    regex: ^:\\s*Socket$\n  inside:\n    kind: variable_declarator\n    inside:\n      kind: lexical_declaration\n      regex: ^const")],
         ["ast-grep run -p 'const $N = ($$$A) => $B' src", "ast-grep run -p 'let $N = ($$$A): Socket => $B' src",
          RULE("  kind: arrow_function\n  has:\n    field: return_type\n    has:\n      kind: type_identifier\n      regex: ^Socket$")]),
     "zero-calls": (["ast-grep run -p 'probeMeadow($$$A)' src", "ast-grep --pattern 'probeMeadow($$$)' --lang ts .", RULE("  pattern: probeMeadow($$$)")],
@@ -224,7 +265,9 @@ CASES = {
                    ['ast-grep run -p "$emit($$$A)" src', "ast-grep run -p 'emit($$$A)' src", "ast-grep run -p '$E($$$A)' src"]),
     "track-calls": (["ast-grep run -p '$track($$$ARGS)' -l typescript src"], ["ast-grep run -p 'track($$$A)' src"]),
     "maybe-defined": (["ast-grep outline src --match '^VertexSpec$'", "ast-grep outline --items structure --match '^VertexSpec$' src"],
-                      ["ast-grep outline src --match VertexSpec", "ast-grep outline src --match 'Vertex'", "ast-grep outline src"]),
+                      ["ast-grep outline src --match VertexSpec", "ast-grep outline src --match 'Vertex'", "ast-grep outline src",
+                       # A kind filter the ask doesn't name (rubric review, 2026-10-27): right only where the item is that kind.
+                       "ast-grep outline --items structure --type struct --match '^VertexSpec$' -l ts src"]),
     "fn-outline": (["ast-grep outline src --match '^loadQuota$'", "ast-grep outline src --type function --match '^loadQuota$'",
                     "ast-grep outline src --items structure --match '^loadQuota$' --view signatures"],
                    ["ast-grep outline src --match loadQuota", "ast-grep outline src --match '^loadQuota'",
@@ -232,7 +275,8 @@ CASES = {
     "itf-outline": (["ast-grep outline src --match '^GarnetRow$'", "ast-grep outline src --type interface --match '^GarnetRow$'"],
                     # h6's live answer: unanchored; right by execution on its fixture, wrong here (no near-name there).
                     ["ast-grep outline src --type interface --match GarnetRow", "ast-grep outline src/index.ts --match '^GarnetRow$'"]),
-    "public-surface": (["ast-grep outline src/index.ts", "ast-grep outline --items exports src/index.ts", "ast-grep outline ./src/index.ts --items structure"],
+    "public-surface": (["ast-grep outline src/index.ts", "ast-grep outline --items exports src/index.ts", "ast-grep outline ./src/index.ts --items structure",
+                        "ast-grep run -l ts -k export_statement src/index.ts"],
                        ["ast-grep outline src --items exports", "ast-grep outline src", "ast-grep outline src/index.ts --match Relay"]),
     "public-types": (["ast-grep run -l typescript -p 'export type { $$$ }' src/index.ts",
                       "ast-grep run --pattern 'export type { $$$NAMES } from $MODULE' --lang typescript src/index.ts",
@@ -242,9 +286,12 @@ CASES = {
                    "ast-grep scan --inline-rules '{id: f, language: typescript, rule: {kind: function_declaration, has: {field: body, kind: await_expression, stopBy: end}}}' src/"],
                   [RULE("  kind: function_declaration\n  has:\n    pattern: await $E"), "ast-grep run -p 'await $E' src"]),
     "log-in-try": ([RULE("  pattern: loadMeadow($$$A)\n  inside:\n    kind: try_statement\n    stopBy: end"),
-                    RULE("  pattern: loadMeadow($$$)\n  inside:\n    kind: try_statement\n    field: body\n    stopBy: end")],
+                    RULE("  pattern: loadMeadow($$$)\n  inside:\n    kind: try_statement\n    field: body\n    stopBy: end"),
+                    RULE("  all:\n    - pattern: loadMeadow($$$)\n    - inside:\n        kind: try_statement\n        stopBy: end"),
+                    RULE("  all:\n    - inside:\n        kind: try_statement\n        stopBy: end\n    - pattern: loadMeadow($$$)")],
                    [RULE("  pattern: loadMeadow($$$A)\n  inside:\n    kind: try_statement"), "ast-grep run -p 'loadMeadow($$$A)' src",
-                    "ast-grep run -k 'try_statement > statement_block call_expression' -l TypeScript src"]),
+                    "ast-grep run -k 'try_statement > statement_block call_expression' -l TypeScript src",
+                    RULE("  all:\n    - pattern: loadMeadow($$$)\n    - inside:\n        kind: try_statement")]),
 }
 
 

@@ -15,9 +15,10 @@ Right only when all of it holds; `unrecognized` and a refusal are wrong.
 **The notes turn rides on the grade** (#971's notes loop, Dispatch 2026-10-27): the check also names the attempt's
 failure kind (`right`, `rubric`, `miss fields`, `trial`, `unrecognized`, `no answer`) as `expected`, and prints as
 `got` the notes ask for it, which the scenario's grade step sends as its feedback (`right` and `last` are `{got}`).
-The asks are a writer table, `$DIET_AST_GREP_WRITERS` (JSON: `tail`, and `W0`, `W0n`, `W1`, `W2`, `W3`, `W4`), experiment
+The asks are a writer table, `$DIET_AST_GREP_WRITERS` (JSON: `tail`, and `W0`, `W0n`, `W1`, `W2`, `W3`, `W3n`, `W4`), experiment
 text kept out of this tree; without it, every kind gets the DRAFT stub. The map: rubric → W1, miss fields (the command was
-right, its miss fields weren't) → W4, trial (the command was right) → W3, right with a docs read → W2, right and clean → W0, unrecognized or no answer → W0n, a
+right, its miss fields weren't) → W4, trial (the command was right) → W3, unrecognized with trial searches → W3n
+(the searches named, right or wrong never said), right with a docs read → W2, right and clean → W0, unrecognized or no answer → W0n, a
 neutral ask that never says the command was right or wrong. An answer in prose,
 or through another tool, is no answer. Prints one line, `{"right", "expected", "got"}`. `--selftest` grades known
 answers. The confined execution (`audit.py`) is an offline audit, never the verdict.
@@ -103,9 +104,10 @@ def kind_of(verdict, why):
     return "rubric"
 
 
-def notes_ask(kind, read, writers):
-    """The writer and the ask for KIND: W2 for a right attempt that read the docs."""
-    writer = WRITER_OF.get(kind) or ("W2" if read else "W0")
+def notes_ask(kind, read, writers, trials=0):
+    """The writer and the ask for KIND: W2 for a right attempt that read the docs; W3n for an unrecognized attempt that
+    ran trial searches (a wrong one stays W1, whatever its searches)."""
+    writer = "W3n" if kind == "unrecognized" and trials else WRITER_OF.get(kind) or ("W2" if read else "W0")
     if writers is None:
         return writer, STUB
     return writer, (writers[writer].rstrip() + " " + writers["tail"].strip()).strip()
@@ -122,7 +124,8 @@ def grade(turn, task, truth, trial="fail", version=None):
     expected = "a command the rubric knows as right"
     args, before = answered(turn)
     if args is None:
-        return {"right": False, "expected": expected, "got": "(no answer through the answer tool)", "kind": "no answer", "before": before}
+        return {"right": False, "expected": expected, "got": "(no answer through the answer tool)", "kind": "no answer", "before": before,
+                "trials": trial_searches(before)}
     family = family_of(task)
     verdict, why = rubric.judge(args["command"], family, truth["params"])
     trials = trial_searches(before)
@@ -138,7 +141,8 @@ def grade(turn, task, truth, trial="fail", version=None):
             off = [k for k in FIELDS if args.get(k) != measured[sub][k]]
             if off:
                 verdict, why = "wrong", f"the command is right, but {', '.join(off)} is not what `{sub}` does on a miss"
-    return {"right": verdict == "right", "expected": expected, "got": f"{verdict}: {why}", "kind": kind_of(verdict, why), "before": before}
+    return {"right": verdict == "right", "expected": expected, "got": f"{verdict}: {why}", "kind": kind_of(verdict, why), "before": before,
+            "trials": trials}
 
 
 def main():
@@ -150,7 +154,7 @@ def main():
     g = grade(turn, os.environ["DIET_GRADE_TASK"], truth, trial)
     path = os.environ.get("DIET_AST_GREP_WRITERS")
     writers = json.load(open(path)) if path else None
-    writer, ask = notes_ask(g["kind"], g["kind"] == "right" and docs_read(g["before"]), writers)
+    writer, ask = notes_ask(g["kind"], g["kind"] == "right" and docs_read(g["before"]), writers, g["trials"])
     # What the model is sent is only the notes ask; the verdict and its reason stay in `expected` and the log.
     print(json.dumps({"right": g["right"], "expected": f"{g['kind']} ({writer}): {g['got']}", "got": ask}))
 
@@ -199,16 +203,17 @@ def selftest():
         got = grade(t, task, truth, version=v)["kind"]
         if got != want:
             print(f"check: kind {want}: got {got}"); bad += 1
-    table = {"tail": "TAIL.", "W0": "w0.", "W0n": "w0n.", "W1": "w1.", "W2": "w2.", "W3": "w3.", "W4": "w4."}
-    for kind, read, writer in [("right", False, "W0"), ("right", True, "W2"), ("rubric", True, "W1"), ("miss fields", False, "W4"),
-                               ("trial", True, "W3"), ("unrecognized", False, "W0n"), ("no answer", True, "W0n")]:
-        w, ask = notes_ask(kind, read, table)
-        if w != writer or ask != table[writer] + " TAIL." or notes_ask(kind, read, None) != (writer, STUB):
+    table = {"tail": "TAIL.", "W0": "w0.", "W0n": "w0n.", "W1": "w1.", "W2": "w2.", "W3": "w3.", "W3n": "w3n.", "W4": "w4."}
+    for kind, read, trials, writer in [("right", False, 0, "W0"), ("right", True, 0, "W2"), ("rubric", True, 0, "W1"), ("rubric", False, 5, "W1"),
+                                       ("miss fields", False, 0, "W4"), ("trial", True, 3, "W3"), ("unrecognized", False, 0, "W0n"),
+                                       ("unrecognized", True, 2, "W3n"), ("no answer", True, 0, "W0n")]:
+        w, ask = notes_ask(kind, read, table, trials)
+        if w != writer or ask != table[writer] + " TAIL." or notes_ask(kind, read, None, trials) != (writer, STUB):
             print(f"check: writer for {kind} (docs {read}): {w} {ask!r}"); bad += 1
     unmeasured = grade(turn(call(zero, exit_status_when_none=1, prints_nothing_when_none=True)), "t2-zero-calls", truth, version="ast-grep 9.9.9")
     if not unmeasured["got"].startswith("unrecognized"):
         print(f"check: an unmeasured version graded {unmeasured}"); bad += 1
-    print(f"check: {sum(c[4] for c in cases)} right and {sum(not c[4] for c in cases) + 1} not right, 6 kinds and 7 writer choices, {bad} wrong")
+    print(f"check: {sum(c[4] for c in cases)} right and {sum(not c[4] for c in cases) + 1} not right, 6 kinds and 9 writer choices, {bad} wrong")
     return 1 if bad else 0
 
 

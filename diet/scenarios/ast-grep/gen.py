@@ -169,7 +169,13 @@ def build(seed):
     defined = rng.random() < 0.5
     if defined:
         mpath = rng.choice(paths[1:])
-        maybe_line = f"{mpath}:{g.emit(mpath, f'export type {maybe} = {{ name: string }};')}"
+        # Its kind varies by seed (rubric review, 2026-10-27): the ask names no kind, so a --type filter must not pass by
+        # the generator's habit of one.
+        kind = rng.choice(["type", "interface", "function", "class"])
+        first = {"type": f"export type {maybe} = {{ name: string }};", "interface": f"export interface {maybe} {{ name: string }}",
+                 "function": f"export function {maybe}(name: string): void {{ void name; }}",
+                 "class": f"export class {maybe} {{ name = ''; }}"}[kind]
+        maybe_line = f"{mpath}:{g.emit(mpath, first)}"
         g.emit(mpath, "")
 
     # The barrel: some exported functions, a few under another name, and all but one interface but the never-public
@@ -276,7 +282,7 @@ def selftest():
             holds = {"ret-decl": lambda t: "function " in t and f"): {p['target']} {{" in t,
                      "ret-arrow": lambda t: t.lstrip("export ").startswith("const ") and f"): {p['arrow_target']} =>" in t,
                      "zero-calls": lambda t: f"{p['zero_fn']}(" in t and not t.lstrip().startswith(("//", "export")),
-                     "maybe-defined": lambda t: f"export type {p['maybe']} " in t,
+                     "maybe-defined": lambda t: any(f"export {k} {p['maybe']}" in t for k in ("type", "interface", "function", "class")),
                      "public-surface": lambda t: t.startswith("export "), "public-types": lambda t: t.startswith("export type {"),
                      "await-any": lambda t: "async function " in t, "log-in-try": lambda t: f"{p['log_fn']}(id)" in t,
                      "emit-calls": lambda t: "$emit(" in t, "track-calls": lambda t: "$track(" in t,
