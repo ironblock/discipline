@@ -16,7 +16,8 @@ Reads the run's `session.log`. Per task:
   (`ast-grep`, `other` or `none`: descriptive only).
 Then the pass's `notes`, the last well-formed `notes` call's text, which `run_pass.py` carries into the next head.
 
-A pass is clean when every task is right and none was capped. A docs read costs against par by default, reported and
+A pass is clean when every task is right, none was capped, and none ran a trial search (ruled 2026-10-27;
+`--trial par` records them without failing). A docs read costs against par by default, reported and
 never failing (`--docs-read par`, Dispatch's reading, unconfirmed); `--docs-read fail` makes one fail the pass.
 DRAFT and provisional, as the tutorial is.
 """
@@ -61,7 +62,7 @@ def args_of(line):
     return args if isinstance(args, dict) else None
 
 
-def verdict(lines, skills=False, installed=None, docs_read="par"):
+def verdict(lines, skills=False, installed=None, docs_read="par", trial="fail"):
     tasks, turn_task, notes = {}, {}, None
     for l in lines:
         if l.get("kind") == "ask" and l.get("task"):
@@ -121,9 +122,11 @@ def verdict(lines, skills=False, installed=None, docs_read="par"):
             why.append(f"{t}: wrong")
         if v["capped"]:
             why.append(f"{t}: capped ({v['capped']})")
+        if v["trial_searches"] and trial == "fail":
+            why.append(f"{t}: trial searches before the answer ({v['trial_searches']})")
         if v["docs_reads"] and docs_read == "fail":
             why.append(f"{t}: read the docs ({len(v['docs_reads'])})")
-    return {"tasks": tasks, "notes": notes, "docs_read": docs_read, "clean": bool(tasks) and not why, "why": why}
+    return {"tasks": tasks, "notes": notes, "docs_read": docs_read, "trial": trial, "clean": bool(tasks) and not why, "why": why}
 
 
 def selftest():
@@ -149,8 +152,7 @@ def selftest():
     if v["notes"] != "use : $RET":
         print(f"pass: notes {v['notes']!r}"); bad += 1
     cases = [
-        ("right, with a docs read, costs against par", full, "par", True),
-        ("the same under --docs-read fail", full, "fail", False),
+        ("right, with a docs read and a trial search: the trial fails it", full, "par", False),
         ("wrong", [ask("a"), answer("x"), grade("a", False)], "par", False),
         ("never graded", [ask("a"), answer("x")], "par", False),
         ("capped", [request, ask("a"), resp(100, finish="length"), answer("x"), grade("a", True)], "par", False),
@@ -160,7 +162,10 @@ def selftest():
     for why, lines, mode, clean in cases:
         if verdict(lines, docs_read=mode)["clean"] != clean:
             print(f"pass: {why}: clean {not clean}, expected {clean}"); bad += 1
-    if "capped" not in " ".join(verdict(cases[4][1])["why"]):
+    no_trial = [l for l in full if "-p 'x'" not in l.get("arguments", "")]
+    if not verdict(no_trial)["clean"] or verdict(no_trial, docs_read="fail")["clean"] or not verdict(full, trial="par")["clean"]:
+        print("pass: docs reads cost par, fail under --docs-read fail, and trial passes under --trial par: not so"); bad += 1
+    if "capped" not in " ".join(verdict(cases[3][1])["why"]):
         print("pass: a capped task's why does not say capped"); bad += 1
     for why, cmds, want_used in [("ast-grep run", ["ast-grep run -p 'x' src"], "ast-grep"), ("sg outline after cd", ["cd src && sg outline ."], "ast-grep"),
                                  ("rg and a node script only", ["rg -n foo src", "node -e 'require(1)'"], "other"),
@@ -179,7 +184,8 @@ if __name__ == "__main__":
     if not sys.argv[1:2]:
         sys.exit(__doc__)
     mode = sys.argv[sys.argv.index("--docs-read") + 1] if "--docs-read" in sys.argv else "par"
-    if mode not in ("par", "fail"):
-        sys.exit("pass: --docs-read is par or fail")
+    trial = sys.argv[sys.argv.index("--trial") + 1] if "--trial" in sys.argv else "fail"
+    if mode not in ("par", "fail") or trial not in ("par", "fail"):
+        sys.exit("pass: --docs-read and --trial are par or fail")
     log = [json.loads(l) for l in open(os.path.join(sys.argv[1], "session.log")) if l.strip()]
-    print(json.dumps(verdict(log, "--skills" in sys.argv[2:], installed_prefix(), mode), indent=1))
+    print(json.dumps(verdict(log, "--skills" in sys.argv[2:], installed_prefix(), mode, trial), indent=1))

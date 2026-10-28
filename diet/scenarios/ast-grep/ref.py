@@ -49,6 +49,20 @@ def naive(family, p):
     }[family]
 
 
+def overbroad(family, p):
+    """Commands that also match what the task excludes: right by execution only on a fixture with nothing for them to
+    wrongly catch. gen.py plants that (a near-name, a second call in a try, a Promise<T> return, a non-const arrow), so
+    every one must execute wrong on every seed. None where a family has no over-broad form here."""
+    return {
+        "fn-outline": f"ast-grep outline src --items structure --match '{p['line_fn']}'",
+        "itf-outline": f"ast-grep outline src --type interface --match '{p['line_itf']}'",
+        "maybe-defined": f"ast-grep outline src --match '{p['maybe']}'",
+        "log-in-try": "ast-grep run -k 'try_statement > statement_block call_expression' -l ts src",
+        "ret-arrow": RULE(f"  kind: arrow_function\n  has:\n    field: return_type\n    has:\n      kind: type_identifier\n      regex: ^{p['arrow_target']}$"),
+        "ret-decl": RULE(f"  kind: function_declaration\n  has:\n    field: return_type\n    has:\n      kind: type_identifier\n      regex: ^{p['target']}$\n      stopBy: end"),
+    }.get(family)
+
+
 def right(cmd, root, want):
     try:
         return command.matches(command.checked(cmd), root) == sorted(want)
@@ -56,9 +70,12 @@ def right(cmd, root, want):
         return False
 
 
+OVERBROAD = ("fn-outline", "itf-outline", "maybe-defined", "log-in-try", "ret-arrow", "ret-decl")
+
+
 def main():
     seeds = int(sys.argv[1]) if len(sys.argv) > 1 else 20
-    ref_wrong, naive_right, total = {}, {}, 0
+    ref_wrong, naive_right, broad_right, total = {}, {}, {}, 0
     with tempfile.TemporaryDirectory() as d:
         for seed in range(1, seeds + 1):
             root = os.path.join(d, f"s{seed}")
@@ -73,6 +90,9 @@ def main():
                 if rubric.judge(naive(fam, truth["params"]), fam, truth["params"])[0] == "right":
                     naive_right[fam] = naive_right.get(fam, 0) + 1
                     print(f"ref: seed {seed * 101} {fam}: the rubric calls the naive command right")
+                broad = overbroad(fam, truth["params"])
+                if broad and right(broad, root, want):
+                    broad_right[fam] = broad_right.get(fam, 0) + 1
                 # Execution, the audit's way, checks the same references against the truth.
                 if not right(reference(fam, truth["params"]), root, want):
                     ref_wrong[fam] = ref_wrong.get(fam, 0) + 1
@@ -81,9 +101,9 @@ def main():
                     naive_right[fam] = naive_right.get(fam, 0) + 1
     bad = 0
     for fam in gen.build(1)[1]["answers"]:
-        r, n = ref_wrong.get(fam, 0), naive_right.get(fam, 0)
-        print(f"ref: {fam}: reference wrong {r}/{total}, naive right {n}/{total}")
-        bad += (r > 0) + (n == total)
+        r, n, b = ref_wrong.get(fam, 0), naive_right.get(fam, 0), broad_right.get(fam, 0)
+        print(f"ref: {fam}: reference wrong {r}/{total}, naive right {n}/{total}" + (f", over-broad executed right {b}/{total}" if fam in OVERBROAD else ""))
+        bad += (r > 0) + (n == total) + (b > 0)
     print(f"ref: {bad} problem(s)")
     return 1 if bad else 0
 

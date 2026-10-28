@@ -3,7 +3,7 @@
 {"reply": {"text": "Canned: answered.", "when": "Answer recorded"}}
 {"reply": {"calls": [{"arguments": "{\"notes\": \"DRAFT. Canned notes.\"}", "id": "canned-notes", "name": "notes"}], "text": "", "when": "Notes update:"}}
 {"reply": {"text": "Canned: noted.", "when": "Notes saved"}}
-{"step": "ask", "task": "t4-await-any", "text": "DRAFT. Task `t4-await-any`. DRAFT. Give the ast-grep command, run from this directory, that matches every function declared with the `function` keyword under src/ that contains an `await` expression anywhere in its body, at any depth, and nothing else."}
+{"patience": 3600, "step": "ask", "task": "t4-await-any", "text": "DRAFT. Task `t4-await-any`. DRAFT. Give the ast-grep command, run from this directory, that matches every function declared with the `function` keyword under src/ that contains an `await` expression anywhere in its body, at any depth, and nothing else."}
 {"attempts": 1, "check": "python3 -I \"$DIET_GRADE_SCENARIO_DIR/../check.py\"", "step": "grade", "task": "t4-await-any", "wrong": "DRAFT. (Not sent: a pass asks its task once.)"}
-{"step": "ask", "text": "DRAFT. Notes update: update your notes on ast-grep through the notes tool, as concise as you can make them."}
+{"patience": 3600, "step": "ask", "text": "DRAFT. Notes update: update your notes on ast-grep through the notes tool, as concise as you can make them."}
 {"step": "end"}

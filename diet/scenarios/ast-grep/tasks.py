@@ -21,8 +21,9 @@ GAPS = {
 ASK = "DRAFT. Give the ast-grep command, run from this directory, that {what}"
 
 # Operations whose gap a command can't show (Dispatch, 2026-10-27): the answer is never run, so a lesson about reading
-# the tool's output is invisible in it. A right `Z($$$)` reads the same whether the model believes a miss or not.
-# Each carries a reshaped DRAFT ask for the maintainer, never used until he rules.
+# the tool's output is invisible in it. The maintainer ruled (2026-10-27) that "no match" is part of mastery: t2 and h2
+# answer through `answer-tool-miss.json`, whose structured fields say what the command does on a miss, graded against
+# `miss_truth.json`. Their asks (above) are the reshaped ones, DRAFT; this table stays as the record of why.
 INVISIBLE = {
     "miss": {"why": "the right command is the same whether or not the model knows a miss prints nothing (run, exit 1) "
                     "or `nothing found` (outline, exit 0): that lesson is about reading output, and no output is read",
@@ -38,7 +39,7 @@ TASKS = [
     {"id": "t1-ret-decl", "split": "tutorial", "family": "ret-decl", "gap": "return-type",
      "what": "matches every function declared with the `function` keyword under src/ whose declared return type is exactly `{service.fixture.target}`, and nothing else."},
     {"id": "t2-zero-calls", "split": "tutorial", "family": "zero-calls", "gap": "miss",
-     "what": "matches every call expression under src/ that calls `{service.fixture.zero_fn}` directly, as `{service.fixture.zero_fn}(...)`, and nothing else."},
+     "what": "matches every call expression under src/ that calls `{service.fixture.zero_fn}` directly, as `{service.fixture.zero_fn}(...)`, and nothing else. In the answer, also say what that command prints, and its exit status, when nothing matches.", "tool": "answer-tool-miss.json"},
     {"id": "t3-public-surface", "split": "tutorial", "family": "public-surface", "gap": "barrel",
      "what": "shows each export of the package's public surface, the entry point src/index.ts, and nothing else."},
     {"id": "t4-await-any", "split": "tutorial", "family": "await-any", "gap": "stop-by",
@@ -50,7 +51,7 @@ TASKS = [
     {"id": "h1-ret-arrow", "split": "held-out", "family": "ret-arrow", "gap": "return-type",
      "what": "matches every arrow function assigned to a `const` under src/ whose declared return type is exactly `{service.fixture.arrow_target}`, and nothing else."},
     {"id": "h2-maybe-defined", "split": "held-out", "family": "maybe-defined", "gap": "miss",
-     "what": "outlines the definition of `{service.fixture.maybe}` under src/, if there is one, and nothing else."},
+     "what": "outlines the definition of `{service.fixture.maybe}` under src/, if there is one, and nothing else. In the answer, also say what that command prints, and its exit status, when nothing matches.", "tool": "answer-tool-miss.json"},
     {"id": "h3-public-types", "split": "held-out", "family": "public-types", "gap": "barrel",
      "what": "matches each statement of the package's entry point, src/index.ts, that exports only types, and nothing else."},
     {"id": "h4-log-in-try", "split": "held-out", "family": "log-in-try", "gap": "stop-by",

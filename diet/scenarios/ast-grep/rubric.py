@@ -27,7 +27,7 @@ def canon(pattern):
 
 
 def langs_ok(form):
-    return all(v in ("ts", "typescript") for v in form["opts"].get("--lang", []))
+    return all(v.lower() in ("ts", "typescript") for v in form["opts"].get("--lang", []))
 
 
 def whole_project(form):
@@ -52,7 +52,7 @@ def rule_of(form):
         doc = yamlish.load(text)
     except ValueError:
         return None
-    if not isinstance(doc, dict) or doc.get("language") not in ("ts", "typescript", "TypeScript", "Ts"):
+    if not isinstance(doc, dict) or str(doc.get("language", "")).lower() not in ("ts", "typescript"):
         return None
     return doc.get("rule") if isinstance(doc.get("rule"), dict) else None
 
@@ -129,17 +129,19 @@ def judge(cmd, family, p):
             return "right", "a return-type rule"
         if f["sub"] == "run" and canon(one(f, "--pattern") or "") == canon("function $F($$$A) { $$$B }"):
             return "wrong", "no return type: it matches untyped functions instead"
-        return ("unrecognized" if r else "wrong"), "not a form the rubric knows"
+        return "unrecognized", "not a form the rubric knows"
     if family == "ret-arrow":
         if not whole_project(f):
             return "wrong", "not the whole project"
-        if search(f, f"const $N = ($$$A): {p['arrow_target']} => $B"):
+        if search(f, f"const $N = ($$$A): {p['arrow_target']} => $B", f"const $N = ($$$A): {p['arrow_target']} => $$$B"):
             return "right", "the const arrow pattern"
         r = rule_of(f) if f["sub"] == "scan" else None
         if r and r.get("kind") == "arrow_function" and direct_type(r.get("has"), p["arrow_target"]):
             consts = str(r.get("inside", "")).count("const")
             return ("right", "an arrow return-type rule within a const") if consts else ("wrong", "not only const arrows")
-        return ("unrecognized" if r else "wrong"), "not a form the rubric knows"
+        return "unrecognized", "not a form the rubric knows"
+    if family == "log-in-try" and f["sub"] == "run" and "try_statement" in (one(f, "--kind") or ""):
+        return "wrong", "a kind selector over every call in a try: it also matches calls that aren't the log function's"
     if family in ("zero-calls", "emit-calls", "track-calls"):
         name = {"zero-calls": p["zero_fn"], "emit-calls": "$emit", "track-calls": "$track"}[family]
         if not whole_project(f):
@@ -149,7 +151,7 @@ def judge(cmd, family, p):
         pat = one(f, "--pattern") or ""
         if canon(pat) == canon(f"{name}($A)"):
             return "wrong", "one argument only: `$$$` takes any number"
-        return "wrong", "not the call pattern"
+        return "unrecognized", "not a call pattern the rubric knows"
     if family == "maybe-defined":
         return outline_named(f, p["maybe"], None, False)
     if family == "fn-outline":
@@ -167,9 +169,9 @@ def judge(cmd, family, p):
     if family == "public-types":
         if not only(f, "src/index.ts"):
             return "wrong", "not the entry point alone"
-        if search(f, "export type { $$$S }", "export type { $$$S } from $$$P", "export type { $$$S } from '$P'"):
+        if search(f, "export type { $$$S }", "export type { $$$S } from $$$P", "export type { $$$S } from $P", "export type { $$$S } from '$P'"):
             return "right", "the type-export pattern"
-        return ("unrecognized" if f["sub"] == "scan" else "wrong"), "not a form the rubric knows"
+        return "unrecognized", "not a form the rubric knows"
     if family == "await-any":
         r = rule_of(f) if f["sub"] == "scan" else None
         if not r or not whole_project(f):
@@ -198,17 +200,20 @@ RULE = lambda body: "ast-grep scan --inline-rules 'id: q\nlanguage: ts\nrule:\n"
 CASES = {
     "ret-decl": (
         ["ast-grep run -l ts -p 'function $F($$$A): Relay { $$$B }' src",
+         "ast-grep run -l TypeScript -p 'function $F($$$A): Relay { $$$B }' src",
          "sg -p 'function $NAME($$$ARGS): Relay {$$$BODY}' --lang typescript ./src/",
          "ast-grep --pattern 'function $_($$$): Relay { $$$ }' src",
          'ast-grep run -p "function \\$F(\\$\\$\\$A): Relay { \\$\\$\\$B }" src',
          RULE("  kind: function_declaration\n  has:\n    field: return_type\n    kind: type_annotation\n    has:\n      kind: type_identifier\n      regex: ^Relay$")],
         ["ast-grep run -l ts -p 'function $F($$$A) { $$$B }' src",
          "ast-grep run -p 'export function $F($$$A): Relay { $$$B }' src",
+         "ast-grep run -p 'function $F($$$A): Relay { $$$B }' -l TypeScript src/core",
          "ast-grep run -p 'function $F($$$A): Relay { $$$B }' src/core",
          "ast-grep run -p 'function $F($$$A): Relay { $$$B }' -l rust src",
          'ast-grep run -p "function $F($$$A): Relay { $$$B }" src']),
     "ret-arrow": (
         ["ast-grep run -p 'const $N = ($$$A): Socket => $B' src", "ast-grep -p 'const $V = ($$$): Socket => $BODY' -l ts src/",
+         "ast-grep run -p 'const $NAME = ($$$): Socket => $$$' -l ts src",
          RULE("  kind: arrow_function\n  has:\n    kind: type_annotation\n    field: return_type\n    has:\n      kind: type_identifier\n      regex: ^Socket$\n  inside:\n    kind: variable_declarator\n    inside:\n      kind: lexical_declaration\n      regex: ^const\\b")],
         ["ast-grep run -p 'const $N = ($$$A) => $B' src", "ast-grep run -p 'let $N = ($$$A): Socket => $B' src",
          RULE("  kind: arrow_function\n  has:\n    field: return_type\n    has:\n      kind: type_identifier\n      regex: ^Socket$")]),
@@ -229,6 +234,7 @@ CASES = {
     "public-surface": (["ast-grep outline src/index.ts", "ast-grep outline --items exports src/index.ts", "ast-grep outline ./src/index.ts --items structure"],
                        ["ast-grep outline src --items exports", "ast-grep outline src", "ast-grep outline src/index.ts --match Relay"]),
     "public-types": (["ast-grep run -l typescript -p 'export type { $$$ }' src/index.ts",
+                      "ast-grep run --pattern 'export type { $$$NAMES } from $MODULE' --lang typescript src/index.ts",
                       "ast-grep run -p 'export type { $$$S } from $$$P' src/index.ts"],
                      ["ast-grep run -p 'export type { $$$S }' src", "ast-grep outline src/index.ts"]),
     "await-any": ([RULE("  kind: function_declaration\n  has:\n    pattern: await $E\n    stopBy: end"),
@@ -236,12 +242,13 @@ CASES = {
                   [RULE("  kind: function_declaration\n  has:\n    pattern: await $E"), "ast-grep run -p 'await $E' src"]),
     "log-in-try": ([RULE("  pattern: loadMeadow($$$A)\n  inside:\n    kind: try_statement\n    stopBy: end"),
                     RULE("  pattern: loadMeadow($$$)\n  inside:\n    kind: try_statement\n    field: body\n    stopBy: end")],
-                   [RULE("  pattern: loadMeadow($$$A)\n  inside:\n    kind: try_statement"), "ast-grep run -p 'loadMeadow($$$A)' src"]),
+                   [RULE("  pattern: loadMeadow($$$A)\n  inside:\n    kind: try_statement"), "ast-grep run -p 'loadMeadow($$$A)' src",
+                    "ast-grep run -k 'try_statement > statement_block call_expression' -l TypeScript src"]),
 }
 
 
 def selftest():
-    bad = n_right = n_wrong = 0
+    bad = n_right = n_wrong = unknown = 0
     for fam, (rights, wrongs) in CASES.items():
         for c in rights:
             n_right += 1
@@ -253,7 +260,10 @@ def selftest():
             v, why = judge(c, fam, P)
             if v == "right":
                 print(f"rubric: {fam}: graded right: {c!r}"); bad += 1
-    print(f"rubric: {n_right} right spellings and {n_wrong} wrong ones over {len(CASES)} operations, {bad} misjudged")
+            elif v == "unrecognized":
+                unknown += 1
+    print(f"rubric: {n_right} right spellings and {n_wrong} not right ({n_wrong - unknown} wrong, {unknown} unrecognized) over "
+          f"{len(CASES)} operations, {bad} misjudged")
     return 1 if bad else 0
 
 
