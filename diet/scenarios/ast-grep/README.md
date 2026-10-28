@@ -153,6 +153,13 @@ The note-writer experiment (Dispatch, 2026-10-27). Its asks are the experiment's
   - `--before` runs the host's idle gate before each pass. `--max-seconds` (3600) stops a pass's process group and records it `stopped`, never graded.
 - **Canned:** `DIET_AST_GREP_SEED=7`. t1's canned answer is wrong, so it takes 4 attempts with W1; t2–t6 are clean with W0; the held-out six run without notes turns. The writer's ask, tail included, is what the model receives, and the notes ride into the next pass's head.
 
+## Gap-filling: `tutor_round.py`
+The maintainer's change of direction (2026-10-28): the self-written notes loop is set aside; a stronger model, the tutor, edits a model's notes until its failures disappear. `tutor_round.py` is the instrument it reads. DRAFT.
+- **`tutor_round.py --notes FILE --out DIR [--tasks ...] [--held-out] [--floor] [--before CMD] [--max-seconds S] [-- DRIVE_ARGS]`** runs each task once on a fresh instance with the notes FILE and no notes turn (`run_pass.py --no-notes`), under the loop's gates.
+- **`DIR/rows.jsonl`**, per task: right, kind and the rubric's reason, the command, the trial searches and their commands, the docs read, and `pass.py`'s par fields.
+- **`DIR/failures.md`**, the tutor's input, from the tutorial run (t1..t6 by default) only: per failed task, its ask, command, kind and reason, trial commands, and the last 1,500 characters of reasoning before the answer. A stopped or void pass is listed as not run, never as no failure. Private run data, never committed.
+- **`--held-out`** runs h1..h6 and writes no failures.md: the tutor never sees a held-out failure. A task list that mixes the splits is refused.
+
 ## Declared limits
 - **macOS only.** The regimens read all (`sandbox_reads = "all"`), which the drive builds for macOS alone, and the check confines commands there only.
 - **Other readable copies of ast-grep's docs.** The classifier counts the ones it knows. The live deny list covers the agents' plugin caches (`~/.claude`). Any other copy, such as a package cache, is neither denied nor counted.
@@ -170,4 +177,5 @@ In `./verify.sh`'s scenarios check:
 - `pass.py --selftest`;
 - `loop.py --selftest` and `run_pass.py --selftest`;
 - `audit.py --selftest`;
+- `tutor_round.py --selftest`;
 - `probe_key.py --selftest`.
