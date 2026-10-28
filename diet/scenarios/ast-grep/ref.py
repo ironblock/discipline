@@ -81,7 +81,11 @@ def alternatives(family, p):
                       f"kind: type_annotation, has: {{kind: type_identifier, regex: ^{p['arrow_target']}$}}}}}}, {{inside: {{kind: variable_declarator, "
                       "field: value, inside: {kind: lexical_declaration, regex: ^const}}}]}}' src"],
         # Round 5, the Flash-Next instance's t4: the body, then an await at any depth within it.
-        "await-any": [RULE("  kind: function_declaration\n  has:\n    field: body\n    kind: statement_block\n    has:\n      kind: await_expression\n      stopBy: end")],
+        "await-any": [RULE("  kind: function_declaration\n  has:\n    field: body\n    kind: statement_block\n    has:\n      kind: await_expression\n      stopBy: end"),
+                      # `any:` of kinds (Dispatch, 2026-10-28): the Flash-Next instance's gap-fill t4.
+                      RULE("  any:\n    - kind: function_declaration\n    - kind: generator_function_declaration\n  has:\n    field: body\n    kind: statement_block\n    has:\n      kind: await_expression\n      stopBy: end"),
+                      RULE("  any:\n    - kind: function_declaration\n  has:\n    pattern: await $E\n    stopBy: end"),
+                      RULE("  all:\n    - kind: function_declaration\n    - has:\n        pattern: await $A\n        stopBy: end")],
         "public-surface": ["ast-grep run -l ts -k export_statement src/index.ts"],
         "public-types": ["ast-grep run -p \"export type { \\$\\$\\$ } from '\\$PATH';\" -l ts src/index.ts"],
         "log-in-try": [RULE(f"  all:\n    - pattern: {p['log_fn']}($$$)\n    - inside:\n        pattern: \"try {{ $$$ }}\"\n        stopBy: end"),

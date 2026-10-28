@@ -172,6 +172,19 @@ def merged_all(r):
 ONE_PARAM = "`$A` in a parameter list matches exactly one parameter"
 
 
+def declares_functions(r):
+    """A rule's own kind is function_declaration, or an `any:` of bare kinds that includes it and adds at most
+    generator_function_declaration (Dispatch, 2026-10-28: "declared with the `function` keyword" arguably covers
+    `function*`)."""
+    if "kind" in r:
+        return "any" not in r and r["kind"] == "function_declaration"
+    alts = r.get("any")
+    if not isinstance(alts, list) or not all(isinstance(x, dict) and set(x) == {"kind"} for x in alts):
+        return False
+    kinds = {x["kind"] for x in alts}
+    return "function_declaration" in kinds and kinds <= {"function_declaration", "generator_function_declaration"}
+
+
 def untyped_function(node):
     """A rule node whose pattern is a function declaration without its return type."""
     return isinstance(node, dict) and pattern_is(node, "function $F($$$A) { $$$B }")
@@ -266,8 +279,9 @@ def judge(cmd, family, p):
         items = r.get("all") if isinstance(r.get("all"), list) else [r]
         if any(untyped_function(x) for x in items):
             return "wrong", "a function pattern without its return type matches no typed function"
+        r = merged_all(r)  # `all:` of the kind and the `has` is the one rule
         has = r.get("has")
-        if r.get("kind") != "function_declaration" or not isinstance(has, dict):
+        if not declares_functions(r) or not isinstance(has, dict):
             return "unrecognized", "not a function_declaration with `has`"
         inner = has.get("has")
         if has.get("field") == "body" and has.get("kind") == "statement_block" and isinstance(inner, dict) and (
@@ -352,9 +366,18 @@ CASES = {
     "await-any": ([RULE("  kind: function_declaration\n  has:\n    pattern: await $E\n    stopBy: end"),
                    # Round 5, the Flash-Next instance's t4: the body, then an await at any depth within it.
                    RULE("  kind: function_declaration\n  has:\n    field: body\n    kind: statement_block\n    has:\n      kind: await_expression\n      stopBy: end"),
-                   "ast-grep scan --inline-rules '{id: f, language: typescript, rule: {kind: function_declaration, has: {field: body, kind: await_expression, stopBy: end}}}' src/"],
+                   "ast-grep scan --inline-rules '{id: f, language: typescript, rule: {kind: function_declaration, has: {field: body, kind: await_expression, stopBy: end}}}' src/",
+                   # `any:` of kinds with function_declaration among them (Dispatch, 2026-10-28): the ask's "declared with the
+                   # `function` keyword" arguably covers `function*`, so either set is right.
+                   RULE("  any:\n    - kind: function_declaration\n    - kind: generator_function_declaration\n  has:\n    field: body\n    kind: statement_block\n    has:\n      kind: await_expression\n      stopBy: end"),
+                   RULE("  any:\n    - kind: function_declaration\n  has:\n    pattern: await $E\n    stopBy: end"),
+                   # `all:` of the kind and the `has` is the one rule (the floor's gap-fill t4).
+                   RULE("  all:\n    - kind: function_declaration\n    - has:\n        pattern: await $A\n        stopBy: end")],
                   [RULE("  kind: function_declaration\n  has:\n    pattern: await $E"), "ast-grep run -p 'await $E' src",
-                   RULE("  kind: function_declaration\n  has:\n    field: body\n    kind: statement_block\n    has:\n      kind: await_expression")]),
+                   RULE("  kind: function_declaration\n  has:\n    field: body\n    kind: statement_block\n    has:\n      kind: await_expression"),
+                   RULE("  any:\n    - kind: function_declaration\n    - kind: generator_function_declaration\n  has:\n    pattern: await $E"),
+                   RULE("  any:\n    - kind: generator_function_declaration\n  has:\n    pattern: await $E\n    stopBy: end"),
+                   RULE("  any:\n    - kind: function_declaration\n    - kind: arrow_function\n  has:\n    pattern: await $E\n    stopBy: end")]),
     "log-in-try": ([RULE("  pattern: loadMeadow($$$A)\n  inside:\n    kind: try_statement\n    stopBy: end"),
                     RULE("  pattern: loadMeadow($$$)\n  inside:\n    kind: try_statement\n    field: body\n    stopBy: end"),
                     RULE("  all:\n    - pattern: loadMeadow($$$)\n    - inside:\n        kind: try_statement\n        stopBy: end"),
