@@ -10,7 +10,8 @@ rubric doesn't know, graded wrong and reported, so the audit can show whether th
 - paths normalised (`./src/` is `src`); a search of the whole project is `src`, `.` or no path; `--lang`, when
   given, `ts` or `typescript`.
 "As specific as necessary": a form that also matches what the task excludes is wrong (an unanchored outline
-`--match`, which matches names, signatures and first lines; an arrow rule without its `const`). DRAFT and
+`--match`, which matches names, signatures and first lines, ruled wrong by the maintainer 2026-10-27; an arrow rule
+without its `const`). DRAFT and
 provisional: the rubric is a judgment compiled into data, and the audit (`audit.py`) says where it disagrees.
 """
 import re, sys

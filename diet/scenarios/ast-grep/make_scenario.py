@@ -27,7 +27,9 @@ SKILLS = {"name": "skills", "start": "python3 -I ../services/skills.py start", "
           "ready_timeout_s": 120}
 # DRAFT, model-facing: the task's id leads its ask, so a canned reply can be routed to it.
 ASK = "DRAFT. Task `{id}`. {ask}"
-NOTES_ASK = "DRAFT. Notes update: update your notes on ast-grep through the notes tool, as concise as you can make them."
+# The notes turn is the grade's feedback (check.py picks its ask by the attempt's failure kind; the DRAFT stub when no
+# writer table is given), so no separate step asks it.
+NOTES_FEEDBACK = "{got}"
 WRONG = "DRAFT. (Not sent: a pass asks its task once.)"
 # A step waits as long as the 60-minute guard allows a pass, never the drive's 900 s default (two floor passes voided on it).
 PATIENCE = 3600
@@ -58,11 +60,11 @@ def lines(task, skills, first):
     out = [header,
            {"reply": {"when": f"Task `{task['id']}`", "text": "", "calls": [answer]}},
            {"reply": {"when": "Answer recorded", "text": "Canned: answered."}},
-           {"reply": {"when": "Notes update:", "text": "", "calls": [notes]}},
+           {"reply": {"when": "your notes", "text": "", "calls": [notes]}},
            {"reply": {"when": "Notes saved", "text": "Canned: noted."}},
            {"step": "ask", "text": ASK.format(id=task["id"], ask=task["ask"]), "task": task["id"], "patience": PATIENCE},
-           {"step": "grade", "task": task["id"], "check": CHECK, "attempts": 1, "wrong": WRONG},
-           {"step": "ask", "text": NOTES_ASK, "patience": PATIENCE},
+           {"step": "grade", "task": task["id"], "check": CHECK, "attempts": 1, "wrong": WRONG, "right": NOTES_FEEDBACK,
+            "last": NOTES_FEEDBACK, "patience": PATIENCE},
            {"step": "end"}]
     return "".join(json.dumps(line, sort_keys=True) + "\n" for line in out)
 
