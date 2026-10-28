@@ -29,6 +29,11 @@ SKILLS = {"name": "skills", "start": "python3 -I ../services/skills.py start", "
 ASK = "DRAFT. Task `{id}`. {ask}"
 NOTES_ASK = "DRAFT. Notes update: update your notes on ast-grep through the notes tool, as concise as you can make them."
 WRONG = "DRAFT. (Not sent: a pass asks its task once.)"
+# A step waits as long as the 60-minute guard allows a pass, never the drive's 900 s default (two floor passes voided on it).
+PATIENCE = 3600
+# The canned miss answers: what each subcommand does on a miss (miss_truth.json, ast-grep 0.44.0).
+MISS_FIELDS = {"zero-calls": {"exit_status_when_none": 1, "prints_nothing_when_none": True},
+               "maybe-defined": {"exit_status_when_none": 0, "prints_nothing_when_none": False}}
 
 
 def canned_truth():
@@ -44,20 +49,20 @@ def lines(task, skills, first):
     cmd = (ref.naive if first else ref.reference)(task["family"], p)
     header = {"scenario": f"ast-grep-{task['id']}" + ("-skills" if skills else ""), "regimen": "../canned.toml",
               "live_regimen": "../bare.toml", "head": "../head-skills.md" if skills else "../head.md",
-              "answer_tool": ["../answer-tool.json", "../notes-tool.json"], "services": [FIXTURE, SKILLS] if skills else [FIXTURE],
+              "answer_tool": ["../" + task.get("tool", "answer-tool.json"), "../notes-tool.json"], "services": [FIXTURE, SKILLS] if skills else [FIXTURE],
               "sandbox_tools": ["ast-grep"],
               # The answer key is the fixture's own directory: denied to the model's commands (probe_key.py proves it).
               "sandbox_secrets": ["service.fixture.dir"]}
-    answer = {"id": "canned-answer", "name": ANSWER, "arguments": json.dumps({"command": cmd})}
+    answer = {"id": "canned-answer", "name": ANSWER, "arguments": json.dumps(dict({"command": cmd}, **MISS_FIELDS.get(task["family"], {})))}
     notes = {"id": "canned-notes", "name": NOTES, "arguments": json.dumps({"notes": "DRAFT. Canned notes."})}
     out = [header,
            {"reply": {"when": f"Task `{task['id']}`", "text": "", "calls": [answer]}},
            {"reply": {"when": "Answer recorded", "text": "Canned: answered."}},
            {"reply": {"when": "Notes update:", "text": "", "calls": [notes]}},
            {"reply": {"when": "Notes saved", "text": "Canned: noted."}},
-           {"step": "ask", "text": ASK.format(id=task["id"], ask=task["ask"]), "task": task["id"]},
+           {"step": "ask", "text": ASK.format(id=task["id"], ask=task["ask"]), "task": task["id"], "patience": PATIENCE},
            {"step": "grade", "task": task["id"], "check": CHECK, "attempts": 1, "wrong": WRONG},
-           {"step": "ask", "text": NOTES_ASK},
+           {"step": "ask", "text": NOTES_ASK, "patience": PATIENCE},
            {"step": "end"}]
     return "".join(json.dumps(line, sort_keys=True) + "\n" for line in out)
 

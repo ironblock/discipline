@@ -116,11 +116,12 @@ def build(seed):
         if logs == "plain":
             body.append((f"  {log_fn}(id);", None))
         if logs == "try":
-            body += [(f"  try {{", None), (f"    {log_fn}(id);", "log-in-try"), (f"  }} catch (err) {{", None), (f"    void err;", None),
-                     (f"  }}", None)]
+            body += [(f"  try {{", None), (f"    {log_fn}(id);", "log-in-try"), (f"    JSON.stringify(id);", None),
+                     (f"  }} catch (err) {{", None), (f"    void err;", None), (f"  }}", None)]
         if logs == "try-nested":
             body += [(f"  try {{", None), (f"    if (id.length > 1) {{", None), (f"      {log_fn}(id);", "log-in-try"),
-                     (f"    }}", None), (f"  }} finally {{", None), (f"    void id;", None), (f"  }}", None)]
+                     (f"      Math.max(id.length, 1);", None), (f"    }}", None), (f"  }} finally {{", None), (f"    void id;", None),
+                     (f"  }}", None)]
         if emits:
             body.append((f"  $emit('{rng.choice(NOUNS)}');", "emit-calls"))
         for _ in range(n_track):
@@ -198,6 +199,20 @@ def build(seed):
     decls = [f for f in funcs if f["kind"] == "decl"]
     line_fn = rng.choice(decls)
     line_itf = rng.choice(interfaces)
+    # Distractors (Dispatch, 2026-10-27): what an over-broad form would also match, so execution can tell it from a right
+    # one. A near-name beside each outlined item (an unanchored --match catches it), and a `let` arrow returning the arrow
+    # type (a rule without its const catches it). None of them is in any family's truth.
+    near = rng.choice(paths[1:])
+    g.emit(near, f"export function {line_fn['name']}View(id: string): void {{")
+    g.emit(near, "  void id;")
+    g.emit(near, "}")
+    g.emit(near, "")
+    g.emit(near, f"export interface {line_itf['name']}View {{")
+    g.emit(near, "  id: string;")
+    g.emit(near, "}")
+    g.emit(near, "")
+    g.emit(near, f"export let {g.fn_name()} = (id: string): {arrow_target} => ({{ id }} as never);")
+    g.emit(near, "")
     truth["params"] = {"target": target, "arrow_target": arrow_target, "zero_fn": zero_fn, "maybe": maybe,
                        "log_fn": log_fn, "line_fn": line_fn["name"], "line_fn_exported": line_fn["export"],
                        "line_itf": line_itf["name"]}

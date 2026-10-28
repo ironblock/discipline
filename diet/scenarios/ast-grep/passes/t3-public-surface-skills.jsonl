@@ -3,7 +3,7 @@
 {"reply": {"text": "Canned: answered.", "when": "Answer recorded"}}
 {"reply": {"calls": [{"arguments": "{\"notes\": \"DRAFT. Canned notes.\"}", "id": "canned-notes", "name": "notes"}], "text": "", "when": "Notes update:"}}
 {"reply": {"text": "Canned: noted.", "when": "Notes saved"}}
-{"step": "ask", "task": "t3-public-surface", "text": "DRAFT. Task `t3-public-surface`. DRAFT. Give the ast-grep command, run from this directory, that shows each export of the package's public surface, the entry point src/index.ts, and nothing else."}
+{"patience": 3600, "step": "ask", "task": "t3-public-surface", "text": "DRAFT. Task `t3-public-surface`. DRAFT. Give the ast-grep command, run from this directory, that shows each export of the package's public surface, the entry point src/index.ts, and nothing else."}
 {"attempts": 1, "check": "python3 -I \"$DIET_GRADE_SCENARIO_DIR/../check.py\"", "step": "grade", "task": "t3-public-surface", "wrong": "DRAFT. (Not sent: a pass asks its task once.)"}
-{"step": "ask", "text": "DRAFT. Notes update: update your notes on ast-grep through the notes tool, as concise as you can make them."}
+{"patience": 3600, "step": "ask", "text": "DRAFT. Notes update: update your notes on ast-grep through the notes tool, as concise as you can make them."}
 {"step": "end"}

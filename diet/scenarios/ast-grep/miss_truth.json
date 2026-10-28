@@ -1,0 +1,17 @@
+{
+ "about": "What each search prints and exits with when nothing matches, measured per ast-grep version (2026-10-27): the miss tasks grade their answer fields against it, never against a guess for another version.",
+ "ast-grep 0.44.0": {
+  "run": {
+   "exit_status_when_none": 1,
+   "prints_nothing_when_none": true
+  },
+  "outline": {
+   "exit_status_when_none": 0,
+   "prints_nothing_when_none": false
+  },
+  "scan": {
+   "exit_status_when_none": 0,
+   "prints_nothing_when_none": true
+  }
+ }
+}
