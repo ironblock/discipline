@@ -248,7 +248,7 @@ check_scenarios() {
   # docs-read classifier hold without ast-grep; ref.py, which runs it, does not
   # run here.
   local tut
-  for tut in "gen.py --selftest" "check.py --selftest" "docs_reads.py --selftest" "command.py --selftest" "yamlish.py" "rubric.py" "make_scenario.py --check" "pass.py --selftest" "probe_key.py --selftest"; do
+  for tut in "gen.py --selftest" "check.py --selftest" "docs_reads.py --selftest" "command.py --selftest" "yamlish.py" "rubric.py" "make_scenario.py --check" "pass.py --selftest" "loop.py --selftest" "probe_key.py --selftest"; do
     code=0
     # shellcheck disable=SC2086 # the script and its one flag
     python3 -I diet/scenarios/ast-grep/${tut} || code=$?

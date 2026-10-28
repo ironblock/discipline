@@ -1,5 +1,5 @@
 """The notes loop (#971; Dispatch's note-writer experiment, 2026-10-27): python3 -I loop.py --out DIR [--writers FILE]
-[--skills] [--attempts N] [--notes FILE] [--before CMD] [--max-seconds S] [-- DRIVE_ARGS...].
+[--skills] [--floor] [--attempts N] [--notes FILE] [--before CMD] [--max-seconds S] [-- DRIVE_ARGS...], or --selftest.
 
 For each tutorial operation t1..t6 in order, a fresh instance with the current notes (`run_pass.py`). Its notes turn
 is the grade's feedback, its ask chosen by the attempt's failure kind (check.py's writer map, `--writers`). A pass
@@ -8,7 +8,9 @@ on, carrying the notes. After t6, h1..h6 run once each with the final notes and 
 
 Per attempt it records, in DIR/loop.jsonl: the operation, attempt, pass dir, clean, failure kind, writer, the notes'
 character lengths before and after, and pass.json's path. `--before CMD` runs before every pass (the host's idle
-gate); `--max-seconds S` (3600) stops a pass's whole process group and records it `stopped`, never graded. DRAFT and
+gate); `--max-seconds S` (3600) stops a pass's whole process group and records it `stopped`, never graded. `--floor`
+takes every pass under the floor's live regimen (`run_pass.py --floor`, `bare-floor.toml`): without it a floor endpoint
+would be driven under the production entry's regimen, its substrate and its output cap. DRAFT and
 experimental: the writers' text is the experiment's, never the maintainer's wording.
 """
 import json, os, signal, subprocess, sys, time
@@ -33,14 +35,20 @@ def run(cmd, max_seconds):
         return None, True
 
 
+def pass_cmd(task, out, notes, args, held_out):
+    """The run_pass.py command for one pass."""
+    cmd = [sys.executable, "-I", os.path.join(HERE, "run_pass.py"), task, "--out", out, "--notes", notes]
+    cmd += ["--skills"] if args["skills"] else []
+    cmd += ["--floor"] if args["floor"] else []
+    cmd += ["--no-notes"] if held_out else (["--writers", args["writers"]] if args["writers"] else [])
+    return cmd + (["--"] + args["drive"] if args["drive"] else [])
+
+
 def one(task, attempt, notes, args, held_out):
     out = os.path.join(args["out"], ("held-out" if held_out else "tutorial"), f"{task}-{attempt}")
     if args["before"]:
         subprocess.run(["bash", "-c", args["before"]], check=False)
-    cmd = [sys.executable, "-I", os.path.join(HERE, "run_pass.py"), task, "--out", out, "--notes", notes]
-    cmd += ["--skills"] if args["skills"] else []
-    cmd += ["--no-notes"] if held_out else (["--writers", args["writers"]] if args["writers"] else [])
-    cmd += ["--"] + args["drive"] if args["drive"] else []
+    cmd = pass_cmd(task, out, notes, args, held_out)
     started = time.time()
     code, stopped = run(cmd, args["max_seconds"])
     p = os.path.join(out, "pass.json")
@@ -65,7 +73,7 @@ def parse(argv):
     if not get("--out"):
         sys.exit(__doc__)
     return {"out": os.path.abspath(get("--out")), "writers": get("--writers") and os.path.abspath(get("--writers")),
-            "skills": "--skills" in argv, "attempts": int(get("--attempts", 4)), "notes": get("--notes"),
+            "skills": "--skills" in argv, "floor": "--floor" in argv, "attempts": int(get("--attempts", 4)), "notes": get("--notes"),
             "before": get("--before"), "max_seconds": int(get("--max-seconds", 3600)), "drive": drive}
 
 
@@ -86,5 +94,24 @@ def main(argv):
     return 0
 
 
+def selftest():
+    bad = 0
+    base = ["--out", "/x", "--writers", "/w.json", "--", "--endpoint", "E"]
+    cases = [
+        ("a production pass", base, False, ["--writers", "/w.json", "--", "--endpoint", "E"], ["--floor", "--no-notes"]),
+        ("a floor pass", ["--floor"] + base, False, ["--floor", "--writers"], ["--no-notes"]),
+        ("a floor held-out pass", ["--floor"] + base, True, ["--floor", "--no-notes"], ["--writers"]),
+        ("a skills pass", ["--skills"] + base, False, ["--skills"], ["--floor"]),
+    ]
+    for why, argv, held_out, have, lack in cases:
+        cmd = pass_cmd("t1-ret-decl", "/x/p", "/x/n.md", parse(argv), held_out)
+        missing = [w for w in have if w not in cmd]
+        extra = [w for w in lack if w in cmd]
+        if missing or extra:
+            print(f"loop: {why}: missing {missing}, extra {extra}: {cmd}"); bad += 1
+    print(f"loop: {len(cases)} pass commands, {bad} wrong")
+    return 1 if bad else 0
+
+
 if __name__ == "__main__":
-    sys.exit(main(sys.argv[1:]))
+    sys.exit(selftest() if sys.argv[1:] == ["--selftest"] else main(sys.argv[1:]))
