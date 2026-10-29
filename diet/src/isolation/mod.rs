@@ -3237,6 +3237,9 @@ mod tests {
 (allow network-bind (local ip (string-append "localhost:" (param "PORT_0"))))
 (allow network-inbound (local ip (string-append "localhost:" (param "PORT_0"))))
 (deny file-read* file-write*
+  ;; secrets v2: no read, no write, no exec
+  (subpath (param "SECRET_0")))
+(deny process-exec
   (subpath (param "SECRET_0")))
 (deny file-read* file-write* (require-all (regex #"/\.env(\.[^/]*)?$") (require-not (regex #"/\.env\.(example|sample|template|dist)$")) (require-not (subpath (param "WORKTREE")))))
 "#;
@@ -3490,7 +3493,9 @@ mod tests {
             ..Policy::merged_usr()
         };
         let profile = Seatbelt::profile(&declared);
-        let secrets = "(deny file-read* file-write*\n  (subpath (param \"SECRET_0\"))\n  \
+        let secrets = "(deny file-read* file-write*\n  ;; secrets v2: no read, no write, no exec\n  \
+                       (subpath (param \"SECRET_0\"))\n  (subpath (param \"SECRET_1\")))\n\
+                       (deny process-exec\n  (subpath (param \"SECRET_0\"))\n  \
                        (subpath (param \"SECRET_1\")))\n";
         let env_files = "(deny file-read* file-write* (require-all (regex #\"/\\.env(\\.[^/]*)?$\") \
                          (require-not (regex #\"/\\.env\\.(example|sample|template|dist)$\")) \
@@ -4493,6 +4498,104 @@ mod tests {
                 "the key is not readable from inside: {:?} {:?}",
                 read.exit,
                 read.stdout
+            );
+        }
+    }
+
+    #[test]
+    fn a_secret_is_neither_executed_nor_linked_from_inside() {
+        // #971 (2026-10-29): a secret denied reads and writes could still be
+        // exec'd, so a model ran a denied binary by its path. Measured on the
+        // Mac: a secret binary (by its resolved path and through a symlink to
+        // it), a secret script run directly, and links to secrets made from
+        // inside. The same files outside the secret run: the control.
+        if Platform::here() != Platform::MacOs {
+            return;
+        }
+        let ground = Ground::make("secret-exec");
+        let mut made = Vec::new();
+        for dir in ["denied", "open"] {
+            let at = ground.outside.join(dir);
+            fs::create_dir_all(&at).expect("a dir");
+            fs::copy("/bin/echo", at.join("echo")).expect("a binary");
+            // A copied platform binary is killed (SIGKILL) at exec: its
+            // signature names its path. Signed ad hoc, the copy runs.
+            let signed = process::Command::new("/usr/bin/codesign")
+                .args(["--force", "--sign", "-"])
+                .arg(at.join("echo"))
+                .output()
+                .expect("codesign runs");
+            assert!(signed.status.success(), "the copy is signed: {signed:?}");
+            fs::write(at.join("s.sh"), "#!/bin/sh\necho SCRIPT-RAN\n").expect("a script");
+            fs::set_permissions(at.join("s.sh"), fs::Permissions::from_mode(0o755))
+                .expect("executable");
+            fs::write(at.join("key"), "DUMMY-KEY\n").expect("a key");
+            made.push(fs::canonicalize(&at).expect("it resolves"));
+        }
+        let (secret, open) = (&made[0], &made[1]);
+        let mut declared = policy(
+            "isolation = \"sandbox\"\n\
+             network = \"none\"\n\
+             sandbox_reads = \"all\"\n",
+        );
+        policy::add_run_secret(&mut declared, secret.to_string_lossy().into_owned())
+            .expect("absolute");
+        let Ok(confinement) = open_on(&declared, Platform::MacOs) else {
+            return;
+        };
+        let sh = |script: String| {
+            confinement
+                .run(&declared, &ground.tree, &argv(&["/bin/sh", "-c", &script]))
+                .expect("the sandbox set up")
+        };
+        // The control: outside the secret, each runs.
+        let control = sh(format!(
+            "{o}/echo BINARY-RAN; {o}/s.sh; ln -s {o}/echo ./open-link && ./open-link LINK-RAN",
+            o = open.display()
+        ));
+        assert!(
+            control.stdout.contains("BINARY-RAN")
+                && control.stdout.contains("SCRIPT-RAN")
+                && control.stdout.contains("LINK-RAN"),
+            "the control runs, so a refusal below is the secret's: {control:?}"
+        );
+        let s = secret.display();
+        for (case, script, leak) in [
+            (
+                "a secret binary by its path",
+                format!("{s}/echo LEAKED"),
+                "LEAKED",
+            ),
+            (
+                "a secret binary through a symlink",
+                format!("ln -s {s}/echo ./l && ./l LEAKED"),
+                "LEAKED",
+            ),
+            (
+                "a secret script run directly",
+                format!("{s}/s.sh"),
+                "SCRIPT-RAN",
+            ),
+            (
+                "a hard link to a secret file",
+                format!("ln {s}/key ./k; cat ./k"),
+                "DUMMY-KEY",
+            ),
+            (
+                "a symlink to a secret file",
+                format!("ln -s {s}/key ./ks; cat ./ks"),
+                "DUMMY-KEY",
+            ),
+            (
+                "a hard link to a secret binary",
+                format!("ln {s}/echo ./h; ./h LEAKED"),
+                "LEAKED",
+            ),
+        ] {
+            let ran = sh(script);
+            assert!(
+                !ran.stdout.contains(leak),
+                "{case}: refused from inside, as a read is: {ran:?}"
             );
         }
     }

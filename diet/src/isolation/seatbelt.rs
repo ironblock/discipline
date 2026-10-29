@@ -72,7 +72,13 @@
 //!   `~/.docker/config.json`, `~/.gnupg`, plus the regimen's additions, `~`
 //!   being the drive's `HOME`), and on every `.env` or `.env.*` file outside
 //!   the tree. The later rule wins in Seatbelt, so these beat `reads =
-//!   "all"`, a readable path and a writable dir alike.
+//!   "all"`, a readable path and a writable dir alike. **And `deny
+//!   process-exec`** on every secret path (#971, 2026-10-29): a read deny
+//!   does not stop exec, so a denied binary or script ran by its path
+//!   (measured). The denies open with `;; secrets v2: no read, no write, no
+//!   exec`, so the profile's digest, and each `confined` argv the log keeps,
+//!   tells which semantics a run had. A link made from inside to a secret
+//!   (`ln`, `ln -s`) is refused, read or exec'd (measured, same test).
 //! - The environment is not the profile's: `Confinement::run` clears it and
 //!   passes only `PATH`, `HOME`, `LANG`, `TERM`, `TMPDIR` and the regimen's
 //!   `env_passthrough`, on every backend.
@@ -186,6 +192,12 @@ const ALL_READS: &str = "(allow file-read*)\n";
 /// `.Env.Production` and `.env.EXAMPLE` alike (review of 0dec34b, G). Measured:
 /// `.env` and `.env.production` outside are refused (exit 1); `.env.example`,
 /// `.env.template` and `not.env` outside, and `.env` inside, read (exit 0).
+/// The secrets' semantics, a comment inside their first deny: in the
+/// profile text, so in its digest and in each `confined` argv the log keeps.
+/// Version 2 (#971, 2026-10-29) adds `process-exec` to version 1's reads and
+/// writes: a run's log tells which it ran under.
+const SECRETS_SEMANTICS: &str = ";; secrets v2: no read, no write, no exec";
+
 const ENV_FILES: &str = r#"(deny file-read* file-write* (require-all (regex #"/\.env(\.[^/]*)?$") (require-not (regex #"/\.env\.(example|sample|template|dist)$")) (require-not (subpath (param "WORKTREE")))))
 "#;
 
@@ -400,11 +412,23 @@ impl Seatbelt {
     /// The secrets' denies: reads (metadata included) and writes, of each
     /// secret path and of `.env` files outside the tree.
     fn secrets(policy: &Policy) -> String {
-        let mut out = String::from("(deny file-read* file-write*");
+        // The secrets' semantics, named in the profile text and so in its
+        // digest and in every `confined` the log records (#971, 2026-10-29).
+        let mut out = String::from("(deny file-read* file-write*\n  ");
+        out.push_str(SECRETS_SEMANTICS);
         for index in 0..policy.secrets.len() {
             let _ = write!(out, "\n  (subpath (param \"SECRET_{index}\"))");
         }
         out.push_str(")\n");
+        // Exec too: a read deny does not stop `process-exec`, so a denied
+        // binary or script ran by its path (measured, #971).
+        if !policy.secrets.is_empty() {
+            out.push_str("(deny process-exec");
+            for index in 0..policy.secrets.len() {
+                let _ = write!(out, "\n  (subpath (param \"SECRET_{index}\"))");
+            }
+            out.push_str(")\n");
+        }
         out.push_str(ENV_FILES);
         out
     }
