@@ -71,6 +71,10 @@ def search(form, *patterns):
     """A run whose pattern is one of PATTERNS, or a scan whose rule is only that pattern."""
     if form["sub"] == "run":
         p = one(form, "--pattern")
+        # A `--selector` beside the pattern changes what matches (it picks the pattern's sub-node): never the plain
+        # pattern's search (measured, 0.44.0; the crossover's false right, 2026-10-29).
+        if form["opts"].get("--selector"):
+            return False
         return p is not None and canon(p) in {canon(x) for x in patterns}
     if form["sub"] == "scan":
         r = rule_of(form)
@@ -90,6 +94,9 @@ def type_wrong(node, name):
     if isinstance(rx, str) and name in rx and rx not in {a.format(name) for a in ANNOTATION}:
         return "the annotation's regex isn't anchored to the whole annotation: it also matches what only contains the type"
     inner = node.get("has")
+    # Measured on 0.44.0 (the sweep, 2026-10-29): the annotation's type identifier has no field name.
+    if isinstance(inner, dict) and inner.get("kind") == "type_identifier" and "field" in inner:
+        return "a type annotation's type has no field name: a `field` on it matches nothing there"
     if isinstance(inner, dict) and deep(inner) and inner.get("kind") == "type_identifier":
         return "the type identifier at any depth (stopBy: end) also matches Promise<T> and other wrapped types"
     return None
@@ -107,7 +114,7 @@ def direct_type(node, name):
         return True
     inner = node.get("has")
     return (isinstance(inner, dict) and not deep(inner) and inner.get("kind") == "type_identifier"
-            and inner.get("regex") == f"^{name}$")
+            and inner.get("regex") == f"^{name}$" and "field" not in inner)
 
 
 def outline_named(form, name, kind, need_structure):
@@ -186,6 +193,26 @@ def declares_functions(r):
     return "function_declaration" in kinds and kinds <= {"function_declaration", "generator_function_declaration"}
 
 
+CONST = ("^const", "^const\\b", "^const\\s", "^const ")
+
+
+def const_inside(inside):
+    """Whether an arrow rule's `inside` reaches a `const` declaration: a variable_declarator inside a
+    lexical_declaration whose regex anchors `const`, or that lexical_declaration itself with `stopBy: end`. (ok, why)
+    -- never "const" found anywhere in the text (the crossover's false right, 2026-10-29)."""
+    def const_decl(node):
+        return isinstance(node, dict) and node.get("kind") == "lexical_declaration" and node.get("regex") in CONST
+    if not isinstance(inside, dict):
+        return False, "not only const arrows"
+    if inside.get("kind") == "variable_declarator" and const_decl(inside.get("inside")):
+        return True, ""
+    if const_decl(inside):
+        return (True, "") if deep(inside) else (False, "`inside` looks only at a node's direct parent by default")
+    if isinstance(inside.get("pattern"), str) and inside["pattern"].lstrip().startswith("const") and not deep(inside):
+        return False, "`inside` looks only at a node's direct parent by default"
+    return False, "not only const arrows"
+
+
 def untyped_function(node):
     """A rule node whose pattern is a function declaration without its return type."""
     return isinstance(node, dict) and pattern_is(node, "function $F($$$A) { $$$B }")
@@ -198,6 +225,10 @@ def judge(cmd, family, p):
         return "wrong", f"refused: {why}"
     if not langs_ok(f):
         return "wrong", "--lang is not TypeScript"
+    # Measured on 0.44.0 (2026-10-29): `run` with both exits 2, "the argument '--pattern <PATTERN>' cannot be used with
+    # '--kind <KIND>'".
+    if f["sub"] == "run" and f["opts"].get("--pattern") and f["opts"].get("--kind"):
+        return "wrong", "ast-grep refuses the command: the argument '--pattern' cannot be used with '--kind'"
     # Round 5 (Dispatch, 2026-10-28): the floor's `(...$ARGS)` and `name(...)`. Not for set 2's spread and rest
     # families, whose `...` is the spread they ask for.
     if family not in ("spread-call", "rest-decl", "array-spread") and any("..." in pat for pat in patterns_of(f)):
@@ -233,8 +264,8 @@ def judge(cmd, family, p):
         if r and r.get("kind") == "arrow_function" and type_wrong(r.get("has"), p["arrow_target"]):
             return "wrong", type_wrong(r.get("has"), p["arrow_target"])
         if r and r.get("kind") == "arrow_function" and direct_type(r.get("has"), p["arrow_target"]):
-            consts = str(r.get("inside", "")).count("const")
-            return ("right", "an arrow return-type rule within a const") if consts else ("wrong", "not only const arrows")
+            ok, why = const_inside(r.get("inside"))
+            return ("right", "an arrow return-type rule within a const") if ok else ("wrong", why)
         return "unrecognized", "not a form the rubric knows"
     if family == "log-in-try" and f["sub"] == "run" and "try_statement" in (one(f, "--kind") or ""):
         return "wrong", "a kind selector over every call in a try: it also matches calls that aren't the log function's"
@@ -429,6 +460,13 @@ NAMED = [
     ("ret-decl", "ast-grep run -p 'function $F($A): Relay { $$$B }' -l ts src", "exactly one parameter"),
     ("public-types", "ast-grep run -p 'export type { $X }' -l typescript src/index.ts", "exactly one export specifier"),
     ("await-any", RULE("  any:\n    - kind: function_declaration\n    - kind: function_expression\n    - kind: generator_function_declaration\n  has:\n    pattern: await $X\n    stopBy: end"), "written as a value"),
+    # False rights the crossover's audit found (2026-10-29): graded right, executed wrong.
+    ("track-calls", "ast-grep run -p '$track($$$)' -k call_expression --lang typescript src/", "cannot be used with"),
+    ("ret-arrow", RULE("  kind: arrow_function\n  all:\n    - has:\n        field: return_type\n        regex: \"^: Socket$\"\n"
+                       "    - inside:\n        pattern: \"const $NAME = $ARROW\"") , "direct parent"),
+    # The sweep's (2026-10-29): a gap-fill t1 of the Flash-Next instance's, graded right, executed wrong.
+    ("ret-decl", RULE("  kind: function_declaration\n  has:\n    field: return_type\n    kind: type_annotation\n    has:\n"
+                      "      field: type\n      kind: type_identifier\n      regex: ^Relay$"), "no field name"),
     ("log-in-try", RULE("  all:\n    - pattern: loadMeadow($A)\n    - inside:\n        kind: try_statement\n        stopBy: end"), "exactly one argument"),
 ]
 # W1r carries a wrong's reason to the model (round 4): no reason may hand it the fix itself.
