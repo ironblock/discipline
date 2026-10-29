@@ -12,15 +12,16 @@ commands, the docs read, and the par fields (`pass.py`'s). The tutorial run (t1.
 DIR/failures.md, the tutor's input: per failed task its ask, command, kind and reason, trial commands, and the last
 1,500 characters of reasoning before the answer. Private run data, never committed.
 
-`--held-out` runs h1..h6 (or `--tasks` from them) and writes **no failures.md**: the tutor never sees a held-out
-failure. A task list that mixes the splits is refused. DRAFT and experimental.
+`--held-out` runs task set 2's held-out set (h7..h17), `--held-out-1` set 1's (h1..h6), or `--tasks` from either; each
+writes **no failures.md**: the tutor never sees a held-out failure. A task list that mixes the splits is refused. The
+tutorial run is t1..t22 by default. DRAFT and experimental.
 """
 import importlib, json, os, sys, time
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
 import check, loop  # noqa: E402
-from tasks import HELD_OUT, TUTORIAL  # noqa: E402
+from tasks import HELD_OUT, HELD_OUT_1, TUTORIAL  # noqa: E402
 
 tools_of = importlib.import_module("pass").tools_of  # `pass` is a keyword, so by name
 REASONING_TAIL = 1500
@@ -98,8 +99,9 @@ def parse(argv):
     get = lambda flag, default=None: argv[argv.index(flag) + 1] if flag in argv else default
     if not get("--out") or not get("--notes"):
         sys.exit(__doc__)
-    held_out = "--held-out" in argv
-    split = HELD_OUT if held_out else TUTORIAL
+    # `--held-out` is task set 2's held-out set; `--held-out-1`, set 1's (h1..h6, the gap-fill rounds' comparison).
+    held_out = "--held-out" in argv or "--held-out-1" in argv
+    split = HELD_OUT_1 if "--held-out-1" in argv else HELD_OUT if held_out else TUTORIAL
     ids = [t["id"] for t in split]
     tasks = get("--tasks").split(",") if get("--tasks") else ids
     stray = [t for t in tasks if t not in ids]
@@ -157,19 +159,22 @@ def selftest():
     if "the ask" not in md or wrong not in md or "ast-grep run -p 'x' src" not in md:
         print("tutor_round: failures.md lacks the ask, command or trial"); bad += 1
     for argv, ok in [(["--out", "/x", "--notes", "/n"], True), (["--out", "/x", "--notes", "/n", "--tasks", "h1-ret-arrow"], False),
-                     (["--out", "/x", "--notes", "/n", "--held-out"], True), (["--out", "/x", "--notes", "/n", "--held-out", "--tasks", "t1-ret-decl"], False)]:
+                     (["--out", "/x", "--notes", "/n", "--held-out"], True), (["--out", "/x", "--notes", "/n", "--held-out", "--tasks", "t1-ret-decl"], False),
+                     (["--out", "/x", "--notes", "/n", "--held-out-1"], True)]:
         try:
             a = parse(argv)
             got = True
+            if "--held-out-1" in argv and a["tasks"] != [t["id"] for t in HELD_OUT_1]:
+                print("tutor_round: --held-out-1 does not default to set 1's held-out tasks"); bad += 1
             if "--held-out" in argv and a["tasks"] != [t["id"] for t in HELD_OUT]:
-                print("tutor_round: --held-out does not default to h1..h6"); bad += 1
+                print("tutor_round: --held-out does not default to set 2's held-out tasks"); bad += 1
             if "--no-notes" not in loop.pass_cmd("t1-ret-decl", "/x/p", "/n", a, True):
                 print("tutor_round: a pass with a notes turn"); bad += 1
         except SystemExit:
             got = False
         if got != ok:
             print(f"tutor_round: {argv}: accepted {got}, expected {ok}"); bad += 1
-    print(f"tutor_round: the task turn's details, failures.md and 4 task lists, {bad} wrong")
+    print(f"tutor_round: the task turn's details, failures.md and 5 task lists, {bad} wrong")
     return 1 if bad else 0
 
 

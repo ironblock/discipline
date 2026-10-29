@@ -7,6 +7,9 @@ with new file layout, new names and new values. `--selftest` builds a few seeds 
 """
 import json, os, random, sys
 
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import gen2  # noqa: E402
+
 VERBS = ["load", "parse", "build", "merge", "fetch", "store", "render", "split", "scan", "pack", "route", "sync",
          "trim", "sort", "index", "probe", "seal", "stamp", "drain", "weigh"]
 NOUNS = ["ledger", "parcel", "beacon", "ticket", "bundle", "shard", "quota", "relay", "anchor", "harbor", "cipher",
@@ -154,7 +157,7 @@ def build(seed):
     cls_path = rng.choice(paths[1:])
     cls = g.word(NOUNS, lambda w: cap(w) + "Desk")
     g.emit(cls_path, f"export class {cls} {{")
-    g.emit(cls_path, f"  {g.fn_name()}(id: string): {target} {{")
+    desk_method = f"{cls_path}:{g.emit(cls_path, f'  {g.fn_name()}(id: string): {target} {{')}"
     g.emit(cls_path, f"    return {{ id }} as never;")
     g.emit(cls_path, "  }")
     g.emit(cls_path, "}")
@@ -252,7 +255,7 @@ def build(seed):
     g.emit(wide, "")
     # And an async function expression with an await (Dispatch, 2026-10-28): not a declaration, so a rule whose kinds
     # include `function_expression` also catches it. Not in any family's truth.
-    g.emit(wide, f"export const {g.fn_name()} = async function (id: string): Promise<void> {{")
+    fexpr = f"{wide}:{g.emit(wide, f'export const {g.fn_name()} = async function (id: string): Promise<void> {{')}"
     g.emit(wide, "  await Promise.resolve(id);")
     g.emit(wide, "};")
     g.emit(wide, "")
@@ -266,6 +269,9 @@ def build(seed):
     at_pair = f"src/index.ts:{g.emit('src/index.ts', f'export type {{ {pair[0]}, {pair[1]} }} from {chr(39)}./{pair_path[4:-3]}{chr(39)};')}"
     barrel_lines.append(at_pair)
     type_lines.append(at_pair)
+    # Task set 2 (#971, the maintainer 2026-10-29): its families' content, after every set-1 draw.
+    params2, answers2 = gen2.build(g, rng, paths, helper, {"target": target, "other": other, "funcs": funcs + [wide_decl],
+                                                         "desk_method": desk_method, "fexpr": [fexpr], "barrel_lines": barrel_lines})
     truth["params"] = {"target": target, "arrow_target": arrow_target, "zero_fn": zero_fn, "maybe": maybe,
                        "log_fn": log_fn, "line_fn": line_fn["name"], "line_fn_exported": line_fn["export"],
                        "line_itf": line_itf["name"]}
@@ -285,13 +291,16 @@ def build(seed):
     a["track-calls"] = sorted(lines_of["track-calls"])
     a["fn-outline"] = [at(line_fn)]
     a["itf-outline"] = [f"{line_itf['path']}:{line_itf['line']}"]
+    truth["params"].update(params2)
+    a.update({k: sorted(v) for k, v in answers2.items()})
+    a["two-params"] = gen2.two_params(g.files)
     return g.files, truth
 
 
 def usable(truth):
     """Every family but the two misses has a match, so no right command is the one that matches nothing; the misses
     (`zero-calls`, `maybe-defined`) may match nothing, on purpose."""
-    return all(v for k, v in truth["answers"].items() if k not in ("zero-calls", "maybe-defined"))
+    return all(v for k, v in truth["answers"].items() if k not in ("zero-calls", "maybe-defined", "zero-new", "itf-maybe"))
 
 
 def write(seed, out, truth_path):
@@ -334,6 +343,7 @@ def selftest():
                      "await-any": lambda t: "async function " in t, "log-in-try": lambda t: f"{p['log_fn']}(id" in t,
                      "emit-calls": lambda t: "$emit(" in t, "track-calls": lambda t: "$track(" in t,
                      "fn-outline": lambda t: f"function {p['line_fn']}(" in t, "itf-outline": lambda t: f"interface {p['line_itf']} " in t}
+            holds.update(gen2.holds(p))
             for fam, lines in truth["answers"].items():
                 for spot in lines:
                     path, n = spot.rsplit(":", 1)

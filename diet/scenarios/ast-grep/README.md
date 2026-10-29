@@ -26,7 +26,7 @@ The first slice of #971: ast-grep (`run`, `outline` and `scan`) on small TypeScr
   - round 5, in their families' truth: a log call with two arguments inside a `try`, which `log($A)` misses; a barrel line exporting two types at once, `export type { A, B }`, which `export type { $X }` misses; and a function and a `const` arrow of the target types with two parameters, which `($A)` misses. Before them, all three forms executed right on all 20 seeds, since every such call, export and arrow had one.
 
 ## Tasks: `tasks.py`
-Twelve operations: six tutorial and six held-out. Each asks for the command that matches a family's lines "and nothing else". A held-out task tests the same gap on another surface:
+Thirty-nine operations: 22 tutorial (t1..t22), 11 in held-out set 2 (h7..h17), and set 1's six held-out (h1..h6). Each asks for the command that matches a family's lines "and nothing else". A held-out task tests the same gap on another surface. Set 1, the first twelve:
 
 | gap | tutorial | held-out |
 |---|---|---|
@@ -36,6 +36,28 @@ Twelve operations: six tutorial and six held-out. Each asks for the command that
 | `has` and `inside` look one level down unless `stopBy: end` | t4 functions with an `await` at any depth | h4 calls inside a `try` at any depth |
 | `$name` in double quotes is the shell's; lowercase `$x` is literal | t5 calls to `$emit(...)` | h5 calls to `$track(...)` |
 | `outline --match` is a regex to anchor, and on a directory outline lists only exports unless `--items structure` | t6 one function's outline | h6 one interface's outline |
+
+**Task set 2** (the maintainer, 2026-10-29; DRAFT asks). Two tutorial operations per gap, five of the gaps new, from the gap-fill rounds' failures, and a fresh held-out set on other surfaces. Its families are `gen2.py`'s, its commands `ref2.py`'s, its judge `rubric2.py`:
+
+| gap | tutorial | held-out set 2 |
+|---|---|---|
+| return type | t1, t7 methods returning T | h7 `async` declarations returning `Promise<T>` |
+| miss | t2, t8 `new C(…)` of a class rarely built | h8 an interface that may not exist |
+| barrel | t3, t9 names re-exported under an alias | h9 statements exporting values, not only types |
+| stop-by | t4, t10 `throw` inside a `for (;;)` | h10 calls inside a `catch` |
+| dollar | t5, t11 `$store.get(…)` | h11 `$log(…)` |
+| outline | t6, t12 one class | h12 one type alias |
+| **kind filter** | t13 an item whose kind varies, under src/; t14 the same, in one file | h13 the same, unexported |
+| **field** | t15 variables initialised by a call to X; t16 `if`s whose condition is one | h14 properties whose value is an arrow |
+| **function kinds** | t17 function expressions with an await; t18 generator declarations | h15 declarations nested in a declaration |
+| **`...`** | t19 calls to X with a spread argument; t20 declarations with a rest parameter | h16 array literals with a spread |
+| **exactly one** | t21 calls to X with one argument; t22 declarations with exactly two parameters | h17 calls to X with no argument |
+
+- **Held-out set 1 stays runnable** (`tutor_round.py --held-out-1`), for continuity with the gap-fill results. Where set 2 now teaches the gap a set-1 task's failures showed, the task says so (`now_taught`): h1 (field), h2 (kind filter), h3 and h4 (exactly one). Their later results are not held-out for those gaps.
+- **Every set-2 family executes as its role says on 20 seeds** (`ref2_exec.py`, run by `ref.py`): the reference right on every seed; the naive form wrong on at least one; the over-broad form wrong on every seed, against the distractors `gen2.py` plants; and, statically, the rubric calls the reference right and none of the others right.
+  - The kind filter's `--type` can't be wrong on every seed, since the kind is drawn per seed: it is wrong on 18, 16 and 15 of 20 (t13, t14, h13).
+  - RED caught three fixture holes before any rubric line was written: a nested object on one line merged two truth lines (h14); every rest pattern sat on a declaration's line, so `-k rest_pattern` came out right (t20); and an unquoted `: $R` in a rule's YAML pattern doesn't parse (t22's reference).
+- **Probed on 0.44.0 first.** `X($A)` also matches `X(...[1, 2])`, a spread being one argument, so t21's fixture holds no spread call to X. The barrel's value re-export patterns (`export { $A as $B } from …`, `export * from …`) don't parse, so t9 and h9 take rules. `outline` lists no `export default`, and calls a type alias `struct`.
 
 ## The answer is a command, never run: `answer-tool.json`, `command.py`, `rubric.py` and `check.py`
 - **The answer** comes through `submit_answer`'s schema (`command`, a string), never parsed from prose. It's a tool of its own, so the model can see it isn't bash.

@@ -9,7 +9,7 @@ import os, sys, tempfile
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
-import command, gen, rubric  # noqa: E402
+import command, gen, ref2, ref2_exec, rubric  # noqa: E402
 
 RULE = lambda body: "ast-grep scan --inline-rules 'id: q\nlanguage: ts\nrule:\n" + body + "' src"
 
@@ -30,7 +30,7 @@ def reference(family, p):
         "track-calls": "ast-grep run -l ts -p '$track($$$A)' src",
         "fn-outline": f"ast-grep outline src --items structure --match '^{p['line_fn']}$'",
         "itf-outline": f"ast-grep outline src --match '^{p['line_itf']}$'",
-    }[family]
+    }.get(family) or ref2.reference(family, p)
 
 
 def naive(family, p):
@@ -47,7 +47,7 @@ def naive(family, p):
         "track-calls": "ast-grep run -l ts -p 'track($$$A)' src",
         "fn-outline": f"ast-grep outline src --match '{p['line_fn'][:4]}'",
         "itf-outline": f"ast-grep outline src --match '{p['line_itf']}'",
-    }[family]
+    }.get(family) or ref2.naive(family, p)
 
 
 def overbroad(family, p):
@@ -75,6 +75,9 @@ def alternatives(family, p):
     seed, distractors included, before the rubric may call it right."""
     return {
         "ret-decl": [RULE(f"  kind: function_declaration\n  has:\n    field: return_type\n    kind: type_annotation\n    regex: ^:\\s*{p['target']}$"),
+                     # An `any:` of function kinds (Dispatch, 2026-10-29): the Flash-Next instance's crossover t1.
+                     RULE(f"  any:\n    - kind: function_declaration\n    - kind: generator_function_declaration\n  has:\n    field: return_type\n"
+                          f"    kind: type_annotation\n    has:\n      kind: type_identifier\n      regex: ^{p['target']}$"),
                      # `all:` of the kind and the `has` (the floor's gap-fill iter-3 t1).
                      RULE(f"  all:\n    - kind: function_declaration\n    - has:\n        field: return_type\n        regex: \"^: {p['target']}$\"")],
         "ret-arrow": [RULE(f"  kind: arrow_function\n  has:\n    field: return_type\n    kind: type_annotation\n    regex: ^:\\s*{p['arrow_target']}$\n"
@@ -146,6 +149,8 @@ def main():
             truth = gen.write(seed * 101, root, os.path.join(d, f"s{seed}.json"))
             total += 1
             for fam, want in truth["answers"].items():
+                if fam in ref2.FAMILIES:  # task set 2's, checked below (ref2_exec.py)
+                    continue
                 # The verdict that counts is the static one (rubric.py): the reference must be right, the naive not.
                 static_ref = rubric.judge(reference(fam, truth["params"]), fam, truth["params"])
                 if static_ref[0] != "right":
@@ -177,7 +182,7 @@ def main():
                 if right(naive(fam, truth["params"]), root, want):
                     naive_right[fam] = naive_right.get(fam, 0) + 1
     bad = 0
-    for fam in gen.build(1)[1]["answers"]:
+    for fam in (f for f in gen.build(1)[1]["answers"] if f not in ref2.FAMILIES):
         r, n, b = ref_wrong.get(fam, 0), naive_right.get(fam, 0), broad_right.get(fam, 0)
         print(f"ref: {fam}: reference wrong {r}/{total}, naive right {n}/{total}" + (f", over-broad executed right {b}/{total}" if fam in OVERBROAD else ""))
         bad += (r > 0) + (n == total) + (b > 0)
@@ -196,6 +201,8 @@ def main():
             k = kind_wrong.get(fam, 0)
             print(f"ref: {fam}: the kind filter executed wrong on {k}/{total} seeds")
             bad += k == 0
+    # Task set 2 (#971, 2026-10-29): by execution, and statically through the rubric.
+    bad += ref2_exec.report(*ref2_exec.run(seeds, verbose=True))
     print(f"ref: {bad} problem(s)")
     return 1 if bad else 0
 
