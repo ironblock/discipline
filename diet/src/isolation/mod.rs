@@ -4540,9 +4540,9 @@ mod tests {
         );
         policy::add_run_secret(&mut declared, secret.to_string_lossy().into_owned())
             .expect("absolute");
-        let Ok(confinement) = open_on(&declared, Platform::MacOs) else {
-            return;
-        };
+        // On the Mac, never skipped: a Seatbelt that would not open is a
+        // failure, not a vacuous pass (#1002 review).
+        let confinement = open_on(&declared, Platform::MacOs).expect("Seatbelt opens on macOS");
         let sh = |script: String| {
             confinement
                 .run(&declared, &ground.tree, &argv(&["/bin/sh", "-c", &script]))
