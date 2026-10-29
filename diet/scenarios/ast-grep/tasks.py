@@ -43,7 +43,8 @@ TASKS = [
     {"id": "t3-public-surface", "split": "tutorial", "family": "public-surface", "gap": "barrel",
      "what": "shows each export of the package's public surface, the entry point src/index.ts, and nothing else."},
     {"id": "t4-await-any", "split": "tutorial", "family": "await-any", "gap": "stop-by",
-     "what": "matches every function declared with the `function` keyword under src/ that contains an `await` expression anywhere in its body, at any depth, and nothing else."},
+     # DRAFT (the maintainer, 2026-10-29): "declared with the `function` keyword" also read as `const f = async function`.
+     "what": "matches every function declaration (a `function name(…) { … }` statement) under src/ that contains an `await` anywhere in its body, and nothing else."},
     {"id": "t5-emit-calls", "split": "tutorial", "family": "emit-calls", "gap": "dollar",
      "what": "matches every call to `$emit(...)` under src/, and nothing else."},
     {"id": "t6-fn-outline", "split": "tutorial", "family": "fn-outline", "gap": "outline",

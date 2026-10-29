@@ -23,6 +23,8 @@ ANSWER = json.load(open(os.path.join(HERE, "answer-tool.json")))["name"]
 NOTES = json.load(open(os.path.join(HERE, "notes-tool.json")))["name"]
 READY = {"command": 'test -s "$DIET_SERVICE_DIR/provides.json"'}
 FIXTURE = {"name": "fixture", "start": "python3 -I ../services/fixture.py start", "stop": "python3 -I ../services/fixture.py stop", "ready": READY}
+# The ast-grep shim (#971, the maintainer 2026-10-29): help from captures, every search refused.
+SHIM = {"name": "shim", "start": "python3 -I ../services/shim.py start", "stop": "python3 -I ../services/shim.py stop", "ready": READY}
 SKILLS = {"name": "skills", "start": "python3 -I ../services/skills.py start", "stop": "python3 -I ../services/skills.py stop", "ready": READY,
           "ready_timeout_s": 120}
 # DRAFT, model-facing: the task's id leads its ask, so a canned reply can be routed to it.
@@ -51,10 +53,13 @@ def lines(task, skills, first):
     cmd = (ref.naive if first else ref.reference)(task["family"], p)
     header = {"scenario": f"ast-grep-{task['id']}" + ("-skills" if skills else ""), "regimen": "../canned.toml",
               "live_regimen": "../bare.toml", "head": "../head-skills.md" if skills else "../head.md",
-              "answer_tool": ["../" + task.get("tool", "answer-tool.json"), "../notes-tool.json"], "services": [FIXTURE, SKILLS] if skills else [FIXTURE],
+              "answer_tool": ["../" + task.get("tool", "answer-tool.json"), "../notes-tool.json"], "services": [FIXTURE, SHIM, SKILLS] if skills else [FIXTURE, SHIM],
               "sandbox_tools": ["ast-grep"],
-              # The answer key is the fixture's own directory: denied to the model's commands (probe_key.py proves it).
-              "sandbox_secrets": ["service.fixture.dir"]}
+              # The answer key is the fixture's own directory, and the real ast-grep binaries are the shim's `real`:
+              # denied to the model's commands, read and exec alike (probe_key.py proves both).
+              "sandbox_secrets": ["service.fixture.dir", "service.shim.real"],
+              # The shim ahead of the operator's PATH, so `ast-grep` and `sg` are the shim's.
+              "serve_env": {"PATH": "{service.shim.path}"}}
     answer = {"id": "canned-answer", "name": ANSWER, "arguments": json.dumps(dict({"command": cmd}, **MISS_FIELDS.get(task["family"], {})))}
     notes = {"id": "canned-notes", "name": NOTES, "arguments": json.dumps({"notes": "DRAFT. Canned notes."})}
     out = [header,

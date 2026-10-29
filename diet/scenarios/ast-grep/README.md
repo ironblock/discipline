@@ -3,7 +3,7 @@
 The first slice of #971: ast-grep (`run`, `outline` and `scan`) on small TypeScript projects. Following the maintainer's ruling, "The pass" (2026-10-26):
 - **The model is told.** It's a technical demonstration of subject mastery: nothing runs, and only the answer's structure is checked.
 - **The command is never run** (2026-10-27). It's submitted through its own tool, `submit_answer`, and graded statically against the forms known to be right.
-- **No trial searches** (2026-10-27). Help and docs may be read, but an ast-grep search before the answer, against the project or a file the model made, fails the attempt. The DRAFT heads state this as user intent.
+- **Searches are blocked, not failed** (the maintainer, 2026-10-29). Help and docs may be read; an ast-grep search before the answer is refused in the sandbox (the shim, below) and counted as par cost, never a fail. The verdict is the submitted command alone. The DRAFT heads state "no searches" as user intent. (2026-10-27 to 10-29: a search failed the attempt.)
 - **"No match" is part of mastery** (2026-10-27). t2 and h2 also say, in structured fields, what the command does when nothing matches.
 - **Each operation is demonstrated once, in isolation.** Help and docs are allowed.
 - **The answer is a command.** A right answer reached any other way fails.
@@ -52,7 +52,10 @@ Twelve operations: six tutorial and six held-out. Each asks for the command that
   - It's right only when the command passes the rubric and both fields match `miss_truth.json` for its subcommand.
   - That truth is measured per ast-grep version. On 0.44.0: `run` prints nothing and exits 1; `outline` prints `nothing found` and exits 0; `scan` prints nothing and exits 0.
   - A version not measured there is unrecognized. `tasks.py`'s `INVISIBLE` keeps the record of why: a command alone can't show the lesson.
-- **No trial searches:** `check.py` counts ast-grep searches among the calls before the answer, never help or docs reads, and a count above 0 fails the attempt. `$DIET_AST_GREP_TRIAL=par` records them without failing.
+- **Trial searches are par cost:** `check.py` counts ast-grep searches among the calls before the answer (`trials`), never help or docs reads, and never fails on them. `$DIET_AST_GREP_TRIAL=fail` restores the old rule.
+- **The shim** (`shim.py`, `services/shim.py`; the maintainer, 2026-10-29): in the model's sandbox, `ast-grep` and `sg` are the shim, first on `PATH` (the header's `serve_env`). It answers `--help`, `<sub> --help`, `help <sub>`, `--version` and `completions <shell>` from the real binary's outputs, captured at session start outside the sandbox, byte for byte. Everything else is refused with a DRAFT line: "This is a demonstration: ast-grep searches don't run here. Give your answer through submit_answer."
+  - **The real binaries are secrets** (`service.shim.real`): no read and, since the drive's secrets v2, no exec. A search by the absolute path, by `"$(readlink -f …)"` or through a copy is refused by the sandbox. `pass.py` counts the first three as trial searches; the copy never gets to search.
+  - `probe_key.py` proves it on the real drive and sandbox: every search route refused, every help form answering as the real binary does, each search counted.
 - **Rubric review, 2026-10-27 (Dispatch; provisional, reported to the maintainer).** Each form below went in RED first, and each executes right on all 20 seeds with distractors (`ref.py`'s alternatives):
   - **Return types:** an anchored regex on the annotation itself, `has: {field: return_type, kind: type_annotation, regex: '^:\s*T$'}`, for functions and, within a `const`, for arrows. Named wrongs: an unanchored annotation regex, and a type identifier at any depth (`stopBy: end`), which also matches `Promise<T>`.
   - **Public surface:** `run -k export_statement src/index.ts`, every export statement of the entry point.
@@ -109,7 +112,7 @@ Twelve operations: six tutorial and six held-out. Each asks for the command that
   1. the task, asked once and graded once, with no feedback;
   2. then a notes update through the `notes` tool (`notes-tool.json`). The prompt is a DRAFT stub, and Dispatch will supply experimental ones.
 - **Two supplied tools.** The header's `answer_tool` lists both (#971's engine PR).
-- **The answer key is denied.** The fixture's directory is the header's `sandbox_secrets`, and `probe_key.py` proves the model can't read it (macOS only; off macOS it skips and says so).
+- **The answer key is denied.** The fixture's directory is the header's `sandbox_secrets`, and `probe_key.py` proves the model can't read it, and that the shim stands in for ast-grep (macOS only; off macOS it skips and says so).
 - **The skills' condition.** `services/skills.py` fetches ast-grep/agent-skill at a pinned commit and checks its digests. It has no license, so it is never in this tree.
 - **Regimens.**
   - `bare.toml` runs the production GPU host's registry entry; `bare-floor.toml` runs the floor's 27B line. Both are bash plus the two tools, with no memory levers.
@@ -125,7 +128,7 @@ Twelve operations: six tutorial and six held-out. Each asks for the command that
   - `docs_reads`, `commands` and `tool_used` (descriptive);
   - then the pass's `notes`.
 
-  A pass is clean when every task is right, none was capped, and none ran a trial search. `--trial par` records trial searches without failing.
+  A pass is clean when every task is right and none was capped. Trial searches are par cost; `--trial fail` restores the old rule.
   - A docs read costs against par, reported and never failing (the maintainer, 2026-10-27). `--docs-read fail` remains as a switch.
   - A step waits up to 3600 s (`patience`), as long as the 60-minute guard, never the drive's 900 s default: two floor passes voided on it.
 - **`run_pass.py TASK --out DIR [--skills] [--notes FILE] [--floor] [-- DRIVE_ARGS]`** writes a self-contained copy of the pass, its head carrying the notes so far, and runs it from the tree, since the drive finds its assembler by a relative path. It writes `pass.json` and `notes.md`, the next pass's `--notes`. Rolling across passes, re-planning after ten failures over par, and choosing note writers are Dispatch's experiments.
@@ -183,4 +186,5 @@ In `./verify.sh`'s scenarios check:
 - `loop.py --selftest` and `run_pass.py --selftest`;
 - `audit.py --selftest`;
 - `tutor_round.py --selftest`;
+- `shim.py --selftest`;
 - `probe_key.py --selftest`.

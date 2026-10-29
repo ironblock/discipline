@@ -21,7 +21,8 @@ def reference(family, p):
         "zero-calls": f"ast-grep run -l ts -p '{p['zero_fn']}($$$A)' src",
         "maybe-defined": f"ast-grep outline src --match '^{p['maybe']}$'",
         "public-surface": "ast-grep outline src/index.ts",
-        # `from $P` doesn't parse ("Multiple AST nodes"); `from $$$P` does.
+        # The type form parses with `from $P` and `from $$$P` alike; the value form, `export { $$$S } from $P`, doesn't
+        # parse under -l ts ("Cannot parse query as a valid pattern"), with `$P` or `$$$P` (measured, 0.44.0, 2026-10-29).
         "public-types": "ast-grep run -l ts -p 'export type { $$$S } from $$$P' src/index.ts",
         "await-any": RULE("  kind: function_declaration\n  has:\n    pattern: await $E\n    stopBy: end"),
         "log-in-try": RULE(f"  pattern: {p['log_fn']}($$$A)\n  inside:\n    kind: try_statement\n    stopBy: end"),

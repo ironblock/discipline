@@ -3,9 +3,10 @@
 The answer is never run (the maintainer, 2026-10-27). The check takes the turn's last well-formed `submit_answer`
 call and judges its command statically (`rubric.py`) against the forms known to be right, with the instance's names
 (`$DIET_SERVICE_FIXTURE_TRUTH`'s params). On top of that:
-- **No trial searches** (ruled 2026-10-27): help and docs may be read, but an ast-grep search before the answer,
-  against the project or a file the model made, fails the attempt. `$DIET_AST_GREP_TRIAL=par` records it without
-  failing; the default is `fail`.
+- **Trial searches are par cost, never a fail** (the maintainer, 2026-10-29): the shim (`shim.py`) refuses every
+  ast-grep search in the sandbox, so a search before the answer is a refused attempt, counted (`trials`) and never
+  graded; the verdict is the submitted command alone. `$DIET_AST_GREP_TRIAL=fail` restores the 2026-10-27 rule, under
+  which one fails the attempt.
 - **The miss** (t2, h2): their answer tool (`answer-tool-miss.json`) also says what the command does when nothing
   matches, `exit_status_when_none` and `prints_nothing_when_none`. Right only when the command passes the rubric and
   both fields match `miss_truth.json` for the command's subcommand, measured per ast-grep version; a version not
@@ -126,7 +127,7 @@ def installed_version():
         return None
 
 
-def grade(turn, task, truth, trial="fail", version=None):
+def grade(turn, task, truth, trial="par", version=None):
     expected = "a command the rubric knows as right"
     args, before = answered(turn)
     if args is None:
@@ -154,7 +155,7 @@ def grade(turn, task, truth, trial="fail", version=None):
 def main():
     turn = json.load(open(os.environ["DIET_GRADE_TURN"]))
     truth = json.load(open(os.environ["DIET_SERVICE_FIXTURE_TRUTH"]))
-    trial = os.environ.get("DIET_AST_GREP_TRIAL", "fail")
+    trial = os.environ.get("DIET_AST_GREP_TRIAL", "par")
     if trial not in ("fail", "par"):
         sys.exit("check: DIET_AST_GREP_TRIAL is fail or par")
     g = grade(turn, os.environ["DIET_GRADE_TASK"], truth, trial)
@@ -187,6 +188,7 @@ def selftest():
         ("a trial search first fails", "t1-ret-decl", turn(bash("ast-grep run -p 'function $F($$$A): Relay { $$$B }' src"), call(right)), "fail", False),
         ("a trial outline of its own file fails", "t1-ret-decl", turn(bash("ast-grep outline scratch.ts"), call(right)), "fail", False),
         ("a trial search under par is recorded, not failed", "t1-ret-decl", turn(bash("ast-grep scan --inline-rules 'x' src"), call(right)), "par", True),
+        ("by default a trial search is par cost, never a fail", "t1-ret-decl", turn(bash("ast-grep run -p x src"), call(right)), "par", True),
         ("a search after the answer is no trial", "t1-ret-decl", turn(call(right), bash("ast-grep run -p x src")), "fail", True),
         ("the miss: run, exit 1, prints nothing", "t2-zero-calls", turn(call(zero, exit_status_when_none=1, prints_nothing_when_none=True)), "fail", True),
         ("the miss: run, wrong exit", "t2-zero-calls", turn(call(zero, exit_status_when_none=0, prints_nothing_when_none=True)), "fail", False),
@@ -207,7 +209,7 @@ def selftest():
              ("unrecognized", "t1-ret-decl", turn(call(RULE_UNKNOWN))),
              ("miss fields", "t2-zero-calls", turn(call(zero, exit_status_when_none=0, prints_nothing_when_none=True)))]
     for want, task, t in kinds:
-        got = grade(t, task, truth, version=v)["kind"]
+        got = grade(t, task, truth, "fail" if want == "trial" else "par", version=v)["kind"]  # trial only under the old rule
         if got != want:
             print(f"check: kind {want}: got {got}"); bad += 1
     table = {"tail": "TAIL.", "W0": "w0.", "W0n": "w0n.", "W1": "w1.", "W2": "w2.", "W3": "w3.", "W3n": "w3n.", "W4": "w4."}
