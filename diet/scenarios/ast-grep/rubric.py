@@ -18,6 +18,7 @@ import re, sys
 
 sys.path.insert(0, __import__("os").path.dirname(__import__("os").path.abspath(__file__)))
 import command, yamlish  # noqa: E402
+import rubric2  # noqa: E402  (it imports this module back, by name)
 
 META = re.compile(r"\$\$\$[A-Z0-9_]*|\$[A-Z_][A-Z0-9_]*")
 
@@ -197,9 +198,12 @@ def judge(cmd, family, p):
         return "wrong", f"refused: {why}"
     if not langs_ok(f):
         return "wrong", "--lang is not TypeScript"
-    # Round 5 (Dispatch, 2026-10-28): the floor's `(...$ARGS)` and `name(...)`.
-    if any("..." in pat for pat in patterns_of(f)):
+    # Round 5 (Dispatch, 2026-10-28): the floor's `(...$ARGS)` and `name(...)`. Not for set 2's spread and rest
+    # families, whose `...` is the spread they ask for.
+    if family not in ("spread-call", "rest-decl", "array-spread") and any("..." in pat for pat in patterns_of(f)):
         return "wrong", "`...` in a pattern is literal text: it matches only code that has `...` there"
+    if family in rubric2.FAMILIES:  # task set 2 (#971, 2026-10-29)
+        return rubric2.judge(f, family, p)
     if family == "ret-decl":
         if not whole_project(f):
             return "wrong", "not the whole project"
@@ -207,9 +211,10 @@ def judge(cmd, family, p):
             return "right", "the return-type pattern"
         r = rule_of(f) if f["sub"] == "scan" else None
         r = merged_all(r) if r else r  # `all:` of the kind and the `has` is the one rule (the floor's gap-fill t1)
-        if r and r.get("kind") == "function_declaration" and direct_type(r.get("has"), p["target"]):
+        # Its kind, or an `any:` of function kinds (Dispatch, 2026-10-29, as t4's).
+        if r and declares_functions(r) and direct_type(r.get("has"), p["target"]):
             return "right", "a return-type rule"
-        if r and r.get("kind") == "function_declaration" and type_wrong(r.get("has"), p["target"]):
+        if r and declares_functions(r) and type_wrong(r.get("has"), p["target"]):
             return "wrong", type_wrong(r.get("has"), p["target"])
         if one_meta(f, [f"function $F($$$A): {p['target']} {{ $$$B }}"], "()"):
             return "wrong", ONE_PARAM
@@ -333,6 +338,8 @@ CASES = {
          RULE("  kind: function_declaration\n  has:\n    field: return_type\n    kind: type_annotation\n    has:\n      kind: type_identifier\n      regex: ^Relay$"),
          # The live answers' form (rubric review, 2026-10-27): an anchored regex on the annotation, its colon included.
          RULE("  kind: function_declaration\n  has:\n    field: return_type\n    kind: type_annotation\n    regex: ^:\\s*Relay$"),
+         # An `any:` of function kinds (Dispatch, 2026-10-29, as t4's): the Flash-Next instance's crossover t1.
+         RULE("  any:\n    - kind: function_declaration\n    - kind: generator_function_declaration\n  has:\n    field: return_type\n    kind: type_annotation\n    has:\n      kind: type_identifier\n      regex: ^Relay$"),
          # `all:` of the kind and the `has` is the one rule (the floor's gap-fill iter-3 t1).
          RULE("  all:\n    - kind: function_declaration\n    - has:\n        field: return_type\n        regex: \"^: Relay$\"")],
         ["ast-grep run -l ts -p 'function $F($$$A) { $$$B }' src",
@@ -451,12 +458,28 @@ def selftest():
             print(f"rubric: named wrong {fam}: {v}: {why!r}"); bad += 1
     for fam, (rights, wrongs) in CASES.items():
         reasons += [judge(c, fam, P)[1] for c in wrongs]
+    # Task set 2 (#971, 2026-10-29): on a sample instance, each family's reference is right, and its naive, over-broad
+    # and kind-filtered forms are not (ref2_exec.py executes them on 20 seeds); their reasons join the LEAKS test.
+    import gen, ref2
+    p2 = gen.build(7)[1]["params"]
+    n2 = 0
+    for fam in rubric2.FAMILIES:
+        v, why = judge(ref2.reference(fam, p2), fam, p2)
+        if v != "right":
+            print(f"rubric: set 2 {fam}: the reference is {v}: {why}"); bad += 1
+        for wrong in (ref2.naive(fam, p2), ref2.overbroad(fam, p2), ref2.kind_filtered(fam, p2)):
+            if wrong:
+                n2 += 1
+                v, why = judge(wrong, fam, p2)
+                reasons.append(why)
+                if v == "right":
+                    print(f"rubric: set 2 {fam}: graded right: {wrong!r}"); bad += 1
     leaked = [r for r in reasons if any(l in r for l in LEAKS)]
     if leaked:
         print(f"rubric: reasons that name the fix: {leaked}"); bad += 1
     print(f"rubric: {len(NAMED)} named wrongs, {len(reasons)} reasons checked for the fix;", end=" ")
     print(f"rubric: {n_right} right spellings and {n_wrong} not right ({n_wrong - unknown} wrong, {unknown} unrecognized) over "
-          f"{len(CASES)} operations, {bad} misjudged")
+          f"{len(CASES)} operations, and set 2's {len(rubric2.FAMILIES)} references and {n2} not right, {bad} misjudged")
     return 1 if bad else 0
 
 

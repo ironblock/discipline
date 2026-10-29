@@ -1,0 +1,8 @@
+{"answer_tool": ["../answer-tool.json", "../notes-tool.json"], "head": "../head.md", "live_regimen": "../bare.toml", "regimen": "../canned.toml", "sandbox_secrets": ["service.fixture.dir", "service.shim.real"], "sandbox_tools": ["ast-grep"], "scenario": "ast-grep-t14-kind-file", "serve_env": {"PATH": "{service.shim.path}"}, "services": [{"name": "fixture", "ready": {"command": "test -s \"$DIET_SERVICE_DIR/provides.json\""}, "start": "python3 -I ../services/fixture.py start", "stop": "python3 -I ../services/fixture.py stop"}, {"name": "shim", "ready": {"command": "test -s \"$DIET_SERVICE_DIR/provides.json\""}, "start": "python3 -I ../services/shim.py start", "stop": "python3 -I ../services/shim.py stop"}]}
+{"reply": {"calls": [{"arguments": "{\"command\": \"ast-grep outline src/core/types.ts --match '^LedgerItem$'\"}", "id": "canned-answer", "name": "submit_answer"}], "text": "", "when": "Task `t14-kind-file`"}}
+{"reply": {"text": "Canned: answered.", "when": "Answer recorded"}}
+{"reply": {"calls": [{"arguments": "{\"notes\": \"DRAFT. Canned notes.\"}", "id": "canned-notes", "name": "notes"}], "text": "", "when": "your notes"}}
+{"reply": {"text": "Canned: noted.", "when": "Notes saved"}}
+{"patience": 3600, "step": "ask", "task": "t14-kind-file", "text": "DRAFT. Task `t14-kind-file`. DRAFT. Give the ast-grep command, run from this directory, that outlines the item named `{service.fixture.kind_file_item}` in `{service.fixture.kind_file}`, and nothing else."}
+{"attempts": 1, "check": "python3 -I \"$DIET_GRADE_SCENARIO_DIR/../check.py\"", "last": "{got}", "patience": 3600, "right": "{got}", "step": "grade", "task": "t14-kind-file", "wrong": "DRAFT. (Not sent: a pass asks its task once.)"}
+{"step": "end"}

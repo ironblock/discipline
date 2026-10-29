@@ -35,7 +35,7 @@ TOOL = json.load(open(os.path.join(HERE, "answer-tool.json")))["name"]
 # The DRAFT notes ask every kind gets when no writer table is given.
 STUB = "DRAFT. Notes update: update your notes on ast-grep through the notes tool, as concise as you can make them."
 WRITER_OF = {"rubric": "W1", "miss fields": "W4", "trial": "W3", "unrecognized": "W0n", "no answer": "W0n"}
-MISS = ("zero-calls", "maybe-defined")
+MISS = ("zero-calls", "maybe-defined", "zero-new", "itf-maybe")
 FIELDS = ("exit_status_when_none", "prints_nothing_when_none")
 
 

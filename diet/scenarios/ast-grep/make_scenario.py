@@ -37,6 +37,8 @@ WRONG = "DRAFT. (Not sent: a pass asks its task once.)"
 PATIENCE = 3600
 # The canned miss answers: what each subcommand does on a miss (miss_truth.json, ast-grep 0.44.0).
 MISS_FIELDS = {"zero-calls": {"exit_status_when_none": 1, "prints_nothing_when_none": True},
+               "zero-new": {"exit_status_when_none": 1, "prints_nothing_when_none": True},
+               "itf-maybe": {"exit_status_when_none": 0, "prints_nothing_when_none": False},
                "maybe-defined": {"exit_status_when_none": 0, "prints_nothing_when_none": False}}
 
 
