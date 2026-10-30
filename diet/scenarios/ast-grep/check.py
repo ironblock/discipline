@@ -152,8 +152,37 @@ def grade(turn, task, truth, trial="par", version=None):
             "trials": trials}
 
 
+def grade_executed(turn, task, truth, pristine, version=None):
+    """The falsification's verdict (PREREG.md, 2026-10-29): the answer RUN, confined, on the pass's pristine fixture,
+    right only when its matches are exactly the truth's lines, and on a miss task when its miss fields match
+    `miss_truth.json` too. The rubric's verdict is a descriptor (`static`), never the verdict. Macos only (command.py)."""
+    args, before = answered(turn)
+    if args is None:
+        return {"right": False, "executed": "no answer", "static": "no answer", "why": "", "trials": trial_searches(before)}
+    family = family_of(task)
+    static, why = rubric.judge(args["command"], family, truth["params"])
+    try:
+        found = command.matches(command.checked(args["command"]), pristine)
+        executed = "right" if found == sorted(truth["answers"][family]) else "wrong"
+    except command.Refused as e:
+        executed = f"refused: {e}"
+    right = executed == "right"
+    if right and family in MISS:
+        measured = json.load(open(os.path.join(HERE, "miss_truth.json"))).get(version or installed_version() or "")
+        sub = command.parse(args["command"])["sub"]
+        right = measured is not None and sub in measured and all(args.get(k) == measured[sub][k] for k in FIELDS)
+        if not right:
+            executed = "right, miss fields wrong"
+    return {"right": right, "executed": executed, "static": static, "why": why, "trials": trial_searches(before)}
+
+
 def main():
     turn = json.load(open(os.environ["DIET_GRADE_TURN"]))
+    if os.environ.get("DIET_AST_GREP_VERDICT") == "execute":  # the falsification's (PREREG.md): execution, not the rubric
+        truth_path = os.environ["DIET_SERVICE_FIXTURE_TRUTH"]
+        g = grade_executed(turn, os.environ["DIET_GRADE_TASK"], json.load(open(truth_path)), os.path.join(os.path.dirname(truth_path), "pristine"))
+        print(json.dumps({"right": g["right"], "expected": f"executed {g['executed']}; static {g['static']}: {g['why']}", "got": STUB}))
+        return
     truth = json.load(open(os.environ["DIET_SERVICE_FIXTURE_TRUTH"]))
     trial = os.environ.get("DIET_AST_GREP_TRIAL", "par")
     if trial not in ("fail", "par"):

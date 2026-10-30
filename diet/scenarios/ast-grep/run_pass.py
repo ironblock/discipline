@@ -1,5 +1,7 @@
 """One tutorial pass (#971): python3 -I run_pass.py TASK --out DIR [--skills] [--notes FILE] [--floor] [--writers FILE]
-[--no-notes] [-- DRIVE_ARGS...].
+[--no-notes] [--native] [--head FILE] [--seed N] [--verdict execute] [-- DRIVE_ARGS...]. The last four are the
+falsification's (PREREG.md, 2026-10-29): the native condition (no shim), a head of its own, an explicit seed, execution as
+the verdict.
 
 Writes `passes/TASK[-skills].jsonl` into DIR as a self-contained scenario: its paths made absolute, its head the
 condition's head with the notes so far appended (FILE, from the last pass), and its live regimen `bare.toml`, or
@@ -26,19 +28,37 @@ from docs_reads import installed_prefix  # noqa: E402
 NOTES_HEADING = "DRAFT. Your notes on ast-grep, from earlier demonstrations:"
 
 
-def scenario(task, skills, notes, floor, out, no_notes=False):
+def native(head):
+    """The falsification's native condition (PREREG.md, 2026-10-29): no shim, so `ast-grep` is the real binary and
+    searches run; the binary is no secret; the fixture's truth still is."""
+    head["services"] = [s for s in head["services"] if s["name"] != "shim"]
+    # The answer tool without "it is never run": under execution as the verdict it is run (the native variants).
+    head["answer_tool"] = [t.replace("answer-tool.json", "answer-tool-native.json").replace("answer-tool-miss.json", "answer-tool-miss-native.json")
+                           for t in head["answer_tool"]]
+    head["sandbox_secrets"] = [s for s in head.get("sandbox_secrets", []) if not s.startswith("service.shim.")]
+    env = {k: v for k, v in head.get("serve_env", {}).items() if "service.shim." not in v}
+    if env:
+        head["serve_env"] = env
+    else:
+        head.pop("serve_env", None)
+    return head
+
+
+def scenario(task, skills, notes, floor, out, no_notes=False, native_run=False, head_file=None):
     src = os.path.join(HERE, "passes", task + ("-skills" if skills else "") + ".jsonl")
     lines = [json.loads(l) for l in open(src)]
     head = lines[0]
     passes = os.path.join(HERE, "passes")
     absolute = lambda rel: os.path.normpath(os.path.join(passes, rel))
-    text = open(absolute(head["head"])).read()
+    text = open(head_file or absolute(head["head"])).read()
     if notes and notes.strip():
         text = text.rstrip("\n") + "\n\n" + NOTES_HEADING + "\n" + notes.strip() + "\n"
     with open(os.path.join(out, "head.md"), "w") as f:
         f.write(text)
     head["head"] = os.path.join(out, "head.md")
     head["regimen"] = absolute(head["regimen"])
+    if native_run:
+        native(head)
     head["live_regimen"] = os.path.join(HERE, "bare-floor.toml" if floor else "bare.toml")
     head["answer_tool"] = [absolute(t) for t in head["answer_tool"] if not (no_notes and t.endswith("notes-tool.json"))]
     for service in head["services"]:
@@ -133,13 +153,22 @@ def main(argv):
     task, out = argv[0], argv[argv.index("--out") + 1]
     notes = open(argv[argv.index("--notes") + 1]).read() if "--notes" in argv else ""
     skills, floor, no_notes = "--skills" in argv, "--floor" in argv, "--no-notes" in argv
+    # The falsification's switches (PREREG.md, 2026-10-29): the native condition, a head of its own, an explicit seed
+    # (the arms are paired), and execution as the verdict.
+    native_run = "--native" in argv
+    head_file = os.path.abspath(argv[argv.index("--head") + 1]) if "--head" in argv else None
+    seed = argv[argv.index("--seed") + 1] if "--seed" in argv else None
+    verdict_mode = argv[argv.index("--verdict") + 1] if "--verdict" in argv else None
+    if verdict_mode not in (None, "execute"):
+        sys.exit("run_pass: --verdict is execute")
     writers = os.path.abspath(argv[argv.index("--writers") + 1]) if "--writers" in argv else None
     out = os.path.abspath(out)
     os.makedirs(out, exist_ok=False)
-    path = scenario(task, skills, notes, floor, out, no_notes)
+    path = scenario(task, skills, notes, floor, out, no_notes, native_run, head_file)
     drive = os.environ.get("DIET_DRIVE") or os.path.join(ROOT, "target", "debug", "diet-drive")
     # From the tree: the drive runs its assembler by a relative path (scripts/assemble-run.py).
-    env = dict(os.environ, **({"DIET_AST_GREP_WRITERS": writers} if writers else {}))
+    env = dict(os.environ, **({"DIET_AST_GREP_WRITERS": writers} if writers else {}),
+               **({"DIET_AST_GREP_SEED": seed} if seed else {}), **({"DIET_AST_GREP_VERDICT": verdict_mode} if verdict_mode else {}))
     ran = subprocess.run([drive, "scenario", path, "--out", os.path.abspath(os.path.join(out, "run"))] + drive_args, cwd=ROOT, env=env)
     log = os.path.join(out, "run", "session.log")
     if not os.path.exists(log):
