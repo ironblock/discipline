@@ -115,5 +115,3 @@ def main(argv):
 
 if __name__ == "__main__":
     sys.exit(selftest() if sys.argv[1:] == ["--selftest"] else main(sys.argv[1:]))
-
-
