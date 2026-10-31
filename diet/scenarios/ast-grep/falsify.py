@@ -3,7 +3,7 @@
 
 Do tailored notes beat native ast-grep use on cost, at equal correctness? 12 set-1 tasks (t1..t6, h1..h6) x 10 seeds
 (101..104, 106..111: Amendment 1) x 3 arms, each pass a fresh instance under the floor's regimen, in the native
-condition (`run_pass.py --native`: no shim, ast-grep runs, the fixture's truth a secret), no notes turn, no tutor, and
+condition (the passes' own, `make_scenario.py`: ast-grep runs, the fixture's truth a secret), no notes turn, and
 execution as the verdict (`--verdict execute`, check.py's `grade_executed`). The arms differ only in the preamble:
 - N: `head-native.md`;
 - S: `head-native-skills.md`, with the official skills on disk (the `-skills` pass);
@@ -94,7 +94,7 @@ def measure(lines, task):
 
 
 def pass_cmd(task, seed, arm, out, args):
-    cmd = [sys.executable, "-I", os.path.join(HERE, "run_pass.py"), task, "--out", out, "--floor", "--native",
+    cmd = [sys.executable, "-I", os.path.join(HERE, "run_pass.py"), task, "--out", out, "--floor",
            "--seed", str(seed), "--verdict", "execute",
            "--head", os.path.join(HERE, "head-native-skills.md" if arm == "S" else "head-native.md")]
     cmd += ["--skills"] if arm == "S" else []
@@ -217,7 +217,7 @@ def selftest():
         if m[k] != w:
             print(f"falsify: no answer {k}: {m[k]}, expected {w}"); bad += 1
     a = parse(["--out", "/x", "--notes", "/n.md"])
-    for arm, have, lack in (("N", ["--native", "--floor", "head-native.md"], ["--skills", "--notes", "head-native-skills.md"]),
+    for arm, have, lack in (("N", ["--floor", "--verdict", "execute", "head-native.md"], ["--skills", "--notes", "head-native-skills.md"]),
                             ("S", ["--skills", "head-native-skills.md"], ["--notes"]), ("T", ["--notes", "/n.md", "head-native.md"], ["--skills"])):
         cmd = pass_cmd("t1-ret-decl", 101, arm, "/x/p", a)
         joined = " ".join(cmd)

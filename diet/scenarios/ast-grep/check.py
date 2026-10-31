@@ -16,7 +16,7 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
 import command  # noqa: E402
 
-TOOL = json.load(open(os.path.join(HERE, "answer-tool.json")))["name"]
+TOOL = json.load(open(os.path.join(HERE, "answer-tool-native.json")))["name"]
 MISS = ("zero-calls", "maybe-defined", "zero-new", "itf-maybe")
 FIELDS = ("exit_status_when_none", "prints_nothing_when_none")
 
@@ -41,7 +41,7 @@ def answered(turn):
     return got, (before if got is not None else turn.get("calls", []))
 
 
-def trial_searches(calls):
+def searches_before(calls):
     """The ast-grep searches the calls before the answer ran: help and docs reads aren't searches."""
     tools_of = importlib.import_module("pass").tools_of  # `pass` is a keyword, so by name
     n = 0
@@ -68,7 +68,7 @@ def grade_executed(turn, task, truth, pristine, version=None, matches=command.ma
     task when its miss fields match `miss_truth.json` too. MATCHES runs a checked argv on a root (the selftest's stub)."""
     args, before = answered(turn)
     if args is None:
-        return {"right": False, "executed": "no answer", "trials": trial_searches(before)}
+        return {"right": False, "executed": "no answer", "searches": searches_before(before)}
     family = family_of(task)
     try:
         found = matches(command.checked(args["command"]), pristine)
@@ -82,7 +82,7 @@ def grade_executed(turn, task, truth, pristine, version=None, matches=command.ma
         right = measured is not None and sub in measured and all(args.get(k) == measured[sub][k] for k in FIELDS)
         if not right:
             executed = "right, miss fields wrong"
-    return {"right": right, "executed": executed, "trials": trial_searches(before)}
+    return {"right": right, "executed": executed, "searches": searches_before(before)}
 
 
 def verdict_refused(env):
@@ -142,7 +142,7 @@ def selftest():
     if grade_executed(miss, "t2-zero-calls", truth, "/pristine", version="ast-grep 9.9.9", matches=stub)["right"]:
         print("check: an unmeasured version's miss graded right"); bad += 1
     searched = turn(bash("ast-grep run --help"), bash("ast-grep run -p x src"), bash("sg outline src"), call(right), bash("ast-grep run -p y src"))
-    if grade_executed(searched, "t1-ret-decl", truth, "/pristine", version=v, matches=stub)["trials"] != 2:
+    if grade_executed(searched, "t1-ret-decl", truth, "/pristine", version=v, matches=stub)["searches"] != 2:
         print("check: the searches before the answer, help apart, are not 2"); bad += 1
     for env, refused in (({}, False), ({"DIET_AST_GREP_VERDICT": "execute"}, False), ({"DIET_AST_GREP_VERDICT": "static"}, True),
                          ({"DIET_AST_GREP_VERDICT": ""}, True)):

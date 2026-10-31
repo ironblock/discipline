@@ -1,5 +1,4 @@
-"""A tutorial pass's verdict and its par instruments (#971): python3 -I pass.py RUN_DIR [--skills] [--docs-read par|fail],
-or --selftest.
+"""A tutorial pass's verdict and its par instruments (#971): python3 -I pass.py RUN_DIR [--skills], or --selftest.
 
 Reads the run's `session.log`. Per task:
 - `right`, from its `grade` line;
@@ -8,16 +7,13 @@ Reads the run's `session.log`. Per task:
   `reasoning_chars_before_answer` over the responses before it;
 - `output_tokens`, every response of the task's turn, and `capped`, the responses cut at their cap
   (`finish_reason` `length`);
-- `trial_searches`: ast-grep searches before the answer, apart from help and docs reads: since the shim
-  (2026-10-29) refused attempts, every one refused in the sandbox, and par cost (the maintainer, 2026-10-29);
+- `searches`: ast-grep searches before the answer, apart from help and docs reads;
 - `requests`, each response's `prompt_tokens` and `cached_tokens`: cache state moves the seconds;
 - `docs_reads` (`docs_reads.py`), the official skills' root taken as `.agent-skills` under the call's working
   directory under `--skills`, and the tool's install prefix on this machine; `commands` and `tool_used`
   (`ast-grep`, `other` or `none`: descriptive only).
 
-A pass is clean when every task is right and none was capped. A trial search is par cost, never a fail (the
-maintainer, 2026-10-29); `--trial fail` restores the 2026-10-27 rule, under which one fails the pass. A docs read costs against par by default, reported and
-never failing (`--docs-read par`, Dispatch's reading, unconfirmed); `--docs-read fail` makes one fail the pass.
+A pass is clean when every task is right and none was capped. Searches and docs reads are recorded, never a fail.
 DRAFT and provisional, as the tutorial is.
 """
 import json, os, sys
@@ -26,7 +22,7 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
 from docs_reads import TOOLS, installed_prefix, reads_of, simple_commands, strip_wrappers  # noqa: E402
 
-ANSWER = json.load(open(os.path.join(HERE, "answer-tool.json")))["name"]
+ANSWER = json.load(open(os.path.join(HERE, "answer-tool-native.json")))["name"]
 # The first live passes (2026-10-27) answered through `answer`, before it was `submit_answer`: read too.
 ANSWERS = {ANSWER, "answer"}
 
@@ -39,7 +35,7 @@ def tools_of(cmd):
         words = strip_wrappers(words)
         if words and os.path.basename(words[0]) != "cd":
             first = words[0]
-            # A command named by a substitution, `"$(readlink -f …/ast-grep)" run …` (#971, the shim probe): the
+            # A command named by a substitution, `"$(readlink -f …/ast-grep)" run …` (#971): the
             # program is the substitution's last word.
             if first.startswith(("$(", "`")) and first.endswith((")", "`")) and first[2 if first[0] == "$" else 1:-1].split():
                 first = first[2 if first[0] == "$" else 1:-1].split()[-1]
@@ -65,14 +61,14 @@ def args_of(line):
     return args if isinstance(args, dict) else None
 
 
-def verdict(lines, skills=False, installed=None, docs_read="par", trial="par"):
+def verdict(lines, skills=False, installed=None):
     tasks, turn_task = {}, {}
     for l in lines:
         if l.get("kind") == "ask" and l.get("task"):
             turn_task[l["turn"]] = l["task"]
             tasks.setdefault(l["task"], {"right": False, "graded": False, "asked_t": l.get("t", 0), "answered_t": None,
                                          "tool_calls": 0, "completion_tokens_before_answer": 0, "reasoning_chars_before_answer": 0,
-                                         "output_tokens": 0, "capped": 0, "docs_reads": [], "commands": [], "trial_searches": 0,
+                                         "output_tokens": 0, "capped": 0, "docs_reads": [], "commands": [], "searches": 0,
                                          "requests": []})
     # A response names its request, not its turn: the request does.
     req_turn = {l.get("seq"): l.get("turn") for l in lines if l.get("kind") == "request"}
@@ -108,8 +104,8 @@ def verdict(lines, skills=False, installed=None, docs_read="par", trial="par"):
                                                home=os.path.expanduser("~"), installed=installed)
                 ran = tools_of(cmd)
                 task["commands"] += [n for n in ran if n not in task["commands"]]
-                if before:  # a search against the project before the answer: trial, apart from help and docs reads
-                    task["trial_searches"] += ran.count("ast-grep")
+                if before:  # a search before the answer, apart from help and docs reads
+                    task["searches"] += ran.count("ast-grep")
     why = []
     for t, v in tasks.items():
         v["seconds"] = round((v.pop("answered_t") - v["asked_t"]) / 1000, 1) if v.get("answered_t") is not None else None
@@ -121,11 +117,7 @@ def verdict(lines, skills=False, installed=None, docs_read="par", trial="par"):
             why.append(f"{t}: wrong")
         if v["capped"]:
             why.append(f"{t}: capped ({v['capped']})")
-        if v["trial_searches"] and trial == "fail":
-            why.append(f"{t}: trial searches before the answer ({v['trial_searches']})")
-        if v["docs_reads"] and docs_read == "fail":
-            why.append(f"{t}: read the docs ({len(v['docs_reads'])})")
-    return {"tasks": tasks, "docs_read": docs_read, "trial": trial, "clean": bool(tasks) and not why, "why": why}
+    return {"tasks": tasks, "clean": bool(tasks) and not why, "why": why}
 
 
 def selftest():
@@ -140,7 +132,7 @@ def selftest():
             resp(5), grade("a", True)]
     v = verdict(full)
     a = v["tasks"]["a"]
-    want = {"seconds": 4.5, "tool_calls": 2, "trial_searches": 1, "completion_tokens_before_answer": 30, "reasoning_chars_before_answer": 9, "output_tokens": 35,
+    want = {"seconds": 4.5, "tool_calls": 2, "searches": 1, "completion_tokens_before_answer": 30, "reasoning_chars_before_answer": 9, "output_tokens": 35,
             "capped": 0, "tool_used": "ast-grep"}
     for k, w in want.items():
         if a[k] != w:
@@ -148,20 +140,16 @@ def selftest():
     if [r["cached_tokens"] for r in a["requests"]] != [0, 0, 0]:
         print(f"pass: requests {a['requests']}"); bad += 1
     cases = [
-        ("right, with a docs read and a trial search: both par cost, so clean", full, "par", True),
-        ("wrong", [ask("a"), answer("x"), grade("a", False)], "par", False),
-        ("never graded", [ask("a"), answer("x")], "par", False),
-        ("capped", [request, ask("a"), resp(100, finish="length"), answer("x"), grade("a", True)], "par", False),
-        ("a refused answer starts no clock", [ask("a"), answer("x", 100, "refused"), grade("a", False)], "par", False),
-        ("no tasks", [], "par", False),
+        ("right, with a docs read and a search: both recorded, so clean", full, True),
+        ("wrong", [ask("a"), answer("x"), grade("a", False)], False),
+        ("never graded", [ask("a"), answer("x")], False),
+        ("capped", [request, ask("a"), resp(100, finish="length"), answer("x"), grade("a", True)], False),
+        ("a refused answer starts no clock", [ask("a"), answer("x", 100, "refused"), grade("a", False)], False),
+        ("no tasks", [], False),
     ]
-    for why, lines, mode, clean in cases:
-        if verdict(lines, docs_read=mode)["clean"] != clean:
+    for why, lines, clean in cases:
+        if verdict(lines)["clean"] != clean:
             print(f"pass: {why}: clean {not clean}, expected {clean}"); bad += 1
-    no_trial = [l for l in full if "-p 'x'" not in l.get("arguments", "")]
-    if not verdict(no_trial)["clean"] or verdict(no_trial, docs_read="fail")["clean"] or not verdict(full, trial="par")["clean"] \
-            or verdict(full, trial="fail")["clean"]:
-        print("pass: docs reads cost par, fail under --docs-read fail, and trial passes under --trial par: not so"); bad += 1
     if "capped" not in " ".join(verdict(cases[3][1])["why"]):
         print("pass: a capped task's why does not say capped"); bad += 1
     for why, cmds, want_used in [("ast-grep run", ["ast-grep run -p 'x' src"], "ast-grep"), ("sg outline after cd", ["cd src && sg outline ."], "ast-grep"),
@@ -180,9 +168,5 @@ if __name__ == "__main__":
         sys.exit(selftest())
     if not sys.argv[1:2]:
         sys.exit(__doc__)
-    mode = sys.argv[sys.argv.index("--docs-read") + 1] if "--docs-read" in sys.argv else "par"
-    trial = sys.argv[sys.argv.index("--trial") + 1] if "--trial" in sys.argv else "par"
-    if mode not in ("par", "fail") or trial not in ("par", "fail"):
-        sys.exit("pass: --docs-read and --trial are par or fail")
     log = [json.loads(l) for l in open(os.path.join(sys.argv[1], "session.log")) if l.strip()]
-    print(json.dumps(verdict(log, "--skills" in sys.argv[2:], installed_prefix(), mode, trial), indent=1))
+    print(json.dumps(verdict(log, "--skills" in sys.argv[2:], installed_prefix()), indent=1))

@@ -46,7 +46,7 @@ TASKS = [
      # DRAFT (Dispatch, 2026-10-29, as t4's): "declared with the `function` keyword" also read as `const f = function`.
      "what": "matches every function declaration (a `function name(…) { … }` statement) under src/ whose declared return type is exactly `{service.fixture.target}`, and nothing else."},
     {"id": "t2-zero-calls", "split": "tutorial", "family": "zero-calls", "gap": "miss",
-     "what": "matches every call expression under src/ that calls `{service.fixture.zero_fn}` directly, as `{service.fixture.zero_fn}(...)`, and nothing else. In the answer, also say what that command prints, and its exit status, when nothing matches.", "tool": "answer-tool-miss.json"},
+     "what": "matches every call expression under src/ that calls `{service.fixture.zero_fn}` directly, as `{service.fixture.zero_fn}(...)`, and nothing else. In the answer, also say what that command prints, and its exit status, when nothing matches.", "tool": "answer-tool-miss-native.json"},
     {"id": "t3-public-surface", "split": "tutorial", "family": "public-surface", "gap": "barrel",
      "what": "shows each export of the package's public surface, the entry point src/index.ts, and nothing else."},
     {"id": "t4-await-any", "split": "tutorial", "family": "await-any", "gap": "stop-by",
@@ -59,7 +59,7 @@ TASKS = [
     {"id": "h1-ret-arrow", "split": "held-out-1", "now_taught": ['field'], "family": "ret-arrow", "gap": "return-type",
      "what": "matches every arrow function assigned to a `const` under src/ whose declared return type is exactly `{service.fixture.arrow_target}`, and nothing else."},
     {"id": "h2-maybe-defined", "split": "held-out-1", "now_taught": ['kind-filter'], "family": "maybe-defined", "gap": "miss",
-     "what": "outlines the definition of `{service.fixture.maybe}` under src/, if there is one, and nothing else. In the answer, also say what that command prints, and its exit status, when nothing matches.", "tool": "answer-tool-miss.json"},
+     "what": "outlines the definition of `{service.fixture.maybe}` under src/, if there is one, and nothing else. In the answer, also say what that command prints, and its exit status, when nothing matches.", "tool": "answer-tool-miss-native.json"},
     {"id": "h3-public-types", "split": "held-out-1", "now_taught": ['exactly-one'], "family": "public-types", "gap": "barrel",
      "what": "matches each statement of the package's entry point, src/index.ts, that exports only types, and nothing else."},
     {"id": "h4-log-in-try", "split": "held-out-1", "now_taught": ['exactly-one'], "family": "log-in-try", "gap": "stop-by",

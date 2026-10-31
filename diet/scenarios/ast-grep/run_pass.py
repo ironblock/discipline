@@ -1,6 +1,6 @@
-"""One tutorial pass (#971): python3 -I run_pass.py TASK --out DIR [--skills] [--notes FILE] [--floor] [--native]
-[--head FILE] [--seed N] [--verdict execute] [-- DRIVE_ARGS...]. The last four are the falsification's (PREREG.md,
-2026-10-29): the native condition (no shim), a head of its own, an explicit seed, execution as the verdict.
+"""One tutorial pass (#971): python3 -I run_pass.py TASK --out DIR [--skills] [--notes FILE] [--floor] [--head FILE]
+[--seed N] [--verdict execute] [-- DRIVE_ARGS...]. The last three are the falsification's (PREREG.md, 2026-10-29): a
+head of its own, an explicit seed, execution as the verdict.
 
 Writes `passes/TASK[-skills].jsonl` into DIR as a self-contained scenario: its paths made absolute, its head the
 condition's head with FILE's notes appended under NOTES_HEADING, and its live regimen `bare.toml`, or
@@ -16,27 +16,12 @@ sys.path.insert(0, HERE)
 verdict_of = importlib.import_module("pass")  # `pass` is a keyword, so by name
 from docs_reads import installed_prefix  # noqa: E402
 
-# DRAFT, model-facing: what heads the notes in the next pass's preamble.
+# DRAFT, model-facing: what heads the notes in the preamble (the falsification's T arm). Kept verbatim while that run
+# is under way; its wording is the maintainer's to change at the re-plan.
 NOTES_HEADING = "DRAFT. Your notes on ast-grep, from earlier demonstrations:"
 
 
-def native(head):
-    """The falsification's native condition (PREREG.md, 2026-10-29): no shim, so `ast-grep` is the real binary and
-    searches run; the binary is no secret; the fixture's truth still is."""
-    head["services"] = [s for s in head["services"] if s["name"] != "shim"]
-    # The answer tool without "it is never run": under execution as the verdict it is run (the native variants).
-    head["answer_tool"] = [t.replace("answer-tool.json", "answer-tool-native.json").replace("answer-tool-miss.json", "answer-tool-miss-native.json")
-                           for t in head["answer_tool"]]
-    head["sandbox_secrets"] = [s for s in head.get("sandbox_secrets", []) if not s.startswith("service.shim.")]
-    env = {k: v for k, v in head.get("serve_env", {}).items() if "service.shim." not in v}
-    if env:
-        head["serve_env"] = env
-    else:
-        head.pop("serve_env", None)
-    return head
-
-
-def scenario(task, skills, notes, floor, out, native_run=False, head_file=None):
+def scenario(task, skills, notes, floor, out, head_file=None):
     src = os.path.join(HERE, "passes", task + ("-skills" if skills else "") + ".jsonl")
     lines = [json.loads(l) for l in open(src)]
     head = lines[0]
@@ -49,8 +34,6 @@ def scenario(task, skills, notes, floor, out, native_run=False, head_file=None):
         f.write(text)
     head["head"] = os.path.join(out, "head.md")
     head["regimen"] = absolute(head["regimen"])
-    if native_run:
-        native(head)
     head["live_regimen"] = os.path.join(HERE, "bare-floor.toml" if floor else "bare.toml")
     head["answer_tool"] = [absolute(t) for t in head["answer_tool"]]
     for service in head["services"]:
@@ -83,6 +66,10 @@ def selftest():
             paths = [h["head"], h["regimen"], h["live_regimen"]] + h["answer_tool"]
             if [p for p in paths if not (os.path.isabs(p) and os.path.exists(p))]:
                 print(f"run_pass: a path not absolute, or missing: {paths}"); bad += 1
+            # The native condition: the fixture alone (no shim), its directory the one secret, no PATH of serve's own.
+            if ([s["name"] for s in h["services"]] != ["fixture"] or h.get("sandbox_secrets") != ["service.fixture.dir"]
+                    or "serve_env" in h or [os.path.basename(t) for t in h["answer_tool"]] != ["answer-tool-native.json"]):
+                print(f"run_pass: not the native condition: {h}"); bad += 1
             if os.path.basename(h["live_regimen"]) != ("bare-floor.toml" if floor else "bare.toml"):
                 print(f"run_pass: floor {floor}: live regimen {h['live_regimen']}"); bad += 1
             grade = next(l for l in lines if l.get("step") == "grade")
@@ -100,9 +87,8 @@ def main(argv):
     task, out = argv[0], argv[argv.index("--out") + 1]
     notes = open(argv[argv.index("--notes") + 1]).read() if "--notes" in argv else ""
     skills, floor = "--skills" in argv, "--floor" in argv
-    # The falsification's switches (PREREG.md, 2026-10-29): the native condition, a head of its own, an explicit seed
-    # (the arms are paired), and execution as the verdict.
-    native_run = "--native" in argv
+    # The falsification's switches (PREREG.md, 2026-10-29): a head of its own, an explicit seed (the arms are paired),
+    # and execution as the verdict.
     head_file = os.path.abspath(argv[argv.index("--head") + 1]) if "--head" in argv else None
     seed = argv[argv.index("--seed") + 1] if "--seed" in argv else None
     verdict_mode = argv[argv.index("--verdict") + 1] if "--verdict" in argv else None
@@ -110,7 +96,7 @@ def main(argv):
         sys.exit("run_pass: --verdict is execute")
     out = os.path.abspath(out)
     os.makedirs(out, exist_ok=False)
-    path = scenario(task, skills, notes, floor, out, native_run, head_file)
+    path = scenario(task, skills, notes, floor, out, head_file)
     drive = os.environ.get("DIET_DRIVE") or os.path.join(ROOT, "target", "debug", "diet-drive")
     # From the tree: the drive runs its assembler by a relative path (scripts/assemble-run.py).
     env = dict(os.environ, **({"DIET_AST_GREP_SEED": seed} if seed else {}), **({"DIET_AST_GREP_VERDICT": verdict_mode} if verdict_mode else {}))
