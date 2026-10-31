@@ -14,7 +14,6 @@ Reads the run's `session.log`. Per task:
 - `docs_reads` (`docs_reads.py`), the official skills' root taken as `.agent-skills` under the call's working
   directory under `--skills`, and the tool's install prefix on this machine; `commands` and `tool_used`
   (`ast-grep`, `other` or `none`: descriptive only).
-Then the pass's `notes`, the last well-formed `notes` call's text, which `run_pass.py` carries into the next head.
 
 A pass is clean when every task is right and none was capped. A trial search is par cost, never a fail (the
 maintainer, 2026-10-29); `--trial fail` restores the 2026-10-27 rule, under which one fails the pass. A docs read costs against par by default, reported and
@@ -30,7 +29,6 @@ from docs_reads import TOOLS, installed_prefix, reads_of, simple_commands, strip
 ANSWER = json.load(open(os.path.join(HERE, "answer-tool.json")))["name"]
 # The first live passes (2026-10-27) answered through `answer`, before it was `submit_answer`: read too.
 ANSWERS = {ANSWER, "answer"}
-NOTES = json.load(open(os.path.join(HERE, "notes-tool.json")))["name"]
 
 
 def tools_of(cmd):
@@ -68,7 +66,7 @@ def args_of(line):
 
 
 def verdict(lines, skills=False, installed=None, docs_read="par", trial="par"):
-    tasks, turn_task, notes = {}, {}, None
+    tasks, turn_task = {}, {}
     for l in lines:
         if l.get("kind") == "ask" and l.get("task"):
             turn_task[l["turn"]] = l["task"]
@@ -84,10 +82,6 @@ def verdict(lines, skills=False, installed=None, docs_read="par", trial="par"):
         task = tasks.get(turn_task.get(turn))
         if kind == "grade" and l.get("task") in tasks:
             tasks[l["task"]].update(right=bool(l["right"]), graded=True)
-        if kind == "tool_call" and l.get("name") == NOTES and l.get("outcome") != "refused":
-            a = args_of(l)
-            if a and isinstance(a.get("notes"), str):
-                notes = a["notes"]
         if task is None:
             continue
         before = task["answered_t"] is None
@@ -131,7 +125,7 @@ def verdict(lines, skills=False, installed=None, docs_read="par", trial="par"):
             why.append(f"{t}: trial searches before the answer ({v['trial_searches']})")
         if v["docs_reads"] and docs_read == "fail":
             why.append(f"{t}: read the docs ({len(v['docs_reads'])})")
-    return {"tasks": tasks, "notes": notes, "docs_read": docs_read, "trial": trial, "clean": bool(tasks) and not why, "why": why}
+    return {"tasks": tasks, "docs_read": docs_read, "trial": trial, "clean": bool(tasks) and not why, "why": why}
 
 
 def selftest():
@@ -141,10 +135,9 @@ def selftest():
     bash = lambda cmd, t=0: {"kind": "tool_call", "name": "bash", "turn": 1, "t": t, "cwd": "/w", "arguments": json.dumps({"command": cmd})}
     answer = lambda cmd, t=0, outcome="ran": {"kind": "tool_call", "name": ANSWER, "turn": 1, "t": t, "outcome": outcome, "arguments": json.dumps({"command": cmd})}
     resp = lambda n, reasoning="", finish="tool_calls": {"kind": "response", "to_request": 1, "usage": {"completion_tokens": n}, "reasoning": reasoning, "finish_reason": finish}
-    note = lambda text: {"kind": "tool_call", "name": NOTES, "turn": 2, "outcome": "ran", "arguments": json.dumps({"notes": text})}
     bad = 0
     full = [request, ask("a", 1000), resp(10, "think"), bash("ast-grep run --help", 2000), bash("ast-grep run -p 'x' src", 3000), resp(20, "more"), answer("ast-grep run -p x src", 5500),
-            resp(5), grade("a", True), note("use : $RET")]
+            resp(5), grade("a", True)]
     v = verdict(full)
     a = v["tasks"]["a"]
     want = {"seconds": 4.5, "tool_calls": 2, "trial_searches": 1, "completion_tokens_before_answer": 30, "reasoning_chars_before_answer": 9, "output_tokens": 35,
@@ -154,8 +147,6 @@ def selftest():
             print(f"pass: instrument {k}: {a[k]}, expected {w}"); bad += 1
     if [r["cached_tokens"] for r in a["requests"]] != [0, 0, 0]:
         print(f"pass: requests {a['requests']}"); bad += 1
-    if v["notes"] != "use : $RET":
-        print(f"pass: notes {v['notes']!r}"); bad += 1
     cases = [
         ("right, with a docs read and a trial search: both par cost, so clean", full, "par", True),
         ("wrong", [ask("a"), answer("x"), grade("a", False)], "par", False),

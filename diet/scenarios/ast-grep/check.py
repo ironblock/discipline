@@ -11,30 +11,18 @@ call and judges its command statically (`rubric.py`) against the forms known to 
   matches, `exit_status_when_none` and `prints_nothing_when_none`. Right only when the command passes the rubric and
   both fields match `miss_truth.json` for the command's subcommand, measured per ast-grep version; a version not
   measured there is unrecognized.
-Right only when all of it holds; `unrecognized` and a refusal are wrong.
-
-**The notes turn rides on the grade** (#971's notes loop, Dispatch 2026-10-27): the check also names the attempt's
-failure kind (`right`, `rubric`, `miss fields`, `trial`, `unrecognized`, `no answer`) as `expected`, and prints as
-`got` the notes ask for it, which the scenario's grade step sends as its feedback (`right` and `last` are `{got}`).
-The asks are a writer table, `$DIET_AST_GREP_WRITERS` (JSON: `tail`, and `W0`, `W0n`, `W1`, `W2`, `W3`, `W3n`, `W4`), experiment
-text kept out of this tree; without it, every kind gets the DRAFT stub. The map: rubric → W1, miss fields (the command was
-right, its miss fields weren't) → W4, trial (the command was right) → W3, unrecognized with trial searches → W3n
-(the searches named, right or wrong never said), right with a docs read → W2, right and clean → W0, unrecognized or no answer → W0n, a
-neutral ask that never says the command was right or wrong. An answer in prose,
-or through another tool, is no answer. Prints one line, `{"right", "expected", "got"}`. `--selftest` grades known
-answers. The confined execution (`audit.py`) is an offline audit, never the verdict.
+Right only when all of it holds; `unrecognized` and a refusal are wrong. The check names the attempt's failure kind
+(`right`, `rubric`, `miss fields`, `trial`, `unrecognized`, `no answer`) in `expected`. An answer in prose, or
+through another tool, is no answer. Prints one line, `{"right", "expected", "got"}`; `got` is empty, as no feedback
+is sent. `--selftest` grades known answers. The confined execution (`audit.py`) is an offline audit, never the verdict.
 """
 import importlib, json, os, subprocess, sys
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
 import command, rubric  # noqa: E402
-from docs_reads import installed_prefix, reads_of  # noqa: E402
 
 TOOL = json.load(open(os.path.join(HERE, "answer-tool.json")))["name"]
-# The DRAFT notes ask every kind gets when no writer table is given.
-STUB = "DRAFT. Notes update: update your notes on ast-grep through the notes tool, as concise as you can make them."
-WRITER_OF = {"rubric": "W1", "miss fields": "W4", "trial": "W3", "unrecognized": "W0n", "no answer": "W0n"}
 MISS = ("zero-calls", "maybe-defined", "zero-new", "itf-maybe")
 FIELDS = ("exit_status_when_none", "prints_nothing_when_none")
 
@@ -74,23 +62,6 @@ def trial_searches(calls):
     return n
 
 
-def docs_read(calls):
-    """Whether any call before the answer read ast-grep's docs (docs_reads.py), the skills under ./.agent-skills
-    counted when the condition put them there."""
-    skills = os.path.abspath(".agent-skills") if os.path.isdir(".agent-skills") else None
-    cwd, prefix = os.getcwd(), installed_prefix()
-    for call in calls:
-        if call.get("name") != "bash":
-            continue
-        try:
-            cmd = json.loads(call.get("arguments") or "{}").get("command", "")
-        except ValueError:
-            continue
-        if reads_of(cmd, skills, cwd=cwd, home=os.path.expanduser("~"), installed=prefix):
-            return True
-    return False
-
-
 def kind_of(verdict, why):
     if verdict == "right":
         return "right"
@@ -103,21 +74,6 @@ def kind_of(verdict, why):
     if "on a miss" in why:
         return "miss fields"
     return "rubric"
-
-
-def notes_ask(kind, read, writers, trials=0, why=None):
-    """The writer and the ask for KIND: W2 for a right attempt that read the docs; W3n for an unrecognized attempt that
-    ran trial searches (a wrong one stays W1, whatever its searches)."""
-    writer = "W3n" if kind == "unrecognized" and trials else WRITER_OF.get(kind) or ("W2" if read else "W0")
-    if writers is None:
-        return writer, STUB
-    text = writers[writer].rstrip()
-    if writer == "W1" and why:
-        # W1r (round 4): the rubric's named reason, which states an ast-grep fact or the ask's terms, never the fix
-        # (rubric.py's LEAKS test), in place of W1's own opening sentence.
-        rest = text.split(".", 1)[1].strip() if text.startswith("That command was graded wrong.") else text
-        writer, text = "W1r", f"That command was graded wrong: {why.rstrip('.')}. {rest}".rstrip()
-    return writer, (text + " " + writers["tail"].strip()).strip()
 
 
 def installed_version():
@@ -181,19 +137,14 @@ def main():
     if os.environ.get("DIET_AST_GREP_VERDICT") == "execute":  # the falsification's (PREREG.md): execution, not the rubric
         truth_path = os.environ["DIET_SERVICE_FIXTURE_TRUTH"]
         g = grade_executed(turn, os.environ["DIET_GRADE_TASK"], json.load(open(truth_path)), os.path.join(os.path.dirname(truth_path), "pristine"))
-        print(json.dumps({"right": g["right"], "expected": f"executed {g['executed']}; static {g['static']}: {g['why']}", "got": STUB}))
+        print(json.dumps({"right": g["right"], "expected": f"executed {g['executed']}; static {g['static']}: {g['why']}", "got": ""}))
         return
     truth = json.load(open(os.environ["DIET_SERVICE_FIXTURE_TRUTH"]))
     trial = os.environ.get("DIET_AST_GREP_TRIAL", "par")
     if trial not in ("fail", "par"):
         sys.exit("check: DIET_AST_GREP_TRIAL is fail or par")
     g = grade(turn, os.environ["DIET_GRADE_TASK"], truth, trial)
-    path = os.environ.get("DIET_AST_GREP_WRITERS")
-    writers = json.load(open(path)) if path else None
-    why = g["got"].split(": ", 1)[1] if g["kind"] == "rubric" and ": " in g["got"] else None
-    writer, ask = notes_ask(g["kind"], g["kind"] == "right" and docs_read(g["before"]), writers, g["trials"], why)
-    # What the model is sent is only the notes ask; the verdict and its reason stay in `expected` and the log.
-    print(json.dumps({"right": g["right"], "expected": f"{g['kind']} ({writer}): {g['got']}", "got": ask}))
+    print(json.dumps({"right": g["right"], "expected": f"{g['kind']}: {g['got']}", "got": ""}))
 
 
 def selftest():
@@ -241,25 +192,10 @@ def selftest():
         got = grade(t, task, truth, "fail" if want == "trial" else "par", version=v)["kind"]  # trial only under the old rule
         if got != want:
             print(f"check: kind {want}: got {got}"); bad += 1
-    table = {"tail": "TAIL.", "W0": "w0.", "W0n": "w0n.", "W1": "w1.", "W2": "w2.", "W3": "w3.", "W3n": "w3n.", "W4": "w4."}
-    for kind, read, trials, writer in [("right", False, 0, "W0"), ("right", True, 0, "W2"), ("rubric", True, 0, "W1"), ("rubric", False, 5, "W1"),
-                                       ("miss fields", False, 0, "W4"), ("trial", True, 3, "W3"), ("unrecognized", False, 0, "W0n"),
-                                       ("unrecognized", True, 2, "W3n"), ("no answer", True, 0, "W0n")]:
-        w, ask = notes_ask(kind, read, table, trials)
-        if w != writer or ask != table[writer] + " TAIL." or notes_ask(kind, read, None, trials) != (writer, STUB):
-            print(f"check: writer for {kind} (docs {read}): {w} {ask!r}"); bad += 1
-    # W1r (round 4): a wrong with a named reason carries it; W1's own opening isn't repeated; never for unrecognized.
-    table1 = {"tail": "TAIL.", "W0": "w0.", "W0n": "w0n.", "W1": "That command was graded wrong. What did you believe? Update.",
-              "W2": "w2.", "W3": "w3.", "W3n": "w3n.", "W4": "w4."}
-    w, ask = notes_ask("rubric", False, table1, 0, why="--lang is not TypeScript")
-    if w != "W1r" or ask != "That command was graded wrong: --lang is not TypeScript. What did you believe? Update. TAIL.":
-        print(f"check: W1r: {w} {ask!r}"); bad += 1
-    if notes_ask("rubric", False, table1, 0)[0] != "W1" or notes_ask("unrecognized", False, table1, 0, why="x")[0] != "W0n":
-        print("check: W1 without a reason, or unrecognized with one, misrouted"); bad += 1
     unmeasured = grade(turn(call(zero, exit_status_when_none=1, prints_nothing_when_none=True)), "t2-zero-calls", truth, version="ast-grep 9.9.9")
     if not unmeasured["got"].startswith("unrecognized"):
         print(f"check: an unmeasured version graded {unmeasured}"); bad += 1
-    print(f"check: {sum(c[4] for c in cases)} right and {sum(not c[4] for c in cases) + 1} not right, 6 kinds, 9 writer choices and W1r, {bad} wrong")
+    print(f"check: {sum(c[4] for c in cases)} right and {sum(not c[4] for c in cases) + 1} not right, 6 kinds, {bad} wrong")
     return 1 if bad else 0
 
 

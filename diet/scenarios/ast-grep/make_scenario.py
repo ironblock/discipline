@@ -2,11 +2,10 @@
 
 One operation in isolation (Dispatch's reading of the maintainer's "each operation demonstrated once, in isolation",
 unconfirmed): a scenario per task, `passes/<task>.jsonl`, and its twin with the official skills,
-`passes/<task>-skills.jsonl`. Each is one session on a fresh instance (the `fixture` service):
-1. the task, asked once and graded once on its answer, a command (`check.py`), with no feedback;
-2. then a notes update through the `notes` tool (`notes-tool.json`), its ask a DRAFT stub Dispatch will replace.
+`passes/<task>-skills.jsonl`. Each is one session on a fresh instance (the `fixture` service): the task, asked once
+and graded once on its answer, a command (`check.py`), with no feedback.
 
-`run_pass.py` carries the notes into the next pass's head. The canned replies answer with `ref.py`'s reference
+The canned replies answer with `ref.py`'s reference
 command for the instance at CANNED_SEED, but the first task's is the naive one (no return type), so a rehearsal
 with `DIET_AST_GREP_SEED=CANNED_SEED` grades both ways. `--check` says when a written scenario is stale.
 """
@@ -20,7 +19,6 @@ from tasks import TASKS  # noqa: E402
 CANNED_SEED = 7
 CHECK = 'python3 -I "$DIET_GRADE_SCENARIO_DIR/../check.py"'
 ANSWER = json.load(open(os.path.join(HERE, "answer-tool.json")))["name"]
-NOTES = json.load(open(os.path.join(HERE, "notes-tool.json")))["name"]
 READY = {"command": 'test -s "$DIET_SERVICE_DIR/provides.json"'}
 FIXTURE = {"name": "fixture", "start": "python3 -I ../services/fixture.py start", "stop": "python3 -I ../services/fixture.py stop", "ready": READY}
 # The ast-grep shim (#971, the maintainer 2026-10-29): help from captures, every search refused.
@@ -29,9 +27,6 @@ SKILLS = {"name": "skills", "start": "python3 -I ../services/skills.py start", "
           "ready_timeout_s": 120}
 # DRAFT, model-facing: the task's id leads its ask, so a canned reply can be routed to it.
 ASK = "DRAFT. Task `{id}`. {ask}"
-# The notes turn is the grade's feedback (check.py picks its ask by the attempt's failure kind; the DRAFT stub when no
-# writer table is given), so no separate step asks it.
-NOTES_FEEDBACK = "{got}"
 WRONG = "DRAFT. (Not sent: a pass asks its task once.)"
 # A step waits as long as the 60-minute guard allows a pass, never the drive's 900 s default (two floor passes voided on it).
 PATIENCE = 3600
@@ -55,7 +50,7 @@ def lines(task, skills, first):
     cmd = (ref.naive if first else ref.reference)(task["family"], p)
     header = {"scenario": f"ast-grep-{task['id']}" + ("-skills" if skills else ""), "regimen": "../canned.toml",
               "live_regimen": "../bare.toml", "head": "../head-skills.md" if skills else "../head.md",
-              "answer_tool": ["../" + task.get("tool", "answer-tool.json"), "../notes-tool.json"], "services": [FIXTURE, SHIM, SKILLS] if skills else [FIXTURE, SHIM],
+              "answer_tool": ["../" + task.get("tool", "answer-tool.json")], "services": [FIXTURE, SHIM, SKILLS] if skills else [FIXTURE, SHIM],
               "sandbox_tools": ["ast-grep"],
               # The answer key is the fixture's own directory, and the real ast-grep binaries are the shim's `real`:
               # denied to the model's commands, read and exec alike (probe_key.py proves both).
@@ -63,15 +58,11 @@ def lines(task, skills, first):
               # The shim ahead of the operator's PATH, so `ast-grep` and `sg` are the shim's.
               "serve_env": {"PATH": "{service.shim.path}"}}
     answer = {"id": "canned-answer", "name": ANSWER, "arguments": json.dumps(dict({"command": cmd}, **MISS_FIELDS.get(task["family"], {})))}
-    notes = {"id": "canned-notes", "name": NOTES, "arguments": json.dumps({"notes": "DRAFT. Canned notes."})}
     out = [header,
            {"reply": {"when": f"Task `{task['id']}`", "text": "", "calls": [answer]}},
            {"reply": {"when": "Answer recorded", "text": "Canned: answered."}},
-           {"reply": {"when": "your notes", "text": "", "calls": [notes]}},
-           {"reply": {"when": "Notes saved", "text": "Canned: noted."}},
            {"step": "ask", "text": ASK.format(id=task["id"], ask=task["ask"]), "task": task["id"], "patience": PATIENCE},
-           {"step": "grade", "task": task["id"], "check": CHECK, "attempts": 1, "wrong": WRONG, "right": NOTES_FEEDBACK,
-            "last": NOTES_FEEDBACK, "patience": PATIENCE},
+           {"step": "grade", "task": task["id"], "check": CHECK, "attempts": 1, "wrong": WRONG, "patience": PATIENCE},
            {"step": "end"}]
     return "".join(json.dumps(line, sort_keys=True) + "\n" for line in out)
 

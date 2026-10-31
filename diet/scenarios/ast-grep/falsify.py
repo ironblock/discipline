@@ -18,7 +18,7 @@ one, else to the end of its task turn -- plus `searches` (ast-grep searches run)
 same DIR resumes: a (task, seed, arm) with a row is not run again. DIR/manifest.json records the build commit, the
 PREREG files' sha256, the notes' sha256 and the plan.
 """
-import hashlib, importlib, json, os, random, subprocess, sys, time
+import hashlib, importlib, json, os, random, signal, subprocess, sys, time
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.dirname(os.path.dirname(os.path.dirname(HERE)))
@@ -42,6 +42,21 @@ def plan():
             rng.shuffle(arms)
             out += [(task, seed, arm) for arm in arms]
     return out
+
+
+def run(cmd, max_seconds):
+    """CMD in its own session, stopped whole past MAX_SECONDS: (exit, stopped)."""
+    p = subprocess.Popen(cmd, start_new_session=True)
+    try:
+        return p.wait(timeout=max_seconds), False
+    except subprocess.TimeoutExpired:
+        os.killpg(p.pid, signal.SIGTERM)
+        try:
+            p.wait(timeout=10)
+        except subprocess.TimeoutExpired:
+            os.killpg(p.pid, signal.SIGKILL)
+            p.wait()
+        return None, True
 
 
 def args_of(line):
@@ -79,7 +94,7 @@ def measure(lines, task):
 
 
 def pass_cmd(task, seed, arm, out, args):
-    cmd = [sys.executable, "-I", os.path.join(HERE, "run_pass.py"), task, "--out", out, "--floor", "--no-notes", "--native",
+    cmd = [sys.executable, "-I", os.path.join(HERE, "run_pass.py"), task, "--out", out, "--floor", "--native",
            "--seed", str(seed), "--verdict", "execute",
            "--head", os.path.join(HERE, "head-native-skills.md" if arm == "S" else "head-native.md")]
     cmd += ["--skills"] if arm == "S" else []
@@ -139,7 +154,6 @@ def sha(path):
 
 
 def main(argv):
-    import loop
     args = parse(argv)
     os.makedirs(args["out"], exist_ok=True)
     rows_path = os.path.join(args["out"], "rows.jsonl")
@@ -161,7 +175,7 @@ def main(argv):
             if args["before"]:
                 subprocess.run(["bash", "-c", args["before"]], check=False)
             started = time.time()
-            _, stopped = loop.run(pass_cmd(task, seed, arm, out, args), args["max_seconds"])
+            _, stopped = run(pass_cmd(task, seed, arm, out, args), args["max_seconds"])
             wall = round(time.time() - started)
             row = row_of(task, seed, arm, out, attempt, stopped, wall)
             row["wall_seconds"] = wall
@@ -203,7 +217,7 @@ def selftest():
         if m[k] != w:
             print(f"falsify: no answer {k}: {m[k]}, expected {w}"); bad += 1
     a = parse(["--out", "/x", "--notes", "/n.md"])
-    for arm, have, lack in (("N", ["--native", "--no-notes", "--floor", "head-native.md"], ["--skills", "--notes", "head-native-skills.md"]),
+    for arm, have, lack in (("N", ["--native", "--floor", "head-native.md"], ["--skills", "--notes", "head-native-skills.md"]),
                             ("S", ["--skills", "head-native-skills.md"], ["--notes"]), ("T", ["--notes", "/n.md", "head-native.md"], ["--skills"])):
         cmd = pass_cmd("t1-ret-decl", 101, arm, "/x/p", a)
         joined = " ".join(cmd)
