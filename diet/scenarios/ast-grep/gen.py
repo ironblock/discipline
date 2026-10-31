@@ -269,7 +269,8 @@ def build(seed):
     at_pair = f"src/index.ts:{g.emit('src/index.ts', f'export type {{ {pair[0]}, {pair[1]} }} from {chr(39)}./{pair_path[4:-3]}{chr(39)};')}"
     barrel_lines.append(at_pair)
     type_lines.append(at_pair)
-    # Task set 2 (#971, the maintainer 2026-10-29): its families' content, after every set-1 draw.
+    # The decoy families' content (gen2.py, 2026-10-29), after every task family's draw: no task asks for them, and
+    # `usable` still requires them, so the instances, and the seed each resolves to, stay what they were.
     params2, answers2 = gen2.build(g, rng, paths, helper, {"target": target, "other": other, "funcs": funcs + [wide_decl],
                                                          "desk_method": desk_method, "fexpr": [fexpr], "barrel_lines": barrel_lines})
     truth["params"] = {"target": target, "arrow_target": arrow_target, "zero_fn": zero_fn, "maybe": maybe,
@@ -298,8 +299,8 @@ def build(seed):
 
 
 def usable(truth):
-    """Every family but the two misses has a match, so no right command is the one that matches nothing; the misses
-    (`zero-calls`, `maybe-defined`) may match nothing, on purpose."""
+    """Every family but the misses has a match, so no right command is the one that matches nothing; the misses
+    (`zero-calls`, `maybe-defined`, and the decoys' `zero-new` and `itf-maybe`) may match nothing, on purpose."""
     return all(v for k, v in truth["answers"].items() if k not in ("zero-calls", "maybe-defined", "zero-new", "itf-maybe"))
 
 

@@ -1,6 +1,0 @@
-{"answer_tool": ["../answer-tool-native.json"], "head": "../head-native.md", "live_regimen": "../bare.toml", "regimen": "../canned.toml", "sandbox_secrets": ["service.fixture.dir"], "sandbox_tools": ["ast-grep"], "scenario": "ast-grep-t16-cond-call", "services": [{"name": "fixture", "ready": {"command": "test -s \"$DIET_SERVICE_DIR/provides.json\""}, "start": "python3 -I ../services/fixture.py start", "stop": "python3 -I ../services/fixture.py stop"}]}
-{"reply": {"calls": [{"arguments": "{\"command\": \"ast-grep scan --inline-rules 'id: q\\nlanguage: ts\\nrule:\\n  kind: if_statement\\n  has:\\n    field: condition\\n    has:\\n      pattern: sealRelay($$$A)' src\"}", "id": "canned-answer", "name": "submit_answer"}], "text": "", "when": "Task `t16-cond-call`"}}
-{"reply": {"text": "Canned: answered.", "when": "Answer recorded"}}
-{"patience": 3600, "step": "ask", "task": "t16-cond-call", "text": "DRAFT. Task `t16-cond-call`. DRAFT. Give the ast-grep command, run from this directory, that matches every `if` statement under src/ whose condition is a call to `{service.fixture.cond_fn}(...)`, and nothing else."}
-{"attempts": 1, "check": "python3 -I \"$DIET_GRADE_SCENARIO_DIR/../check.py\"", "patience": 3600, "step": "grade", "task": "t16-cond-call", "wrong": "DRAFT. (Not sent: a pass asks its task once.)"}
-{"step": "end"}

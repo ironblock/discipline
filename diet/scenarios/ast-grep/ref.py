@@ -9,7 +9,7 @@ import os, sys, tempfile
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
-import command, gen, ref2  # noqa: E402
+import command, gen  # noqa: E402
 
 RULE = lambda body: "ast-grep scan --inline-rules 'id: q\nlanguage: ts\nrule:\n" + body + "' src"
 
@@ -30,7 +30,7 @@ def reference(family, p):
         "track-calls": "ast-grep run -l ts -p '$track($$$A)' src",
         "fn-outline": f"ast-grep outline src --items structure --match '^{p['line_fn']}$'",
         "itf-outline": f"ast-grep outline src --match '^{p['line_itf']}$'",
-    }.get(family) or ref2.reference(family, p)
+    }.get(family)
 
 
 def naive(family, p):
@@ -47,7 +47,7 @@ def naive(family, p):
         "track-calls": "ast-grep run -l ts -p 'track($$$A)' src",
         "fn-outline": f"ast-grep outline src --match '{p['line_fn'][:4]}'",
         "itf-outline": f"ast-grep outline src --match '{p['line_itf']}'",
-    }.get(family) or ref2.naive(family, p)
+    }.get(family)
 
 
 def overbroad(family, p):

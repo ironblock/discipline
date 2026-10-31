@@ -17,7 +17,7 @@ sys.path.insert(0, HERE)
 import command  # noqa: E402
 
 TOOL = json.load(open(os.path.join(HERE, "answer-tool-native.json")))["name"]
-MISS = ("zero-calls", "maybe-defined", "zero-new", "itf-maybe")
+MISS = ("zero-calls", "maybe-defined")
 FIELDS = ("exit_status_when_none", "prints_nothing_when_none")
 
 

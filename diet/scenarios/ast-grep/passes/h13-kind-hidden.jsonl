@@ -1,6 +1,0 @@
-{"answer_tool": ["../answer-tool-native.json"], "head": "../head-native.md", "live_regimen": "../bare.toml", "regimen": "../canned.toml", "sandbox_secrets": ["service.fixture.dir"], "sandbox_tools": ["ast-grep"], "scenario": "ast-grep-h13-kind-hidden", "services": [{"name": "fixture", "ready": {"command": "test -s \"$DIET_SERVICE_DIR/provides.json\""}, "start": "python3 -I ../services/fixture.py start", "stop": "python3 -I ../services/fixture.py stop"}]}
-{"reply": {"calls": [{"arguments": "{\"command\": \"ast-grep outline src --items structure --match '^LatticeItem$'\"}", "id": "canned-answer", "name": "submit_answer"}], "text": "", "when": "Task `h13-kind-hidden`"}}
-{"reply": {"text": "Canned: answered.", "when": "Answer recorded"}}
-{"patience": 3600, "step": "ask", "task": "h13-kind-hidden", "text": "DRAFT. Task `h13-kind-hidden`. DRAFT. Give the ast-grep command, run from this directory, that outlines the item named `{service.fixture.kind_hidden}` under src/, which isn't exported, and nothing else."}
-{"attempts": 1, "check": "python3 -I \"$DIET_GRADE_SCENARIO_DIR/../check.py\"", "patience": 3600, "step": "grade", "task": "h13-kind-hidden", "wrong": "DRAFT. (Not sent: a pass asks its task once.)"}
-{"step": "end"}
