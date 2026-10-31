@@ -1,9 +1,11 @@
 """The answer is a command (#971): parse it, refuse what it may not be, and run what it may, confined.
 
 The model's answer is model-written text, run by the grader out of the model's sight. So:
-- **Parsed, never a shell.** `shlex`, POSIX rules. Refused: an operator (`;`, `|`, `&`, a redirection, a subshell),
-  a backtick, a `$` inside double quotes (a shell would expand it there, so the command is wrong as written), a
-  variable assignment, and a parse error.
+- **Parsed by bash, never by a lexer of ours** (`words`): bash runs it twice, confined, with `ast-grep` and `sg` a
+  recorder that runs nothing. Refused: anything but exactly one recorded call, so an operator (`;`, `|`, `&`, a
+  redirection, a subshell), a substitution, a backtick or another program; a `$` bash expands (the two runs differ
+  in what it would expand to, and an unset variable fails); an assignment before the command; input fed to it; and
+  a parse error. A `$` bash leaves literal, and ANSI-C quoting (`$'…'`), are read as bash reads them.
 - **Only ast-grep.** The first word is `ast-grep` or `sg`, by name alone (not a path); it runs the binary
   `ast-grep` names on PATH, never `sg`, which is `newgrp` on Linux.
 - **Only a search.** The subcommand is `run` (or none, which is `run`), `outline` or `scan`, and every option one the
@@ -18,7 +20,7 @@ The model's answer is model-written text, run by the grader out of the model's s
 `matches(argv, root)` runs it with `--json=stream` in place of any `--json` it gave and returns the matched lines as
 `path:line`, lines from 1. `refusal(command)` is the reason a command may not run, or None.
 """
-import json, os, shlex, shutil, subprocess, sys, tempfile
+import json, os, shutil, subprocess, sys, tempfile
 
 TOOLS = {"ast-grep", "sg"}
 SEARCHES = {"run", "outline", "scan"}
@@ -45,41 +47,113 @@ class Refused(Exception):
     pass
 
 
+MARK = "@@diet-recorder@@"
+# The recorder stands in for `ast-grep` and `sg` while bash parses an answer: shell builtins only, so the parse run
+# may exec nothing but bash and it (sh only as its interpreter). It prints, between markers: its argv, NUL-separated;
+# the values of the variables bash was given, and SHLVL; every exported name (`export -p`); and `stdin` when it was
+# fed any.
+RECORDER = ("#!/bin/sh\n"
+            f"printf '%s' '{MARK}'; printf '%s\\0' \"$0\" \"$@\"\n"
+            f"printf '%s' '{MARK}'; printf '%s\\0' \"$PATH\" \"$HOME\" \"$DIET_PROBE\" \"$SHLVL\"\n"
+            f"printf '%s' '{MARK}'; export -p\n"
+            f"printf '%s' '{MARK}'; if IFS= read -r line || [ -n \"$line\" ]; then printf 'stdin'; fi\n"
+            f"printf '%s\\n' '{MARK}'\n")
+# Bash's own exports, beyond the variables it was given.
+BASH_OWN = {"_", "PWD", "OLDPWD", "SHLVL"}
+# SHLVL as the recorder sees it when the parse run's bash started it: bash starts at 1 (it is given none), and the
+# recorder's sh counts one more. A bash the answer starts (`/bin/bash -c …`) counts another, and the parse run's own
+# SHLVL is readonly, so an assignment can't take that back.
+RECORDER_SHLVL = "2"
+# Before the answer: unset variables fail, SHLVL is fixed, and the DEBUG trap writes every simple command bash is
+# about to run, with its subshell depth, to the trace pipe, fd FD (inside substitutions too, `set -T`). The answer's
+# commands are the ones traced after SENTINEL. After the answer, CODA writes `$!`, set only if the answer started a
+# background job; an answer that ends bash before it (`exit`, `exec`), or clears the trap, never shows it traced.
+SENTINEL = f"0 : {MARK}"
+# Bash 3.2 calls `$!` unbound under `set -u` whatever its default, so the coda lifts it first.
+CODA = "set +u\nprintf 'END:%s\\0' \"$!\" >&{fd}"
+CODA_TRACED = ["0 set +u", "0 printf 'END:%s\\0' \"$!\" 1>&{fd}"]
+PRELUDE = ("set -u\nset -T\nreadonly SHLVL\ntrap 'printf \"%s\\0\" \"$BASH_SUBSHELL $BASH_COMMAND\" >&{fd}' DEBUG\n"
+           + SENTINEL[2:] + "\n")
+
+
+def parse_profile(root, rec):
+    """command.py's profile for ROOT, and exec of bash and the recorder alone, sh only as the recorder's interpreter."""
+    return (profile(root) + "(deny process-exec)"
+            f"(allow process-exec (literal \"/bin/bash\") (subpath \"{os.path.realpath(rec)}\"))"
+            "(allow process-exec-interpreter (literal \"/bin/sh\"))")
+
+
+def recorded(command, run):
+    """Bash's words for COMMAND in one parse run, numbered RUN (0 or 1), or Refused. The runs differ in the working
+    directory, HOME, PATH (the recorder's own directory), a variable of the drive's (`DIET_PROBE`) and the positional
+    parameters, so a word that expands to any of them differs between the runs."""
+    with tempfile.TemporaryDirectory(prefix=f"parse-{run}-") as d:
+        work, home, rec = (os.path.join(d, n) for n in ("work", "home", "bin"))
+        for p in (work, home, rec):
+            os.makedirs(p)
+        for name in TOOLS:
+            path = os.path.join(rec, name)
+            with open(path, "w") as f:
+                f.write(RECORDER)
+            os.chmod(path, 0o755)
+        env = {"PATH": rec, "HOME": home, "DIET_PROBE": f"probe-{run}"}
+        trace_r, trace_w = os.pipe()
+        try:
+            cmd = ["/usr/bin/sandbox-exec", "-p", parse_profile(work, rec), "/bin/bash", "--noprofile", "--norc", "-c",
+                   PRELUDE.format(fd=trace_w) + command + "\n" + CODA.format(fd=trace_w) + "\n", f"arg0-{run}", f"arg1-{run}"]
+            try:
+                done = subprocess.run(cmd, cwd=work, env=env, capture_output=True, timeout=TIMEOUT_S,
+                                      stdin=subprocess.DEVNULL, pass_fds=(trace_w,))
+            except subprocess.TimeoutExpired:
+                raise Refused(f"bash ran past {TIMEOUT_S} s on it")
+        finally:
+            os.close(trace_w)
+            with os.fdopen(trace_r, "rb") as f:
+                traced = f.read().decode("utf-8", "replace").split("\0")[:-1]
+        out, err = done.stdout.decode("utf-8", "replace"), done.stderr.decode("utf-8", "replace").strip()
+        said = f" (bash said: {err[:160]})" if err else ""
+        if SENTINEL not in traced:
+            raise Refused("bash never reached the answer" + said)
+        traced = traced[traced.index(SENTINEL) + 1:]
+        coda = [t.format(fd=trace_w) for t in CODA_TRACED]
+        if len(traced) < 3 or traced[-3:-1] != coda or not traced[-1].startswith("END:"):
+            raise Refused("bash never finished the answer as written (an `exit`, an `exec`, a cleared trap, or an error)" + said)
+        if traced[-1] != "END:":
+            raise Refused("it starts a background job (`&`)")
+        traced = traced[:-3]
+        if any(not t.startswith("0 ") for t in traced):
+            raise Refused("it runs in a subshell (`( … )`)")
+        parts = out.split(MARK)
+        calls = (len(parts) - 1) // 5
+        if len(traced) != 1 or calls != 1:
+            raise Refused(f"it is not one ast-grep call: bash ran {len(traced)} command(s), and the recorder {calls} time(s)" + said)
+        argv, given, exported, stdin = parts[1].split("\0")[:-1], parts[2].split("\0")[:-1], parts[3], parts[4]
+        if stdin:
+            raise Refused("it feeds ast-grep input (a heredoc, a here-string or `<`), which the check never gives it")
+        if given[3:] != [RECORDER_SHLVL]:
+            raise Refused(f"ast-grep runs under a shell the answer starts (SHLVL {given[3:]})")
+        names = {l.split()[1].split("=", 1)[0] for l in exported.splitlines() if l.startswith("export ") and len(l.split()) > 1}
+        if given[:3] != [env["PATH"], env["HOME"], env["DIET_PROBE"]] or names - set(env) - BASH_OWN:
+            raise Refused("it sets the environment ast-grep runs in (an assignment before the command)")
+        return [os.path.basename(argv[0])] + argv[1:]
+
+
 def words(command):
-    """The command's words, or Refused: no operators, no backticks, no `$` a shell would expand."""
-    if "`" in command:
-        raise Refused("a backtick")
-    # In double quotes bash turns `\$` into `$`, where shlex would keep the backslash: cook it as bash would.
-    quote, i, cooked = None, 0, []
-    while i < len(command):
-        c = command[i]
-        if c == "\\" and quote != "'":
-            if quote == '"' and command[i + 1:i + 2] == "$":
-                cooked.append("$")
-            else:
-                cooked.append(command[i:i + 2])
-            i += 2
-            continue
-        if quote is None and c in "'\"":
-            quote = c
-        elif c == quote:
-            quote = None
-        elif quote == '"' and c == "$":
-            raise Refused("a `$` in double quotes, which the shell expands")
-        cooked.append(c)
-        i += 1
-    lex = shlex.shlex("".join(cooked), posix=True, punctuation_chars=";&|<>()")
-    lex.whitespace_split = True
-    try:
-        toks = list(lex)
-    except ValueError as e:
-        raise Refused(f"it does not parse: {e}")
-    for t in toks:
-        if t and set(t) <= set(";&|<>()"):
-            raise Refused(f"a shell operator `{t}`")
-    if not toks:
+    """The command's words as bash reads them, or Refused. Bash parses it, never a lexer of ours: twice, confined,
+    with `ast-grep` and `sg` a recorder that runs nothing. It must be exactly one call of the recorder, from the parse
+    run's bash itself, and nothing else, with no input fed to it, no environment of its own, and the same words in
+    both runs. So no
+    operator, substitution or other program passes, and neither does a `$` bash expands; one bash leaves literal
+    (`$'…'`, a `$` before a quote or at a word's end) is read as bash reads it. Macos only: off it, bash would run the
+    model's text unconfined, so every answer is refused."""
+    if sys.platform != "darwin":
+        raise Refused("an answer is parsed by bash under Seatbelt, which this host lacks (macOS only)")
+    if not command.strip():
         raise Refused("it is empty")
-    return toks
+    first, second = recorded(command, 0), recorded(command, 1)
+    if first != second:
+        raise Refused("it expands to what the shell's environment holds (a `$` that bash expands)")
+    return first
 
 
 LONG_OF = {"p": "--pattern", "k": "--kind", "r": "--rewrite", "l": "--lang", "j": "--threads", "A": "--after",
@@ -266,7 +340,40 @@ REFUSED = [
     ("a short option the filter doesn't know", "ast-grep run -p 'x' -Z src"),
     ("a run with a scan's rule flag", "ast-grep run --rule rule.yml src"),
     ("a path after the options' end", "ast-grep run -p 'x' -- /etc"),
+    # Bash as the parser (2026-10-31): what it would expand, run, feed or set.
+    ("a home variable", 'ast-grep run -p "$HOME" src'),
+    ("an unset variable", 'ast-grep run -p "${x}" src'),
+    ("the search path", 'ast-grep run -p "$PATH" src'),
+    ("the working directory", 'ast-grep run -p "$PWD" src'),
+    ("a positional parameter", 'ast-grep run -p "$1" src'),
+    ("an unquoted variable of the drive's", "ast-grep run -p $DIET_PROBE src"),
+    ("a no-op after it", "ast-grep run -p 'x' src; true"),
+    ("two searches", "ast-grep run -p 'x' src; ast-grep run -p 'y' src"),
+    ("a process substitution", "ast-grep run -p 'x' <(echo src)"),
+    ("a here-string", "ast-grep run -p 'x' src <<< hi"),
+    ("a heredoc", "ast-grep run -p 'x' src <<EOF\nhi\nEOF"),
+    ("input from a readable file", "ast-grep run -p 'x' src < /etc/hosts"),
+    ("env before it", "env ast-grep run -p 'x' src"),
+    ("env by its path", "/usr/bin/env ast-grep run -p 'x' src"),
+    ("clearing the trap", "trap - DEBUG; ast-grep run -p 'x' src; true"),
+    ("clearing it through builtin", "builtin trap - DEBUG; ast-grep run -p 'x' src; true"),
+    ("an export first", "export X=1; ast-grep run -p 'x' src"),
+    ("a PATH assignment", "PATH=/bin ast-grep run -p 'x' src"),
+    ("a HOME assignment", "HOME=/tmp ast-grep run -p 'x' src"),
+    ("exec in bash's place", "exec ast-grep run -p 'x' src"),
+    ("bash by its path", "/bin/bash -c 'ast-grep run -p x src'"),
+    ("bash by its variable", "\"$BASH\" -c 'ast-grep run -p x src'"),
+    ("bash with SHLVL assigned", "SHLVL=0 /bin/bash -c 'ast-grep run -p x src'"),
+    ("sh by its path", "/bin/sh -c 'ast-grep run -p x src'"),
+    ("sh by its path, resetting SHLVL inside", "/bin/sh -c 'SHLVL=1 ast-grep run -p x src'"),
+    ("an echo of the command", "echo ast-grep run -p 'x' src"),
 ]
+# A declared limit, pinned as accepted (Dispatch, 2026-10-31; README, "Declared limits"): a bash the answer starts can
+# reset SHLVL before ast-grep runs, and nothing else tells it from the parse run's own bash. It is still graded on the
+# words bash gives ast-grep. A fix that closes it fails this case, visibly.
+LIMITS = [("an inner bash resetting SHLVL", "/bin/bash -c 'SHLVL=1 ast-grep run -p x src'", ["ast-grep", "run", "-p", "x", "src"])]
+# What bash makes of an answer: its words, exactly (command_words.json, the regrade's five false wrongs among them).
+WORDS = json.load(open(os.path.join(os.path.dirname(os.path.abspath(__file__)), "command_words.json")))
 ALLOWED = [
     ("a run search", "ast-grep run -l ts -p 'function $F($$$A): T { $$$B }' src"),
     ("the default subcommand", "ast-grep -p 'foo($$$A)' src"),
@@ -289,6 +396,29 @@ ALLOWED = [
 
 def selftest():
     bad = 0
+    real, sys.platform = sys.platform, "linux"
+    try:
+        if refusal("ast-grep run -p 'x' src") is None:
+            print("command: off macOS an answer was not refused"); bad += 1
+    finally:
+        sys.platform = real
+    if sys.platform != "darwin":
+        print(f"command: skipped: bash parses answers under Seatbelt, on macOS only; off it every answer is refused, {bad} wrong")
+        return 1 if bad else 0
+    for c in WORDS:
+        try:
+            got = words(c["command"])
+        except Refused as e:
+            got = f"refused: {e}"
+        if got != c["words"]:
+            print(f"command: words, {c['why']}: {got!r}"); bad += 1
+    for why, cmd, want in LIMITS:
+        try:
+            got = words(cmd)
+        except Refused as e:
+            got = f"refused: {e}"
+        if got != want:
+            print(f"command: the declared limit '{why}' changed (update README's declared limits): {got!r}"); bad += 1
     for why, cmd in REFUSED:
         if refusal(cmd) is None:
             print(f"command: not refused: {why}: {cmd!r}"); bad += 1
@@ -328,7 +458,8 @@ def selftest():
                     print("command: the confinement blocked a read of the copy itself"); bad += 1
             finally:
                 shutil.rmtree(probe_dir)
-    print(f"command: {len(REFUSED)} refused and {len(ALLOWED)} allowed, {bad} wrong")
+    print(f"command: {len(WORDS)} read as bash reads them, {len(REFUSED)} refused and {len(ALLOWED)} allowed, "
+          f"{len(LIMITS)} declared limit pinned, {bad} wrong")
     return 1 if bad else 0
 
 
