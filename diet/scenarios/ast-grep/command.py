@@ -142,10 +142,9 @@ def words(command):
     """The command's words as bash reads them, or Refused. Bash parses it, never a lexer of ours: twice, confined,
     with `ast-grep` and `sg` a recorder that runs nothing. It must be exactly one call of the recorder, from the parse
     run's bash itself, and nothing else, with no input fed to it, no environment of its own, and the same words in
-    both runs. So no
-    operator, substitution or other program passes, and neither does a `$` bash expands; one bash leaves literal
-    (`$'…'`, a `$` before a quote or at a word's end) is read as bash reads it. Macos only: off it, bash would run the
-    model's text unconfined, so every answer is refused."""
+    both runs. So no operator, substitution or other program passes, and neither does a `$` bash expands; one bash
+    leaves literal (`$'…'`, a `$` before a quote or at a word's end) is read as bash reads it. macOS only: off it,
+    bash would run the model's text unconfined, so every answer is refused."""
     if sys.platform != "darwin":
         raise Refused("an answer is parsed by bash under Seatbelt, which this host lacks (macOS only)")
     if not command.strip():
