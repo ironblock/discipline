@@ -1,8 +1,11 @@
-"""Task set 2's fixture content (#971, the maintainer 2026-10-29): `gen.build` calls `build` after set 1's.
+"""The fixture's decoy families (#971, 2026-10-29): `gen.build` calls `build` after the task families' draws.
 
-Every line here comes after set 1's draws, and none of it is in a set-1 family's truth (ref.py checks set 1's references
-on the same instances). Each family's truth is the lines the generator wrote, as set 1's are; each has the distractors
-that make its naive and over-broad forms execute wrong (ref.py). Families, by gap:
+No task asks for these families: their content is more for a task's command to wrongly catch, on the same instances
+the tasks run on (ref.py checks the tasks' references there). Every line here comes after the task families' draws.
+One barrel export (`export { a as b } from …`) joins the barrel's lines, so it is in t3's public-surface truth; no other
+line is in a task family's truth. Each family keeps the truth of the lines the generator wrote, as the tasks' do, and
+`gen.usable` still requires them, so the instances, and the seed each resolves to, are what they were when these
+families had tasks of their own. Families, by gap:
 - return type: `ret-method` (class methods returning T), `ret-async` (async declarations returning `Promise<T>`);
 - miss: `zero-new` (`new C(…)` of a class rarely built), `itf-maybe` (an interface that may not exist);
 - barrel: `public-aliases` (barrel names re-exported under an alias), `public-values` (barrel statements exporting values);
@@ -49,8 +52,8 @@ def body(g, path, lines):
 
 
 def build(g, rng, paths, helper, ctx):
-    """CTX: set 1's `target`, `other`, `funcs`, `desk_method` and `fexpr` (`path:line`s), and `barrel_lines` (the list
-    the barrel's lines go in, set 1's `public-surface` truth). Returns (params, answers)."""
+    """CTX: the task families' `target`, `other`, `funcs`, `desk_method` and `fexpr` (`path:line`s), and `barrel_lines` (the list
+    the barrel's lines go in, the tasks' `public-surface` truth). Returns (params, answers)."""
     from gen import NOUNS, cap
     target, other = ctx["target"], ctx["other"]
     pick = lambda: rng.choice(paths[1:])
@@ -62,7 +65,7 @@ def build(g, rng, paths, helper, ctx):
     add = lambda found: [ans[k].extend(v) for k, v in found.items()]
     p = {}
 
-    # Return type: methods. Set 1's Desk method returns the target; a second class has one more, and look-alikes.
+    # Return type: methods. The tasks' Desk method returns the target; a second class has one more, and look-alikes.
     ans["ret-method"].append(ctx["desk_method"])
     board_path, board = pick(), g.word(NOUNS, lambda w: cap(w) + "Board")
     g.emit(board_path, f"export class {board} {{")
@@ -73,7 +76,7 @@ def build(g, rng, paths, helper, ctx):
     g.emit(board_path, f"  {g.fn_name()} = (id: string): {target} => ({{ id }} as never);")
     g.emit(board_path, "}")
     g.emit(board_path, "")
-    # Async declarations returning Promise<target>: set 1's, and one sure of each, async and not.
+    # Async declarations returning Promise<target>: the tasks', and one sure of each, async and not.
     ans["ret-async"] += [f"{f['path']}:{f['line']}" for f in ctx["funcs"] if f["kind"] == "decl" and f["awaits"] != "none"
                          and f["ret"] == f"Promise<{target}>"]
     ap = pick()
@@ -102,7 +105,7 @@ def build(g, rng, paths, helper, ctx):
     g.emit(sp, "")
     p["maybe_itf"] = shape
 
-    # Barrel: one sure alias (set 1 adds some by chance), and a module's own alias (a directory search catches it).
+    # Barrel: one sure alias (the tasks' families add some by chance), and a module's own alias (a directory search catches it).
     alias_src = pick()
     aliased = g.fn_name()
     g.emit(alias_src, f"export function {aliased}(id: string): void {{ void id; }}")
@@ -206,7 +209,7 @@ def build(g, rng, paths, helper, ctx):
     add(body(g, pick(), lines))
     p["init_fn"], p["cond_fn"] = init, cond
 
-    # Function kinds: expressions with an await (set 1's one among them), generators, nested declarations.
+    # Function kinds: expressions with an await (the tasks' one among them), generators, nested declarations.
     fp = pick()
     for text in [f"export const {g.fn_name()} = async function (id: string): Promise<void> {{ await Promise.resolve(id); }};",
                  f"export const {g.fn_name()} = async function named(id: string): Promise<void> {{ await Promise.resolve(id); }};"]:
@@ -225,7 +228,7 @@ def build(g, rng, paths, helper, ctx):
     g.emit(fp, f"  function {g.fn_name()}(): void {{ void 0; }}")
     g.emit(fp, "};")
     g.emit(fp, "")
-    # The set-1 function expression with an await (gen.py's `wide` file) is one of this family's.
+    # The tasks' function expression with an await (gen.py's `wide` file) is one of this family's.
     ans["fexpr-await"] += ctx["fexpr"]
 
     # `...`: spread arguments, rest parameters, array spreads (object spreads beside them).
@@ -254,7 +257,7 @@ def build(g, rng, paths, helper, ctx):
     g.emit(rp2, "export const [head0, ...tail0] = [1, 2];")
     g.emit(rp2, f"export const {g.fn_name()} = (...xs: number[]): void => void xs;")
     g.emit(rp2, "")
-    # Set 2's helpers with a rest parameter are rest declarations too.
+    # The decoys' helpers with a rest parameter are rest declarations too.
     for i, line in enumerate(g.files[helper]):
         if re.match(r"export function \w+\(\.\.\.", line):
             ans["rest-decl"].append(f"{helper}:{i + 1}")
@@ -294,7 +297,7 @@ def two_params(files):
 
 
 def holds(p):
-    """Per set-2 family, what each truth line holds as written: a check of the construction alone (gen.py's selftest)."""
+    """Per decoy family, what each truth line holds as written: a check of the construction alone (gen.py's selftest)."""
     t = p["target"]
     return {
         "ret-method": lambda s: s.startswith("  ") and f"): {t} {{" in s and "function" not in s,

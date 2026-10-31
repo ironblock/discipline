@@ -176,7 +176,7 @@ def run(argv, root):
     binary = shutil.which("ast-grep")
     if not binary:
         raise Refused("no ast-grep on PATH")
-    # The audit reads JSON, so it drops the command's own output format (--json, and --report-style, --color, --heading
+    # The check reads JSON, so it drops the command's own output format (--json, and --report-style, --color, --heading
     # and --format, which ast-grep won't take beside --json), with a separate value, then asks for --json=stream.
     args, skip = [], False
     for a in argv[1:]:
@@ -305,12 +305,12 @@ def selftest():
             got = matches(checked("ast-grep run -p 'foo()' src"), root)
             if got != ["src/a.ts:2"]:
                 print(f"command: a search in the copy matched {got}"); bad += 1
-            # Output-format flags can't sit beside --json (ast-grep refuses --report-style with it): the audit drops them.
+            # Output-format flags can't sit beside --json (ast-grep refuses --report-style with it): the check drops them.
             for styled in ("ast-grep scan --inline-rules 'id: q\nlanguage: ts\nrule:\n  pattern: foo()' --report-style short src",
                            "ast-grep run -p 'foo()' --color never --heading never src"):
                 got = matches(checked(styled), root)
                 if got != ["src/a.ts:2"]:
-                    print(f"command: an output-format flag voided the audit's matches: {got}: {styled!r}"); bad += 1
+                    print(f"command: an output-format flag voided the check's matches: {got}: {styled!r}"); bad += 1
             # The confinement itself, tested on the profile: no write in the copy, no read under home outside it.
             target = os.path.join(root, "written")
             subprocess.run(confine(["/usr/bin/touch", target], root), capture_output=True)

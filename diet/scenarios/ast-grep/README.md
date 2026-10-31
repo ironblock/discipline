@@ -1,32 +1,32 @@
 # The ast-grep tutorial (#971)
 
-The first slice of #971: ast-grep (`run`, `outline` and `scan`) on small TypeScript projects. Following the maintainer's ruling, "The pass" (2026-10-26):
-- **The model is told.** It's a technical demonstration of subject mastery: nothing runs, and only the answer's structure is checked.
-- **The command is never run** (2026-10-27). It's submitted through its own tool, `submit_answer`, and graded statically against the forms known to be right.
-- **Searches are blocked, not failed** (the maintainer, 2026-10-29). Help and docs may be read; an ast-grep search before the answer is refused in the sandbox (the shim, below) and counted as par cost, never a fail. The verdict is the submitted command alone. The DRAFT heads state "no searches" as user intent. (2026-10-27 to 10-29: a search failed the attempt.)
+The first slice of #971: ast-grep (`run`, `outline` and `scan`) on small TypeScript projects. What stands here is the instrument of one pre-registered falsification: do tailored notes beat native ast-grep use on cost, at equal correctness?
+- **Native use.** The model works in a terminal where `ast-grep` is the real binary and searches run. Only the fixture's truth is denied to it.
+- **The answer is a command,** submitted through its own tool, `submit_answer`, and **run** to grade it: right only when it matches exactly the lines the task asks for.
 - **"No match" is part of mastery** (2026-10-27). t2 and h2 also say, in structured fields, what the command does when nothing matches.
-- **Each operation is demonstrated once, in isolation.** Help and docs are allowed.
-- **The answer is a command.** A right answer reached any other way fails.
-- **A notes update** follows each demonstration.
-- **No hard cap on output.** Length is graded instead.
+- **One operation per fresh instance.** Each task is asked once and graded once, with no feedback.
+- **No hard cap on output.**
 
-**Everything here is DRAFT and provisional.** In the maintainer's words, building it is "an experiment in itself: strong convictions, weakly held". Model-facing text is his: every ask, both tools' descriptions and results, the heads, and the notes prompt and heading each say `DRAFT.` until he edits them.
+**The back-out (2026-10-30).** #971's disposition, after an adversarial review of the earlier design, removed from this tree the static rubric, the notes loop and its writer table, the gap-filling round, the search shim and its "no trial" rule, task set 2, and the heads and answer-tool text that framed a pass as a demonstration that runs nothing. That review is the errata for the earlier sections of this README and for the results produced under them. What stayed: the answer tool, secrets v2, the generated fixtures with their decoys, execution grading, the run nonces, and the falsification's harness.
 
-## Fixtures: `gen.py`
+**Everything here is DRAFT and provisional.** In the maintainer's words, building it is "an experiment in itself: strong convictions, weakly held". Model-facing text is his: every ask, both tools' descriptions and results, the heads, and the notes heading each say `DRAFT.` until he edits them.
+
+## Fixtures: `gen.py` and `gen2.py`
 `python3 -I gen.py SEED OUT TRUTH` writes one instance: a project under `OUT` (`package.json`, `src/` in three directories, a barrel `src/index.ts`), and its truth in `TRUTH`.
-- **Every pass gets a fresh instance.** The same families, with a new layout, new names and new values.
+- **Every pass gets a fresh instance.** The same families, with a new layout, new names and new values. A seed resolves to the first usable instance at or after it.
 - **The truth is, per family, the lines a right command matches** (`path:line`, lines from 1). It comes from the generator's own construction: it records what it wrote where, never what ast-grep says.
-- **Every family but the two misses matches something.** The misses, `zero-calls` and `maybe-defined`, may match nothing, on purpose.
-- **Distractors** (2026-10-27), so execution separates a right form from an over-broad one. A wrong form that catches them executes wrong, rather than passing because the fixture has nothing for it to catch. None of them is in any family's truth:
-  - a near-name beside each outlined item (`<name>View`), which an unanchored `--match` also catches, and a suffix near-name (`pre<name>`, `Legacy<Name>`), which a `--match` anchored at one end only also catches (round 4);
+- **Every family but the misses matches something.** The misses may match nothing, on purpose.
+- **Distractors** (2026-10-27), so execution separates a right form from an over-broad one. A wrong form that catches them executes wrong, rather than passing because the fixture has nothing for it to catch:
+  - a near-name beside each outlined item (`<name>View`), which an unanchored `--match` also catches, and a suffix near-name (`pre<name>`, `Legacy<Name>`), which a `--match` anchored at one end only also catches;
   - a second call inside every `try`, which "any call in a try" also catches;
   - a `let` arrow returning the arrow type, which a rule without its `const` also catches;
-  - the maybe-defined name, when it's defined, as one of four kinds (type alias, interface, function, class), so a `--type` filter the ask doesn't name also goes wrong (rubric review, 2026-10-27);
-  - `Promise<T>` returns beside `T`, already present;
-  - round 5, in their families' truth: a log call with two arguments inside a `try`, which `log($A)` misses; a barrel line exporting two types at once, `export type { A, B }`, which `export type { $X }` misses; and a function and a `const` arrow of the target types with two parameters, which `($A)` misses. Before them, all three forms executed right on all 20 seeds, since every such call, export and arrow had one.
+  - the maybe-defined name, when it's defined, as one of four kinds (type alias, interface, function, class), so a `--type` filter the ask doesn't name also goes wrong;
+  - `Promise<T>` returns beside `T`;
+  - in their families' truth: a log call with two arguments inside a `try`, which `log($A)` misses; a barrel line exporting two types at once, which `export type { $X }` misses; and a function and a `const` arrow of the target types with two parameters, which `($A)` misses.
+- **Decoy families** (`gen2.py`). `gen.build` adds more content after the task families' draws, with families of its own that no task asks for: more for a task's command to wrongly catch. One of its barrel exports is in t3's public-surface truth. `gen.usable` requires its families too, so the instances, and the seed each resolves to (105 to 106), are the ones the falsification runs on.
 
 ## Tasks: `tasks.py`
-Thirty-nine operations: 22 tutorial (t1..t22), 11 in held-out set 2 (h7..h17), and set 1's six held-out (h1..h6). Each asks for the command that matches a family's lines "and nothing else". A held-out task tests the same gap on another surface. Set 1, the first twelve:
+Twelve operations: six tutorial (t1..t6) and six held-out (h1..h6). Each asks for the command that matches a family's lines "and nothing else". A held-out task tests the same gap on another surface.
 
 | gap | tutorial | held-out |
 |---|---|---|
@@ -37,75 +37,15 @@ Thirty-nine operations: 22 tutorial (t1..t22), 11 in held-out set 2 (h7..h17), a
 | `$name` in double quotes is the shell's; lowercase `$x` is literal | t5 calls to `$emit(...)` | h5 calls to `$track(...)` |
 | `outline --match` is a regex to anchor, and on a directory outline lists only exports unless `--items structure` | t6 one function's outline | h6 one interface's outline |
 
-**Task set 2** (the maintainer, 2026-10-29; DRAFT asks). Two tutorial operations per gap, five of the gaps new, from the gap-fill rounds' failures, and a fresh held-out set on other surfaces. Its families are `gen2.py`'s, its commands `ref2.py`'s, its judge `rubric2.py`:
-
-| gap | tutorial | held-out set 2 |
-|---|---|---|
-| return type | t1, t7 methods returning T | h7 `async` declarations returning `Promise<T>` |
-| miss | t2, t8 `new C(…)` of a class rarely built | h8 an interface that may not exist |
-| barrel | t3, t9 names re-exported under an alias | h9 statements exporting values, not only types |
-| stop-by | t4, t10 `throw` inside a `for (;;)` | h10 calls inside a `catch` |
-| dollar | t5, t11 `$store.get(…)` | h11 `$log(…)` |
-| outline | t6, t12 one class | h12 one type alias |
-| **kind filter** | t13 an item whose kind varies, under src/; t14 the same, in one file | h13 the same, unexported |
-| **field** | t15 variables initialised by a call to X; t16 `if`s whose condition is one | h14 properties whose value is an arrow |
-| **function kinds** | t17 function expressions with an await; t18 generator declarations | h15 declarations nested in a declaration |
-| **`...`** | t19 calls to X with a spread argument; t20 declarations with a rest parameter | h16 array literals with a spread |
-| **exactly one** | t21 calls to X with one argument; t22 declarations with exactly two parameters | h17 calls to X with no argument |
-
-- **Held-out set 1 stays runnable** (`tutor_round.py --held-out-1`), for continuity with the gap-fill results. Where set 2 now teaches the gap a set-1 task's failures showed, the task says so (`now_taught`): h1 (field), h2 (kind filter), h3 and h4 (exactly one). Their later results are not held-out for those gaps.
-- **Every set-2 family executes as its role says on 20 seeds** (`ref2_exec.py`, run by `ref.py`): the reference right on every seed; the naive form wrong on at least one; the over-broad form wrong on every seed, against the distractors `gen2.py` plants; and, statically, the rubric calls the reference right and none of the others right.
-  - The kind filter's `--type` can't be wrong on every seed, since the kind is drawn per seed: it is wrong on 18, 16 and 15 of 20 (t13, t14, h13).
-  - RED caught three fixture holes before any rubric line was written: a nested object on one line merged two truth lines (h14); every rest pattern sat on a declaration's line, so `-k rest_pattern` came out right (t20); and an unquoted `: $R` in a rule's YAML pattern doesn't parse (t22's reference).
-- **Probed on 0.44.0 first.** `X($A)` also matches `X(...[1, 2])`, a spread being one argument, so t21's fixture holds no spread call to X. The barrel's value re-export patterns (`export { $A as $B } from …`, `export * from …`) don't parse, so t9 and h9 take rules. `outline` lists no `export default`, and calls a type alias `struct`.
-
-## The answer is a command, never run: `answer-tool.json`, `command.py`, `rubric.py` and `check.py`
+## The answer, run: `answer-tool-native.json`, `command.py` and `check.py`
 - **The answer** comes through `submit_answer`'s schema (`command`, a string), never parsed from prose. It's a tool of its own, so the model can see it isn't bash.
-- **`check.py`** judges the turn's last well-formed answer statically (`rubric.py`), with the instance's names.
-  - It's right only when the rubric says right. `unrecognized` and a refusal are wrong, and `got` says which and why.
-  - It runs nothing, so it works off macOS too.
-- **`rubric.py`** reads the command with `command.py`'s `parse`: the subcommand, options by long name with their values, and normalised paths. Then it applies a rubric per operation:
-  - **Patterns** are compared with metavariable names and whitespace dropped, so `$F`/`$NAME`/`$_` and `$$$A`/`$$$` are the same, and a reflow is the same. A literal `$emit` stays literal.
-  - **`--inline-rules`** is read through `yamlish.py` (block and flow YAML, the subset rules use; anything else is unrecognized). The rubric checks `kind`, `pattern`, `regex`, `field`, and that a relation which must reach any depth says `stopBy: end`.
-  - **Paths:** the whole project is `src`, `.` or none; the barrel is `src/index.ts` alone. `--lang`, if given, is TypeScript.
-  - **"As specific as necessary":** a form that also matches what the task excludes is wrong. Examples: an outline `--match` that isn't `^NAME$` (it matches names, signatures and first lines; ruled wrong by the maintainer, 2026-10-27); an arrow rule without its `const`; `--items` left at exports for a function that isn't exported.
-  - **Selftest:** 47 right spellings (references and equivalents: flag order, long and short, `sg`, other metavariable names, other quoting, flow-style YAML, field-based rules, the `=> $$$` body, `from $P`, a capitalised `--lang`) and 46 not right (36 wrong with a named reason, 10 unrecognized), the floor's over-broad answers among them, and 12 named wrongs whose reasons must say why. `ref.py` adds 20 seeds: every reference is right, and no naive command is.
-- **The miss** (t2, h2) answers through `answer-tool-miss.json`, the same `submit_answer` with `exit_status_when_none` (an integer) and `prints_nothing_when_none` (a boolean), all required.
-  - It's right only when the command passes the rubric and both fields match `miss_truth.json` for its subcommand.
-  - That truth is measured per ast-grep version. On 0.44.0: `run` prints nothing and exits 1; `outline` prints `nothing found` and exits 0; `scan` prints nothing and exits 0.
-  - A version not measured there is unrecognized. `tasks.py`'s `INVISIBLE` keeps the record of why: a command alone can't show the lesson.
-- **Trial searches are par cost:** `check.py` counts ast-grep searches among the calls before the answer (`trials`), never help or docs reads, and never fails on them. `$DIET_AST_GREP_TRIAL=fail` restores the old rule.
-- **The shim** (`shim.py`, `services/shim.py`; the maintainer, 2026-10-29): in the model's sandbox, `ast-grep` and `sg` are the shim, first on `PATH` (the header's `serve_env`). It answers `--help`, `<sub> --help`, `help <sub>`, `--version` and `completions <shell>` from the real binary's outputs, captured at session start outside the sandbox, byte for byte. Everything else is refused with a DRAFT line: "This is a demonstration: ast-grep searches don't run here. Give your answer through submit_answer."
-  - **The real binaries are secrets** (`service.shim.real`): no read and, since the drive's secrets v2, no exec. A search by the absolute path, by `"$(readlink -f …)"` or through a copy is refused by the sandbox. `pass.py` counts the first three as trial searches; the copy never gets to search.
-  - `probe_key.py` proves it on the real drive and sandbox: every search route refused, every help form answering as the real binary does, each search counted.
-- **Rubric review, 2026-10-27 (Dispatch; provisional, reported to the maintainer).** Each form below went in RED first, and each executes right on all 20 seeds with distractors (`ref.py`'s alternatives):
-  - **Return types:** an anchored regex on the annotation itself, `has: {field: return_type, kind: type_annotation, regex: '^:\s*T$'}`, for functions and, within a `const`, for arrows. Named wrongs: an unanchored annotation regex, and a type identifier at any depth (`stopBy: end`), which also matches `Promise<T>`.
-  - **Public surface:** `run -k export_statement src/index.ts`, every export statement of the entry point.
-  - **Log in try:** `all: [pattern, inside: {kind: try_statement, stopBy: end}]`, in either order. Without `stopBy` it's wrong.
-  - **Rejected:** a `--type` filter on a kind the ask doesn't name. It was right only because the generator always made a type alias; now `ref.py`'s kind filter executes wrong on 7 of 20 seeds.
-- **Round 4 (Dispatch, 2026-10-28; provisional).** Each went in RED first and was executed on all 20 seeds:
-  - **Named wrongs:** "`export $$$` doesn't parse as a pattern", and "a function pattern without its return type matches no typed function", also inside an `all:` rule. Each executes wrong on 20 of 20 seeds.
-  - **Learned:** h3's escaped `"export type { \$\$\$ } from '\$PATH';"`, with its trailing `;`, and `inside: {pattern: "try { $$$ }", stopBy: end}`. Each executes right on all 20.
-  - **A `--match` anchored at one end only is wrong**, by the maintainer's unanchored ruling. The suffix near-names make it execute wrong on all 20 seeds; before them it executed right on all 20.
-  - **t6 holds the ask's word:** it asks for an outline.
-  - **Every wrong's reason is model-facing now** (W1r, below), so it states an ast-grep fact or the ask's terms, never the fix. `rubric.py`'s `LEAKS` test fails if any reason names one (for example `--items structure`, or `stopBy: end` as the remedy).
-- **Round 5 (Dispatch, 2026-10-28; provisional).** Each went in RED first and was executed on all 20 seeds (`ref.py`):
-  - **Named wrongs, from the floor's unrecognized answers:** "`...` in a pattern is literal text: it matches only code that has `...` there" (t1's `(...$ARGS)`, t2's `name(...)`; executes wrong on 20 of 20 and, for the miss, on the 6 seeds that have calls); "`$A` in a parameter list matches exactly one parameter" (h1, and t1's declaration form; 20 of 20 each); "`$X` matches exactly one export specifier" (h3; 20 of 20); and h4's `log($A)` inside a `try` takes the one-argument reason (20 of 20). The selector forms (t5, h5) stay unrecognized.
-  - **Learned, from the Flash-Next instance's answers:** t4's `has: {field: body, kind: statement_block, has: {kind: await_expression, stopBy: end}}` (graded wrong without its inner `stopBy`, as any `has` is), and h1's flow-style `all:` of the return type and the `const`. Each executes right on all 20.
-- **Gap-fill coverage (Dispatch, 2026-10-28; provisional).** Both models' first gap-fill t4 answers were unrecognized and executed right, so the rubric learned them (RED first; each executes right on all 20 seeds):
-  - an `any:` of bare kinds that includes `function_declaration` and adds at most `generator_function_declaration`: "declared with the `function` keyword" arguably covers `function*`, so either set is right. There is no generator distractor: it would flip every plain `function_declaration` answer, and that reading is the maintainer's.
-  - `all:` of the kind and the `has`, which is the one rule: for t4, and for t1's return-type rule (the floor's gap-fill t1).
-  - `run -k 'function_declaration:has(await_expression)'`: a `:has()` selector reaches any depth, as `has` with `stopBy: end` does. It had been graded "a relation needs a rule", a false wrong the audit caught (the floor's gap-fill t4). `:has(await $X)` matches nothing in 0.44.0, and a `:has` of another kind stays wrong.
-  - **Named wrong:** "`function_expression` is a function written as a value, not a function declaration" (the floor's second t4). Its distractor is an async function expression with an `await`, outside the truth: the form executes wrong on 20 of 20 seeds, and before it executed right on all 20.
-- **False rights, swept (Dispatch, 2026-10-29).** A static right that executes wrong hides a failure. The crossover's audit found two, and a sweep of every live answer since the static grader existed (284 passes: baseline, the notes loops, gap fill, crossover) found one more. Each now judges wrong with a measured reason, RED first; after them the sweep finds none.
-  - `run -p … -k …`: ast-grep refuses it, "the argument '--pattern' cannot be used with '--kind'" (exit 2). A pattern with `--selector` beside it is never the plain pattern's search: the selector picks the pattern's sub-node, so it is unrecognized.
-  - An arrow rule's `const` must be structural: a variable_declarator inside a lexical_declaration whose regex anchors `const`, or that declaration with `stopBy: end`. It had been "const" anywhere in the `inside` text, which passed `inside: {pattern: "const $N = $A"}`, which reaches only the direct parent and matches nothing.
-  - A type annotation's type has no field name: `has: {field: type, kind: type_identifier}` under it matches nothing.
-- **Unrecognized, never a false wrong:** a form the rubric doesn't know is `unrecognized`, never `wrong`, unless the rubric names why it's wrong (no return type, one argument, unanchored, a kind selector over every call in a try). `--lang` and a rule's `language` are case-insensitive.
-- **`audit.py --execute PASS_DIR...`** is the offline audit (ast-grep only, macOS only, never the verdict). It runs each pass's answer, the task turn's last as `check.py` grades it (round 5; it had read the last in the whole log, so a notes-turn resubmission was audited in its place), confined against its pristine instance, compares the result with the static verdict, and prints `disagree` where they differ. It drops the answer's own output format (`--json`, `--report-style`, `--color`, `--heading`, `--format`) before asking for `--json=stream`, since ast-grep refuses `--report-style` beside `--json`. It isn't a general mechanism: a tool with destructive actions gets no execution audit.
-  - On the first 24 live answers (the Flash-Next instance) it found 4 disagreements:
-    - three unanchored outline `--match` answers that execution passed, because their fixtures had no near-name;
-    - one type-only-export rule built from `all`/`any`/`not`, which the rubric doesn't know.
+- **`check.py`** takes the turn's last well-formed answer and runs it, confined, on the pass's pristine copy of the instance. It's right only when the matched lines are exactly the truth's. A command `command.py` refuses is not right, and an answer in prose or through another tool is no answer.
+  - Execution is the only verdict: `$DIET_AST_GREP_VERDICT`, when set, must be `execute`, or the check exits non-zero.
+  - It also counts the ast-grep searches before the answer (`searches`), never help or docs reads. A count, never a fail.
+  - Its selftest stubs the execution, so it needs no ast-grep. Each case was checked against a mutant of the check.
+- **The miss** (t2, h2) answers through `answer-tool-miss-native.json`, the same `submit_answer` with `exit_status_when_none` (an integer) and `prints_nothing_when_none` (a boolean), all required.
+  - It's right only when the command executes right and both fields match `miss_truth.json` for its subcommand.
+  - That truth is measured per ast-grep version. On 0.44.0: `run` prints nothing and exits 1; `outline` prints `nothing found` and exits 0; `scan` prints nothing and exits 0. A version not measured there is not right.
 - **`command.py`** stands between the model's text and anything that runs:
   - **Parsed with `shlex`, never a shell.** Refused: any operator (`;`, `|`, `&`, a redirection, a subshell, `$(...)`), a backtick, a `$` inside double quotes (a shell expands it, so the command is wrong as typed), a variable assignment, and a parse error.
   - **ast-grep only.** The first word must be `ast-grep` or `sg`, by name. It runs the `ast-grep` on PATH, never `sg`, which is `newgrp` on Linux.
@@ -113,113 +53,65 @@ Thirty-nine operations: 22 tutorial (t1..t22), 11 in held-out set 2 (h7..h17), a
     - Options are read as clap reads them: short flags cluster (`-Uj1` is `-U -j 1`); a valued short flag takes the rest of its token or the next word; an optional value (`--debug-query`) is only its `=` form.
     - Refused: `-U`/`--update-all`; `-i`/`--interactive`; config and rule files (`-c`, `--config`, scan's `-r`, `--rule`, `--outline-rules`; a rule goes in `--inline-rules`); an option the filter doesn't know; and absolute, `~` or `..` paths, after `--` too.
     - run's `-r` is `--rewrite`, which only prints.
-  - **Run confined.** No shell; a bare environment; a 20 s timeout; a 4 MB output cap; `--json=stream` in place of any `--json` it gave; and on macOS, Seatbelt with no network, no writes, and no reads under the home directory except the copy.
-  - Every refusal is a red test (39), beside 16 searches that must be allowed. In double quotes, `\$` is read as bash reads it, as `$`.
-  - The confined execution below is now the audit's, never the verdict's. The confinement is tested on the profile itself, and goes red without it.
-- **`ref.py`** (needs ast-grep and macOS; not in `./verify.sh`) grades one reference and one naive command per family, statically and by execution, on 20 fresh seeds. It also runs an over-broad command for each of six families: the unanchored outline `--match` (three families), the kind selector over every call in a try, the const-less arrow rule, and a return-type rule that reaches into `Promise<T>`.
-  - Every reference is right; no naive command is right statically; and with the distractors, every over-broad command executes wrong on every seed.
-  - Before the distractors, three of them executed right on all 20 seeds and one on 10.
-  - The references are also the canned answers. It found two gotchas:
-  - `export { $$$S } from $P` doesn't parse under `-l ts` ("Multiple AST nodes"), and with the language taken from the file it parses but matches nothing. `export type { $$$S } from $P` matches either way, which the floor's answers showed (corrected 2026-10-27);
-  - `outline` on a directory lists only exports, so a non-exported function needs `--items structure`.
+  - **Run confined.** No shell; a bare environment; a 20 s timeout; a 4 MB output cap; the answer's own output format dropped (`--json`, `--report-style`, `--color`, `--heading`, `--format`) for `--json=stream`; and on macOS, Seatbelt with no network, no writes, and no reads under the home directory except the copy. The confinement is tested on the profile itself, and goes red without it.
+  - Every refusal is a red test, beside searches that must be allowed. In double quotes, `\$` is read as bash reads it, as `$`.
+- **`ref.py`** (needs ast-grep and macOS; not in `./verify.sh`) runs, on 20 fresh seeds, one reference and one naive command per task family, an over-broad command for six families, and a kind filter for the maybe-defined one.
+  - Every reference must execute right on every seed, every naive command wrong on at least one, every over-broad command wrong on every seed, and the kind filter wrong on at least one.
+  - The references are also the canned answers.
+  - Two gotchas it found: `export { $$$S } from $P` doesn't parse under `-l ts`, while `export type { $$$S } from $P` matches; and `outline` on a directory lists only exports, so a non-exported function needs `--items structure`.
 
 ## Reading the docs: `docs_reads.py`
 `reads_of(cmd, skills, installed=...)` parses one bash call's docs reads:
 - `help`: `--help`, `-h`, `help`, or the tool run bare;
 - `man`: man, tldr or cheat of the tool;
 - `web`: a fetch of the site or the repository;
-- `installed`: a read under the tool's install prefix, the binary included (`strings $(which ast-grep)` reads its embedded rules); listing it is no read (rubric review, 2026-10-27);
+- `installed`: a read under the tool's install prefix, the binary included (`strings $(which ast-grep)` reads its embedded rules); listing it is no read;
 - `skill`: a read under the official skills' root.
 
-`docs_reads_fixtures.json` holds 27 reads and 20 non-reads.
+`docs_reads_fixtures.json` holds the reads and non-reads its selftest checks.
 
 ## A pass: `make_scenario.py`, `pass.py` and `run_pass.py`
-- **One operation per fresh instance** is Dispatch's reading of "in isolation", unconfirmed. `make_scenario.py` writes `passes/<task>.jsonl`, and `passes/<task>-skills.jsonl` for the official skills' condition, from `tasks.py`; `--check` runs in verify. Each pass is one session:
-  1. the task, asked once and graded once, with no feedback;
-  2. then a notes update through the `notes` tool (`notes-tool.json`). The prompt is a DRAFT stub, and Dispatch will supply experimental ones.
-- **Two supplied tools.** The header's `answer_tool` lists both (#971's engine PR).
-- **The answer key is denied.** The fixture's directory is the header's `sandbox_secrets`, and `probe_key.py` proves the model can't read it, and that the shim stands in for ast-grep (macOS only; off macOS it skips and says so).
+- **`make_scenario.py`** writes `passes/<task>.jsonl`, and `passes/<task>-skills.jsonl` for the official skills' condition, from `tasks.py`; `--check` runs in verify. Each pass is one session, the task asked once and graded once, with no feedback. The header holds the native condition: `head-native.md` (or `head-native-skills.md`), the native answer tool, the `fixture` service (and `skills`), and the fixture's directory as the one secret.
+- **The answer key is denied** (secrets v2: no read, no exec). `probe_key.py` proves the model can't read it, on the real drive and sandbox (macOS only; off macOS it skips and says so).
 - **The skills' condition.** `services/skills.py` fetches ast-grep/agent-skill at a pinned commit and checks its digests. It has no license, so it is never in this tree.
 - **Regimens.**
-  - `bare.toml` runs the production GPU host's registry entry; `bare-floor.toml` runs the floor's 27B line. Both are bash plus the two tools, with no memory levers.
-  - Output has no hard cap, as ruled. `max_output_tokens` is the largest job each pool admits (cache_size less two 2048-token chunks: 520192 and 159744), and the drive cuts each request to what is left of the pool (#826). This value is DRAFT.
+  - `bare.toml` runs the production GPU host's registry entry; `bare-floor.toml` runs the floor's 27B line. Both are bash plus the answer tool, with no memory levers.
+  - Output has no hard cap, as ruled. `max_output_tokens` is the largest job each pool admits, and the drive cuts each request to what is left of the pool (#826). This value is DRAFT.
   - `canned.toml` is the rehearsal twin.
-  - **A shared prefix:** `head_nonce = "off"` (the maintainer, 2026-10-27: "the shared prefix is the important bit"). Passes with the same head and notes share a cached prefix, and a new notes version is a new prefix by its own text.
-- **`pass.py RUN_DIR [--skills] [--docs-read par|fail]`**, per task:
+  - **A shared prefix:** `head_nonce = "off"` (the maintainer, 2026-10-27: "the shared prefix is the important bit"). Passes with the same head share a cached prefix.
+- **`pass.py RUN_DIR [--skills]`**, per task:
   - `right`;
   - the par instruments, recorded only: `seconds` from the ask to the answer, `tool_calls`, `completion_tokens_before_answer` and `reasoning_chars_before_answer`;
   - `output_tokens`, and `capped` (responses cut at their cap);
-  - `trial_searches`: ast-grep searches against the project before the answer. A count above 0 fails the attempt (ruled 2026-10-27; `--trial par` records them only);
+  - `searches`: ast-grep searches before the answer, apart from help and docs reads;
   - `requests`: each response's `prompt_tokens` and `cached_tokens`, since cache state moves the seconds;
-  - `docs_reads`, `commands` and `tool_used` (descriptive);
-  - then the pass's `notes`.
+  - `docs_reads`, `commands` and `tool_used` (descriptive).
 
-  A pass is clean when every task is right and none was capped. Trial searches are par cost; `--trial fail` restores the old rule.
-  - A docs read costs against par, reported and never failing (the maintainer, 2026-10-27). `--docs-read fail` remains as a switch.
-  - A step waits up to 3600 s (`patience`), as long as the 60-minute guard, never the drive's 900 s default: two floor passes voided on it.
-- **`run_pass.py TASK --out DIR [--skills] [--notes FILE] [--floor] [-- DRIVE_ARGS]`** writes a self-contained copy of the pass, its head carrying the notes so far, and runs it from the tree, since the drive finds its assembler by a relative path. It writes `pass.json` and `notes.md`, the next pass's `--notes`. Rolling across passes, re-planning after ten failures over par, and choosing note writers are Dispatch's experiments.
+  A pass is clean when every task is right and none was capped. Searches and docs reads are recorded, never a fail. A step waits up to 3600 s (`patience`), as long as the 60-minute guard, never the drive's 900 s default.
+- **`run_pass.py TASK --out DIR [--skills] [--notes FILE] [--floor] [--head FILE] [--seed N] [--verdict execute] [-- DRIVE_ARGS]`** writes a self-contained copy of the pass, its head the given head with FILE's notes under the notes heading, and runs it from the tree, since the drive finds its assembler by a relative path. It writes `pass.json`.
+  - The notes heading, "DRAFT. Your notes on ast-grep, from earlier demonstrations:", is the falsification's T arm's model-facing text, kept verbatim while that run is under way; its wording is the maintainer's to change at the re-plan.
 - **Canned:** `DIET_AST_GREP_SEED=7 python3 -I run_pass.py t1-ret-decl --out DIR` rehearses on the canned substrate. t1's canned answer is the naive command, so it grades wrong; every other task's grades right.
 
-## The notes loop: `check.py`'s writer map and `loop.py`
-The note-writer experiment (Dispatch, 2026-10-27). Its asks are the experiment's text, never the maintainer's wording.
-- **The notes turn rides on the grade.** The check names the attempt's failure kind and prints, as `got`, the notes ask for that kind. The grade step sends it as its feedback (`right` and `last` are `{got}`), so the model is sent only the ask, never the verdict or its reason. That is the conditional step, chosen over a fork from carry, and it needs no engine change.
-  - The asks come from a writer table, `$DIET_AST_GREP_WRITERS` (a JSON file kept out of this tree: `tail`, `W0`, `W0n`, `W1`, `W2`, `W3`, `W4`). Without it, every kind gets the DRAFT stub.
-  - **The map:**
-    - rubric → W1, refutation;
-    - miss fields → W4: the command was right, but what it was said to print or exit with on a miss wasn't;
-    - trial → W3: the command was right, but searches were run;
-    - right with a docs read → W2, read-replacement;
-    - right and clean → W0;
-    - unrecognized and no answer → **W0n**, a neutral ask that never says the command was right or wrong;
-    - unrecognized with trial searches → **W3n**, which names the searches and never says right or wrong;
-    - a wrong command → W1, whatever its searches. When the rubric names a reason (round 4), W1 becomes **W1r**: "That command was graded wrong: <reason>." followed by the rest of W1. Never for unrecognized. W1 alone moved nothing: the 27B took it four times on t6.
-
-    W0 opens "That command was right", which an unrecognized command must never be told; W1 opens "That command was graded wrong", which a right command with wrong miss fields must never be told.
-- **`run_pass.py --writers FILE`** passes the table to the check. **`--no-notes`** takes a pass without its notes turn, as a held-out check.
-- **pass.json gains, per task,** `failure` (the kind, re-derived with `check.grade` from the turn's own calls and the pass's truth) and `writer` (which ask followed the grade, by its text).
-  - And `resubmitted` (Dispatch, 2026-10-28): `submit_answer` stays available in the notes turn, and a call there is recorded, with `resubmitted_command`, never graded. A descriptor: a sign the reason landed. `loop.jsonl` carries both.
-- **`loop.py --out DIR [--writers FILE] [--skills] [--floor] [--attempts N] [--notes FILE] [--before CMD] [--max-seconds S] [-- DRIVE_ARGS]`:**
-  - `--floor` takes every pass under the floor's regimen (`bare-floor.toml`), as `run_pass.py --floor` does. Without it, a floor endpoint would run under the production entry's regimen.
-  - For t1..t6 in order, it runs a fresh instance with the current notes. An attempt that isn't clean is retried on the same operation, with the notes it left, up to N times (4). Then the loop moves on, carrying the notes.
-  - An unrecognized attempt is never retried: its notes turn gives the model no signal (the first notes loop on the Flash-Next instance spent 8 attempts that way). It is recorded `queued_for_review`, for rubric review, and the loop moves on.
-  - After t6, h1..h6 run once each with the final notes and no notes turns.
-  - Per attempt, `DIR/loop.jsonl` records the operation, attempt, clean, failure kind, writer, and the notes' character lengths before and after.
-  - `--before` runs the host's idle gate before each pass. `--max-seconds` (3600) stops a pass's process group and records it `stopped`, never graded.
-- **Canned:** `DIET_AST_GREP_SEED=7`. t1's canned answer is wrong, so it takes 4 attempts with W1; t2–t6 are clean with W0; the held-out six run without notes turns. The writer's ask, tail included, is what the model receives, and the notes ride into the next pass's head.
-
-## Gap-filling: `tutor_round.py`
-The maintainer's change of direction (2026-10-28): the self-written notes loop is set aside; a stronger model, the tutor, edits a model's notes until its failures disappear. `tutor_round.py` is the instrument it reads. DRAFT.
-- **`tutor_round.py --notes FILE --out DIR [--tasks ...] [--held-out] [--floor] [--before CMD] [--max-seconds S] [-- DRIVE_ARGS]`** runs each task once on a fresh instance with the notes FILE and no notes turn (`run_pass.py --no-notes`), under the loop's gates.
-- **`DIR/rows.jsonl`**, per task: right, kind and the rubric's reason, the command, the trial searches and their commands, the docs read, and `pass.py`'s par fields.
-- **`DIR/failures.md`**, the tutor's input, from the tutorial run (t1..t6 by default) only: per failed task, its ask, command, kind and reason, trial commands, and the last 1,500 characters of reasoning before the answer. A turn cut at its output cap before any answer is kind `capped`, never wrong, listed with its reasoning tail (Dispatch, 2026-10-28). A stopped or void pass is listed as not run, never as no failure. Private run data, never committed.
-- **`--held-out`** runs h1..h6 and writes no failures.md: the tutor never sees a held-out failure. A task list that mixes the splits is refused.
-
 ## The falsification: `falsify.py` and `analyze.py`
-The maintainer's ruling after the adversarial review (#971, 2026-10-29): task set 2 is stopped, and one pre-registered falsification asks whether tailored notes beat native ast-grep use on cost, at equal correctness. The pre-registration and its amendment are private run data, frozen before the first pass, and their sha256 goes in the run's manifest. DRAFT.
-- **The native condition** (`run_pass.py --native`): no shim, so ast-grep runs, searches included; the binary is no secret; the fixture's truth still is. The answer tool is the `-native` variant, whose description no longer says the answer is never run.
-- **Execution as the verdict** (`--verdict execute`, `check.py`'s `grade_executed`): the answer run, confined, on the pass's pristine fixture, right only when its matches are exactly the truth's lines, plus the miss fields on t2 and h2. The rubric's verdict is a descriptor. Proven on an answer the rubric doesn't know: the rubric grades it not right, execution right.
+The maintainer's ruling after the adversarial review (#971, 2026-10-29): one pre-registered falsification asks whether tailored notes beat native ast-grep use on cost, at equal correctness. The pre-registration and its amendments are private run data, frozen before any result was read, and their sha256 goes in the run's manifest, with the build commit the run is reproduced from. DRAFT.
 - **Heads** (experiment text): `head-native.md` (a terminal, a TypeScript project, any commands including ast-grep, one ast-grep command through submit_answer); `head-native-skills.md` adds the skills pointer; the T arm is the N head with the notes under the notes heading.
-- **An explicit seed** (`run_pass.py --seed`), so the arms are paired: 101..104 and 106..111 (seed 105 resolves to 106 under `gen.write`'s first-usable rule).
-- **`falsify.py`**: 12 set-1 tasks x 10 seeds x 3 arms (N, S, T), the arms' order shuffled per (task, seed) by one `random.Random(29)`, the idle gate and the 60-minute stop; a void or stopped pass is re-run once on the same seed, then recorded void, not right. Every pass has a cost: before the answer when there is one, else to the end of its task turn (a stopped pass's seconds at least its wall time). `rows.jsonl`, `manifest.json`, resumable.
+- **An explicit seed** (`run_pass.py --seed`), so the arms are paired: 101..104 and 106..111 (seed 105 resolves to 106).
+- **`falsify.py`**: the 12 tasks x 10 seeds x 3 arms (N, S, T), the arms' order shuffled per (task, seed) by one `random.Random(29)`, the idle gate and the 60-minute stop; a void or stopped pass is re-run once on the same seed, then recorded void, not right. Every pass has a cost: before the answer when there is one, else to the end of its task turn (a stopped pass's seconds at least its wall time). `rows.jsonl`, `manifest.json`, resumable.
 - **`analyze.py`**: per arm, executed-right and the medians over all 120 passes; paired per-(task, seed) T-N and S-N differences with a 10,000-resample bootstrap at seed 29; a per-task table; the decision, T against N alone: the notes win only if T is at most one executed-right below N and T's median tool calls or seconds is at least 25% below N's. A row without a cost is an error, never a free pass. RED-tested on synthetic rows.
 
 ## Declared limits
 - **macOS only.** The regimens read all (`sandbox_reads = "all"`), which the drive builds for macOS alone, and the check confines commands there only.
 - **Other readable copies of ast-grep's docs.** The classifier counts the ones it knows. The live deny list covers the agents' plugin caches (`~/.claude`). Any other copy, such as a package cache, is neither denied nor counted.
-- **Which model, the note writers, and the par values** are the maintainer's and Dispatch's.
+- **Which model, the notes, and the par values** are the maintainer's and Dispatch's.
 
 ## Checks
 In `./verify.sh`'s scenarios check:
 - `gen.py --selftest`;
-- `check.py --selftest`, whose command cases run on macOS only;
+- `check.py --selftest`;
 - `docs_reads.py --selftest`;
-- `command.py --selftest`;
-- `yamlish.py`;
-- `rubric.py`;
+- `command.py --selftest`, whose execution cases run on macOS only;
 - `make_scenario.py --check`;
 - `pass.py --selftest`;
-- `loop.py --selftest` and `run_pass.py --selftest`;
-- `audit.py --selftest`;
-- `tutor_round.py --selftest`;
-- `shim.py --selftest`;
+- `run_pass.py --selftest`;
+- `falsify.py --selftest` and `analyze.py --selftest`;
 - `probe_key.py --selftest`.

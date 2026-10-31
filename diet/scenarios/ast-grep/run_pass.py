@@ -1,20 +1,12 @@
-"""One tutorial pass (#971): python3 -I run_pass.py TASK --out DIR [--skills] [--notes FILE] [--floor] [--writers FILE]
-[--no-notes] [--native] [--head FILE] [--seed N] [--verdict execute] [-- DRIVE_ARGS...]. The last four are the
-falsification's (PREREG.md, 2026-10-29): the native condition (no shim), a head of its own, an explicit seed, execution as
-the verdict.
+"""One tutorial pass (#971): python3 -I run_pass.py TASK --out DIR [--skills] [--notes FILE] [--floor] [--head FILE]
+[--seed N] [--verdict execute] [-- DRIVE_ARGS...]. The last three are the falsification's (PREREG.md, 2026-10-29): a
+head of its own, an explicit seed, execution as the verdict.
 
 Writes `passes/TASK[-skills].jsonl` into DIR as a self-contained scenario: its paths made absolute, its head the
-condition's head with the notes so far appended (FILE, from the last pass), and its live regimen `bare.toml`, or
+condition's head with FILE's notes appended under NOTES_HEADING, and its live regimen `bare.toml`, or
 `bare-floor.toml` under `--floor`. Then it runs `diet-drive scenario` on it into DIR/run, with DRIVE_ARGS passed
 through (`--endpoint URL --model NAME --key-file F` for a live pass; none for a canned one). It writes DIR/pass.json
-(`pass.py`'s verdict) and DIR/notes.md, the pass's notes update, or the notes it was given when it made none: the
-next pass's `--notes`. The drive is `$DIET_DRIVE`, else the built `target/debug/diet-drive`. DRAFT and provisional.
-
-`--writers FILE` is the notes asks' writer table (check.py, passed as `$DIET_AST_GREP_WRITERS`). `--no-notes` takes the
-pass without its notes turn (no feedback, no notes tool): a held-out check of notes, not a lesson. pass.json gains,
-per task, `failure` (check.py's kind, re-derived from the log's own calls and the pass's truth) and `writer`, and
-`resubmitted` (Dispatch, 2026-10-28): whether the model called the answer tool again in its notes turn, with
-`resubmitted_command`, the last such command. A descriptor only, a sign the reason landed: never graded.
+(`pass.py`'s verdict). The drive is `$DIET_DRIVE`, else the built `target/debug/diet-drive`. DRAFT and provisional.
 """
 import importlib, json, os, subprocess, sys
 
@@ -24,27 +16,12 @@ sys.path.insert(0, HERE)
 verdict_of = importlib.import_module("pass")  # `pass` is a keyword, so by name
 from docs_reads import installed_prefix  # noqa: E402
 
-# DRAFT, model-facing: what heads the notes in the next pass's preamble.
+# DRAFT, model-facing: what heads the notes in the preamble (the falsification's T arm). Kept verbatim while that run
+# is under way; its wording is the maintainer's to change at the re-plan.
 NOTES_HEADING = "DRAFT. Your notes on ast-grep, from earlier demonstrations:"
 
 
-def native(head):
-    """The falsification's native condition (PREREG.md, 2026-10-29): no shim, so `ast-grep` is the real binary and
-    searches run; the binary is no secret; the fixture's truth still is."""
-    head["services"] = [s for s in head["services"] if s["name"] != "shim"]
-    # The answer tool without "it is never run": under execution as the verdict it is run (the native variants).
-    head["answer_tool"] = [t.replace("answer-tool.json", "answer-tool-native.json").replace("answer-tool-miss.json", "answer-tool-miss-native.json")
-                           for t in head["answer_tool"]]
-    head["sandbox_secrets"] = [s for s in head.get("sandbox_secrets", []) if not s.startswith("service.shim.")]
-    env = {k: v for k, v in head.get("serve_env", {}).items() if "service.shim." not in v}
-    if env:
-        head["serve_env"] = env
-    else:
-        head.pop("serve_env", None)
-    return head
-
-
-def scenario(task, skills, notes, floor, out, no_notes=False, native_run=False, head_file=None):
+def scenario(task, skills, notes, floor, out, head_file=None):
     src = os.path.join(HERE, "passes", task + ("-skills" if skills else "") + ".jsonl")
     lines = [json.loads(l) for l in open(src)]
     head = lines[0]
@@ -57,91 +34,48 @@ def scenario(task, skills, notes, floor, out, no_notes=False, native_run=False, 
         f.write(text)
     head["head"] = os.path.join(out, "head.md")
     head["regimen"] = absolute(head["regimen"])
-    if native_run:
-        native(head)
     head["live_regimen"] = os.path.join(HERE, "bare-floor.toml" if floor else "bare.toml")
-    head["answer_tool"] = [absolute(t) for t in head["answer_tool"] if not (no_notes and t.endswith("notes-tool.json"))]
+    head["answer_tool"] = [absolute(t) for t in head["answer_tool"]]
     for service in head["services"]:
         for key in ("start", "stop"):
             service[key] = service[key].replace("../services/", os.path.join(HERE, "services") + "/")
     for line in lines[1:]:
         if line.get("step") == "grade":
             line["check"] = f"python3 -I {os.path.join(HERE, 'check.py')}"
-            if no_notes:
-                line.pop("right", None)
-                line.pop("last", None)
     path = os.path.join(out, "scenario.jsonl")
     with open(path, "w") as f:
         f.write("".join(json.dumps(l, sort_keys=True) + "\n" for l in lines))
     return path
 
 
-def kind_into(v, lines, task, truth_path, writers, no_notes):
-    """The task's failure kind, re-derived with check.grade from the turn's own calls and the truth, and the writer
-    whose ask followed the grade (by its text), into pass.json."""
-    check = importlib.import_module("check")
-    t = v["tasks"].get(task)
-    if t is None or not os.path.exists(truth_path):
-        return
-    turn = next(l["turn"] for l in lines if l.get("kind") == "ask" and l.get("task") == task)
-    calls = [{"name": l.get("name"), "outcome": l.get("outcome"), "arguments": l.get("arguments")}
-             for l in lines if l.get("kind") == "tool_call" and l.get("turn") == turn]
-    g = check.grade({"calls": calls}, task, json.load(open(truth_path)))
-    t["failure"] = g["kind"]
-    t.update(resubmission(lines, turn))
-    asks = [l.get("text", "") for l in lines if l.get("kind") == "ask"]
-    table = json.load(open(writers)) if writers else None
-    t["writer"] = None
-    if not no_notes and len(asks) > 1:
-        t["writer"] = writer_of(asks[1], table)
-
-
-def resubmission(lines, turn):
-    """`resubmitted`, and the command, when a turn after TURN (the notes turn) called the answer tool well-formed."""
-    audit = importlib.import_module("audit")
-    later = audit.last_answer([l for l in lines if isinstance(l.get("turn"), int) and l["turn"] > turn])
-    return {"resubmitted": later is not None, **({"resubmitted_command": later} if later is not None else {})}
-
-
-def _kind_read(writer):
-    """A (kind, read, trials) that check.notes_ask maps to WRITER: to tell which ask the log holds."""
-    return {"W0": ("right", False, 0), "W2": ("right", True, 0), "W1": ("rubric", False, 0), "W3": ("trial", False, 1),
-            "W4": ("miss fields", False, 0), "W0n": ("unrecognized", False, 0), "W3n": ("unrecognized", False, 1)}[writer]
-
-
-def writer_of(ask_text, table):
-    """Which writer's ask ASK_TEXT holds, by check.notes_ask's own text for each: None when none does."""
-    check = importlib.import_module("check")
-    if table is None:  # with no table every kind gets the stub, so the writer can't be told
-        return "stub" if check.STUB in ask_text else None
-    if "That command was graded wrong: " in ask_text:  # W1r carries the rubric's reason after the colon
-        return "W1r"
-    for w in ("W0", "W0n", "W1", "W2", "W3", "W3n", "W4"):
-        kind, read, trials = _kind_read(w)
-        if check.notes_ask(kind, read, table, trials)[1] in ask_text:
-            return w
-    return None
-
-
 def selftest():
-    check = importlib.import_module("check")
-    table = {"tail": "TAIL.", "W0": "w0.", "W0n": "w0n.", "W1": "w1.", "W2": "w2.", "W3": "w3.", "W3n": "w3n.", "W4": "w4."}
+    """The written scenario stands alone: its head the given head, with notes under NOTES_HEADING only when given; its
+    paths absolute and present; the floor's live regimen under --floor; the grade step this tree's check."""
+    import tempfile
     bad = 0
-    for w in ("W0", "W0n", "W1", "W2", "W3", "W3n", "W4"):
-        kind, read, trials = _kind_read(w)
-        got_w, ask = check.notes_ask(kind, read, table, trials)
-        if got_w != w or writer_of(ask, table) != w:
-            print(f"run_pass: writer {w}: notes_ask says {got_w}, matching says {writer_of(ask, table)}"); bad += 1
-    w1r = check.notes_ask("rubric", False, table, 0, why="a reason")[1]
-    if writer_of(w1r, table) != "W1r":
-        print(f"run_pass: a W1r ask read as {writer_of(w1r, table)}"); bad += 1
-    if writer_of(check.STUB, None) != "stub" or writer_of("something else", table) is not None:
-        print("run_pass: the stub, or an unknown ask, misread"); bad += 1
-    call = lambda turn, cmd: {"kind": "tool_call", "name": check.TOOL, "turn": turn, "outcome": "ran", "arguments": json.dumps({"command": cmd})}
-    if (resubmission([call(1, "a"), call(2, "b")], 1) != {"resubmitted": True, "resubmitted_command": "b"}
-            or resubmission([call(1, "a")], 1) != {"resubmitted": False}):
-        print("run_pass: a notes-turn resubmission misread"); bad += 1
-    print(f"run_pass: 7 writers matched from their asks and a resubmission, {bad} wrong")
+    head = os.path.join(HERE, "head-native.md")
+    for notes, floor in (("", True), ("Some notes.", True), ("", False)):
+        with tempfile.TemporaryDirectory() as out:
+            lines = [json.loads(l) for l in open(scenario("t1-ret-decl", False, notes, floor, out, head_file=head))]
+            text, want = open(os.path.join(out, "head.md")).read(), open(head).read()
+            if notes:
+                want = want.rstrip("\n") + "\n\n" + NOTES_HEADING + "\n" + notes + "\n"
+            if text != want:
+                print(f"run_pass: notes {notes!r}: the head is {text!r}"); bad += 1
+            h = lines[0]
+            paths = [h["head"], h["regimen"], h["live_regimen"]] + h["answer_tool"]
+            if [p for p in paths if not (os.path.isabs(p) and os.path.exists(p))]:
+                print(f"run_pass: a path not absolute, or missing: {paths}"); bad += 1
+            # The native condition: the fixture alone (no shim), its directory the one secret, no PATH of serve's own.
+            if ([s["name"] for s in h["services"]] != ["fixture"] or h.get("sandbox_secrets") != ["service.fixture.dir"]
+                    or "serve_env" in h or [os.path.basename(t) for t in h["answer_tool"]] != ["answer-tool-native.json"]):
+                print(f"run_pass: not the native condition: {h}"); bad += 1
+            if os.path.basename(h["live_regimen"]) != ("bare-floor.toml" if floor else "bare.toml"):
+                print(f"run_pass: floor {floor}: live regimen {h['live_regimen']}"); bad += 1
+            grade = next(l for l in lines if l.get("step") == "grade")
+            if grade["check"] != f"python3 -I {os.path.join(HERE, 'check.py')}":
+                print(f"run_pass: the grade step's check is {grade['check']}"); bad += 1
+    print(f"run_pass: 3 scenarios written, {bad} wrong")
     return 1 if bad else 0
 
 
@@ -152,23 +86,20 @@ def main(argv):
         sys.exit(__doc__)
     task, out = argv[0], argv[argv.index("--out") + 1]
     notes = open(argv[argv.index("--notes") + 1]).read() if "--notes" in argv else ""
-    skills, floor, no_notes = "--skills" in argv, "--floor" in argv, "--no-notes" in argv
-    # The falsification's switches (PREREG.md, 2026-10-29): the native condition, a head of its own, an explicit seed
-    # (the arms are paired), and execution as the verdict.
-    native_run = "--native" in argv
+    skills, floor = "--skills" in argv, "--floor" in argv
+    # The falsification's switches (PREREG.md, 2026-10-29): a head of its own, an explicit seed (the arms are paired),
+    # and execution as the verdict.
     head_file = os.path.abspath(argv[argv.index("--head") + 1]) if "--head" in argv else None
     seed = argv[argv.index("--seed") + 1] if "--seed" in argv else None
     verdict_mode = argv[argv.index("--verdict") + 1] if "--verdict" in argv else None
     if verdict_mode not in (None, "execute"):
         sys.exit("run_pass: --verdict is execute")
-    writers = os.path.abspath(argv[argv.index("--writers") + 1]) if "--writers" in argv else None
     out = os.path.abspath(out)
     os.makedirs(out, exist_ok=False)
-    path = scenario(task, skills, notes, floor, out, no_notes, native_run, head_file)
+    path = scenario(task, skills, notes, floor, out, head_file)
     drive = os.environ.get("DIET_DRIVE") or os.path.join(ROOT, "target", "debug", "diet-drive")
     # From the tree: the drive runs its assembler by a relative path (scripts/assemble-run.py).
-    env = dict(os.environ, **({"DIET_AST_GREP_WRITERS": writers} if writers else {}),
-               **({"DIET_AST_GREP_SEED": seed} if seed else {}), **({"DIET_AST_GREP_VERDICT": verdict_mode} if verdict_mode else {}))
+    env = dict(os.environ, **({"DIET_AST_GREP_SEED": seed} if seed else {}), **({"DIET_AST_GREP_VERDICT": verdict_mode} if verdict_mode else {}))
     ran = subprocess.run([drive, "scenario", path, "--out", os.path.abspath(os.path.join(out, "run"))] + drive_args, cwd=ROOT, env=env)
     log = os.path.join(out, "run", "session.log")
     if not os.path.exists(log):
@@ -176,12 +107,9 @@ def main(argv):
     lines = [json.loads(l) for l in open(log) if l.strip()]
     v = verdict_of.verdict(lines, skills, installed_prefix())
     v["drive_exit"] = ran.returncode
-    kind_into(v, lines, task, os.path.join(out, "run", "services", "fixture", "truth.json"), writers, no_notes)
     with open(os.path.join(out, "pass.json"), "w") as f:
         json.dump(v, f, indent=1)
-    with open(os.path.join(out, "notes.md"), "w") as f:
-        f.write((v["notes"] if v["notes"] is not None else notes).rstrip("\n") + "\n")
-    print(json.dumps({"task": task, "clean": v["clean"], "why": v["why"], "notes_updated": v["notes"] is not None}))
+    print(json.dumps({"task": task, "clean": v["clean"], "why": v["why"]}))
     return 0 if ran.returncode == 0 else 1
 
 
