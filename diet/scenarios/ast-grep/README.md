@@ -42,19 +42,24 @@ Twelve operations: six tutorial (t1..t6) and six held-out (h1..h6). Each asks fo
 - **`check.py`** takes the turn's last well-formed answer and runs it, confined, on the pass's pristine copy of the instance. It's right only when the matched lines are exactly the truth's. A command `command.py` refuses is not right, and an answer in prose or through another tool is no answer.
   - Execution is the only verdict: `$DIET_AST_GREP_VERDICT`, when set, must be `execute`, or the check exits non-zero.
   - It also counts the ast-grep searches before the answer (`searches`), never help or docs reads. A count, never a fail.
-  - Its selftest stubs the execution, so it needs no ast-grep. Each case was checked against a mutant of the check.
+  - Its selftest stubs the parse and the execution, so it needs no ast-grep and runs on any host. Each case was checked against a mutant of the check.
 - **The miss** (t2, h2) answers through `answer-tool-miss-native.json`, the same `submit_answer` with `exit_status_when_none` (an integer) and `prints_nothing_when_none` (a boolean), all required.
   - It's right only when the command executes right and both fields match `miss_truth.json` for its subcommand.
   - That truth is measured per ast-grep version. On 0.44.0: `run` prints nothing and exits 1; `outline` prints `nothing found` and exits 0; `scan` prints nothing and exits 0. A version not measured there is not right.
 - **`command.py`** stands between the model's text and anything that runs:
-  - **Parsed with `shlex`, never a shell.** Refused: any operator (`;`, `|`, `&`, a redirection, a subshell, `$(...)`), a backtick, a `$` inside double quotes (a shell expands it, so the command is wrong as typed), a variable assignment, and a parse error.
-  - **ast-grep only.** The first word must be `ast-grep` or `sg`, by name. It runs the `ast-grep` on PATH, never `sg`, which is `newgrp` on Linux.
+  - **Parsed by bash, never by a lexer of ours** (2026-10-31; the hand lexer it replaces graded five right answers wrong in the falsification, on ANSI-C `$'…'` quoting and on `$`s bash leaves literal).
+    - Bash runs the answer twice under Seatbelt (no network, no writes, no reads under the home directory, and exec of bash and the recorder alone, `sh` only as the recorder's interpreter), with `ast-grep` and `sg` a recorder that prints its argv and runs nothing.
+    - Before the answer: `set -u`, `readonly SHLVL`, and a DEBUG trap (`set -T`) that records every simple command bash runs, with its subshell depth. After it, a coda records `$!`; an answer that clears the trap, exits or execs never reaches the coda, and is refused.
+    - Accepted only as exactly one recorded call, run at depth 0, with nothing else traced, no background job, a coda that ran, no input fed to the recorder, no variable bash wasn't given, the given ones unchanged, and SHLVL one above the parse run's, so not under a bash the answer starts.
+    - The two runs differ in the working directory, HOME, PATH, one variable of the drive's and the positional parameters, and must give the same words: a `$` that bash expands is refused, as is an unset variable (`set -u`); one it leaves literal is read as bash reads it.
+    - Off macOS every answer is refused: there bash would run the model's text unconfined.
+  - **ast-grep only.** The command must be `ast-grep` or `sg` found on the recorder's PATH. It runs the `ast-grep` on PATH, never `sg`, which is `newgrp` on Linux.
   - **Searches only.** The subcommand is `run` (or none), `outline` or `scan`, and every option one the filter knows: ast-grep 0.44.0's, per subcommand.
     - Options are read as clap reads them: short flags cluster (`-Uj1` is `-U -j 1`); a valued short flag takes the rest of its token or the next word; an optional value (`--debug-query`) is only its `=` form.
     - Refused: `-U`/`--update-all`; `-i`/`--interactive`; config and rule files (`-c`, `--config`, scan's `-r`, `--rule`, `--outline-rules`; a rule goes in `--inline-rules`); an option the filter doesn't know; and absolute, `~` or `..` paths, after `--` too.
     - run's `-r` is `--rewrite`, which only prints.
   - **Run confined.** No shell; a bare environment; a 20 s timeout; a 4 MB output cap; the answer's own output format dropped (`--json`, `--report-style`, `--color`, `--heading`, `--format`) for `--json=stream`; and on macOS, Seatbelt with no network, no writes, and no reads under the home directory except the copy. The confinement is tested on the profile itself, and goes red without it.
-  - Every refusal is a red test, beside searches that must be allowed. In double quotes, `\$` is read as bash reads it, as `$`.
+  - Every refusal is a red test, beside searches that must be allowed, and `command_words.json` pins the words bash gives a set of answers, the falsification's five false wrongs among them. Each check of the parser was shown to matter by a mutant of it.
 - **`ref.py`** (needs ast-grep and macOS; not in `./verify.sh`) runs, on 20 fresh seeds, one reference and one naive command per task family, an over-broad command for six families, and a kind filter for the maybe-defined one.
   - Every reference must execute right on every seed, every naive command wrong on at least one, every over-broad command wrong on every seed, and the kind filter wrong on at least one.
   - The references are also the canned answers.
@@ -100,7 +105,10 @@ The maintainer's ruling after the adversarial review (#971, 2026-10-29): one pre
 - **`analyze.py`**: per arm, executed-right and the medians over all 120 passes; paired per-(task, seed) T-N and S-N differences with a 10,000-resample bootstrap at seed 29; a per-task table; the decision, T against N alone: the notes win only if T is at most one executed-right below N and T's median tool calls or seconds is at least 25% below N's. A row without a cost is an error, never a free pass. RED-tested on synthetic rows.
 
 ## Declared limits
-- **macOS only.** The regimens read all (`sandbox_reads = "all"`), which the drive builds for macOS alone, and the check confines commands there only.
+- **macOS only.** The regimens read all (`sandbox_reads = "all"`), which the drive builds for macOS alone, and the check confines commands there only. Off macOS `command.py` refuses every answer, since bash would parse the model's text unconfined.
+- **One shell: the macOS `/bin/bash`, 3.2.** The parser runs `/bin/bash`; the drive's bash tool runs the model's commands as `bash -c`, by the `bash` on serve's PATH, which on the Mac Pro is `/bin/bash` alone. A host whose PATH finds another bash first would run the model under one shell and grade it under another.
+- **An inner bash can reset SHLVL** (pinned as accepted: `command.py`'s `LIMITS`). An answer that starts its own bash and sets SHLVL inside it, `/bin/bash -c 'SHLVL=1 ast-grep …'`, passes the parser's "one ast-grep command" rule: nothing else tells that bash from the parse run's own, the process tree being the same, and Seatbelt can't stop bash executing bash once it runs. It is still graded on the words bash gives ast-grep, run in the check's own environment.
+- **Globs are left as written.** The parse runs in an empty directory, so an unquoted glob matches nothing there and reaches ast-grep literally, as the lexer it replaced left it, never as bash would expand it in the fixture.
 - **Other readable copies of ast-grep's docs.** The classifier counts the ones it knows. The live deny list covers the agents' plugin caches (`~/.claude`). Any other copy, such as a package cache, is neither denied nor counted.
 - **Which model, the notes, and the par values** are the maintainer's and Dispatch's.
 
@@ -109,7 +117,7 @@ In `./verify.sh`'s scenarios check:
 - `gen.py --selftest`;
 - `check.py --selftest`;
 - `docs_reads.py --selftest`;
-- `command.py --selftest`, whose execution cases run on macOS only;
+- `command.py --selftest`, whose parse and execution cases run on macOS only (elsewhere it checks that every answer is refused);
 - `make_scenario.py --check`;
 - `pass.py --selftest`;
 - `run_pass.py --selftest`;

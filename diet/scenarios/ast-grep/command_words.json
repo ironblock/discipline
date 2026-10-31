@@ -1,0 +1,114 @@
+[
+ {
+  "why": "single-quoted metavariables",
+  "command": "ast-grep run -p 'foo($$$A)' src",
+  "words": [
+   "ast-grep",
+   "run",
+   "-p",
+   "foo($$$A)",
+   "src"
+  ]
+ },
+ {
+  "why": "ANSI-C quoting",
+  "command": "ast-grep run -p $'foo(\\n)' src",
+  "words": [
+   "ast-grep",
+   "run",
+   "-p",
+   "foo(\n)",
+   "src"
+  ]
+ },
+ {
+  "why": "a `$` at a double-quoted word's end",
+  "command": "ast-grep outline src --match \"^Foo$\"",
+  "words": [
+   "ast-grep",
+   "outline",
+   "src",
+   "--match",
+   "^Foo$"
+  ]
+ },
+ {
+  "why": "an escaped dollar in double quotes",
+  "command": "ast-grep run -p \"\\$emit(\\$\\$\\$A)\" src",
+  "words": [
+   "ast-grep",
+   "run",
+   "-p",
+   "$emit($$$A)",
+   "src"
+  ]
+ },
+ {
+  "why": "the sg name",
+  "command": "sg run -p x src",
+  "words": [
+   "sg",
+   "run",
+   "-p",
+   "x",
+   "src"
+  ]
+ },
+ {
+  "why": "the falsification's t1-ret-decl seed 103 arm T, a false wrong of the old lexer",
+  "command": "ast-grep scan --inline-rules $'id: t1-ret-decl\\nlanguage: TypeScript\\nrule:\\n  kind: function_declaration\\n  has:\\n    field: return_type\\n    regex: \"^: Meadow$\"' src",
+  "words": [
+   "ast-grep",
+   "scan",
+   "--inline-rules",
+   "id: t1-ret-decl\nlanguage: TypeScript\nrule:\n  kind: function_declaration\n  has:\n    field: return_type\n    regex: \"^: Meadow$\"",
+   "src"
+  ]
+ },
+ {
+  "why": "the falsification's t1-ret-decl seed 106 arm T, a false wrong of the old lexer",
+  "command": "ast-grep scan --inline-rules \"id: ret-garnet\nlanguage: TypeScript\nrule:\n  kind: function_declaration\n  has:\n    field: return_type\n    regex: '^: Garnet$'\n\" src/",
+  "words": [
+   "ast-grep",
+   "scan",
+   "--inline-rules",
+   "id: ret-garnet\nlanguage: TypeScript\nrule:\n  kind: function_declaration\n  has:\n    field: return_type\n    regex: '^: Garnet$'\n",
+   "src/"
+  ]
+ },
+ {
+  "why": "the falsification's t1-ret-decl seed 110 arm T, a false wrong of the old lexer",
+  "command": "ast-grep scan --inline-rules \"id: ret-vertex\nlanguage: TypeScript\nrule:\n  kind: function_declaration\n  has:\n    field: return_type\n    regex: '^:\\s*Vertex$'\" src/",
+  "words": [
+   "ast-grep",
+   "scan",
+   "--inline-rules",
+   "id: ret-vertex\nlanguage: TypeScript\nrule:\n  kind: function_declaration\n  has:\n    field: return_type\n    regex: '^:\\s*Vertex$'",
+   "src/"
+  ]
+ },
+ {
+  "why": "the falsification's h3-public-types seed 110 arm N, a false wrong of the old lexer",
+  "command": "ast-grep scan --inline-rules $'id: type-only-export\\nlanguage: TypeScript\\nseverity: warning\\nrule:\\n  kind: export_statement\\n  regex: \"^export type \"' --report-style short src/index.ts",
+  "words": [
+   "ast-grep",
+   "scan",
+   "--inline-rules",
+   "id: type-only-export\nlanguage: TypeScript\nseverity: warning\nrule:\n  kind: export_statement\n  regex: \"^export type \"",
+   "--report-style",
+   "short",
+   "src/index.ts"
+  ]
+ },
+ {
+  "why": "the falsification's h4-log-in-try seed 108 arm N, a false wrong of the old lexer",
+  "command": "ast-grep scan --inline-rules $'id: log-in-try\\nlanguage: TypeScript\\nmessage: routeQuota call inside try block\\nseverity: warning\\nrule:\\n  all:\\n    - pattern: routeQuota($$$)\\n    - inside:\\n        kind: try_statement\\n        field: body\\n        stopBy: end\\n' src",
+  "words": [
+   "ast-grep",
+   "scan",
+   "--inline-rules",
+   "id: log-in-try\nlanguage: TypeScript\nmessage: routeQuota call inside try block\nseverity: warning\nrule:\n  all:\n    - pattern: routeQuota($$$)\n    - inside:\n        kind: try_statement\n        field: body\n        stopBy: end\n",
+   "src"
+  ]
+ }
+]

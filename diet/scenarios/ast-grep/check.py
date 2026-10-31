@@ -63,22 +63,24 @@ def installed_version():
         return None
 
 
-def grade_executed(turn, task, truth, pristine, version=None, matches=command.matches):
+def grade_executed(turn, task, truth, pristine, version=None, parse=command.parse, matches=command.matches):
     """The answer RUN, confined, on PRISTINE: right only when its matches are exactly the truth's lines, and on a miss
-    task when its miss fields match `miss_truth.json` too. MATCHES runs a checked argv on a root (the selftest's stub)."""
+    task when its miss fields match `miss_truth.json` too. PARSE reads the answer (bash, confined: macOS only) and
+    MATCHES runs its argv on a root; the selftest stubs both."""
     args, before = answered(turn)
     if args is None:
         return {"right": False, "executed": "no answer", "searches": searches_before(before)}
     family = family_of(task)
     try:
-        found = matches(command.checked(args["command"]), pristine)
+        form = parse(args["command"])
+        found = matches(form["argv"], pristine)
         executed = "right" if found == sorted(truth["answers"][family]) else "wrong"
     except command.Refused as e:
         executed = f"refused: {e}"
     right = executed == "right"
     if right and family in MISS:
         measured = json.load(open(os.path.join(HERE, "miss_truth.json"))).get(version or installed_version() or "")
-        sub = command.parse(args["command"])["sub"]
+        sub = form["sub"]
         right = measured is not None and sub in measured and all(args.get(k) == measured[sub][k] for k in FIELDS)
         if not right:
             executed = "right, miss fields wrong"
@@ -110,10 +112,18 @@ def selftest():
     right, wrong, part = "ast-grep run -p 'right($$$A)' src", "ast-grep run -p 'wrong($$$A)' src", "ast-grep run -p 'part($$$A)' src"
     outline = "ast-grep outline src --match '^Maybe$'"
     truth = {"answers": {"ret-decl": ["src/a.ts:1", "src/b.ts:2"], "zero-calls": [], "maybe-defined": []}}
-    # The execution stubbed: each command's matches, by its checked argv.
+    # The parse and the execution stubbed, so this runs on any host: each command's form, or command.py's refusal,
+    # and its matches.
     found = {right: ["src/a.ts:1", "src/b.ts:2"], wrong: ["src/a.ts:1", "src/b.ts:2", "src/c.ts:3"], part: ["src/a.ts:1"],
              "ast-grep run -p 'probe($$$A)' src": [], outline: []}
-    stub = lambda argv, root: found[next(c for c in found if command.checked(c) == argv)]
+    refused = {"ast-grep run -p 'right($$$A)' -U src": "`-U` is not allowed in `run` in an answer", "rg -n right src": "`rg` is not ast-grep"}
+
+    def parse_stub(cmd):
+        if cmd in refused:
+            raise command.Refused(refused[cmd])
+        return {"argv": [cmd], "sub": "outline" if cmd == outline else "run"}
+
+    stub = lambda argv, root: found[argv[0]]
     v = "ast-grep 0.44.0"
     cases = [
         ("the right matches", "t1-ret-decl", turn(call(right)), True),
@@ -135,14 +145,14 @@ def selftest():
     ]
     bad = 0
     for why, task, t, want in cases:
-        got = grade_executed(t, task, truth, "/pristine", version=v, matches=stub)
+        got = grade_executed(t, task, truth, "/pristine", version=v, parse=parse_stub, matches=stub)
         if got["right"] != want:
             print(f"check: {why}: graded {got}, expected {want}"); bad += 1
     miss = turn(call("ast-grep run -p 'probe($$$A)' src", exit_status_when_none=1, prints_nothing_when_none=True))
-    if grade_executed(miss, "t2-zero-calls", truth, "/pristine", version="ast-grep 9.9.9", matches=stub)["right"]:
+    if grade_executed(miss, "t2-zero-calls", truth, "/pristine", version="ast-grep 9.9.9", parse=parse_stub, matches=stub)["right"]:
         print("check: an unmeasured version's miss graded right"); bad += 1
     searched = turn(bash("ast-grep run --help"), bash("ast-grep run -p x src"), bash("sg outline src"), call(right), bash("ast-grep run -p y src"))
-    if grade_executed(searched, "t1-ret-decl", truth, "/pristine", version=v, matches=stub)["searches"] != 2:
+    if grade_executed(searched, "t1-ret-decl", truth, "/pristine", version=v, parse=parse_stub, matches=stub)["searches"] != 2:
         print("check: the searches before the answer, help apart, are not 2"); bad += 1
     for env, refused in (({}, False), ({"DIET_AST_GREP_VERDICT": "execute"}, False), ({"DIET_AST_GREP_VERDICT": "static"}, True),
                          ({"DIET_AST_GREP_VERDICT": ""}, True)):
