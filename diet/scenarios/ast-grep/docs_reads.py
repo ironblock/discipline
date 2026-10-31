@@ -7,8 +7,7 @@ A pass that reads the docs rolls back, so what counts is parsed, never matched a
 - `man`: `man ast-grep` or `man sg`; `tldr` and `cheat` the same.
 - `web`: `curl`, `wget` or `open` of an ast-grep.github.io or ast-grep repository page.
 - `installed`: any reading command on a path under INSTALLED, the tool's install prefix (`installed_prefix()`): its
-  README, changelog and completions, and the binary itself (`strings` on it holds its embedded rules; rubric review,
-  2026-10-27). Listing it or the `bin` directory (`ls`, `file`, `stat`) is no read, and a substitution naming the
+  README, changelog and completions, and the binary itself (`strings` on it holds its embedded rules, 2026-10-27). Listing it or the `bin` directory (`ls`, `file`, `stat`) is no read, and a substitution naming the
   binary (`$(which ast-grep)`, `$(command -v sg)`) stands for its path.
 - `skill`: any reading command (`cat`, `head`, `sed`, `grep`, `ls`, ...) on a path under SKILLS, the official skills'
   root when the condition gives them, with `cd` followed and `~` read as the home directory on both sides.

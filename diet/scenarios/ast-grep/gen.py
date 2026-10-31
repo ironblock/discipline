@@ -172,7 +172,7 @@ def build(seed):
     defined = rng.random() < 0.5
     if defined:
         mpath = rng.choice(paths[1:])
-        # Its kind varies by seed (rubric review, 2026-10-27): the ask names no kind, so a --type filter must not pass by
+        # Its kind varies by seed (2026-10-27): the ask names no kind, so a --type filter must not pass by
         # the generator's habit of one.
         kind = rng.choice(["type", "interface", "function", "class"])
         first = {"type": f"export type {maybe} = {{ name: string }};", "interface": f"export interface {maybe} {{ name: string }}",

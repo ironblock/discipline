@@ -1,26 +1,20 @@
 """The ast-grep tutorial's check (#971): python3 -I check.py, as a scenario's `grade` step runs it.
 
-The answer is never run (the maintainer, 2026-10-27). The check takes the turn's last well-formed `submit_answer`
-call and judges its command statically (`rubric.py`) against the forms known to be right, with the instance's names
-(`$DIET_SERVICE_FIXTURE_TRUTH`'s params). On top of that:
-- **Trial searches are par cost, never a fail** (the maintainer, 2026-10-29): the shim (`shim.py`) refuses every
-  ast-grep search in the sandbox, so a search before the answer is a refused attempt, counted (`trials`) and never
-  graded; the verdict is the submitted command alone. `$DIET_AST_GREP_TRIAL=fail` restores the 2026-10-27 rule, under
-  which one fails the attempt.
-- **The miss** (t2, h2): their answer tool (`answer-tool-miss.json`) also says what the command does when nothing
-  matches, `exit_status_when_none` and `prints_nothing_when_none`. Right only when the command passes the rubric and
-  both fields match `miss_truth.json` for the command's subcommand, measured per ast-grep version; a version not
-  measured there is unrecognized.
-Right only when all of it holds; `unrecognized` and a refusal are wrong. The check names the attempt's failure kind
-(`right`, `rubric`, `miss fields`, `trial`, `unrecognized`, `no answer`) in `expected`. An answer in prose, or
-through another tool, is no answer. Prints one line, `{"right", "expected", "got"}`; `got` is empty, as no feedback
-is sent. `--selftest` grades known answers. The confined execution (`audit.py`) is an offline audit, never the verdict.
+Execution is the verdict (PREREG.md, 2026-10-29). The check takes the turn's last well-formed `submit_answer` call
+and runs its command, confined (`command.py`, macOS only), on the pass's pristine copy of the instance
+(`$DIET_SERVICE_FIXTURE_TRUTH`'s directory). It is right only when the matched lines are exactly the truth's, and on a
+miss task (t2, h2) only when its answer fields, `exit_status_when_none` and `prints_nothing_when_none`, also match
+`miss_truth.json` for the command's subcommand, measured per ast-grep version; a version not measured there is not
+right. A command `command.py` refuses is not right. An answer in prose, or through another tool, is no answer.
+`$DIET_AST_GREP_VERDICT`, when set, must be `execute`: there is no other verdict. Prints one line,
+`{"right", "expected", "got"}`; `got` is empty, as no feedback is sent. `--selftest` grades known answers with the
+execution stubbed, so it needs no ast-grep.
 """
 import importlib, json, os, subprocess, sys
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
-import command, rubric  # noqa: E402
+import command  # noqa: E402
 
 TOOL = json.load(open(os.path.join(HERE, "answer-tool.json")))["name"]
 MISS = ("zero-calls", "maybe-defined", "zero-new", "itf-maybe")
@@ -62,20 +56,6 @@ def trial_searches(calls):
     return n
 
 
-def kind_of(verdict, why):
-    if verdict == "right":
-        return "right"
-    if verdict == "unrecognized":
-        return "unrecognized"
-    if why.startswith("(no answer"):
-        return "no answer"
-    if "trial search" in why:
-        return "trial"
-    if "on a miss" in why:
-        return "miss fields"
-    return "rubric"
-
-
 def installed_version():
     try:
         return subprocess.run(["ast-grep", "--version"], capture_output=True, text=True, timeout=10).stdout.strip()
@@ -83,42 +63,15 @@ def installed_version():
         return None
 
 
-def grade(turn, task, truth, trial="par", version=None):
-    expected = "a command the rubric knows as right"
+def grade_executed(turn, task, truth, pristine, version=None, matches=command.matches):
+    """The answer RUN, confined, on PRISTINE: right only when its matches are exactly the truth's lines, and on a miss
+    task when its miss fields match `miss_truth.json` too. MATCHES runs a checked argv on a root (the selftest's stub)."""
     args, before = answered(turn)
     if args is None:
-        return {"right": False, "expected": expected, "got": "(no answer through the answer tool)", "kind": "no answer", "before": before,
-                "trials": trial_searches(before)}
+        return {"right": False, "executed": "no answer", "trials": trial_searches(before)}
     family = family_of(task)
-    verdict, why = rubric.judge(args["command"], family, truth["params"])
-    trials = trial_searches(before)
-    if verdict == "right" and trials and trial == "fail":
-        verdict, why = "wrong", f"{trials} trial search(es) before the answer: a demonstration runs no ast-grep search"
-    if verdict == "right" and family in MISS:
-        expected = "a right command, and what it does when nothing matches"
-        measured = json.load(open(os.path.join(HERE, "miss_truth.json"))).get(version or installed_version() or "")
-        sub = command.parse(args["command"])["sub"]
-        if measured is None or sub not in measured:
-            verdict, why = "unrecognized", f"no measured miss behaviour for {version or 'this ast-grep'}'s `{sub}`"
-        else:
-            off = [k for k in FIELDS if args.get(k) != measured[sub][k]]
-            if off:
-                verdict, why = "wrong", f"the command is right, but {', '.join(off)} is not what `{sub}` does on a miss"
-    return {"right": verdict == "right", "expected": expected, "got": f"{verdict}: {why}", "kind": kind_of(verdict, why), "before": before,
-            "trials": trials}
-
-
-def grade_executed(turn, task, truth, pristine, version=None):
-    """The falsification's verdict (PREREG.md, 2026-10-29): the answer RUN, confined, on the pass's pristine fixture,
-    right only when its matches are exactly the truth's lines, and on a miss task when its miss fields match
-    `miss_truth.json` too. The rubric's verdict is a descriptor (`static`), never the verdict. Macos only (command.py)."""
-    args, before = answered(turn)
-    if args is None:
-        return {"right": False, "executed": "no answer", "static": "no answer", "why": "", "trials": trial_searches(before)}
-    family = family_of(task)
-    static, why = rubric.judge(args["command"], family, truth["params"])
     try:
-        found = command.matches(command.checked(args["command"]), pristine)
+        found = matches(command.checked(args["command"]), pristine)
         executed = "right" if found == sorted(truth["answers"][family]) else "wrong"
     except command.Refused as e:
         executed = f"refused: {e}"
@@ -129,73 +82,73 @@ def grade_executed(turn, task, truth, pristine, version=None):
         right = measured is not None and sub in measured and all(args.get(k) == measured[sub][k] for k in FIELDS)
         if not right:
             executed = "right, miss fields wrong"
-    return {"right": right, "executed": executed, "static": static, "why": why, "trials": trial_searches(before)}
+    return {"right": right, "executed": executed, "trials": trial_searches(before)}
+
+
+def verdict_refused(env):
+    """Why ENV's `DIET_AST_GREP_VERDICT` is refused, or None: when set, it is `execute`, the only verdict."""
+    mode = env.get("DIET_AST_GREP_VERDICT")
+    if mode is not None and mode != "execute":
+        return f"check: DIET_AST_GREP_VERDICT is {mode!r}, but execution is the only verdict: set it to execute, or unset"
+    return None
 
 
 def main():
+    why = verdict_refused(os.environ)
+    if why:
+        sys.exit(why)
     turn = json.load(open(os.environ["DIET_GRADE_TURN"]))
-    if os.environ.get("DIET_AST_GREP_VERDICT") == "execute":  # the falsification's (PREREG.md): execution, not the rubric
-        truth_path = os.environ["DIET_SERVICE_FIXTURE_TRUTH"]
-        g = grade_executed(turn, os.environ["DIET_GRADE_TASK"], json.load(open(truth_path)), os.path.join(os.path.dirname(truth_path), "pristine"))
-        print(json.dumps({"right": g["right"], "expected": f"executed {g['executed']}; static {g['static']}: {g['why']}", "got": ""}))
-        return
-    truth = json.load(open(os.environ["DIET_SERVICE_FIXTURE_TRUTH"]))
-    trial = os.environ.get("DIET_AST_GREP_TRIAL", "par")
-    if trial not in ("fail", "par"):
-        sys.exit("check: DIET_AST_GREP_TRIAL is fail or par")
-    g = grade(turn, os.environ["DIET_GRADE_TASK"], truth, trial)
-    print(json.dumps({"right": g["right"], "expected": f"{g['kind']}: {g['got']}", "got": ""}))
+    truth_path = os.environ["DIET_SERVICE_FIXTURE_TRUTH"]
+    g = grade_executed(turn, os.environ["DIET_GRADE_TASK"], json.load(open(truth_path)), os.path.join(os.path.dirname(truth_path), "pristine"))
+    print(json.dumps({"right": g["right"], "expected": f"executed {g['executed']}", "got": ""}))
 
 
 def selftest():
-    truth = {"params": rubric.P}
     call = lambda cmd, outcome="ran", name=TOOL, **fields: {"name": name, "outcome": outcome, "arguments": json.dumps(dict(command=cmd, **fields))}
     bash = lambda cmd: {"name": "bash", "outcome": "ran", "arguments": json.dumps({"command": cmd})}
-    turn = lambda *calls, answer="": {"calls": list(calls), "answer": answer}
-    right = "ast-grep run -l ts -p 'function $F($$$A): Relay { $$$B }' src"
-    zero = "ast-grep run -p 'probeMeadow($$$A)' src"
-    maybe = "ast-grep outline src --match '^VertexSpec$'"
+    turn = lambda *calls: {"calls": list(calls)}
+    right, wrong, part = "ast-grep run -p 'right($$$A)' src", "ast-grep run -p 'wrong($$$A)' src", "ast-grep run -p 'part($$$A)' src"
+    outline = "ast-grep outline src --match '^Maybe$'"
+    truth = {"answers": {"ret-decl": ["src/a.ts:1", "src/b.ts:2"], "zero-calls": [], "maybe-defined": []}}
+    # The execution stubbed: each command's matches, by its checked argv.
+    found = {right: ["src/a.ts:1", "src/b.ts:2"], wrong: ["src/a.ts:1", "src/b.ts:2", "src/c.ts:3"], part: ["src/a.ts:1"],
+             "ast-grep run -p 'probe($$$A)' src": [], outline: []}
+    stub = lambda argv, root: found[next(c for c in found if command.checked(c) == argv)]
     v = "ast-grep 0.44.0"
-    RULE_UNKNOWN = "ast-grep scan --inline-rules 'id: q\nlanguage: ts\nrule:\n  any:\n    - pattern: function $F($$$A): Relay { $$$B }' src"
     cases = [
-        ("the right command", "t1-ret-decl", turn(call(right)), "fail", True),
-        ("no call", "t1-ret-decl", turn(answer=right), "fail", False),
-        ("through bash", "t1-ret-decl", turn(call(right, name="bash")), "fail", False),
-        ("a refused call", "t1-ret-decl", turn(call(right, "refused")), "fail", False),
-        ("the last call decides", "t1-ret-decl", turn(call(right), call("ast-grep run -p 'function $F($$$A) { $$$B }' src")), "fail", False),
-        ("not ast-grep", "t1-ret-decl", turn(call("rg -n 'function' src")), "fail", False),
-        ("help read first is no trial", "t1-ret-decl", turn(bash("ast-grep run --help"), bash("man ast-grep"), call(right)), "fail", True),
-        ("a trial search first fails", "t1-ret-decl", turn(bash("ast-grep run -p 'function $F($$$A): Relay { $$$B }' src"), call(right)), "fail", False),
-        ("a trial outline of its own file fails", "t1-ret-decl", turn(bash("ast-grep outline scratch.ts"), call(right)), "fail", False),
-        ("a trial search under par is recorded, not failed", "t1-ret-decl", turn(bash("ast-grep scan --inline-rules 'x' src"), call(right)), "par", True),
-        ("by default a trial search is par cost, never a fail", "t1-ret-decl", turn(bash("ast-grep run -p x src"), call(right)), "par", True),
-        ("a search after the answer is no trial", "t1-ret-decl", turn(call(right), bash("ast-grep run -p x src")), "fail", True),
-        ("the miss: run, exit 1, prints nothing", "t2-zero-calls", turn(call(zero, exit_status_when_none=1, prints_nothing_when_none=True)), "fail", True),
-        ("the miss: run, wrong exit", "t2-zero-calls", turn(call(zero, exit_status_when_none=0, prints_nothing_when_none=True)), "fail", False),
-        ("the miss: run, wrong print", "t2-zero-calls", turn(call(zero, exit_status_when_none=1, prints_nothing_when_none=False)), "fail", False),
-        ("the miss: outline, exit 0, prints `nothing found`", "h2-maybe-defined", turn(call(maybe, exit_status_when_none=0, prints_nothing_when_none=False)), "fail", True),
-        ("the miss: outline answered as run's", "h2-maybe-defined", turn(call(maybe, exit_status_when_none=1, prints_nothing_when_none=True)), "fail", False),
-        ("the miss: no fields", "t2-zero-calls", turn(call(zero)), "fail", False),
-        ("the miss: right fields, wrong command", "t2-zero-calls", turn(call("ast-grep run -p 'probeMeadow' src", exit_status_when_none=1, prints_nothing_when_none=True)), "fail", False),
+        ("the right matches", "t1-ret-decl", turn(call(right)), True),
+        ("one match too many", "t1-ret-decl", turn(call(wrong)), False),
+        ("one match too few", "t1-ret-decl", turn(call(part)), False),
+        ("no call", "t1-ret-decl", turn(), False),
+        ("through bash", "t1-ret-decl", turn(call(right, name="bash")), False),
+        ("a refused call", "t1-ret-decl", turn(call(right, "refused")), False),
+        ("the last call decides", "t1-ret-decl", turn(call(right), call(wrong)), False),
+        ("the last call decides, the other way", "t1-ret-decl", turn(call(wrong), call(right)), True),
+        ("a command command.py refuses", "t1-ret-decl", turn(call("ast-grep run -p 'right($$$A)' -U src")), False),
+        ("not ast-grep", "t1-ret-decl", turn(call("rg -n right src")), False),
+        ("the miss: run, exit 1, prints nothing", "t2-zero-calls", turn(call("ast-grep run -p 'probe($$$A)' src", exit_status_when_none=1, prints_nothing_when_none=True)), True),
+        ("the miss: run, wrong exit", "t2-zero-calls", turn(call("ast-grep run -p 'probe($$$A)' src", exit_status_when_none=0, prints_nothing_when_none=True)), False),
+        ("the miss: run, wrong print", "t2-zero-calls", turn(call("ast-grep run -p 'probe($$$A)' src", exit_status_when_none=1, prints_nothing_when_none=False)), False),
+        ("the miss: no fields", "t2-zero-calls", turn(call("ast-grep run -p 'probe($$$A)' src")), False),
+        ("the miss: outline, exit 0, prints `nothing found`", "h2-maybe-defined", turn(call(outline, exit_status_when_none=0, prints_nothing_when_none=False)), True),
+        ("the miss: outline answered as run's", "h2-maybe-defined", turn(call(outline, exit_status_when_none=1, prints_nothing_when_none=True)), False),
     ]
     bad = 0
-    for why, task, t, trial, want in cases:
-        got = grade(t, task, truth, trial, version=v)
+    for why, task, t, want in cases:
+        got = grade_executed(t, task, truth, "/pristine", version=v, matches=stub)
         if got["right"] != want:
             print(f"check: {why}: graded {got}, expected {want}"); bad += 1
-    kinds = [("right", "t1-ret-decl", turn(call(right))), ("no answer", "t1-ret-decl", turn()),
-             ("trial", "t1-ret-decl", turn(bash("ast-grep run -p 'x' src"), call(right))),
-             ("rubric", "t1-ret-decl", turn(call("ast-grep run -p 'function $F($$$A) { $$$B }' src"))),
-             ("unrecognized", "t1-ret-decl", turn(call(RULE_UNKNOWN))),
-             ("miss fields", "t2-zero-calls", turn(call(zero, exit_status_when_none=0, prints_nothing_when_none=True)))]
-    for want, task, t in kinds:
-        got = grade(t, task, truth, "fail" if want == "trial" else "par", version=v)["kind"]  # trial only under the old rule
-        if got != want:
-            print(f"check: kind {want}: got {got}"); bad += 1
-    unmeasured = grade(turn(call(zero, exit_status_when_none=1, prints_nothing_when_none=True)), "t2-zero-calls", truth, version="ast-grep 9.9.9")
-    if not unmeasured["got"].startswith("unrecognized"):
-        print(f"check: an unmeasured version graded {unmeasured}"); bad += 1
-    print(f"check: {sum(c[4] for c in cases)} right and {sum(not c[4] for c in cases) + 1} not right, 6 kinds, {bad} wrong")
+    miss = turn(call("ast-grep run -p 'probe($$$A)' src", exit_status_when_none=1, prints_nothing_when_none=True))
+    if grade_executed(miss, "t2-zero-calls", truth, "/pristine", version="ast-grep 9.9.9", matches=stub)["right"]:
+        print("check: an unmeasured version's miss graded right"); bad += 1
+    searched = turn(bash("ast-grep run --help"), bash("ast-grep run -p x src"), bash("sg outline src"), call(right), bash("ast-grep run -p y src"))
+    if grade_executed(searched, "t1-ret-decl", truth, "/pristine", version=v, matches=stub)["trials"] != 2:
+        print("check: the searches before the answer, help apart, are not 2"); bad += 1
+    for env, refused in (({}, False), ({"DIET_AST_GREP_VERDICT": "execute"}, False), ({"DIET_AST_GREP_VERDICT": "static"}, True),
+                         ({"DIET_AST_GREP_VERDICT": ""}, True)):
+        if bool(verdict_refused(env)) != refused:
+            print(f"check: verdict {env}: refused {not refused}, expected {refused}"); bad += 1
+    print(f"check: {sum(c[3] for c in cases)} right and {sum(not c[3] for c in cases) + 1} not right, a search count, 4 verdict settings, {bad} wrong")
     return 1 if bad else 0
 
 

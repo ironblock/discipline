@@ -12,7 +12,7 @@ The order: per (task, seed), in task-then-seed order, the three arms shuffled by
 pass, `--before` (the idle gate); a pass is stopped at `--max-seconds` (3600). A void or stopped pass is re-run once
 on the same seed; failing again, it is recorded void and counts as not right.
 
-DIR/rows.jsonl, one row per pass (the measures, Amendment 1): `executed_right`, `executed`, `static`, and the cost of
+DIR/rows.jsonl, one row per pass (the measures, Amendment 1): `executed_right`, `executed`, and the cost of
 what the pass spent: `tool_calls`, `seconds`, `completion_tokens`, `output_tokens` -- before the answer when there is
 one, else to the end of its task turn -- plus `searches` (ast-grep searches run) and `docs_reads`. Re-running on the
 same DIR resumes: a (task, seed, arm) with a row is not run again. DIR/manifest.json records the build commit, the
@@ -135,7 +135,7 @@ def row_of(task, seed, arm, out, attempt, stopped, wall=0):
     p = os.path.join(out, "pass.json")
     docs = len(json.load(open(p))["tasks"].get(task, {}).get("docs_reads", [])) if os.path.exists(p) else None
     answer, _ = check.answered({"calls": calls})
-    return dict(row, void=False, executed_right=g["right"], executed=g["executed"], static=g["static"],
+    return dict(row, void=False, executed_right=g["right"], executed=g["executed"],
                 graded_right=graded, command=(answer or {}).get("command"), docs_reads=docs, **measure(lines, task))
 
 
