@@ -201,6 +201,191 @@ fn a_windowed_canned_substrate_fires_the_budget_and_the_window_meditations() {
     let _ = std::fs::remove_dir_all(&dir);
 }
 
+/// #1008: a regimen's `context_window` below the window serve sizes
+/// against is the one in force: the window meditation fires at a refill
+/// point measured from it (a 34,000-token window, whose line is below the
+/// registry's 37,615's, first fires in turn 2, where the registry's first
+/// fires in turn 3), and the start line
+/// names both windows and which is in force. One above the registry's is
+/// clamped to it and says so. Absent, the windowed test above is unchanged.
+#[test]
+fn a_declared_context_window_moves_the_refill_point_and_one_above_is_clamped() {
+    let regimen = |extra: &str| {
+        format!(
+            "arm = \"rehearsal\"\ndogma_version = 0\n\
+             substrate = \"canned-scenario-windowed\"\nsubstrate_reasoning = \"off\"\n\
+             substrate_hardware = \"b6bc80e9e8e4bc2342219f064dab89a8d17c02535600b32b84895fc0b9ba6513\"\n\
+             isolation = \"none\"\napproval = \"none\"\n\
+             approval_policy = \"approvals are off: every command runs without a gate decision or a prompt\"\n\
+             interview_warrant = [\"scoping\"]\ncapture_modality = \"fields\"\n\
+             max_output_tokens = 512\n{extra}\
+             [limits]\nmax_steps = 4\n[sampler]\ntemperature = 0.6\n"
+        )
+    };
+    let body = |window: &str, at_turn: &str| {
+        [
+            r#"{"reply":{"when":"Scope it","text":"Scoped: one tracker."}}"#.to_owned(),
+            r#"{"reply":{"when":"The turn has ended","text":"DECISION: one tracker\nPLAN: NONE\nSUPERSEDE: NONE"}}"#.to_owned(),
+            r#"{"reply":{"when":"Name it","text":"It is the tracker."}}"#.to_owned(),
+            r#"{"reply":{"when":"Print it","text":"Printing.","calls":[{"id":"call-b","name":"bash","arguments":"{\"command\": \"python3 -c \\\"print('x' * 20000)\\\"\"}"}]}}"#.to_owned(),
+            r#"{"reply":{"when":"xxxxxxxxxx","text":"Printed."}}"#.to_owned(),
+            r#"{"reply":{"text":"."}}"#.to_owned(),
+            r#"{"step":"ask","text":"Scope it: one tracker.","scoping":true}"#.to_owned(),
+            r#"{"step":"ask","text":"Name it."}"#.to_owned(),
+            r#"{"step":"ask","text":"Print it: a long line."}"#.to_owned(),
+            r#"{"step":"end"}"#.to_owned(),
+            format!(r#"{{"expect":"meditation","where":{{"reason":"window","at_turn":"{at_turn}","window":"{window}"}}}}"#),
+        ]
+        .join("\n")
+    };
+    for (case, extra, window, at_turn, lever) in [
+        (
+            "below",
+            "context_window = 34000\n",
+            "34000",
+            "2",
+            "34000:in_force:34000:regimen;registry:37615",
+        ),
+        (
+            "above",
+            "context_window = 50000\n",
+            "37615",
+            "3",
+            "50000:in_force:37615:registry;registry:37615:clamped",
+        ),
+    ] {
+        let dir = scratch(&format!("context-window-{case}"));
+        std::fs::write(dir.join("windowed.toml"), regimen(extra)).expect("the regimen");
+        let header = serde_json::json!({
+            "scenario": "windowed",
+            "regimen": "windowed.toml",
+            "head": root().join("diet/drive/heads/floor.md"),
+        });
+        let file = dir.join("windowed.jsonl");
+        std::fs::write(&file, format!("{header}\n{}\n", body(window, at_turn)))
+            .expect("the scenario");
+        let out = dir.join("out");
+        let (code, said) = run(&file, &out);
+        assert_eq!(code, Some(0), "{case}: {said}");
+        let start = first_line(&out.join("session.log"));
+        // The refill point: where the first window meditation fires.
+        let first = std::fs::read_to_string(out.join("session.log"))
+            .expect("the log")
+            .lines()
+            .filter_map(|line| serde_json::from_str::<serde_json::Value>(line).ok())
+            .find(|line| line["kind"] == "meditation" && line["reason"] == "window")
+            .expect("a window meditation");
+        assert_eq!(
+            (first["at_turn"].as_u64(), first["window"].as_u64()),
+            (at_turn.parse::<u64>().ok(), window.parse::<u64>().ok()),
+            "{case}: {first}"
+        );
+        assert_eq!(start["levers"]["context_window"], lever, "{case}: {start}");
+        assert!(
+            start["levers"]["step_and_output_limits"]
+                .as_str()
+                .is_some_and(|word| word.ends_with(&format!(
+                    ":clamped:{window}:{}",
+                    if case == "below" {
+                        "regimen"
+                    } else {
+                        "declared"
+                    }
+                ))),
+            "{case}: the output fit uses the window in force: {start}"
+        );
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+}
+
+/// #1008: the window in force sizes the budget meditation too (a fraction of
+/// it, read when the regimen is), and with no served window at all the
+/// declared one is in force, unclamped, and the start line says it was
+/// declared. A reply reporting a 4,500-token prompt crosses 0.1276 of a
+/// declared 34,000 (4,338) and not of the registry's 37,615 (4,799).
+#[test]
+fn a_declared_context_window_sizes_the_budget_meditation_and_stands_alone_without_a_served_one() {
+    let regimen = |substrate: &str, extra: &str| {
+        format!(
+            "arm = \"rehearsal\"\ndogma_version = 0\n\
+             substrate = \"{substrate}\"\nsubstrate_reasoning = \"off\"\n\
+             substrate_hardware = \"b6bc80e9e8e4bc2342219f064dab89a8d17c02535600b32b84895fc0b9ba6513\"\n\
+             isolation = \"none\"\napproval = \"none\"\n\
+             approval_policy = \"approvals are off: every command runs without a gate decision or a prompt\"\n\
+             interview_warrant = [\"scoping\"]\ncapture_modality = \"fields\"\n\
+             max_output_tokens = 512\n{extra}\
+             [limits]\nmax_steps = 4\n[sampler]\ntemperature = 0.6\n"
+        )
+    };
+    let body = [
+        r#"{"reply":{"when":"Scope it","text":"Scoped: one tracker.","prompt_tokens":4500}}"#,
+        r#"{"reply":{"when":"The turn has ended","text":"DECISION: one tracker\nPLAN: NONE\nSUPERSEDE: NONE"}}"#,
+        r#"{"reply":{"text":"."}}"#,
+        r#"{"step":"ask","text":"Scope it: one tracker.","scoping":true}"#,
+        r#"{"step":"end"}"#,
+    ]
+    .join("\n");
+    let fraction = "meditation_at_context_fraction = 0.1276\n";
+    for (case, substrate, extra, budget, lever, step) in [
+        (
+            "declared",
+            "canned-scenario-windowed",
+            format!("{fraction}context_window = 34000\n"),
+            true,
+            Some("34000:in_force:34000:regimen;registry:37615"),
+            ":clamped:34000:regimen",
+        ),
+        (
+            "registry",
+            "canned-scenario-windowed",
+            fraction.to_owned(),
+            false,
+            None,
+            ":clamped:37615:declared",
+        ),
+        (
+            "alone",
+            "canned-scenario",
+            "context_window = 32768\n".to_owned(),
+            false,
+            Some("32768:in_force:32768:regimen;served:none"),
+            ":clamped:32768:regimen",
+        ),
+    ] {
+        let dir = scratch(&format!("context-window-{case}"));
+        std::fs::write(dir.join("budget.toml"), regimen(substrate, &extra)).expect("the regimen");
+        let header = serde_json::json!({
+            "scenario": "budget",
+            "regimen": "budget.toml",
+            "head": root().join("diet/drive/heads/floor.md"),
+        });
+        let file = dir.join("budget.jsonl");
+        std::fs::write(&file, format!("{header}\n{body}\n")).expect("the scenario");
+        let out = dir.join("out");
+        let (code, said) = run(&file, &out);
+        assert_eq!(code, Some(0), "{case}: {said}");
+        let log = std::fs::read_to_string(out.join("session.log")).expect("the log");
+        let budgets = log
+            .lines()
+            .filter_map(|line| serde_json::from_str::<serde_json::Value>(line).ok())
+            .filter(|line| line["kind"] == "meditation" && line["reason"] == "budget")
+            .count();
+        assert_eq!(budgets > 0, budget, "{case}: the budget meditation");
+        let start = first_line(&out.join("session.log"));
+        match lever {
+            Some(lever) => assert_eq!(start["levers"]["context_window"], lever, "{case}: {start}"),
+            None => assert_eq!(start["levers"]["context_window"], "none", "{case}: {start}"),
+        }
+        assert!(
+            start["levers"]["step_and_output_limits"]
+                .as_str()
+                .is_some_and(|word| word.ends_with(step)),
+            "{case}: {start}"
+        );
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+}
+
 /// A file an ask attaches is kept in the assembled run (#372's layout,
 /// `files/<sha256>`), as serve's own recording keeps it: the work
 /// directory that held the copy goes once the run is assembled, and a

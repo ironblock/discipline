@@ -149,6 +149,73 @@ pub fn window(
         })
 }
 
+/// The regimen key declaring the session's context window, in tokens
+/// (#1008): the harness's budget, never the engine's allocation. Its name and
+/// sense are Pi's `contextWindow` (`models.json`; compaction at
+/// `contextTokens > contextWindow - reserveTokens`): `OpenCode` 2 names it
+/// `limit.context`, and Qwen Code's `contextWindowSize` breaks the tie
+/// toward Pi's. All three trust the declared value; here it never exceeds a
+/// window the server reports ([`in_force`]).
+pub const CONTEXT_WINDOW: &str = "context_window";
+
+/// The window a regimen declares under [`CONTEXT_WINDOW`], or `None`.
+///
+/// # Errors
+///
+/// A value that is not a whole number of tokens above 0.
+pub fn declared_window(regimen: &crate::formats::regimen::Regimen) -> Result<Option<u64>, String> {
+    use crate::formats::regimen::Value;
+    match regimen.get(CONTEXT_WINDOW) {
+        None => Ok(None),
+        Some(Value::Integer(tokens)) if *tokens > 0 => Ok(Some(tokens.unsigned_abs())),
+        Some(_) => Err(format!(
+            "`{CONTEXT_WINDOW}` is a whole number of tokens above 0"
+        )),
+    }
+}
+
+/// The window in force (#1008), and the start line's word for how: the
+/// smaller of the window the regimen declares and the one the server's
+/// report or its registry entry gives (`served`, from [`window`]); a
+/// declared window above it is clamped to it, and the word says so. With no
+/// served window the declared one is in force, unclamped, and the word says
+/// it was declared. With nothing declared, `served` as it was, and no word.
+#[must_use]
+pub fn in_force(
+    declared: Option<u64>,
+    served: Option<(u64, &'static str)>,
+) -> (Option<(u64, &'static str)>, Option<String>) {
+    let Some(declared) = declared else {
+        return (served, None);
+    };
+    // The registry's value is `declared` in `window`'s words; here it is
+    // the registry's, beside the regimen's own declaration.
+    let named = |from: &'static str| if from == "declared" { "registry" } else { from };
+    match served {
+        None => (
+            Some((declared, "regimen")),
+            Some(format!(
+                "{declared}:in_force:{declared}:regimen;served:none"
+            )),
+        ),
+        Some((tokens, from)) if declared <= tokens => (
+            Some((declared, "regimen")),
+            Some(format!(
+                "{declared}:in_force:{declared}:regimen;{}:{tokens}",
+                named(from)
+            )),
+        ),
+        Some((tokens, from)) => (
+            Some((tokens, from)),
+            Some(format!(
+                "{declared}:in_force:{tokens}:{};{}:{tokens}:clamped",
+                named(from),
+                named(from)
+            )),
+        ),
+    }
+}
+
 /// The chat template `engine` reports rendering with (#599): llama.cpp's
 /// `/props` `chat_template`, `TabbyAPI`'s `/v1/model`
 /// `parameters.prompt_template_content`.
@@ -375,6 +442,73 @@ pub fn report_of(
 
 #[cfg(test)]
 mod tests {
+
+    /// #1008: a declared window below the served one is in force; one above
+    /// it is clamped to it, and the word says so; with no served window the
+    /// declared one is in force, unclamped, declared; with none declared,
+    /// nothing changes.
+    #[test]
+    fn the_window_in_force_is_the_smaller_and_says_where_it_came_from() {
+        use super::in_force;
+        assert_eq!(
+            in_force(Some(32_768), Some((163_840, "reported"))),
+            (
+                Some((32_768, "regimen")),
+                Some("32768:in_force:32768:regimen;reported:163840".to_owned())
+            )
+        );
+        assert_eq!(
+            in_force(Some(200_000), Some((163_840, "reported"))),
+            (
+                Some((163_840, "reported")),
+                Some("200000:in_force:163840:reported;reported:163840:clamped".to_owned())
+            )
+        );
+        assert_eq!(
+            in_force(Some(50_000), Some((37_615, "declared"))),
+            (
+                Some((37_615, "declared")),
+                Some("50000:in_force:37615:registry;registry:37615:clamped".to_owned())
+            ),
+            "the registry's window clamps as a report does, named as the registry's"
+        );
+        assert_eq!(
+            in_force(Some(131_072), None),
+            (
+                Some((131_072, "regimen")),
+                Some("131072:in_force:131072:regimen;served:none".to_owned())
+            ),
+            "no served window: the declared one, unclamped, declared"
+        );
+        assert_eq!(
+            in_force(None, Some((163_840, "reported"))),
+            (Some((163_840, "reported")), None)
+        );
+        assert_eq!(in_force(None, None), (None, None));
+        // Equal: the regimen's, and nothing clamped.
+        assert_eq!(
+            in_force(Some(4096), Some((4096, "reported"))).0,
+            Some((4096, "regimen"))
+        );
+    }
+
+    /// #1008: the key is a whole number of tokens above 0, or absent.
+    #[test]
+    fn a_declared_window_is_a_positive_whole_number() {
+        let read = |text: &str| {
+            super::declared_window(&crate::formats::regimen::parse(text).expect("a regimen"))
+        };
+        assert_eq!(read("arm = \"a\"\n"), Ok(None));
+        assert_eq!(read("context_window = 32768\n"), Ok(Some(32_768)));
+        for bad in [
+            "context_window = 0\n",
+            "context_window = -1\n",
+            "context_window = \"32k\"\n",
+            "context_window = 1.5\n",
+        ] {
+            assert!(read(bad).is_err(), "{bad}");
+        }
+    }
 
     /// #815: whether a substrate takes images is what its registry entry
     /// declares as served -- `TabbyAPI`'s `use_vision`, llama-server's
