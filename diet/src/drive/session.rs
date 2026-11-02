@@ -8581,9 +8581,9 @@ fn refilled(
             });
         }
     }
-    // A native summary (#936) is carried in the render's place, and what
-    // Qwen Code puts beside it follows: the acknowledgement, then the
-    // restored files and images.
+    // A native summary (#936) is carried in the render's place, then the
+    // restored files and images; no acknowledgement (#1009: Pi and
+    // `OpenCode` 2 carry none, so Qwen Code's is not added).
     let render = native.map_or(rendered.text, |summary| summary.text.clone());
     if native.is_some() {
         render_budget = None;
@@ -8593,10 +8593,6 @@ fn refilled(
         .map_or_else(|| render.clone(), |(text, _)| format!("{render}{text}"));
     let mut refilled = crate::meditation::render::refill_with(&head, &sent, background.as_deref());
     if let Some(summary) = native {
-        refilled.push(Message::new(
-            Role::Assistant,
-            crate::meditation::native::ACK.to_owned(),
-        ));
         refilled.extend(summary.restored.clone());
     }
     state.refilled = true;
@@ -26945,9 +26941,15 @@ pub(in crate::drive) mod tests {
         let trunk = session.trunk();
         let refill = crate::meditation::render::refill(&template().messages, SNAPSHOT);
         assert_eq!(&trunk[..refill.len()], refill.as_slice(), "{trunk:#?}");
-        assert_eq!(trunk.len(), refill.len() + 1, "{trunk:#?}");
-        assert_eq!(trunk[refill.len()].role, Role::Assistant);
-        assert_eq!(trunk[refill.len()].content, crate::meditation::native::ACK);
+        // No acknowledgement after the summary (#1009): Pi and `OpenCode` 2
+        // carry none, and here no file was restored, so the refill ends at it.
+        assert_eq!(trunk.len(), refill.len(), "{trunk:#?}");
+        assert!(
+            trunk
+                .iter()
+                .all(|message| message.content != "Got it. Thanks for the additional context!"),
+            "{trunk:#?}"
+        );
         let Some(Event::Meditated {
             carry,
             summary_tokens,
@@ -27015,10 +27017,22 @@ pub(in crate::drive) mod tests {
                 .any(|message| message.content.contains(SNAPSHOT)),
             "{after:#?}"
         );
+        // Between the summary and the next user turn, no assistant message
+        // (#1009): the next thing the model reads after its summary is the
+        // user's.
+        let summary = after
+            .iter()
+            .position(|message| message.content.contains(SNAPSHOT))
+            .expect("the summary");
+        let next_user = after[summary + 1..]
+            .iter()
+            .position(|message| message.role == Role::User)
+            .map_or(after.len(), |at| summary + 1 + at);
         assert!(
-            after
+            after[summary + 1..next_user]
                 .iter()
-                .any(|message| message.content == crate::meditation::native::ACK)
+                .all(|message| message.role != Role::Assistant),
+            "{after:#?}"
         );
         assert!(after.iter().any(|message| message.content == "second"));
         assert!(
