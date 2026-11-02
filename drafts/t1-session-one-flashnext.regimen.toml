@@ -1,0 +1,88 @@
+# T1 session one on the production GPU host (the Flash-Next line, ada48), for the maintainer's drive (approved
+# 2026-11-02). Based on the last full-stack live T1 run's regimen: the agent-driven phased run of 2026-10-16 on the
+# 3.8 floor (arm t1-phased-floor-r4, build 9c92f8d0, regimen sha256 56efb734..., about 5.5 h). Its own deltas:
+# - the substrate, its hardware fingerprint and its sampler card are the Flash-Next line's registry entry's;
+# - `context_window` is the floor's 163,840 (#1010), below the 524,288 this host serves;
+# - `interview_warrant` names all five warrants, `read` added;
+# - `refutation_interview` is off, `fork_delivery` and `meditation_carry` are declared at their defaults;
+# - `meditation_tail_tokens` is unset, so 0, the total refill (that run kept a 4,000-token tail);
+# - `meditation_audit` is off, and with it `reconcile_gate = "refuse"`, which needs the audit: only what is ready
+#   and tested (the maintainer's rule, 2026-11-02);
+# - the step warrants' gate is declared `regex`; the classifier gate is not ready.
+# Kept from that run, and from the T1 qwen38 regimen (drafts/t1-session-one-qwen38.regimen.toml): the sandbox, host
+# network, reads everywhere, approvals off, the chrome-devtools passthrough, and xhigh reasoning. Unchanged from it
+# (docs/trajectories/t1.md): the reference is read-only; step 4 tells the model to start a new project in its working
+# directory; orient ends only once the model has found the Minecraft demo; the model tests in a headed
+# chrome-devtools daemon the operator started.
+#
+# The endpoint, the head, `--worktree` (~/git/experiments/babylon-lite-minecraft-fps, with no AGENTS.md or
+# CLAUDE.md in its ancestors) and the output cap are the profile's (drive.toml), not this file. No demo caps.
+arm = "t1-session-one-flashnext"
+dogma_version = 0
+
+substrate = "ada48-tabbyapi-exl3-qwen38flashnext-2p05"
+substrate_reasoning = "on"
+# The registry's hardware_fingerprint for the entry's equipment.
+substrate_hardware = "19d9fa21007ab8fef48b62d9d8773ac241fa177b2f8b3de670ddd4128aa10c7b"
+
+# The session's window (#1008, #1010): the floor's, so the drive meditates where the floor's runs did.
+context_window = 163840
+
+isolation = "sandbox"
+network = "host"
+sandbox_reads = "all"
+# The reference is read-only: no `sandbox_writable` entry (docs/trajectories/t1.md, 2026-10-12).
+# The run's browser socket, from drafts/t1-browser.sh start (browser.env line 1), filled by the operator per run:
+# a literal path, never a pattern, at most 103 bytes resolved.
+# sandbox_unix_sockets = ["/private/tmp/chrome-devtools-mcp-<session id>-<uid>.sock"]
+
+approval = "none"
+# Names only: the values are set by whoever starts `serve`. The chrome-devtools CLI: CD4A_INTERNAL_DAEMON_SESSION_ID
+# selects the run's own daemon; the other two keep the CLI from calling home.
+env_passthrough = ["npm_config_cache", "pnpm_config_store_dir", "CD4A_INTERNAL_DAEMON_SESSION_ID", "CHROME_DEVTOOLS_MCP_NO_UPDATE_CHECKS", "CHROME_DEVTOOLS_MCP_NO_USAGE_STATISTICS"]
+approval_policy = "approvals are off: every command runs without a gate decision or a prompt; Seatbelt confines writes to the worktree and the session's TMPDIR"
+
+tool_surface = "standard"
+
+# Phases (#787, #788): the starter library, starting in orient.
+phase_library = "starter"
+starting_phase = "orient"
+self_capture = "on"
+
+# Working memory during the turn (#782, #783, #784), all five warrants; the fork mechanics as the 2026-10-16 run had
+# them: interviews during the turn, the default cadence and view, asks v4.
+interview_warrant = ["scoping", "read", "evidence", "trouble", "open"]
+interview_timing = "during_turn"
+mechanical_capture = "on"
+capture_modality = "fields"
+fork_asks = "v4"
+warrant_gate = "regex"
+refutation_interview = "off"
+fork_delivery = "meditation"
+
+# Meditation: declared at a phase move, or automatic before the window fills (the default). The total refill
+# (`meditation_tail_tokens` unset), working memory rendered (`render`), warmed. No audit, so the reconcile gate is
+# `carry`: an operator change no audit addressed is refilled and recorded `unaddressed`.
+meditation_carry = "render"
+meditation_audit = "off"
+meditation_warm = "on"
+reconcile_gate = "carry"
+meditation_tool_outputs = "reference"
+# The render budget (#565), as the 2026-10-16 run had it: 40k, tiered.
+render_budget_tokens = 40000
+render_over_budget = "tier"
+archive_recall = "literal"
+
+# Write-time dedupe (#872): TF-IDF against live notes of the same kind, merged through alias and provenance.
+note_dedupe = "on"
+
+[reasoning]
+effort = "xhigh"
+budget_tokens = "none"
+
+# The Flash-Next line's sampler card (the registry's sampler_card, preset qwen38_thinking), every key declared.
+[sampler]
+temperature = 1.0
+top_k = 20
+top_p = 0.95
+min_p = 0.0
