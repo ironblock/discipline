@@ -745,13 +745,14 @@ pub fn serve_levers(regimen: &Regimen, output_cap: (u32, &str)) -> BTreeMap<Stri
         ),
         ("reconcile_gate".to_owned(), reconcile_gate_lever(regimen)),
         // #936: what a meditation's refill carries; a native one names its
-        // layout (#1009): the summary, then the restored files, with no
-        // acknowledgement between them, as runs before it had.
+        // layout (#1012): the summary with Pi's path lists appended, and
+        // nothing after it. Runs between #1009 and #1012 read
+        // `summary+restored`, Qwen Code's restored files after the summary.
         (
             "meditation_carry".to_owned(),
             match crate::meditation::policy::meditation_carry(regimen) {
                 carry @ crate::formats::log::MeditationCarry::NativeSummary => {
-                    format!("{}:summary+restored", carry.tag())
+                    format!("{}:summary+paths", carry.tag())
                 }
                 carry => carry.tag().to_owned(),
             },
@@ -1607,9 +1608,10 @@ mod tests {
         );
     }
 
-    /// #1009: a native refill is the summary, then the restored files: no
-    /// acknowledgement. Runs before it read `native_summary` alone, with
-    /// Qwen Code's acknowledgement between the two.
+    /// #1012: a native refill is the summary with Pi's path lists appended,
+    /// nothing after it. Runs between #1009 and #1012 read
+    /// `native_summary:summary+restored`, the restored files after the
+    /// summary; runs before #1009, `native_summary` alone.
     #[test]
     fn the_meditation_carry_lever_names_the_native_layout() {
         let lever = |text: &str| {
@@ -1620,7 +1622,7 @@ mod tests {
         };
         assert_eq!(
             lever("meditation_carry = \"native_summary\"\n"),
-            "native_summary:summary+restored"
+            "native_summary:summary+paths"
         );
         assert_eq!(lever("meditation_carry = \"render\"\n"), "render");
         assert_eq!(lever(""), "render");

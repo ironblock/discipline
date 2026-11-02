@@ -2660,6 +2660,9 @@ struct State {
     phase_floor: u64,
     phase_grown: u64,
     meditation_floor: u64,
+    /// The files the latest native refill listed (#1012): the next one
+    /// gathers them in, as Pi's compaction gathers its previous one's.
+    native_files: crate::meditation::native::Files,
 }
 
 impl State {
@@ -2813,6 +2816,7 @@ impl State {
             phase_floor: 0,
             phase_grown: 0,
             meditation_floor: 0,
+            native_files: crate::meditation::native::Files::default(),
             jobs: BTreeMap::new(),
             notices: Vec::new(),
             promotable: None,
@@ -8581,9 +8585,9 @@ fn refilled(
             });
         }
     }
-    // A native summary (#936) is carried in the render's place, then the
-    // restored files and images; no acknowledgement (#1009: Pi and
-    // `OpenCode` 2 carry none, so Qwen Code's is not added).
+    // A native summary (#936) is carried in the render's place, Pi's path
+    // lists appended (#1012); nothing after it, no acknowledgement (#1009)
+    // and no restored files or images (#1012).
     let render = native.map_or(rendered.text, |summary| summary.text.clone());
     if native.is_some() {
         render_budget = None;
@@ -8593,7 +8597,7 @@ fn refilled(
         .map_or_else(|| render.clone(), |(text, _)| format!("{render}{text}"));
     let mut refilled = crate::meditation::render::refill_with(&head, &sent, background.as_deref());
     if let Some(summary) = native {
-        refilled.extend(summary.restored.clone());
+        state.native_files = summary.files.clone();
     }
     state.refilled = true;
     state.refills += 1;
@@ -8602,7 +8606,8 @@ fn refilled(
     state.trunk = refilled;
     // What a session carried from this refill starts from (#948): the
     // trunk exactly as sent and the working object's dump, kept in the
-    // recording by digest, and the files a native refill embedded.
+    // recording by digest. A native refill embeds no file (#1012), so it
+    // names none on `restored_files`.
     let kept_by_digest = |bytes: &[u8], media_type: &str| {
         state
             .recording
@@ -8622,9 +8627,7 @@ fn refilled(
         .filter(|interview| interview.object.entries().next().is_some())
         .map(|interview| interview.object.dump())
         .and_then(|dump| kept_by_digest(dump.as_bytes(), "application/x-ndjson"));
-    let restored_files = native
-        .map(|summary| summary.embedded.clone())
-        .filter(|files| !files.is_empty());
+    let restored_files = None;
     // The worktree as it stands at the refill (#948, v26): a session carried
     // from here restores it, so its own files cross as memory does.
     let worktree_sha256 = match (&state.worktree, &state.recording) {
@@ -9358,8 +9361,9 @@ fn carries_native(state: &State) -> bool {
 
 /// A native summary of `history` (#936): the summary request on its own
 /// lane, logged like any request, the lock let go while it is in flight and
-/// taken back; then its answer, the analysis stripped, and what Qwen Code
-/// restores beside it. `Err` naming why when the request fails or the
+/// taken back; then its answer, the analysis stripped, and Pi's lists of
+/// the files `history`'s file tools and the latest native refill named
+/// appended (#1012). `Err` naming why when the request fails or the
 /// summary is empty -- the render is never carried in its place.
 fn summarize<'a, S: Streaming>(
     shared: &'a Shared<S>,
@@ -9424,15 +9428,12 @@ fn summarize<'a, S: Streaming>(
     if summary.is_empty() {
         return (state, Err("the summary was empty".to_owned()));
     }
-    let worktree = shared.tools.as_ref().map(|tools| tools.worktree.clone());
-    let (restored, embedded) =
-        crate::meditation::native::restored_embedding(history, worktree.as_deref());
+    let files = crate::meditation::native::files(history, &state.native_files);
     (
         state,
         Ok(crate::meditation::native::Summary {
-            text: summary,
-            restored,
-            embedded,
+            text: format!("{summary}{}", crate::meditation::native::listed(&files)),
+            files,
         }),
     )
 }
@@ -26976,6 +26977,84 @@ pub(in crate::drive) mod tests {
                 .starts_with(&trunk)
         );
         reads_whole(&session);
+    }
+
+    /// #1012: a native refill is the summary with Pi's path lists appended,
+    /// and nothing after it: no restored-files message and no image, though
+    /// the model read a file and a screenshot. A `read`'s `path` is read, an
+    /// `edit`'s `file_path` modified; the next native refill gathers the
+    /// earlier one's lists with its own.
+    #[test]
+    fn a_native_refill_appends_pis_path_lists_and_restores_no_file_or_image() {
+        const SNAPSHOT: &str = "<state_snapshot>a terrain viewer</state_snapshot>";
+        let tree = scratch("native-pi-paths");
+        let recording = scratch("native-pi-paths-recording");
+        let recording = std::fs::canonicalize(&recording).expect("the recording");
+        std::fs::write(tree.join("shot.png"), b"\x89PNG\r\n\x1a\nsome pixels").expect("written");
+        std::fs::write(tree.join("a.rs"), "fn a() {}\n").expect("written");
+        std::fs::write(tree.join("b.md"), "x\n").expect("written");
+        std::fs::write(tree.join("c.rs"), "fn c() {}\n").expect("written");
+        let mut shape = looping();
+        shape.tools = tool_loop::ToolSurface::Standard.tools();
+        let mut tools = tools(Confinement::Unconfined, &tree, &[], None, Decider::Decline);
+        tools.surface = tool_loop::ToolSurface::Standard;
+        tools.read_tool = tool_loop::ToolSurface::Standard.read_tool();
+        tools.recording = Some(recording.clone());
+        let mut interview = interviewing(&[]);
+        interview.meditations.carry = log::MeditationCarry::NativeSummary;
+        let session = Session::open_with(
+            Canned::new(vec![
+                vec![
+                    Step::call(0, "call-1", "read", r#"{"path":"shot.png"}"#),
+                    Step::call(1, "call-2", "read", r#"{"path":"a.rs"}"#),
+                    Step::call(
+                        2,
+                        "call-3",
+                        "edit",
+                        r#"{"file_path":"b.md","old_string":"x","new_string":"y"}"#,
+                    ),
+                ],
+                deltas(&["Read them."]),
+                deltas(&[SNAPSHOT]),
+                vec![Step::call(0, "call-4", "read", r#"{"path":"c.rs"}"#)],
+                deltas(&["Read c."]),
+                deltas(&[SNAPSHOT]),
+            ]),
+            shape,
+            None,
+            Some(tools),
+            None,
+            Some(interview),
+        );
+        session.ask("look at the terrain", None).expect("accepted");
+        wait_until(&session, "turn one", settled);
+        session.declare_meditation(None).expect("admitted");
+        wait_until(&session, "the meditation", meditated);
+        let first = format!(
+            "{SNAPSHOT}\n\n<read-files>\na.rs\nshot.png\n</read-files>\n\n<modified-files>\nb.md\n</modified-files>"
+        );
+        let trunk = session.trunk();
+        let refill = crate::meditation::render::refill(&template().messages, &first);
+        assert_eq!(trunk, refill, "the summary and its lists, nothing after");
+        assert!(trunk.iter().all(|message| message.images.is_empty()));
+        session.ask("and the other file?", None).expect("accepted");
+        wait_until(&session, "turn two", two_settled);
+        session.declare_meditation(None).expect("admitted");
+        wait_until(&session, "the second meditation", |log| {
+            log.iter()
+                .filter(|logged| matches!(logged.event, Event::Meditated { .. }))
+                .count()
+                == 2
+        });
+        let second = format!(
+            "{SNAPSHOT}\n\n<read-files>\na.rs\nc.rs\nshot.png\n</read-files>\n\n<modified-files>\nb.md\n</modified-files>"
+        );
+        assert_eq!(
+            session.trunk(),
+            crate::meditation::render::refill(&template().messages, &second),
+            "the earlier refill's lists gathered in"
+        );
+        tidy(&[&tree, &recording]);
     }
 
     /// #936: under a native summary, a window meditation inside a turn waits
