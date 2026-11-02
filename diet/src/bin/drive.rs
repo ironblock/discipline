@@ -1128,8 +1128,29 @@ fn serve(args: &[String]) -> ExitCode {
         Err(why) => return fail(EXIT_INPUT, &why),
     };
     // Each request's output cap is clamped to the room its prompt leaves in
-    // this window (#588); the record's lever says whether it was.
-    let window = confirmed.as_ref().and_then(|confirmed| confirmed.window);
+    // this window (#588); the record's lever says whether it was. A window
+    // the regimen declares is in force below the served one (#1008), and
+    // everything the window sizes -- the automatic meditation's line, the
+    // native reserve, a fork's room, the output fit -- is sized from it.
+    let declared = read_at_start
+        .as_ref()
+        .and_then(|read| read.context_window.as_ref());
+    let (window, in_force_word) = diet::drive::served::in_force(
+        declared.map(|(tokens, _)| *tokens),
+        confirmed.as_ref().and_then(|confirmed| confirmed.window),
+    );
+    // The derived meditations read their window when the regimen was read;
+    // a declared one is read again against the window in force.
+    if let (Some((_, text)), Some(interview)) = (declared, interview.as_mut()) {
+        let read = regimen::parse(text).map_err(|why| format!("{why:?}"));
+        match read.and_then(|read| {
+            diet::meditation::policy::Served::from_regimen(&read, window.map(|(tokens, _)| tokens))
+                .map_err(|why| why.to_string())
+        }) {
+            Ok(meditations) => interview.meditations = meditations,
+            Err(why) => return fail(EXIT_INPUT, &why),
+        }
+    }
     // The interview's role (#599): a role but `user` runs only where the
     // served template renders it, refused before anything binds -- the
     // offboard seat's template when forks go there, else the trunk's.
@@ -1179,6 +1200,9 @@ fn serve(args: &[String]) -> ExitCode {
                 }
                 None => word.push_str(":unclamped"),
             });
+        if let Some(word) = in_force_word {
+            levers.insert(diet::drive::served::CONTEXT_WINDOW.to_owned(), word);
+        }
     }
     let registry_sha256 = diet::drive::registry::registry_sha256();
     let claim = substrate.zip(engine.as_ref()).map(|(id, passed)| {
@@ -2359,6 +2383,10 @@ struct ReadAtStart {
     output_cap: (u32, &'static str),
     /// How long a streamed call may go silent (#569); `None` for unbounded.
     stream_idle: Option<std::time::Duration>,
+    /// The context window the regimen declares (#1008), and its text, from
+    /// which the derived meditations are read again against the window in
+    /// force.
+    context_window: Option<(u64, String)>,
 }
 
 /// Project the ended session, check the record reads back, and write it and
@@ -2789,6 +2817,9 @@ fn registered_regime(
         regimen::parse(&text).map_err(|why| format!("{path} is not a regimen: {why:?}"))?;
     let stream_idle = diet::drive::regimen::stream_idle(Some(&regimen))
         .map_err(|why| format!("{path}: {why}"))?;
+    let context_window = diet::drive::served::declared_window(&regimen)
+        .map_err(|why| format!("{path}: {why}"))?
+        .map(|tokens| (tokens, text.clone()));
     diet::drive::regimen::regime_registered(&regimen, registry())
         .map(|regime| {
             let output_cap = diet::drive::regimen::output_cap(flag, Some(&regimen));
@@ -2801,6 +2832,7 @@ fn registered_regime(
                     levers,
                     output_cap,
                     stream_idle,
+                    context_window,
                 },
             )
         })

@@ -758,6 +758,16 @@ pub fn serve_levers(regimen: &Regimen, output_cap: (u32, &str)) -> BTreeMap<Stri
                 .map_or_else(|_| undeclared(), |state| state.tag().to_owned()),
         ),
         // #948: the parts a sealed session seals, and the notice it is told:
+        // #1008: the context window the regimen declares, `none` when it
+        // declares none; serve's start line puts the window in force and
+        // the served one beside it.
+        (
+            crate::drive::served::CONTEXT_WINDOW.to_owned(),
+            crate::drive::served::declared_window(regimen).map_or_else(
+                |_| undeclared(),
+                |declared| declared.map_or_else(|| "none".to_owned(), |tokens| tokens.to_string()),
+            ),
+        ),
         // `none` outside a sealed session.
         (
             "sealed".to_owned(),
