@@ -744,12 +744,17 @@ pub fn serve_levers(regimen: &Regimen, output_cap: (u32, &str)) -> BTreeMap<Stri
             meditation_work_lever(regimen, crate::meditation::policy::MEDITATION_WARM),
         ),
         ("reconcile_gate".to_owned(), reconcile_gate_lever(regimen)),
-        // #936: what a meditation's refill carries.
+        // #936: what a meditation's refill carries; a native one names its
+        // layout (#1009): the summary, then the restored files, with no
+        // acknowledgement between them, as runs before it had.
         (
             "meditation_carry".to_owned(),
-            crate::meditation::policy::meditation_carry(regimen)
-                .tag()
-                .to_owned(),
+            match crate::meditation::policy::meditation_carry(regimen) {
+                carry @ crate::formats::log::MeditationCarry::NativeSummary => {
+                    format!("{}:summary+restored", carry.tag())
+                }
+                carry => carry.tag().to_owned(),
+            },
         ),
         // #948: what a declared meditation does to its session.
         (
@@ -1594,6 +1599,25 @@ mod tests {
 
     /// Background commands (#614) are on unless the regimen turns them
     /// off, and undeclared where it runs no commands.
+    #[test]
+    fn the_meditation_carry_lever_names_the_native_layout() {
+        // #1009: a native refill is the summary, then the restored files: no
+        // acknowledgement. Runs before it read `native_summary` alone, with
+        // Qwen Code's acknowledgement between the two.
+        let lever = |text: &str| {
+            serve_levers(&regimen::parse(text).expect("a regimen"), (8192, "default"))
+                .get("meditation_carry")
+                .cloned()
+                .unwrap_or_default()
+        };
+        assert_eq!(
+            lever("meditation_carry = \"native_summary\"\n"),
+            "native_summary:summary+restored"
+        );
+        assert_eq!(lever("meditation_carry = \"render\"\n"), "render");
+        assert_eq!(lever(""), "render");
+    }
+
     #[test]
     fn the_background_commands_lever_is_on_unless_turned_off() {
         let lever = |text: &str| {

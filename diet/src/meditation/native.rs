@@ -5,8 +5,8 @@
 //!
 //! The vote (Pi `v1.3.0`, `OpenCode` 2 `v2.0.32`, Qwen Code `v0.25.3`; Qwen
 //! Code breaks a tie) is in `docs/harness-baseline.md`. The three differ on
-//! the prompt, how the history is shown, the output cap, tools and what rides
-//! beside the summary, so each is Qwen Code's:
+//! the prompt, how the history is shown, the output cap and tools, so each
+//! is Qwen Code's; what rides beside the summary is voted item by item:
 //!
 //! - **The request:** the compression prompt as the system message
 //!   (`qc:packages/core/src/core/prompts.ts:925-971`), the history as
@@ -20,13 +20,41 @@
 //!   An empty one is a failure (`:563-571`). It rides in our refill message
 //!   (#597): Pi and `OpenCode` 2 agree on a user message in `<summary>`
 //!   tags, so Qwen Code's trailer is not added.
-//! - **Beside it** (`postCompactAttachments.ts:800-882`): the model's
-//!   acknowledgement, verbatim; then, when there are any, one user message
-//!   holding the files the model's file tools last touched (at most 5,
-//!   each embedded whole up to 5,000 tokens, within a 50,000-token budget,
-//!   else listed by path) and the last 3 images. Qwen Code's plan-mode
-//!   reminder and running-subagent list are not carried: this harness has
-//!   neither.
+//! - **Beside it**, voted item by item (#1009; the earlier vote took it as
+//!   one bundle, which the three differed on, so Qwen Code's whole bundle
+//!   was carried). Each item at the pinned tags:
+//!   - **The acknowledgement: none.** Pi sends none: its rebuilt context is
+//!     the summary, then the kept entries (`pi:…/core/session-manager.ts:499-511`).
+//!     `OpenCode` 2 sends none: after an automatic compaction the runner goes
+//!     on to the next request (`oc:packages/core/src/session/runner/llm.ts:220-225`).
+//!     Qwen Code alone adds "Got it. Thanks for the additional context!"
+//!     (`qc:…/postCompactAttachments.ts:856-858`). Pi and `OpenCode` 2 agree.
+//!   - **The restored files: voted, not applied (the maintainer's call).**
+//!     Pi and `OpenCode` 2 agree on no file contents, only paths: Pi appends
+//!     `<read-files>`/`<modified-files>` lists to the summary
+//!     (`pi:…/compaction/compaction.ts:1056-1058`, `utils.ts:77-87`), and
+//!     `OpenCode` 2's summary template has a "Relevant Files" section of at
+//!     most 15 (`oc:packages/core/src/session/compaction.ts:129-131`). They
+//!     differ on how the paths get there, and Qwen Code, which embeds the
+//!     contents, breaks that tie toward neither. Until ruled, the native arm
+//!     keeps Qwen Code's: one user message holding the files the model's
+//!     file tools last touched (at most 5, each embedded whole up to 5,000
+//!     tokens, within a 50,000-token budget, else listed by path) and the
+//!     last 3 images (`qc:…/postCompactAttachments.ts:58-60,385-428`).
+//!   - **The kept recent turns: voted, not applied (the maintainer's call).**
+//!     Pi keeps them as messages, 20,000 tokens by default
+//!     (`pi:…/compaction/compaction.ts:126-130,802-829`); `OpenCode` 2 as
+//!     text inside its checkpoint, 15,000 by default
+//!     (`oc:packages/core/src/session/compaction.ts:197,704-811`); Qwen Code
+//!     keeps none (`qc:…/chatCompressionService.ts:570-574`). Pi and
+//!     `OpenCode` 2 agree on a tail and not on its form, which Qwen Code
+//!     cannot break. Until ruled, the compaction depth lever
+//!     (`meditation_tail_tokens`) decides, total by default.
+//!
+//!   Qwen Code's plan-mode reminder and running-subagent list are not
+//!   carried: this harness has neither. The start line's `meditation_carry`
+//!   lever names the layout, `native_summary:summary+restored`; runs before
+//!   #1009 read `native_summary` alone, with the acknowledgement between.
 
 use std::path::Path;
 
@@ -42,10 +70,6 @@ pub const PROMPT: &str = crate::dogma::compaction::QWEN_CODE;
 /// (`qc:packages/core/src/services/chatCompressionService.ts:100-101`).
 pub const DIRECTIVE: &str =
     "First, reason in your <analysis> block. Then, produce the <state_snapshot> XML.";
-
-/// The model's acknowledgement after the summary
-/// (`qc:packages/core/src/services/postCompactAttachments.ts:857`).
-pub const ACK: &str = "Got it. Thanks for the additional context!";
 
 /// The summary's output cap (`chatCompressionService.ts:58`).
 pub const OUTPUT_CAP: u64 = 20_000;
