@@ -1597,13 +1597,11 @@ mod tests {
         );
     }
 
-    /// Background commands (#614) are on unless the regimen turns them
-    /// off, and undeclared where it runs no commands.
+    /// #1009: a native refill is the summary, then the restored files: no
+    /// acknowledgement. Runs before it read `native_summary` alone, with
+    /// Qwen Code's acknowledgement between the two.
     #[test]
     fn the_meditation_carry_lever_names_the_native_layout() {
-        // #1009: a native refill is the summary, then the restored files: no
-        // acknowledgement. Runs before it read `native_summary` alone, with
-        // Qwen Code's acknowledgement between the two.
         let lever = |text: &str| {
             serve_levers(&regimen::parse(text).expect("a regimen"), (8192, "default"))
                 .get("meditation_carry")
@@ -1618,6 +1616,8 @@ mod tests {
         assert_eq!(lever(""), "render");
     }
 
+    /// Background commands (#614) are on unless the regimen turns them
+    /// off, and undeclared where it runs no commands.
     #[test]
     fn the_background_commands_lever_is_on_unless_turned_off() {
         let lever = |text: &str| {
