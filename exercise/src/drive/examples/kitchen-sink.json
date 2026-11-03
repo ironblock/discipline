@@ -15,7 +15,7 @@
     {
       "approvals_off": true,
       "bash_timeout_ms": 120000,
-      "build_commit": "911ff7f73ffea3e01df3cf16446f591eb5d99002",
+      "build_commit": "8d3c31e39a369ea5b7b0807ddd996c5c7af64997",
       "build_dirty": false,
       "compaction_persists": true,
       "fork_asks": "v4",
@@ -74,6 +74,7 @@
         "refill_session": "same",
         "refutation_interview": "on:failed-cooldown-3-steps:default:operator-cooldown-112-steps:candidates-8:default",
         "render_budget": "120:tier",
+        "sandbox_secrets": "unset",
         "sealed": "none",
         "sealed_notice": "none",
         "self_capture": "on:every:3:c1:1726eab1c3bd4722",
@@ -89,7 +90,7 @@
       },
       "model": "scenario",
       "notes_in_the_ask": true,
-      "opened": 1793653878070,
+      "opened": 1793672494545,
       "opening_phase": "plan",
       "phase_document": {
         "digest": "c3c3afe17657994b1403ed749e7352bdf4ad1eb47c688b6e60bb0e122db95e8e",
