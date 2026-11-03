@@ -27,6 +27,7 @@ import answeredTurn from '../../../diet/formats/log/fixtures/valid/an-answered-t
 import meditationReconciles from '../../../diet/formats/log/fixtures/valid/a-v8-meditation-right-after-a-meditation-audits-its-refill.jsonl?raw';
 import toolCallRan from '../../../diet/formats/log/fixtures/valid/a-v3-tool-call-that-ran.jsonl?raw';
 import forks from '../../../diet/formats/log/fixtures/valid/a-v5-scoping-fork-that-patched-and-a-read-fork-that-declined.jsonl?raw';
+import gestures from '../../../diet/formats/log/fixtures/valid/a-v32-operator-keep-fork-and-shadow.jsonl?raw';
 import { App } from '../App.tsx';
 import { respelled } from '../drive/spelling.ts';
 import { tokens } from '../ui/format.ts';
@@ -1060,6 +1061,66 @@ export const ServedOperableByName: Story = {
     posted.length = 0;
     await userEvent.keyboard('{Enter}');
     await waitFor(async () => expect(posted).toEqual([{ kind: 'flag-entry', id, note: 'check with the team' }]));
+  },
+};
+
+/** A block's corner action, as a person reaches it by keyboard: focused, which shows the corner (a synthetic hover sets no
+ * :hover), then clicked. */
+async function cornerClick(button: HTMLElement) {
+  button.focus();
+  await userEvent.click(button);
+}
+
+/** `?drive` (#1021): the operator forks at a step -- a pinned ask, its text shown, or their own words -- and the picker
+ * closes on the post. */
+export const ServedForkAtAStep: Story = {
+  name: '?drive: fork at a step with a pinned ask or your own words',
+  args: { drive: true, web: posting(gestures) },
+  play: async ({ canvasElement }) => {
+    const page = within(canvasElement.ownerDocument.body);
+    await cornerClick(await page.findByRole('button', { name: 'Fork at step 7' }));
+    const pinned = page.getByRole('button', { name: 'Fork at step 7 asking GOTCHAS' });
+    // What it sends is shown beside its name.
+    await expect(pinned.textContent).toContain('Pause.');
+    posted.length = 0;
+    await userEvent.click(pinned);
+    await waitFor(async () => expect(posted).toEqual([{ kind: 'fork', at: 9, ask: 'GOTCHAS' }]));
+    await waitFor(async () => expect(page.queryByRole('button', { name: 'Fork at step 7 asking GOTCHAS' })).toBeNull());
+    await cornerClick(page.getByRole('button', { name: 'Fork at step 7' }));
+    await userEvent.type(page.getByRole('textbox', { name: 'Your own question at step 7' }), 'Why two tables?');
+    posted.length = 0;
+    await userEvent.keyboard('{Enter}');
+    await waitFor(async () => expect(posted).toEqual([{ kind: 'fork', at: 9, text: 'Why two tables?' }]));
+  },
+};
+
+/** `?drive` (#1021): the operator keeps an exact span of a tool result from its logged text, tagged, and the view closes;
+ * a shadow warrant's would-be fork shows quietly on its step. */
+export const ServedKeepFromTheRawText: Story = {
+  name: '?drive: keep an exact span from the logged text, and see where a shadow would have forked',
+  args: { drive: true, web: posting(gestures) },
+  play: async ({ canvasElement }) => {
+    const page = within(canvasElement.ownerDocument.body);
+    await expect(await page.findByText('would fork · read → finding')).toBeTruthy();
+    await cornerClick(page.getByRole('button', { name: 'Keep from call call-1' }));
+    const raw = page.getByLabelText('What call call-1 logged');
+    await expect(raw.textContent).toBe('a note\n');
+    // Select "a note" in the raw view, as a person would.
+    const text = raw.firstChild!;
+    const range = document.createRange();
+    range.setStart(text, 0);
+    range.setEnd(text, 'a note'.length);
+    const selection = window.getSelection()!;
+    selection.removeAllRanges();
+    selection.addRange(range);
+    await userEvent.type(page.getByRole('textbox', { name: 'Tag for the keep from call call-1' }), 'notes');
+    // Typing moved the selection into the tag field: select the span again, then keep it.
+    selection.removeAllRanges();
+    selection.addRange(range);
+    posted.length = 0;
+    await userEvent.click(page.getByRole('button', { name: 'Keep the selection from call call-1' }));
+    await waitFor(async () => expect(posted).toEqual([{ kind: 'keep', from: 6, span: 'a note', tag: 'notes' }]));
+    await waitFor(async () => expect(page.queryByLabelText('What call call-1 logged')).toBeNull());
   },
 };
 

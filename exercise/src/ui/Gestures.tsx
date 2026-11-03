@@ -1,10 +1,10 @@
 import { createContext, useContext, useEffect, useRef, useState } from 'react';
 import type { FormEvent, KeyboardEvent } from 'react';
 
-import { FORK_ASKS } from '../../../diet/dogma/fork-asks.ts';
 import type { ForkAsk } from '../../../diet/dogma/fork-asks.ts';
 import type { Ack, Command } from '../drive/transport.ts';
 import type { LoggedText, Shadowed } from '../session/fold.ts';
+import { pickerAsks } from './forkAsks.ts';
 import { refusalOf } from './sets.ts';
 import './gestures.css';
 
@@ -16,15 +16,6 @@ export const GestureContext = createContext<((command: Command) => Promise<Ack>)
 
 export function useGestures(): ((command: Command) => Promise<Ack>) | undefined {
   return useContext(GestureContext);
-}
-
-/** The pinned asks the picker shows first (Dispatch's ruling, 2026-11-03); the rest are under "more". */
-const FIRST = ['GOTCHAS', 'DECISIONS', 'CONSTRAINTS', 'OPEN_NEXT', 'RATIONALE'];
-
-/** The pinned asks, split: those first, in that order, then the rest in the dogma's. */
-export function pickerAsks(asks: readonly ForkAsk[] = FORK_ASKS): { readonly first: readonly ForkAsk[]; readonly more: readonly ForkAsk[] } {
-  const first = FIRST.flatMap((name) => asks.filter((ask) => ask.name === name));
-  return { first, more: asks.filter((ask) => !FIRST.includes(ask.name)) };
 }
 
 /** What a refused gesture says: its label, and the entry a refusal names. */
