@@ -268,6 +268,19 @@
 //! log that declares 28 or less and carries it is refused. For a reader of
 //! earlier logs, the migration is nothing: no session declared one.
 //!
+//! v32 (#1021) carries the operator's gestures and the shadow warrants,
+//! under manual first. The commands `keep` (a span of a logged line, kept
+//! as the operator's entry) and `fork` (the operator's fork at a step, a
+//! tool result or the trunk's end), and their refusals `not-a-source`,
+//! `not-in-source`, `no-working-memory`, `not-on-the-trunk` and
+//! `not-a-pinned-ask`. A fork's `why` may be `operator`: on `interview`,
+//! at an answered trunk request the latest meditation did not replace, cut,
+//! when it names one, at a `tool_call` of that turn; it answers to no gap.
+//! And `fork.shadowed`, a fork a shadow warrant would have cut, never sent:
+//! its turn, the trunk request at it, the warrant, the trigger and the ask.
+//! Each is refused in a log that declares 31 or less. For a reader of
+//! earlier logs, the migration is nothing: no session wrote them.
+//!
 //! v31 (#1016) names who vouches for a self-capture note. Under contract
 //! set c3 a `patch`'s entry may carry `authority`: `observed` when the
 //! note's evidence quote was found verbatim in what the model observed that
@@ -364,12 +377,12 @@ use super::record::vocabulary;
 struct LogParser;
 
 /// The version this module writes, as `session.start` states it.
-pub const VERSION: i64 = 31;
+pub const VERSION: i64 = 32;
 
 /// Every version this module reads.
 pub const READS: &[i64] = &[
     0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25,
-    26, 27, 28, 29, 30, 31,
+    26, 27, 28, 29, 30, 31, 32,
 ];
 
 /// How recent an input event must be, at the moment a turn settles, for the
@@ -10044,16 +10057,16 @@ mod tests {
         assert!(refused.why.contains("v8"), "{refused}");
     }
 
-    /// #583, #878, #904, #555, #931, #936, #910, #942, #926, #932, #948, #971, #1016: this module
-    /// writes v31.
+    /// #583, #878, #904, #555, #931, #936, #910, #942, #926, #932, #948, #971, #1016, #1021: this
+    /// module writes v32.
     #[test]
-    fn this_module_writes_v31_and_reads_every_version_before_it() {
-        assert_eq!(super::VERSION, 31);
+    fn this_module_writes_v32_and_reads_every_version_before_it() {
+        assert_eq!(super::VERSION, 32);
         assert_eq!(
             super::READS,
             &[
                 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22,
-                23, 24, 25, 26, 27, 28, 29, 30, 31
+                23, 24, 25, 26, 27, 28, 29, 30, 31, 32
             ]
         );
     }
@@ -12134,7 +12147,7 @@ mod tests {
             tags(Kind::ALL.iter().map(|it| it.tag()).collect()),
             "session.start ask settlement request refused delta stop.asked response \
              cancelled request.failed turn.settled idle.gap progress tool_call fork \
-             fork.settled patch meditation delivered recalled flag meditation.held patch.refused pruned phase.ruled phase.proposed phase.answered phase.started tangent.open tangent.close capture reminded background.ended notice timeout.near fork.skipped phase.noted trunk.clamped trunk.waited warrant.gated request.retried grade meditation.skipped"
+             fork.settled patch meditation delivered recalled flag meditation.held patch.refused pruned phase.ruled phase.proposed phase.answered phase.started tangent.open tangent.close capture reminded background.ended notice timeout.near fork.skipped fork.shadowed phase.noted trunk.clamped trunk.waited warrant.gated request.retried grade meditation.skipped"
         );
         assert_eq!(
             tags(FailReason::ALL.iter().map(|it| it.tag()).collect()),
@@ -12143,7 +12156,7 @@ mod tests {
         assert_eq!(
             tags(Refusal::ALL.iter().map(|it| it.tag()).collect()),
             "in-flight ended nothing-in-flight meditation-not-built nothing-to-meditate no-phase-graph not-a-phase \
-             already-in-phase no-phase-edge stale tangent-open no-tangent bad-tangent not-the-scope nothing-running no-proposal unknown-entry not-live empty meditation-held nothing-held restates not-unilateral already-asked proposal-pending no-vision api-cap"
+             already-in-phase no-phase-edge stale tangent-open no-tangent bad-tangent not-the-scope nothing-running no-proposal unknown-entry not-live empty meditation-held nothing-held restates not-unilateral already-asked proposal-pending no-vision api-cap not-a-source not-in-source no-working-memory not-on-the-trunk not-a-pinned-ask"
         );
         assert_eq!(
             tags(SettleReason::ALL.iter().map(|it| it.tag()).collect()),
@@ -12171,7 +12184,7 @@ mod tests {
         );
         assert_eq!(
             tags(Warrant::ALL.iter().map(|it| it.tag()).collect()),
-            "read scoping meditation evidence trouble open refutation"
+            "read scoping meditation evidence trouble open refutation operator"
         );
         assert_eq!(
             tags(ForkOutcome::ALL.iter().map(|it| it.tag()).collect()),

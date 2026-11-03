@@ -19543,12 +19543,12 @@ pub(in crate::drive) mod tests {
                     .collect::<Vec<_>>()
             ),
             "ask cancel declare-meditation end open-tangent close-tangent background ratify-phase \
-             edit-entry flag-entry refill-anyway start-phase propose-phase move-phase grade"
+             edit-entry flag-entry refill-anyway start-phase propose-phase move-phase grade keep fork"
         );
         assert_eq!(
             tags(&Refusal::ALL.iter().map(|it| it.tag()).collect::<Vec<_>>()),
             "in-flight ended nothing-in-flight nothing-to-meditate no-phase-graph not-a-phase \
-             already-in-phase no-phase-edge stale tangent-open no-tangent bad-tangent not-the-scope nothing-running no-proposal unknown-entry not-live empty meditation-held nothing-held restates not-unilateral already-asked proposal-pending no-vision api-cap"
+             already-in-phase no-phase-edge stale tangent-open no-tangent bad-tangent not-the-scope nothing-running no-proposal unknown-entry not-live empty meditation-held nothing-held restates not-unilateral already-asked proposal-pending no-vision api-cap not-a-source not-in-source no-working-memory not-on-the-trunk not-a-pinned-ask"
         );
         assert_eq!(
             tags(
@@ -27850,6 +27850,7 @@ pub(in crate::drive) mod tests {
                 .any(|logged| matches!(logged.event, Event::Forked { .. })),
             "a shadow fires nothing"
         );
+        reads_whole(&session);
         tidy(&[&tree]);
     }
 
@@ -27873,6 +27874,47 @@ pub(in crate::drive) mod tests {
                 "{word}"
             );
         }
+    }
+
+    /// #1021, #1022: a fork's answer keeps as it was written, its trailer
+    /// too -- what trails a fork's last field reaches nothing else.
+    #[test]
+    fn a_keep_takes_a_span_of_a_fork_answers_trailer() {
+        let session = Session::open_with(
+            Canned::new([deltas(&["The schema has two tables."])]),
+            template(),
+            None,
+            None,
+            None,
+            Some(interviewing(&[])),
+        )
+        .forking_through(Canned::new([deltas(&[
+            "DECISION: two tables\nPLAN: NONE\n\nThe orders table needs an index on user_id.",
+        ])]));
+        session.ask("what is the schema?", None).expect("accepted");
+        wait_until(&session, "the turn", settled);
+        let fork = session
+            .fork(None, &OperatorAsk::Text("What else?".to_owned()))
+            .expect("forked");
+        let log = wait_until(&session, "the fork's answer", |log| {
+            !fork_outcomes(log).is_empty() && settled(log)
+        });
+        let request = seq_of(
+            &log,
+            |event| matches!(event, Event::Requested { fork: Some(forked), .. } if *forked == fork),
+        );
+        let answered = seq_of(
+            &log,
+            |event| matches!(event, Event::Answered { request: to, .. } if *to == request),
+        );
+        session
+            .keep(
+                answered,
+                "The orders table needs an index on user_id.",
+                None,
+            )
+            .expect("kept");
+        reads_whole(&session);
     }
 
     /// #1021: a fork is refused while a turn is in flight, and at a line a
