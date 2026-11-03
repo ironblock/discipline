@@ -2004,6 +2004,45 @@ mod tests {
         }
     }
 
+    /// #1021: `keep` takes the line's seq, the span and an optional tag;
+    /// `fork` an optional seq and exactly one of a pinned ask's name or the
+    /// operator's words; a stray key, both asks or neither is no command.
+    #[test]
+    fn the_operators_keep_and_fork_read_their_line_and_ask_and_nothing_else() {
+        use crate::drive::session::OperatorAsk;
+        let read = |body: &str| {
+            let object = crate::formats::record::json::line(body).expect("an object");
+            Command::from_object(&object).map(|posted| posted.command)
+        };
+        assert!(matches!(
+            read(r#"{"kind":"keep","from":7,"span":"two tables","tag":"schema"}"#),
+            Some(Command::Keep(7, span, Some(tag))) if span == "two tables" && tag == "schema"
+        ));
+        assert!(matches!(
+            read(r#"{"kind":"keep","from":7,"span":"two tables"}"#),
+            Some(Command::Keep(7, _, None))
+        ));
+        assert!(matches!(
+            read(r#"{"kind":"fork","at":9,"ask":"GOTCHAS"}"#),
+            Some(Command::Fork(Some(9), OperatorAsk::Pinned(name))) if name == "GOTCHAS"
+        ));
+        assert!(matches!(
+            read(r#"{"kind":"fork","text":"Why two tables?"}"#),
+            Some(Command::Fork(None, OperatorAsk::Text(text))) if text == "Why two tables?"
+        ));
+        for refused in [
+            r#"{"kind":"keep","span":"x"}"#,
+            r#"{"kind":"keep","from":-1,"span":"x"}"#,
+            r#"{"kind":"keep","from":7,"span":"x","note":"y"}"#,
+            r#"{"kind":"fork"}"#,
+            r#"{"kind":"fork","ask":"GOTCHAS","text":"x"}"#,
+            r#"{"kind":"fork","at":"9","text":"x"}"#,
+            r#"{"kind":"fork","text":"x","idle_gap":{}}"#,
+        ] {
+            assert!(read(refused).is_none(), "{refused}");
+        }
+    }
+
     /// #150: `edit-entry` takes the entry and its new content, `flag-entry`
     /// the entry and the operator's note; a missing key, a stray one or an
     /// idle gap is no command.

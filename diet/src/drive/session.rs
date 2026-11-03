@@ -27875,6 +27875,64 @@ pub(in crate::drive) mod tests {
         }
     }
 
+    /// #1021: a fork is refused while a turn is in flight, and at a line a
+    /// meditation has since replaced on the trunk; the operator's kept
+    /// entry rides the refill.
+    #[test]
+    fn the_operators_fork_waits_for_the_turn_and_a_meditation_replaces_its_line() {
+        let tree = scratch("operator-fork-after-a-meditation");
+        std::fs::write(tree.join("notes.md"), "port 5182 is free\n").expect("a note");
+        let gate = Gate::new();
+        let session = Session::open_with(
+            Canned::new(vec![
+                vec![bash("call-1", "cat notes.md")],
+                vec![Step::Hold(gate.clone()), Step::Delta("Read it.".to_owned())],
+                deltas(&["Next."]),
+            ]),
+            looping(),
+            None,
+            Some(tools(
+                Confinement::Unconfined,
+                &tree,
+                &["cat"],
+                None,
+                Decider::Decline,
+            )),
+            None,
+            Some(interviewing(&[])),
+        )
+        .forking_through(Canned::new(Vec::<Vec<Step>>::new()));
+        session.ask("look", None).expect("accepted");
+        wait_until(&session, "the call", |log| {
+            log.iter()
+                .any(|logged| matches!(logged.event, Event::ToolCalled(_)))
+        });
+        assert!(matches!(
+            session.fork(None, &OperatorAsk::Text("why?".to_owned())),
+            Err(Rejected::Refused(Refusal::InFlight))
+        ));
+        gate.open();
+        let log = wait_until(&session, "the turn", settled);
+        let called = seq_of(&log, |event| matches!(event, Event::ToolCalled(_)));
+        session
+            .keep(called, "port 5182 is free", None)
+            .expect("kept");
+        session.declare_meditation(None).expect("admitted");
+        wait_until(&session, "the meditation", meditated);
+        assert!(matches!(
+            session.fork(Some(called), &OperatorAsk::Text("why?".to_owned())),
+            Err(Rejected::Refused(Refusal::NotOnTheTrunk))
+        ));
+        assert!(
+            session
+                .trunk()
+                .iter()
+                .any(|message| message.content.contains("port 5182 is free")),
+            "the kept entry rides the refill"
+        );
+        tidy(&[&tree]);
+    }
+
     /// A session with self-capture on, every `every` silent turns, and the
     /// contract's tools declared, playing `acts`.
     fn self_capturing(acts: Vec<Vec<Step>>, every: u32) -> Session<Canned> {
