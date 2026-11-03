@@ -15,7 +15,7 @@
     {
       "approvals_off": true,
       "bash_timeout_ms": 120000,
-      "build_commit": "d57fe6d316ac419312ce73ccbf27792dffe6bb90",
+      "build_commit": "30444c229796653580746b68cb943a3d5aabdf34",
       "build_dirty": false,
       "compaction_persists": true,
       "fork_asks": "v4",
@@ -91,7 +91,7 @@
       },
       "model": "scenario",
       "notes_in_the_ask": true,
-      "opened": 1793698479356,
+      "opened": 1793701265214,
       "opening_phase": "plan",
       "phase_document": {
         "digest": "c3c3afe17657994b1403ed749e7352bdf4ad1eb47c688b6e60bb0e122db95e8e",
@@ -183,7 +183,7 @@
         "propose_phase_transition",
         "refute_beliefs"
       ],
-      "version": 32
+      "version": 33
     },
     {
       "kind": "phase.started",
@@ -437,6 +437,18 @@
       "fork": 16,
       "kind": "fork.settled",
       "outcome": "value",
+      "passed_over": [
+        {
+          "tag": "EVIDENCE:",
+          "text": "NONE",
+          "why": "declined"
+        },
+        {
+          "tag": "STUCK:",
+          "text": "NONE",
+          "why": "declined"
+        }
+      ],
       "seq": 21,
       "t": 9899
     },
@@ -605,6 +617,13 @@
       "fork": 31,
       "kind": "fork.settled",
       "outcome": "value",
+      "passed_over": [
+        {
+          "tag": "SUPERSEDE:",
+          "text": "NONE",
+          "why": "declined"
+        }
+      ],
       "seq": 35,
       "t": 10804
     },
@@ -852,6 +871,13 @@
       "fork": 51,
       "kind": "fork.settled",
       "outcome": "value",
+      "passed_over": [
+        {
+          "tag": "STUCK:",
+          "text": "NONE",
+          "why": "declined"
+        }
+      ],
       "seq": 56,
       "t": 17901
     },
@@ -1067,6 +1093,23 @@
       "fork": 68,
       "kind": "fork.settled",
       "outcome": "decline",
+      "passed_over": [
+        {
+          "tag": "LEARNED:",
+          "text": "NONE",
+          "why": "declined"
+        },
+        {
+          "tag": "EVIDENCE:",
+          "text": "NONE",
+          "why": "declined"
+        },
+        {
+          "tag": "STUCK:",
+          "text": "NONE",
+          "why": "declined"
+        }
+      ],
       "seq": 73,
       "t": 19392
     },
@@ -1260,6 +1303,13 @@
       "fork": 83,
       "kind": "fork.settled",
       "outcome": "value",
+      "passed_over": [
+        {
+          "tag": "STUCK:",
+          "text": "NONE",
+          "why": "declined"
+        }
+      ],
       "seq": 88,
       "t": 20698
     },
@@ -1821,6 +1871,23 @@
       "fork": 123,
       "kind": "fork.settled",
       "outcome": "decline",
+      "passed_over": [
+        {
+          "tag": "API_SURFACE:",
+          "text": "NONE",
+          "why": "declined"
+        },
+        {
+          "tag": "LEARNED:",
+          "text": "NONE",
+          "why": "declined"
+        },
+        {
+          "tag": "STUCK:",
+          "text": "NONE",
+          "why": "declined"
+        }
+      ],
       "seq": 128,
       "t": 27062
     },
@@ -2932,6 +2999,23 @@
       "fork": 207,
       "kind": "fork.settled",
       "outcome": "decline",
+      "passed_over": [
+        {
+          "tag": "LEARNED:",
+          "text": "NONE",
+          "why": "declined"
+        },
+        {
+          "tag": "EVIDENCE:",
+          "text": "NONE",
+          "why": "declined"
+        },
+        {
+          "tag": "STUCK:",
+          "text": "NONE",
+          "why": "declined"
+        }
+      ],
       "seq": 212,
       "t": 43464
     },
@@ -3061,6 +3145,12 @@
       "fork": 219,
       "kind": "fork.settled",
       "outcome": "decline",
+      "passed_over": [
+        {
+          "text": "NONE",
+          "why": "untagged"
+        }
+      ],
       "seq": 223,
       "t": 44494
     },
@@ -3120,6 +3210,12 @@
       "fork": 224,
       "kind": "fork.settled",
       "outcome": "decline",
+      "passed_over": [
+        {
+          "text": "NONE",
+          "why": "untagged"
+        }
+      ],
       "seq": 228,
       "t": 44769
     },
@@ -3887,6 +3983,23 @@
       "fork": 280,
       "kind": "fork.settled",
       "outcome": "decline",
+      "passed_over": [
+        {
+          "tag": "LEARNED:",
+          "text": "NONE",
+          "why": "declined"
+        },
+        {
+          "tag": "EVIDENCE:",
+          "text": "NONE",
+          "why": "declined"
+        },
+        {
+          "tag": "STUCK:",
+          "text": "NONE",
+          "why": "declined"
+        }
+      ],
       "seq": 285,
       "t": 53362
     },
@@ -4550,6 +4663,23 @@
       "fork": 327,
       "kind": "fork.settled",
       "outcome": "decline",
+      "passed_over": [
+        {
+          "tag": "LEARNED:",
+          "text": "NONE",
+          "why": "declined"
+        },
+        {
+          "tag": "EVIDENCE:",
+          "text": "NONE",
+          "why": "declined"
+        },
+        {
+          "tag": "STUCK:",
+          "text": "NONE",
+          "why": "declined"
+        }
+      ],
       "seq": 332,
       "t": 60541
     },
@@ -6338,6 +6468,23 @@
       "fork": 461,
       "kind": "fork.settled",
       "outcome": "decline",
+      "passed_over": [
+        {
+          "tag": "LEARNED:",
+          "text": "NONE",
+          "why": "declined"
+        },
+        {
+          "tag": "EVIDENCE:",
+          "text": "NONE",
+          "why": "declined"
+        },
+        {
+          "tag": "STUCK:",
+          "text": "NONE",
+          "why": "declined"
+        }
+      ],
       "seq": 466,
       "t": 102492
     },
@@ -6663,6 +6810,18 @@
       "fork": 489,
       "kind": "fork.settled",
       "outcome": "value",
+      "passed_over": [
+        {
+          "tag": "DECISION:",
+          "text": "NONE",
+          "why": "declined"
+        },
+        {
+          "tag": "PLAN:",
+          "text": "NONE",
+          "why": "declined"
+        }
+      ],
       "seq": 493,
       "t": 109173
     },
@@ -7115,6 +7274,23 @@
       "fork": 523,
       "kind": "fork.settled",
       "outcome": "decline",
+      "passed_over": [
+        {
+          "tag": "LEARNED:",
+          "text": "NONE",
+          "why": "declined"
+        },
+        {
+          "tag": "EVIDENCE:",
+          "text": "NONE",
+          "why": "declined"
+        },
+        {
+          "tag": "STUCK:",
+          "text": "NONE",
+          "why": "declined"
+        }
+      ],
       "seq": 530,
       "t": 115631
     },
@@ -7587,6 +7763,23 @@
       "fork": 562,
       "kind": "fork.settled",
       "outcome": "decline",
+      "passed_over": [
+        {
+          "tag": "LEARNED:",
+          "text": "NONE",
+          "why": "declined"
+        },
+        {
+          "tag": "EVIDENCE:",
+          "text": "NONE",
+          "why": "declined"
+        },
+        {
+          "tag": "STUCK:",
+          "text": "NONE",
+          "why": "declined"
+        }
+      ],
       "seq": 567,
       "t": 124151
     },
@@ -8075,6 +8268,23 @@
       "fork": 602,
       "kind": "fork.settled",
       "outcome": "decline",
+      "passed_over": [
+        {
+          "tag": "LEARNED:",
+          "text": "NONE",
+          "why": "declined"
+        },
+        {
+          "tag": "EVIDENCE:",
+          "text": "NONE",
+          "why": "declined"
+        },
+        {
+          "tag": "STUCK:",
+          "text": "NONE",
+          "why": "declined"
+        }
+      ],
       "seq": 609,
       "t": 134368
     },
@@ -8315,6 +8525,23 @@
       "fork": 623,
       "kind": "fork.settled",
       "outcome": "decline",
+      "passed_over": [
+        {
+          "tag": "LEARNED:",
+          "text": "NONE",
+          "why": "declined"
+        },
+        {
+          "tag": "EVIDENCE:",
+          "text": "NONE",
+          "why": "declined"
+        },
+        {
+          "tag": "STUCK:",
+          "text": "NONE",
+          "why": "declined"
+        }
+      ],
       "seq": 630,
       "t": 139550
     },
@@ -8775,6 +9002,23 @@
       "fork": 663,
       "kind": "fork.settled",
       "outcome": "decline",
+      "passed_over": [
+        {
+          "tag": "LEARNED:",
+          "text": "NONE",
+          "why": "declined"
+        },
+        {
+          "tag": "EVIDENCE:",
+          "text": "NONE",
+          "why": "declined"
+        },
+        {
+          "tag": "STUCK:",
+          "text": "NONE",
+          "why": "declined"
+        }
+      ],
       "seq": 668,
       "t": 148717
     },
@@ -9320,6 +9564,12 @@
       "fork": 707,
       "kind": "fork.settled",
       "outcome": "decline",
+      "passed_over": [
+        {
+          "text": ".",
+          "why": "untagged"
+        }
+      ],
       "seq": 712,
       "t": 155557
     },
