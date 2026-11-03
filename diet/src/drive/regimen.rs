@@ -1812,6 +1812,20 @@ mod tests {
             at(&line, "step_and_output_limits"),
             "max_steps:none:default:output_cap:32768:flag"
         );
+        // Manual first (#1021): scoping alone fires, the other four shadow.
+        let manual = draft("t1-session-one-flashnext-manual.regimen.toml");
+        assert_eq!(at(&manual, "fork_warrant"), "one-per-gap-gated:scoping");
+        assert_eq!(
+            at(&manual, "interview_shadow"),
+            "shadow:read+evidence+trouble+open"
+        );
+        assert_eq!(
+            at(
+                &draft("t1-session-one-flashnext.regimen.toml"),
+                "interview_shadow"
+            ),
+            "none"
+        );
         // A regimen that says nothing still gets a table, never an error.
         let empty = serve_levers(
             &regimen::parse("").expect("an empty regimen"),
