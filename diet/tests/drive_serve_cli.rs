@@ -99,8 +99,10 @@ fn start_as(model: &str, endpoint: &str, extra: &[&str]) -> Served {
 /// [`start_with`], its requests sent as `model`.
 fn start_as_with(model: &str, endpoint: &str, extra: &[&str], env: &[(&str, &str)]) -> Served {
     let head = file_holding("head", HEAD);
+    // The operator's deny list (#1014) is the machine's, never the test's.
     let mut child = Command::new(DRIVE)
         .env_remove("ANTHROPIC_API_KEY")
+        .env_remove("DIET_SANDBOX_SECRETS")
         .envs(env.iter().copied())
         .args(["serve", "--endpoint", endpoint, "--model", model, "--head"])
         .arg(&head.0)
@@ -131,7 +133,7 @@ fn start_as_with(model: &str, endpoint: &str, extra: &[&str], env: &[(&str, &str
     Served {
         listening: announced["listening"]
             .as_str()
-            .expect("the address it listens on")
+            .unwrap_or_else(|| panic!("no address it listens on: {first}"))
             .to_owned(),
         opened: announced["opened"].as_u64().expect("when it opened"),
         substrate: announced["substrate"].as_str().map(str::to_owned),
@@ -374,11 +376,23 @@ fn run_briefly(endpoint: &str, extra: &[&str]) -> (Option<i32>, String) {
 
 /// [`run_briefly`], its requests sent as `model`.
 fn run_briefly_as(model: &str, endpoint: &str, extra: &[&str]) -> (Option<i32>, String) {
+    run_briefly_as_with(model, endpoint, extra, &[])
+}
+
+/// [`run_briefly_as`], with `env` set in the program's environment.
+fn run_briefly_as_with(
+    model: &str,
+    endpoint: &str,
+    extra: &[&str],
+    env: &[(&str, &str)],
+) -> (Option<i32>, String) {
     let head = file_holding("head", HEAD);
     // A hosted entry reads its key from here when no file is given (#555):
     // the machine's own must never decide a test.
     let mut child = Command::new(DRIVE)
         .env_remove("ANTHROPIC_API_KEY")
+        .env_remove("DIET_SANDBOX_SECRETS")
+        .envs(env.iter().copied())
         .args(["serve", "--endpoint", endpoint, "--model", model, "--head"])
         .arg(&head.0)
         .args(extra)
@@ -2563,13 +2577,32 @@ struct Drove {
 /// `--auth-file`, `--log` and `--record`; one ask, whose call waits and is
 /// answered `scope` by the operator; then `end`. Every request carries the
 /// credential.
-#[allow(clippy::too_many_lines)]
 fn drive_t1(
     first: Act,
     (top, isolation_line): (&str, &str),
     (tree, state, auth): (&Dir, &Dir, &HeadFile),
     scope: &str,
     before_the_answer: impl FnOnce(&str),
+) -> Drove {
+    drive_t1_with(
+        first,
+        (top, isolation_line),
+        (tree, state, auth),
+        scope,
+        before_the_answer,
+        &[],
+    )
+}
+
+/// [`drive_t1`], with `env` set in serve's environment.
+#[allow(clippy::too_many_lines)]
+fn drive_t1_with(
+    first: Act,
+    (top, isolation_line): (&str, &str),
+    (tree, state, auth): (&Dir, &Dir, &HeadFile),
+    scope: &str,
+    before_the_answer: impl FnOnce(&str),
+    env: &[(&str, &str)],
 ) -> Drove {
     let stub = Stub::serving_with_props(
         vec![first, Act::Raw(ANSWERED.to_vec())],
@@ -2598,7 +2631,7 @@ fn drive_t1(
             "--record",
             &record_path,
         ],
-        &[("XDG_STATE_HOME", &state_path)],
+        &[&[("XDG_STATE_HOME", state_path.as_str())], env].concat(),
     );
     let address = served.listening.clone();
     before_the_answer(&address);
@@ -5880,4 +5913,115 @@ fn a_regimens_arm_reaches_no_request() {
         .expect("the dev loop declares a sampler table last");
     let capped = format!("{before}\nmax_output_tokens = 512\n[sampler]\n{sampler}");
     assert_ne!(one_turns_bodies_under(&[], Some(&capped)), as_written);
+}
+
+/// #1014: a directly started serve denies the operator's deny list,
+/// `DIET_SANDBOX_SECRETS`, to the model's commands, as the scenario runner's
+/// `--sandbox-secret` does: under `sandbox_reads = "all"` a file under a
+/// denied path does not read; the start line counts the paths and the
+/// receipt counts them as the run's own secrets; neither names one.
+#[test]
+fn a_served_session_is_denied_the_operators_deny_list() {
+    // `sandbox_reads = "all"` is built for Seatbelt alone: on Linux serve
+    // refuses it, as the Seatbelt test above says.
+    if std::env::var_os("DIET_REQUIRE_SANDBOX").is_none() || !cfg!(target_os = "macos") {
+        eprintln!("not run: needs DIET_REQUIRE_SANDBOX on a Mac (Seatbelt)");
+        return;
+    }
+    let tree = Dir::new("deny-tree");
+    let state = Dir::new("deny-state");
+    let private = Dir::new("deny-private");
+    std::fs::write(private.0.join("solution.txt"), "operator-private-text\n").expect("written");
+    let top = "allowed_commands = []\nenv_passthrough = [\"XDG_STATE_HOME\"]\n\
+               sandbox_reads = \"all\"\n";
+    let private_path = private.path();
+    let drove = drive_t1_with(
+        a_call(&format!("cat {private_path}/solution.txt")),
+        (top, "isolation = \"sandbox\""),
+        (&tree, &state, &file_holding("auth", "author:s3cret\n")),
+        "once",
+        |_| {},
+        &[("DIET_SANDBOX_SECRETS", private_path.as_str())],
+    );
+    assert_eq!(drove.call["isolation"], "sandbox", "{}", drove.call);
+    let stdout = drove.call["stdout"].as_str().unwrap_or_default();
+    assert!(
+        !stdout.contains("operator-private-text"),
+        "a confined command read a denied file: {}",
+        drove.call
+    );
+    assert!(
+        drove.call["exit"].as_i64().is_some_and(|exit| exit != 0),
+        "{}",
+        drove.call
+    );
+    let levers = &first_logged_line(&drove.log.0)["levers"];
+    assert_eq!(levers["sandbox_secrets"], "1", "{levers}");
+    assert_eq!(
+        drove.receipt["run_secrets"]["count"], 1,
+        "{}",
+        drove.receipt
+    );
+    assert!(
+        !first_logged_line(&drove.log.0)
+            .to_string()
+            .contains(&private_path),
+        "the start line names a denied path"
+    );
+}
+
+/// #1014: the start line's `sandbox_secrets` lever says what the operator's
+/// deny list was for a session that runs commands -- its count, `waived`
+/// or `unset` -- and a list that does not parse refuses the start before
+/// any request; a session that runs no commands is not refused for it.
+#[test]
+fn serve_counts_the_operators_deny_list_and_refuses_one_that_does_not_parse() {
+    let tree = Dir::new("deny-count-tree");
+    let regimen = commands_regimen(
+        "allowed_commands = []\n",
+        "isolation = \"none\"",
+        "[limits]\nmax_steps = 4\n",
+    );
+    let path = regimen.0.to_string_lossy().into_owned();
+    let auth = file_holding("auth", "author:s3cret\n");
+    let auth_path = auth.0.to_string_lossy().into_owned();
+    let tree_path = tree.path();
+    for (value, word) in [
+        (Some("/nowhere/one:/nowhere/two"), "2"),
+        (Some("none"), "waived"),
+        (None, "unset"),
+    ] {
+        let stub = Stub::serving_with_props(Vec::new(), &diet::drive::canned::build_info())
+            .expect("loopback");
+        let log_file = file_holding("log", "");
+        let logged = log_file.0.to_string_lossy().into_owned();
+        let env: Vec<(&str, &str)> = value
+            .map(|value| ("DIET_SANDBOX_SECRETS", value))
+            .into_iter()
+            .collect();
+        let _served = start_with(
+            &stub.url(),
+            &[
+                "--regimen",
+                &path,
+                "--worktree",
+                &tree_path,
+                "--auth-file",
+                &auth_path,
+                "--log",
+                &logged,
+            ],
+            &env,
+        );
+        let levers = &first_logged_line(&log_file.0)["levers"];
+        assert_eq!(levers["sandbox_secrets"], word, "{value:?}: {levers}");
+    }
+    for bad in ["relative/path", ":"] {
+        let stub = Stub::serving(Vec::new()).expect("loopback");
+        let (code, said) =
+            run_briefly_as_with("m", &stub.url(), &[], &[("DIET_SANDBOX_SECRETS", bad)]);
+        assert_eq!(code, Some(2), "{bad:?}: {said}");
+        assert!(said.contains("DIET_SANDBOX_SECRETS"), "{said}");
+        assert!(stub.received().is_empty(), "no request reached the server");
+    }
 }

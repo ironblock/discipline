@@ -228,6 +228,10 @@ fn serve_usage() -> String {
     out.push_str("--sandbox-secret PATH, absolute, each: a path of the run's own denied to\n");
     out.push_str("every command, beside the regimen's secrets; the receipt counts and digests\n");
     out.push_str("them, never naming one (#942).\n");
+    out.push_str("DIET_SANDBOX_SECRETS, when set, is the operator's deny list (colon-separated\n");
+    out.push_str("absolute paths, or `none`): denied as --sandbox-secret is to a session that\n");
+    out.push_str("runs commands, its count on the start line's `sandbox_secrets` lever; one\n");
+    out.push_str("that does not parse refuses the start (#1014).\n");
     carry_usage(&mut out);
     out.push_str("A regimen declaring `extraction_seat = \"offboard:<registry id>\"` runs its\n");
     out.push_str("interview forks on a second server: --seat-endpoint and --seat-model are\n");
@@ -615,6 +619,13 @@ fn serve(args: &[String]) -> ExitCode {
         eprint!("{}", serve_usage());
         return ExitCode::from(EXIT_USAGE);
     };
+    // The operator's deny list (#1014), read as the scenario runner reads
+    // it (`probe::deny_of`): a list that cannot be read or parsed refuses
+    // before anything starts, never half applied.
+    let operator_secrets = match operator_deny(std::env::var(diet::drive::probe::SECRETS)) {
+        Ok(deny) => deny,
+        Err(why) => return fail(EXIT_USAGE, &why),
+    };
     // The carry (#948), read and checked before anything starts: the run's
     // own secrets are the roots a carried file is named sealed under.
     let carry = match carry.as_deref() {
@@ -914,13 +925,14 @@ fn serve(args: &[String]) -> ExitCode {
         regimen_file.as_deref(),
         (
             worktree.as_deref(),
-            (&sandbox_unix_sockets, &sandbox_secrets),
+            (&sandbox_unix_sockets, &sandbox_secrets, &operator_secrets),
         ),
         (key_file.as_deref(), auth_file.as_deref()),
     ) {
         Ok(tools) => tools,
         Err((code, why)) => return fail(code, &why),
     };
+    let runs_commands = tools.is_some();
     // A prune has nothing to prune in a session that runs no tools (#612).
     if tools.is_none() && interview.as_ref().is_some_and(|i| i.prune.is_some()) {
         return fail(
@@ -1202,6 +1214,18 @@ fn serve(args: &[String]) -> ExitCode {
             });
         if let Some(word) = in_force_word {
             levers.insert(diet::drive::served::CONTEXT_WINDOW.to_owned(), word);
+        }
+        // How many of the operator's paths its commands are denied (#1014),
+        // never the paths: `unset`, `waived`, or the count.
+        if runs_commands {
+            levers.insert(
+                SANDBOX_SECRETS_LEVER.to_owned(),
+                match &operator_secrets {
+                    diet::drive::probe::Deny::Unset => "unset".to_owned(),
+                    diet::drive::probe::Deny::Waived => "waived".to_owned(),
+                    diet::drive::probe::Deny::Paths(paths) => paths.len().to_string(),
+                },
+            );
         }
     }
     let registry_sha256 = diet::drive::registry::registry_sha256();
@@ -1948,6 +1972,30 @@ fn serving_interview(
         }))
 }
 
+/// What a run adds to its regimen's confinement: `--sandbox-unix-socket`,
+/// `--sandbox-secret` and the operator's deny list (#942, #1014).
+type RunConfinement<'a> = (&'a [String], &'a [String], &'a diet::drive::probe::Deny);
+
+/// The start line's lever counting the operator's denied paths (#1014).
+const SANDBOX_SECRETS_LEVER: &str = "sandbox_secrets";
+
+/// The operator's deny list as the environment gives it (#1014): `Err`
+/// naming why when it is not UTF-8 or does not parse (`probe::deny_of`).
+fn operator_deny(
+    value: Result<String, std::env::VarError>,
+) -> Result<diet::drive::probe::Deny, String> {
+    let secrets = diet::drive::probe::SECRETS;
+    let value = match value {
+        Ok(value) => Some(value),
+        Err(std::env::VarError::NotPresent) => None,
+        Err(std::env::VarError::NotUnicode(_)) => {
+            return Err(format!("{secrets} cannot be read: it is not UTF-8"));
+        }
+    };
+    diet::drive::probe::deny_of(value.as_deref())
+        .map_err(|why| format!("{why}; serve does not start with the deny list half applied"))
+}
+
 /// What `serve` runs the model's calls under, when the regimen at
 /// `regimen` runs commands -- it declares `allowed_commands`, the pre-seeded
 /// session set (#298 point 8). Everything is checked and opened before any
@@ -1960,7 +2008,7 @@ fn serving_interview(
 #[allow(clippy::too_many_lines)]
 fn serving_tools(
     regimen: Option<&str>,
-    (worktree, (sockets, secrets)): (Option<&str>, (&[String], &[String])),
+    (worktree, (sockets, secrets, operator)): (Option<&str>, RunConfinement<'_>),
     (key_file, auth_file): (Option<&str>, Option<&str>),
 ) -> Result<Option<Tools>, (u8, String)> {
     let no_commands = |path: &str| {
@@ -2098,6 +2146,18 @@ fn serving_tools(
     for secret in secrets {
         isolation::policy::add_run_secret(&mut policy, secret.clone())
             .map_err(|why| (EXIT_USAGE, format!("--sandbox-secret: {why}")))?;
+    }
+    // The operator's deny list (#1014), beside them: a session that runs
+    // commands is denied it whether or not a runner passed it on.
+    if let diet::drive::probe::Deny::Paths(paths) = operator {
+        for path in paths {
+            isolation::policy::add_run_secret(&mut policy, path.clone()).map_err(|why| {
+                (
+                    EXIT_USAGE,
+                    format!("{}: {why}", diet::drive::probe::SECRETS),
+                )
+            })?;
+        }
     }
     // A TMPDIR of the session's own, writable: the drive's is not.
     if policy.isolation == isolation::Isolation::Sandbox {
@@ -2950,8 +3010,8 @@ fn key_file_in_declared_path(regimen: Option<&str>, key_file: &str) -> Option<St
 }
 
 /// Re-execute this program under only the regimen's environment
-/// (`PATH`, `HOME`, `LANG`, `TERM`, `TMPDIR` and its `env_passthrough`),
-/// marked so it does not do it twice. Returns only if the exec failed.
+/// (`PATH`, `HOME`, `LANG`, `TERM`, `TMPDIR` and its `env_passthrough`) and
+/// the operator's deny list (#1014), marked so it does not do it twice. Returns only if the exec failed.
 fn scrubbed(args: &[String]) -> ExitCode {
     use std::os::unix::process::CommandExt as _;
     let args: Vec<std::ffi::OsString> = args.iter().map(std::ffi::OsString::from).collect();
@@ -2965,10 +3025,16 @@ fn scrubbed(args: &[String]) -> ExitCode {
     } else {
         args.first()
     };
-    let names = regimen
+    let mut names = regimen
         .and_then(|path| isolation_policy_of(&path.to_string_lossy()))
         .unwrap_or_else(IsolationPolicy::merged_usr)
         .environment;
+    // The operator's deny list (#1014) crosses to the drive, which applies
+    // it; a command is given only its policy's variables, never this one.
+    let secrets = diet::drive::probe::SECRETS.to_owned();
+    if !names.contains(&secrets) {
+        names.push(secrets);
+    }
     let exe = match std::env::current_exe() {
         Ok(exe) => exe,
         Err(why) => {
