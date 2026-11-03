@@ -242,4 +242,11 @@ export const refusalOf = registry<Refusal>({
   'not-unilateral': { label: 'not taken: this regimen lets the operator only propose a move, not take it alone', level: 'warn' },
   'already-asked': { label: 'not taken: the session has asked, so its starting phase is settled', level: 'quiet' },
   'proposal-pending': { label: 'not taken: the model’s own proposal waits on your ruling first', level: 'warn' },
+  // The operator's keep and fork (#1021).
+  'not-a-source': { label: 'not taken: that line holds no text to keep or fork at', level: 'warn' },
+  'not-in-source': { label: 'not taken: the span is not in that line exactly as logged', level: 'warn' },
+  'no-working-memory': { label: 'not taken: this session keeps no working memory', level: 'quiet' },
+  'not-on-the-trunk': { label: 'not taken: a meditation has replaced that part of the trunk', level: 'quiet' },
+  'not-a-pinned-ask': { label: 'not taken: no pinned fork ask has that name', level: 'warn' },
+  restates: { label: 'already kept: working memory holds that span as yours', level: 'quiet' },
 });

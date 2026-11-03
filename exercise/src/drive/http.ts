@@ -178,6 +178,8 @@ export class HttpTransport implements DriveTransport {
     }
     const plain = this.#body(command);
     if (typeof plain['refused'] === 'string') return { ok: false, refused: plain['refused'] };
+    // What the drive answered rides back only for the operator's gestures (#1021): a fork's seq, a keep's entry.
+    if (command.kind === 'fork' || command.kind === 'keep') return (await this.#post(plain, 'commands', true)).ack;
     const gap = extras?.idle_gap;
     const first = await this.#post(gap ? { ...plain, idle_gap: gap } : plain);
     // An ask whose attachment the drive refused is refused for that, gap or none: it does not go again.
@@ -185,17 +187,24 @@ export class HttpTransport implements DriveTransport {
   }
 
   /** One post, and what it came to: its status (0 when nothing answered), and the ack. */
-  async #post(body: Readonly<Record<string, unknown>>, route = 'commands'): Promise<{ readonly status: number; readonly ack: Ack; readonly unattachable?: true }> {
+  async #post(body: Readonly<Record<string, unknown>>, route = 'commands', answered = false): Promise<{ readonly status: number; readonly ack: Ack; readonly unattachable?: true }> {
     let reply: Response;
     try {
       reply = await this.#web.fetch(`${this.#base}${route}`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
     } catch {
       return { status: 0, ack: { ok: false, refused: 'unreachable' } };
     }
-    if (reply.ok) return { status: reply.status, ack: { ok: true } };
+    if (reply.ok) {
+      if (!answered) return { status: reply.status, ack: { ok: true } };
+      // What the drive answered: a fork's seq, a keep's entry (#1021).
+      const said: unknown = await reply.json().catch(() => undefined);
+      const answer = said !== null && typeof said === 'object' && Object.keys(said).length > 0 ? (said as Readonly<Record<string, unknown>>) : undefined;
+      return { status: reply.status, ack: answer ? { ok: true, answer } : { ok: true } };
+    }
     if (reply.status === 409) {
-      const said = (await reply.json().catch(() => ({}))) as { readonly refused?: unknown };
-      return { status: 409, ack: { ok: false, refused: typeof said.refused === 'string' ? said.refused : 'refused' } };
+      const said = (await reply.json().catch(() => ({}))) as { readonly refused?: unknown; readonly entry?: unknown };
+      const refused = typeof said.refused === 'string' ? said.refused : 'refused';
+      return { status: 409, ack: typeof said.entry === 'string' ? { ok: false, refused, entry: said.entry } : { ok: false, refused } };
     }
     if (reply.status === 400) {
       // An attachment the drive would not take (#372): an upload it never had, or a named path it refused -- by its check.
@@ -250,6 +259,11 @@ export class HttpTransport implements DriveTransport {
         return { kind: 'background' };
       case 'refill-anyway':
         return { kind: 'refill-anyway' };
+      // The operator's gestures (#1021), as serve takes them.
+      case 'fork':
+        return { kind: 'fork', ...(command.at !== undefined ? { at: command.at } : {}), ...('ask' in command ? { ask: command.ask } : { text: command.text }) };
+      case 'keep':
+        return { kind: 'keep', from: command.from, span: command.span, ...(command.tag !== undefined ? { tag: command.tag } : {}) };
     }
   }
 

@@ -398,3 +398,26 @@ describe("diet's valid v0 logs, as the surface reads them", () => {
     expect(fold(logOf('an-ended-session.jsonl')).state).toBe('ended');
   });
 });
+
+describe('the operator\u2019s gestures, as the fold names their lines (#1021)', () => {
+  const session = fold(logOf('a-v32-operator-keep-fork-and-shadow.jsonl'));
+  const nodes = session.eras.flatMap((era) => era.nodes);
+
+  it('names each node\u2019s logged line exactly as serve matches a keep or a fork', () => {
+    const user = nodes.find((n) => n.kind === 'user');
+    expect(user?.kind === 'user' && user.logged).toEqual({ seq: 1, text: 'look around' });
+    const tool = nodes.find((n) => n.kind === 'tool');
+    expect(tool?.kind === 'tool' && tool.logged?.seq).toBe(6);
+    const answer = nodes.find((n) => n.kind === 'assistant' && n.id === '7');
+    expect(answer?.kind === 'assistant' && answer.logged).toEqual({ seq: 9, text: 'Read it. Next, the schema.' });
+    const branch = [...session.branches.values()].flat().find((b) => b.why === 'operator');
+    expect(branch?.logged).toEqual({ seq: 19, text: 'It holds a note.\n\nAlso: ports.' });
+  });
+
+  it('puts a shadow warrant\u2019s would-be fork on the step it would have fired at, quietly', () => {
+    const answer = nodes.find((n) => n.kind === 'assistant' && n.id === '7');
+    expect(answer?.kind === 'assistant' && answer.shadowed).toEqual([
+      { why: 'read', trigger: 'call:document-read:call-1', ask: 'finding' },
+    ]);
+  });
+});

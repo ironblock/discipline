@@ -49,6 +49,8 @@ export interface UserNode extends Provenance {
   readonly id: string;
   readonly turn: number;
   readonly text: string;
+  /** Its `ask` line (#1021): what the operator keeps a span of. */
+  readonly logged: LoggedText;
   /** What the ask cost: the next trunk request's prefill, new and reused. */
   readonly prefill?: { readonly fresh: number; readonly cached: number };
   /** Session time it finished: when it was asked. */
@@ -157,6 +159,22 @@ export interface GateProbe {
  * The warrant gate's decision on a step (#850, `warrant.gated`): each probe the classifier scored, against the
  * threshold, and who scored it. `fallback` or `stale` in place of `decided`: the classifier did not decide, and why.
  */
+/**
+ * The logged line an operator's gesture names (#1021): its `seq`, and its text exactly as serve matches a keep's span
+ * against it -- an ask's or an answer's text as written, a tool result as the model was shown it.
+ */
+export interface LoggedText {
+  readonly seq: number;
+  readonly text: string;
+}
+
+/** A fork a shadow warrant would have cut at this step, never sent (log v32, #1021): where the automation would have fired. */
+export interface Shadowed {
+  readonly why: string;
+  readonly trigger: string;
+  readonly ask: string;
+}
+
 export interface Gate {
   readonly outcome: string;
   readonly probes: readonly GateProbe[];
@@ -175,6 +193,10 @@ export interface AssistantNode extends Provenance, Generation {
   readonly turn: number;
   /** The warrant gate's decision on this step (#850), when the regimen gates with a classifier. */
   readonly gate?: Gate;
+  /** Its `response` line (#1021), once it answered: what the operator forks at, or keeps a span of. */
+  readonly logged?: LoggedText;
+  /** The forks shadow warrants would have cut at this step (#1021), never sent. */
+  readonly shadowed?: readonly Shadowed[];
   /**
    * Not in what the model reads from here on (#289): its turn failed or timed out before any step finished, or was
    * cancelled before anything was said -- a failed or timed-out turn keeps its ask and every finished step on the trunk
@@ -238,6 +260,8 @@ export interface ToolNode extends Provenance {
   readonly nearTimeout?: { readonly timeoutMs: number; readonly at: number };
   /** The policy it failed under: the Seatbelt profile's sha256. */
   readonly policy?: string;
+  /** Its `tool_call` line and the result as the model was shown it (#1021): what the operator forks at, or keeps from. */
+  readonly logged?: LoggedText;
   readonly ms?: number;
   /** Session time the call ended; absent while it runs. */
   readonly endedAt?: number;
@@ -272,6 +296,8 @@ export interface PatchNode extends Provenance {
 export interface BranchNode extends Provenance, Partial<Generation> {
   readonly kind: 'branch';
   readonly id: string;
+  /** Its answer's `response` line as written (#1021), trailer and all: what the operator keeps a span of. */
+  readonly logged?: LoggedText;
   readonly lane: ForkLane;
   readonly slot: number;
   /** The trunk node it branched from: an assistant node, or a tool call. */
@@ -694,6 +720,7 @@ export function fold(written: readonly LogLine[]): Session {
   const nearTimeouts = new Map<string, LineOf<'timeout.near'>>();
   // The warrant gate's lines (#850), by the request of the step they decided.
   const gated = new Map<number, LineOf<'warrant.gated'>[]>();
+  const shadows = new Map<number, Shadowed[]>();
   const prunes = new Map<number, LineOf<'pruned'>[]>();
   // The calls whose output a meditation replaced by its pointer (#630): every meditation's `pruned`.
   const replacedByMeditation = new Set<string>();
@@ -968,8 +995,9 @@ export function fold(written: readonly LogLine[]): Session {
       // A fork screened out of its gap (#611): no branch to draw; folded into no node yet.
       case 'fork.skipped':
         break;
-      // A fork a shadow warrant would have cut (#1021): never sent, scored offline; drawn on no node yet.
+      // A fork a shadow warrant would have cut (#1021): never sent; onto the step it would have fired at, quietly.
       case 'fork.shadowed':
+        shadows.set(e.at, [...(shadows.get(e.at) ?? []), { why: e.why, trigger: e.trigger, ask: e.ask }]);
         break;
       // A hosted API's 429 or 529, retried (#555): the request's own attempt, drawn on no node yet.
       case 'request.retried':
@@ -1182,6 +1210,7 @@ export function fold(written: readonly LogLine[]): Session {
             id: id(ask.seq),
             turn: slot.turn,
             text: ask.text,
+            logged: { seq: ask.seq, text: ask.text },
             endedAt: ask.t,
             ...(timings ? { prefill: { fresh: timings.prompt_n, cached: timings.cache_n } } : {}),
             ...(outOf(slot.turn) ? { outOfContext: outOf(slot.turn)! } : {}),
@@ -1211,6 +1240,8 @@ export function fold(written: readonly LogLine[]): Session {
             ...generation(g, trunkSlot),
             ...(outOf(g.request.turn, g.request.seq) ? { outOfContext: outOf(g.request.turn, g.request.seq)! } : {}),
             ...(gated.has(g.request.seq) ? { gate: gateOf(gated.get(g.request.seq)!) } : {}),
+            ...(g.response ? { logged: { seq: g.response.seq, text: g.response.text } } : {}),
+            ...(shadows.has(g.request.seq) ? { shadowed: shadows.get(g.request.seq)! } : {}),
             ...provenance(g.request, ...g.deltas.slice(0, 1), g.response, g.cancelled, g.failed),
           };
           return brand(node);
@@ -1269,6 +1300,7 @@ export function fold(written: readonly LogLine[]): Session {
                       })()
                     : {}),
                   ...(line.policy !== undefined ? { policy: line.policy } : {}),
+                  ...(line.shown !== undefined ? { logged: { seq: line.seq, text: line.shown } } : {}),
                 }
               : {}),
             ...provenance(c.first, line),
@@ -1350,6 +1382,7 @@ export function fold(written: readonly LogLine[]): Session {
     const node = brand<BranchNode>({
       kind: 'branch',
       id: id(fork.seq),
+      ...(g?.response ? { logged: { seq: g.response.seq, text: g.response.text } } : {}),
       lane: fork.lane,
       slot,
       at,
