@@ -268,6 +268,25 @@
 //! log that declares 28 or less and carries it is refused. For a reader of
 //! earlier logs, the migration is nothing: no session declared one.
 //!
+//! v35 (#1030) carries the operator's wrap, the one rewrite of the trunk
+//! between meditations (#553's exception, for the operator alone). The
+//! command `wrap` names a tool result on the trunk and a span the operator
+//! keeps from its text or from an operator's fork's answer cut at it; the
+//! span becomes an operator entry, as `keep`'s does, and takes the result's
+//! place on the trunk at the next trunk request. A `wrapped` line says so
+//! when it does: the turn whose request first carries it, the `tool_call`
+//! it replaces, the line the span came from, the entry, the text the trunk
+//! now carries, the bytes before and after, the digest of the next trunk
+//! request's head before and after, and the tokens from the replaced
+//! result to the trunk's end, which the server prefills again. A wrap names
+//! an earlier `tool_call` that ran and no other wrap named; its span comes
+//! from that call's shown result or from the answer to an operator's fork
+//! cut at it, and is in that text; its entry is an earlier operator patch;
+//! `bytes_after` is the text's length. The command's refusal is
+//! `wrapped-already`. Each is refused in a log that declares 34 or less.
+//! For a reader of earlier logs, the migration is nothing: no session wrote
+//! them.
+//!
 //! v34 (#1031) offers the shadow warrants' forks to the operator. A
 //! `fork.shadowed` line carries `question`, the question its fork would
 //! have asked. Under `interview_shadow_offer = "chips"` each is a
@@ -401,12 +420,12 @@ use super::record::vocabulary;
 struct LogParser;
 
 /// The version this module writes, as `session.start` states it.
-pub const VERSION: i64 = 34;
+pub const VERSION: i64 = 35;
 
 /// Every version this module reads.
 pub const READS: &[i64] = &[
     0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25,
-    26, 27, 28, 29, 30, 31, 32, 33, 34,
+    26, 27, 28, 29, 30, 31, 32, 33, 34, 35,
 ];
 
 /// How recent an input event must be, at the moment a turn settles, for the
@@ -472,6 +491,9 @@ vocabulary! {
         /// A tool result the model pruned, replaced at a later meditation (v7,
         /// #612).
         Pruned => "pruned",
+        /// A tool result the operator wrapped, replaced on the trunk at the
+        /// next trunk request (v35, #1030).
+        Wrapped => "wrapped",
         /// The operator's ruling on the model's phase proposal (v7, #124).
         PhaseRuled => "phase.ruled",
         /// A phase move proposed, by the model or the operator, with the
@@ -772,6 +794,8 @@ vocabulary! {
         Fork => "fork",
         /// The operator answered a shadow's suggestion (v34, #1031).
         Suggestion => "suggestion",
+        /// The operator wrapped a tool result (v35, #1030).
+        Wrap => "wrap",
     }
 }
 
@@ -858,6 +882,9 @@ vocabulary! {
         /// A suggestion's answer to a shadow already answered, or logged
         /// unanswered (v34, #1031).
         AnsweredAlready => "answered-already",
+        /// A wrap of a tool result already wrapped, or waiting to be (v35,
+        /// #1030).
+        WrappedAlready => "wrapped-already",
     }
 }
 
@@ -2230,6 +2257,33 @@ pub enum Event {
         bytes: u64,
         /// The reference line the meditation carries in its place (#596).
         text: String,
+    },
+    /// A tool result the operator wrapped (v35, #1030): replaced on the
+    /// trunk, from the trunk request this names on, by a span the operator
+    /// kept.
+    Wrapped {
+        /// The turn whose trunk request first carries the replacement.
+        turn: u32,
+        /// The `seq` of the `tool_call` whose result it replaced.
+        call: u64,
+        /// The `seq` of the line the span came from: that `tool_call`, or the
+        /// `response` of an operator's fork cut at it.
+        from: u64,
+        /// The operator entry that holds the span.
+        entry: String,
+        /// What the trunk carries in the result's place.
+        text: String,
+        /// The result's bytes as the trunk carried it.
+        bytes_before: u64,
+        /// The replacement's bytes.
+        bytes_after: u64,
+        /// The next trunk request's head digest had the result stayed.
+        prefix_before: String,
+        /// The next trunk request's head digest with the replacement.
+        prefix_after: String,
+        /// The estimated tokens from the replaced result to the trunk's end:
+        /// what the server prefills again.
+        tail_tokens: u64,
     },
     /// A tangent opened (v7, #22): its id, the turn it forks at, and how
     /// many messages the trunk held there, the fork point a close rolls the
@@ -4296,6 +4350,111 @@ fn check(lines: &[Line]) -> Result<(), LogError> {
             _ => {}
         }
     }
+    wraps(lines).map_err(|(index, why)| at(index, why))
+}
+
+/// The operator's wraps (v35, #1030), each against what came before it: an
+/// earlier `tool_call` that ran and no other wrap named; a span from that
+/// call's shown result, or from the answer to an operator's fork cut at it,
+/// and in that text; an earlier operator entry; `bytes_before` the result's
+/// length as shown, and `bytes_after` the text's.
+fn wraps(lines: &[Line]) -> Result<(), (usize, String)> {
+    let mut shown: BTreeMap<u64, &str> = BTreeMap::new();
+    let mut operator_cuts: BTreeMap<u64, u64> = BTreeMap::new();
+    let mut fork_requests: BTreeMap<u64, u64> = BTreeMap::new();
+    let mut answers: BTreeMap<u64, (u64, &str)> = BTreeMap::new();
+    let mut entries: BTreeSet<&str> = BTreeSet::new();
+    let mut wrapped: BTreeSet<u64> = BTreeSet::new();
+    for (index, line) in lines.iter().enumerate() {
+        match &line.event {
+            Event::ToolCall {
+                outcome: ToolOutcome::Ran,
+                shown: Some(text),
+                ..
+            } => {
+                shown.insert(line.seq, text);
+            }
+            Event::Fork {
+                why: Warrant::Operator,
+                cut: Some(cut),
+                ..
+            } => {
+                operator_cuts.insert(line.seq, *cut);
+            }
+            Event::Request {
+                fork: Some(fork), ..
+            } => {
+                fork_requests.insert(line.seq, *fork);
+            }
+            Event::Response {
+                to_request, text, ..
+            } => {
+                answers.insert(line.seq, (*to_request, text));
+            }
+            Event::Patch {
+                fork: None,
+                lane: Some(lane),
+                entry,
+                ..
+            } if lane == crate::object::OPERATOR => {
+                entries.insert(&entry.id);
+            }
+            Event::Wrapped {
+                call,
+                from,
+                entry,
+                text,
+                bytes_before,
+                bytes_after,
+                ..
+            } => {
+                let at = |why: String| (index, why);
+                let Some(result) = shown.get(call) else {
+                    return Err(at(format!(
+                        "a wrap of seq {call}, which is no earlier `tool_call` that ran and was shown"
+                    )));
+                };
+                if !wrapped.insert(*call) {
+                    return Err(at(format!("a second wrap of the result at seq {call}")));
+                }
+                let source = if from == call {
+                    *result
+                } else {
+                    answers
+                        .get(from)
+                        .filter(|(request, _)| {
+                            fork_requests
+                                .get(request)
+                                .and_then(|fork| operator_cuts.get(fork))
+                                == Some(call)
+                        })
+                        .map(|(_, answer)| *answer)
+                        .ok_or_else(|| {
+                            at(format!(
+                                "a wrap's span from seq {from}, which is neither the call nor the \
+                                 answer to an operator's fork cut at it"
+                            ))
+                        })?
+                };
+                if text.is_empty() || !source.contains(text.as_str()) {
+                    return Err(at(format!(
+                        "a wrap's text is not in the line at seq {from} it came from"
+                    )));
+                }
+                if !entries.contains(entry.as_str()) {
+                    return Err(at(format!(
+                        "a wrap's entry `{entry}`, which no earlier operator patch wrote"
+                    )));
+                }
+                if *bytes_before != result.len() as u64 || *bytes_after != text.len() as u64 {
+                    return Err(at(
+                        "a wrap's bytes are not the result's and the text's lengths".to_owned(),
+                    ));
+                }
+            }
+            _ => {}
+        }
+    }
     Ok(())
 }
 
@@ -5084,6 +5243,18 @@ fn from_object(object: &BTreeMap<String, Value>) -> Result<Line, String> {
             from: fields.optional_string("from")?,
             to: fields.string("to")?,
             phase_document: fields.optional_phase_document("phase_document")?,
+        },
+        Kind::Wrapped => Event::Wrapped {
+            turn: fields.turn("turn")?,
+            call: fields.count("call")?,
+            from: fields.count("from")?,
+            entry: fields.string("entry")?,
+            text: fields.string("text")?,
+            bytes_before: fields.count("bytes_before")?,
+            bytes_after: fields.count("bytes_after")?,
+            prefix_before: fields.digest("prefix_before")?,
+            prefix_after: fields.digest("prefix_after")?,
+            tail_tokens: fields.count("tail_tokens")?,
         },
         Kind::Pruned => Event::Pruned {
             turn: fields.turn("turn")?,
@@ -6208,6 +6379,16 @@ const fn may_v9(key: &'static str, holds: Holds) -> Field {
     }
 }
 
+/// A key that arrived in v35 with its object, which always writes it.
+const fn must_v35(key: &'static str, holds: Holds) -> Field {
+    Field {
+        key,
+        holds,
+        required: true,
+        since: 35,
+    }
+}
+
 /// A key that arrived in v34, optional wherever its object is written.
 const fn may_v34(key: &'static str, holds: Holds) -> Field {
     Field {
@@ -6718,6 +6899,7 @@ pub fn introduced(kind: Kind) -> i64 {
         Kind::MeditationSkipped => 21,
         Kind::ForkShadowed => 32,
         Kind::Suggestion => 34,
+        Kind::Wrapped => 35,
         _ => 0,
     }
 }
@@ -6782,6 +6964,12 @@ pub fn tag_introduced(tags: Tags, tag: &str) -> i64 {
             }));
     if gesture {
         return 32;
+    }
+    // The operator's wrap (#1030).
+    if (tags == Tags::Command && Command::from_tag(tag) == Some(Command::Wrap))
+        || (tags == Tags::Refusal && Refusal::from_tag(tag) == Some(Refusal::WrappedAlready))
+    {
+        return 35;
     }
     // The shadows' suggestions (#1031).
     if (tags == Tags::Command && Command::from_tag(tag) == Some(Command::Suggestion))
@@ -7209,6 +7397,21 @@ pub fn schema(kind: Kind) -> &'static [Field] {
                 must_v32("trigger", Text),
                 must_v32("ask", Text),
                 may_v34("question", Text),
+            ];
+            F
+        }
+        Kind::Wrapped => {
+            const F: &[Field] = &[
+                must_v35("turn", Count),
+                must_v35("call", Count),
+                must_v35("from", Count),
+                must_v35("entry", Text),
+                must_v35("text", Text),
+                must_v35("bytes_before", Count),
+                must_v35("bytes_after", Count),
+                must_v35("prefix_before", Holds::Digest),
+                must_v35("prefix_after", Holds::Digest),
+                must_v35("tail_tokens", Count),
             ];
             F
         }
@@ -8598,6 +8801,30 @@ fn to_value(line: &Line) -> Value {
                 put("question", text(question));
             }
             Kind::ForkShadowed
+        }
+        Event::Wrapped {
+            turn,
+            call,
+            from,
+            entry,
+            text: carried,
+            bytes_before,
+            bytes_after,
+            prefix_before,
+            prefix_after,
+            tail_tokens,
+        } => {
+            put("turn", count(u64::from(*turn)));
+            put("call", count(*call));
+            put("from", count(*from));
+            put("entry", text(entry));
+            put("text", text(carried));
+            put("bytes_before", count(*bytes_before));
+            put("bytes_after", count(*bytes_after));
+            put("prefix_before", text(prefix_before));
+            put("prefix_after", text(prefix_after));
+            put("tail_tokens", count(*tail_tokens));
+            Kind::Wrapped
         }
         Event::Suggestion {
             shadow,
@@ -10381,15 +10608,15 @@ mod tests {
     }
 
     /// #583, #878, #904, #555, #931, #936, #910, #942, #926, #932, #948, #971, #1016, #1021,
-    /// #1022, #1031: this module writes v34.
+    /// #1022, #1031, #1030: this module writes v35.
     #[test]
-    fn this_module_writes_v34_and_reads_every_version_before_it() {
-        assert_eq!(super::VERSION, 34);
+    fn this_module_writes_v35_and_reads_every_version_before_it() {
+        assert_eq!(super::VERSION, 35);
         assert_eq!(
             super::READS,
             &[
                 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22,
-                23, 24, 25, 26, 27, 28, 29, 30, 31, 32, 33, 34
+                23, 24, 25, 26, 27, 28, 29, 30, 31, 32, 33, 34, 35
             ]
         );
     }
@@ -11188,6 +11415,94 @@ mod tests {
                 shadow: accepted,
                 outcome: SuggestionOutcome::Accepted,
                 fork: Some(accepted + 1),
+            },
+        ]);
+        // v35 (#1030): a call that ran, kept from as the operator's entry,
+        // and wrapped with that span.
+        let ran = events.len() as u64;
+        let call = events
+            .iter()
+            .find_map(|event| match event {
+                Event::ToolCall { .. } => Some(event.clone()),
+                _ => None,
+            })
+            .expect("a call");
+        let Event::ToolCall {
+            request,
+            turn,
+            name,
+            arguments,
+            argv,
+            cwd,
+            confined,
+            isolation,
+            network,
+            approval,
+            ..
+        } = call
+        else {
+            unreachable!("a call");
+        };
+        events.extend([
+            Event::ToolCall {
+                request,
+                turn,
+                id: "call-w".to_owned(),
+                name,
+                arguments,
+                outcome: ToolOutcome::Ran,
+                argv: argv
+                    .or_else(|| Some(vec!["bash".to_owned(), "-c".to_owned(), "ls".to_owned()])),
+                cwd: cwd.or_else(|| Some("~/git/x".to_owned())),
+                confined: confined
+                    .or_else(|| Some(vec!["bash".to_owned(), "-c".to_owned(), "ls".to_owned()])),
+                isolation,
+                network,
+                exit: Some(0),
+                reason: None,
+                policy: None,
+                stdout: Some(Output {
+                    text: "port 5182 is free\nand more\n".to_owned(),
+                    bytes: 27,
+                }),
+                stderr: Some(Output {
+                    text: String::new(),
+                    bytes: 0,
+                }),
+                approval,
+                files: None,
+                shown: Some("port 5182 is free\nand more\n".to_owned()),
+                recovered_from: None,
+                background: None,
+                timeout_ms: None,
+            },
+            Event::Patch {
+                fork: None,
+                lane: Some(crate::object::OPERATOR.to_owned()),
+                op: PatchOp::Add,
+                entry: PatchEntry {
+                    id: "operator-w".to_owned(),
+                    text: "port 5182 is free".to_owned(),
+                    category: None,
+                    authority: Some(OPERATOR_AUTHORITY.to_owned()),
+                },
+                supersedes: None,
+                tangent: None,
+                reason: None,
+                merged: None,
+                refuted: None,
+            },
+            Event::Wrapped {
+                turn,
+                call: ran,
+                from: ran,
+                entry: "operator-w".to_owned(),
+                text: "port 5182 is free".to_owned(),
+                bytes_before: 27,
+                bytes_after: 17,
+                prefix_before: "a".repeat(64),
+                prefix_after: "b".repeat(64),
+                tail_tokens: 9,
             },
         ]);
         events
@@ -12555,7 +12870,7 @@ mod tests {
             tags(Kind::ALL.iter().map(|it| it.tag()).collect()),
             "session.start ask settlement request refused delta stop.asked response \
              cancelled request.failed turn.settled idle.gap progress tool_call fork \
-             fork.settled patch meditation delivered recalled flag meditation.held patch.refused pruned phase.ruled phase.proposed phase.answered phase.started tangent.open tangent.close capture reminded background.ended notice timeout.near fork.skipped fork.shadowed suggestion phase.noted trunk.clamped trunk.waited warrant.gated request.retried grade meditation.skipped"
+             fork.settled patch meditation delivered recalled flag meditation.held patch.refused pruned wrapped phase.ruled phase.proposed phase.answered phase.started tangent.open tangent.close capture reminded background.ended notice timeout.near fork.skipped fork.shadowed suggestion phase.noted trunk.clamped trunk.waited warrant.gated request.retried grade meditation.skipped"
         );
         assert_eq!(
             tags(FailReason::ALL.iter().map(|it| it.tag()).collect()),
@@ -12564,7 +12879,7 @@ mod tests {
         assert_eq!(
             tags(Refusal::ALL.iter().map(|it| it.tag()).collect()),
             "in-flight ended nothing-in-flight meditation-not-built nothing-to-meditate no-phase-graph not-a-phase \
-             already-in-phase no-phase-edge stale tangent-open no-tangent bad-tangent not-the-scope nothing-running no-proposal unknown-entry not-live empty meditation-held nothing-held restates not-unilateral already-asked proposal-pending no-vision api-cap not-a-source not-in-source no-working-memory not-on-the-trunk not-a-pinned-ask not-a-suggestion answered-already"
+             already-in-phase no-phase-edge stale tangent-open no-tangent bad-tangent not-the-scope nothing-running no-proposal unknown-entry not-live empty meditation-held nothing-held restates not-unilateral already-asked proposal-pending no-vision api-cap not-a-source not-in-source no-working-memory not-on-the-trunk not-a-pinned-ask not-a-suggestion answered-already wrapped-already"
         );
         assert_eq!(
             tags(SettleReason::ALL.iter().map(|it| it.tag()).collect()),
