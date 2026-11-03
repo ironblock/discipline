@@ -1080,19 +1080,22 @@ export const ServedForkAtAStep: Story = {
   args: { drive: true, web: posting(gestures) },
   play: async ({ canvasElement }) => {
     const page = within(canvasElement.ownerDocument.body);
+    // The whole log folded first, then each dialog awaited open, and each post given time: a loaded runner is slow.
+    await waitFor(async () => expect(says(canvasElement)).toBe('the session has ended'));
+    const slow = { timeout: 5_000 };
     await cornerClick(await page.findByRole('button', { name: 'Fork at step 7' }));
-    const pinned = page.getByRole('button', { name: 'Fork at step 7 asking GOTCHAS' });
+    const pinned = await page.findByRole('button', { name: 'Fork at step 7 asking GOTCHAS' }, slow);
     // What it sends is shown beside its name.
     await expect(pinned.textContent).toContain('Pause.');
     posted.length = 0;
     await userEvent.click(pinned);
-    await waitFor(async () => expect(posted).toEqual([{ kind: 'fork', at: 9, ask: 'GOTCHAS' }]));
-    await waitFor(async () => expect(page.queryByRole('button', { name: 'Fork at step 7 asking GOTCHAS' })).toBeNull());
+    await waitFor(async () => expect(posted).toEqual([{ kind: 'fork', at: 9, ask: 'GOTCHAS' }]), slow);
+    await waitFor(async () => expect(page.queryByRole('button', { name: 'Fork at step 7 asking GOTCHAS' })).toBeNull(), slow);
     await cornerClick(page.getByRole('button', { name: 'Fork at step 7' }));
-    await userEvent.type(page.getByRole('textbox', { name: 'Your own question at step 7' }), 'Why two tables?');
+    await userEvent.type(await page.findByRole('textbox', { name: 'Your own question at step 7' }, slow), 'Why two tables?');
     posted.length = 0;
     await userEvent.keyboard('{Enter}');
-    await waitFor(async () => expect(posted).toEqual([{ kind: 'fork', at: 9, text: 'Why two tables?' }]));
+    await waitFor(async () => expect(posted).toEqual([{ kind: 'fork', at: 9, text: 'Why two tables?' }]), slow);
   },
 };
 
@@ -1103,10 +1106,13 @@ export const ServedKeepFromTheRawText: Story = {
   args: { drive: true, web: posting(gestures) },
   play: async ({ canvasElement }) => {
     const page = within(canvasElement.ownerDocument.body);
+    // The whole log folded first, as above.
+    await waitFor(async () => expect(says(canvasElement)).toBe('the session has ended'));
+    const slow = { timeout: 5_000 };
     await cornerClick(await page.findByRole('button', { name: 'Keep from call call-1' }));
     // The log holds a shadow at this step; the live drive shows none.
     await expect(page.queryByText('would fork · read → finding')).toBeNull();
-    const raw = page.getByLabelText('What call call-1 logged');
+    const raw = await page.findByLabelText('What call call-1 logged', undefined, slow);
     await expect(raw.textContent).toBe('a note\n');
     // Select "a note" in the raw view, as a person would.
     const text = raw.firstChild!;
@@ -1122,8 +1128,8 @@ export const ServedKeepFromTheRawText: Story = {
     selection.addRange(range);
     posted.length = 0;
     await userEvent.click(page.getByRole('button', { name: 'Keep the selection from call call-1' }));
-    await waitFor(async () => expect(posted).toEqual([{ kind: 'keep', from: 6, span: 'a note', tag: 'notes' }]));
-    await waitFor(async () => expect(page.queryByLabelText('What call call-1 logged')).toBeNull());
+    await waitFor(async () => expect(posted).toEqual([{ kind: 'keep', from: 6, span: 'a note', tag: 'notes' }]), slow);
+    await waitFor(async () => expect(page.queryByLabelText('What call call-1 logged')).toBeNull(), slow);
   },
 };
 
