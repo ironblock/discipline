@@ -968,6 +968,9 @@ export function fold(written: readonly LogLine[]): Session {
       // A fork screened out of its gap (#611): no branch to draw; folded into no node yet.
       case 'fork.skipped':
         break;
+      // A fork a shadow warrant would have cut (#1021): never sent, scored offline; drawn on no node yet.
+      case 'fork.shadowed':
+        break;
       // A hosted API's 429 or 529, retried (#555): the request's own attempt, drawn on no node yet.
       case 'request.retried':
         break;
