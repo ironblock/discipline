@@ -34,6 +34,7 @@ export type Kind =
   | "patch.refused"
   | "pruned"
   | "wrapped"
+  | "wrap.accepted"
   | "phase.ruled"
   | "phase.proposed"
   | "phase.answered"
@@ -833,6 +834,15 @@ export type WrappedLine = {
   tail_tokens: number;
 };
 
+export type WrapAcceptedLine = {
+  seq: number;
+  t: number;
+  kind: "wrap.accepted";
+  call: number;
+  from: number;
+  entry: string;
+};
+
 export type PhaseRuledLine = {
   seq: number;
   t: number;
@@ -1091,6 +1101,7 @@ export type LogLine =
   | PatchRefusedLine
   | PrunedLine
   | WrappedLine
+  | WrapAcceptedLine
   | PhaseRuledLine
   | PhaseProposedLine
   | PhaseAnsweredLine

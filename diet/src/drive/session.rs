@@ -1079,6 +1079,16 @@ pub enum Event {
         /// The question it would have asked (#1031).
         question: String,
     },
+    /// The operator's wrap, accepted (#1030): applied at the next trunk
+    /// request, or never, when the session ends first.
+    WrapAccepted {
+        /// The `tool_call` line whose result it wraps.
+        call: u64,
+        /// The line the span came from.
+        from: u64,
+        /// The operator entry that holds the span.
+        entry: String,
+    },
     /// A tool result the operator wrapped (#1030), replaced on the trunk as
     /// the trunk request after this line carries it.
     Wrapped {
@@ -4941,7 +4951,8 @@ impl<S: Streaming + 'static> Session<S> {
     /// `span` the operator keeps from it, or from the answer `from` names of
     /// an operator's fork cut at it, takes its place on the trunk. The span
     /// is an operator entry at once, as a [`Self::keep`]'s is, or the one the
-    /// operator already kept of it. The trunk changes at the next trunk
+    /// operator already kept of it, and a `wrap.accepted` line names the
+    /// call, the source and the entry. The trunk changes at the next trunk
     /// request, never the one in flight: a step's, while the turn runs, or
     /// the next ask's; a `wrapped` line just before that request says so.
     /// Until then a fork reads the trunk as it was. Returns the entry's id.
@@ -4968,6 +4979,12 @@ impl<S: Streaming + 'static> Session<S> {
         };
         state.admit_within_the_gap();
         let entry = held.unwrap_or_else(|| operator_entry(&mut state, span, None));
+        // Accepted: the operator's label, kept though no request carries it.
+        state.push(Event::WrapAccepted {
+            call,
+            from,
+            entry: entry.clone(),
+        });
         state.wraps.insert(
             call,
             Wrap {
@@ -6408,6 +6425,11 @@ pub fn line_of(logged: &Logged) -> log::Line {
             trigger: trigger.clone(),
             ask: ask.clone(),
             question: Some(question.clone()),
+        },
+        Event::WrapAccepted { call, from, entry } => log::Event::WrapAccepted {
+            call: *call,
+            from: *from,
+            entry: entry.clone(),
         },
         Event::Wrapped {
             turn,
@@ -19031,7 +19053,12 @@ pub(in crate::drive) mod tests {
             outcome: log::SuggestionOutcome::Rejected,
             fork: None,
         });
-        // #1030: a wrap.
+        // #1030: a wrap, accepted and applied.
+        events.push(Event::WrapAccepted {
+            call: 9,
+            from: 9,
+            entry: "operator-9".to_owned(),
+        });
         events.push(Event::Wrapped {
             turn: 2,
             call: 9,
@@ -19101,9 +19128,10 @@ pub(in crate::drive) mod tests {
                 Event::Shadowed { .. } => 51,
                 Event::Suggestion { .. } => 52,
                 Event::Wrapped { .. } => 53,
+                Event::WrapAccepted { .. } => 54,
             });
         }
-        assert_eq!(kinds.len(), 54, "a variant has no sample");
+        assert_eq!(kinds.len(), 55, "a variant has no sample");
         events
             .into_iter()
             .enumerate()
@@ -19686,6 +19714,11 @@ pub(in crate::drive) mod tests {
                 shadow: 53,
                 outcome: log::SuggestionOutcome::Rejected,
                 fork: None,
+            },
+            log::Event::WrapAccepted {
+                call: 9,
+                from: 9,
+                entry: "operator-9".to_owned(),
             },
             log::Event::Wrapped {
                 turn: 2,
@@ -28630,6 +28663,39 @@ pub(in crate::drive) mod tests {
         );
         reads_whole(&session);
         heads_rebuild(&session.events_from(0));
+        tidy(&[&tree]);
+    }
+
+    /// #1030: a wrap is logged when it is accepted -- its call, its source
+    /// and its entry -- so a session that ends before the next trunk request
+    /// keeps it as accepted and never applied: no `wrapped` line, and the log
+    /// reads.
+    #[test]
+    fn a_wrap_the_session_ends_on_is_logged_accepted_and_never_applied() {
+        let tree = scratch("wrap-never-applied");
+        let session = wrapping(
+            &tree,
+            vec![vec![bash("call-1", "cat notes.md")], deltas(&["Read it."])],
+            Vec::new(),
+        );
+        session.ask("look", None).expect("accepted");
+        let log = wait_until(&session, "the turn", settled);
+        let called = seq_of(&log, |event| matches!(event, Event::ToolCalled(_)));
+        let entry = session
+            .wrap(called, called, "port 5182 is free")
+            .expect("wrapped");
+        session.end(None).expect("ended");
+        let log = session.events_from(0);
+        let accepted: Vec<_> = log
+            .iter()
+            .filter_map(|logged| match &logged.event {
+                Event::WrapAccepted { call, from, entry } => Some((*call, *from, entry.clone())),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(accepted, vec![(called, called, entry)]);
+        assert!(wrapped_lines(&log).is_empty(), "never applied");
+        reads_whole(&session);
         tidy(&[&tree]);
     }
 

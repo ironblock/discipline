@@ -1072,6 +1072,7 @@ impl<'a> Walk<'a> {
             Line::ForkShadowed { .. } => log::Kind::ForkShadowed,
             Line::Suggestion { .. } => log::Kind::Suggestion,
             Line::Wrapped { .. } => log::Kind::Wrapped,
+            Line::WrapAccepted { .. } => log::Kind::WrapAccepted,
             Line::Flag { .. } => log::Kind::Flag,
             Line::MeditationHeld { .. } => log::Kind::MeditationHeld,
             Line::MeditationSkipped { .. } => log::Kind::MeditationSkipped,
@@ -1220,6 +1221,9 @@ impl<'a> Walk<'a> {
             | Line::ForkSkipped { .. }
             | Line::ForkShadowed { .. }
             | Line::Suggestion { .. }
+            // An operator's wrap, accepted (#1030): its `wrapped` line, when
+            // applied, changes the trunk.
+            | Line::WrapAccepted { .. }
             | Line::Capture { .. }
             // The operator's ruling on a phase proposal (#124): a meditation it
             // declares has its own row.

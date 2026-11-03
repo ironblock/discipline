@@ -431,6 +431,13 @@ describe('the operator\u2019s wrap, as the fold names it (#1030)', () => {
     expect(tool?.kind === 'tool' && tool.wrapped).toEqual({ text: 'It holds a note.', turn: 2, bytesBefore: 7, bytesAfter: 16, tailTokens: 11 });
   });
 
+  it('marks a wrap accepted and never applied as waiting', () => {
+    const waiting = fold(logOf('a-v35-wrap-accepted-never-applied.jsonl'))
+      .eras.flatMap((era) => era.nodes)
+      .find((n) => n.kind === 'tool');
+    expect(waiting?.kind === 'tool' && [waiting.wrapWaiting, waiting.wrapped]).toEqual([true, undefined]);
+  });
+
   it('names the tool call the operator\u2019s fork was cut at, what a wrap from its answer wraps', () => {
     const branch = [...session.branches.values()].flat().find((b) => b.why === 'operator');
     expect(branch?.cut).toBe(6);

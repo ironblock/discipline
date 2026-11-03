@@ -21,6 +21,7 @@
 {"fork":16,"kind":"fork.settled","outcome":"value","seq":20,"t":18}
 {"from":"capture","kind":"settlement","seq":21,"t":18,"to":"awaiting"}
 {"entry":{"authority":"operator","category":"notes","id":"operator-22","text":"It holds a note."},"kind":"patch","lane":"operator","op":"add","seq":22,"t":19}
-{"bytes_after":16,"bytes_before":7,"call":6,"entry":"operator-22","from":19,"kind":"wrapped","prefix_after":"3b1c0f5e9a7d2c4b6e8f0a1d3c5b7e9f2a4c6e8b0d1f3a5c7e9b2d4f6a8c0e1d","prefix_before":"e2327562ecefac231d562167480e71cbe91865c6533bca24fa247fb8263c0ad2","seq":23,"t":19,"tail_tokens":11,"text":"It holds a note.","turn":2}
-{"bytes_after":6,"bytes_before":7,"call":6,"entry":"operator-14","from":6,"kind":"wrapped","prefix_after":"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb","prefix_before":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","seq":24,"t":20,"tail_tokens":11,"text":"a note","turn":2}
-{"from":"awaiting","kind":"settlement","seq":25,"t":20,"to":"ended"}
+{"call":6,"entry":"operator-22","from":19,"kind":"wrap.accepted","seq":23,"t":19}
+{"bytes_after":16,"bytes_before":7,"call":6,"entry":"operator-22","from":19,"kind":"wrapped","prefix_after":"3b1c0f5e9a7d2c4b6e8f0a1d3c5b7e9f2a4c6e8b0d1f3a5c7e9b2d4f6a8c0e1d","prefix_before":"e2327562ecefac231d562167480e71cbe91865c6533bca24fa247fb8263c0ad2","seq":24,"t":19,"tail_tokens":11,"text":"It holds a note.","turn":2}
+{"call":6,"entry":"operator-14","from":6,"kind":"wrap.accepted","seq":25,"t":20}
+{"from":"awaiting","kind":"settlement","seq":26,"t":20,"to":"ended"}

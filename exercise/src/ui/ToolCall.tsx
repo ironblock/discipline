@@ -139,7 +139,7 @@ export function ToolBlock({ node, caller, first = false }: { readonly node: Fold
           {node.logged ? <ForkAction at={node.logged} label={`call ${node.call?.id ?? node.id}`} /> : null}
           {node.logged && node.logged.text !== '' ? <KeepAction logged={node.logged} label={`call ${node.call?.id ?? node.id}`} /> : null}
           {/* The operator's wrap (#1030): a span of it in its place on the trunk, from the next request. */}
-          {node.logged && node.logged.text !== '' && !node.wrapped ? <WrapAction call={node.logged.seq} from={node.logged} label={`call ${node.call?.id ?? node.id}`} /> : null}
+          {node.logged && node.logged.text !== '' && !node.wrapped && !node.wrapWaiting ? <WrapAction call={node.logged.seq} from={node.logged} label={`call ${node.call?.id ?? node.id}`} /> : null}
         </>
       }
     >
@@ -164,6 +164,7 @@ export function ToolBlock({ node, caller, first = false }: { readonly node: Fold
           {`wrapped by you (${size(node.wrapped.bytesBefore)} → ${size(node.wrapped.bytesAfter)}) · from turn ${node.wrapped.turn}'s request · about ${node.wrapped.tailTokens} tokens prefilled again`}
         </p>
       ) : null}
+      {node.wrapWaiting ? <p className="ex-pruned">wrapped by you · in its place from the next request</p> : null}
       {/* Output the model pruned (#630): kept whole until the turn's meditation replaces it by its pointer. */}
       {node.pruned ? (
         <p className="ex-pruned" data-replaced={node.pruned.replaced ? '' : undefined}>

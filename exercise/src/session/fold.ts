@@ -267,6 +267,8 @@ export interface ToolNode extends Provenance {
    * before and after, and the tokens from it to the trunk's end, prefilled again.
    */
   readonly wrapped?: { readonly text: string; readonly turn: number; readonly bytesBefore: number; readonly bytesAfter: number; readonly tailTokens: number };
+  /** The operator's wrap of it, accepted and not yet carried by a trunk request (log v35's `wrap.accepted`, #1030). */
+  readonly wrapWaiting?: true;
   /** A phase proposal the operator ruled on (#651): the choice, and the phase it proposed. */
   readonly ruled?: { readonly choice: string; readonly to: string };
   /** Running, it is near its timeout (log v7's `timeout.near`, #613): its timeout, and when the warning came. */
@@ -742,6 +744,7 @@ export function fold(written: readonly LogLine[]): Session {
   const prunes = new Map<number, LineOf<'pruned'>[]>();
   // The operator's wraps (#1030), by the `tool_call` line each replaced.
   const wraps = new Map<number, LineOf<'wrapped'>>();
+  const wrapsAccepted = new Set<number>();
   // The calls whose output a meditation replaced by its pointer (#630): every meditation's `pruned`.
   const replacedByMeditation = new Set<string>();
   const reminders = new Map<number, LineOf<'reminded'>>();
@@ -1053,6 +1056,10 @@ export function fold(written: readonly LogLine[]): Session {
       case 'wrapped':
         wraps.set(e.call, e);
         break;
+      // The operator's wrap, accepted (#1030): waiting until its `wrapped` line.
+      case 'wrap.accepted':
+        wrapsAccepted.add(e.call);
+        break;
       case 'reminded':
         reminders.set(e.turn, e);
         break;
@@ -1320,7 +1327,8 @@ export function fold(written: readonly LogLine[]): Session {
                   })(),
                   ...(() => {
                     const wrap = wraps.get(line.seq);
-                    return wrap ? { wrapped: { text: wrap.text, turn: wrap.turn, bytesBefore: wrap.bytes_before, bytesAfter: wrap.bytes_after, tailTokens: wrap.tail_tokens } } : {};
+                    if (wrap) return { wrapped: { text: wrap.text, turn: wrap.turn, bytesBefore: wrap.bytes_before, bytesAfter: wrap.bytes_after, tailTokens: wrap.tail_tokens } };
+                    return wrapsAccepted.has(line.seq) ? { wrapWaiting: true as const } : {};
                   })(),
                   ...(line.background !== undefined
                     ? (() => {
