@@ -4845,7 +4845,7 @@ impl<S: Streaming + 'static> Session<S> {
             Settlement::Awaiting => operator_firing(ask)
                 .and_then(|firing| forked_at(&state, at).map(|place| (firing, place))),
         };
-        let (firing, (turn, request, cut, prefix)) = match because {
+        let (firing, (_, request, cut, prefix)) = match because {
             Ok(fired) => fired,
             Err(because) => {
                 let refused = state.refuse(CommandKind::Fork, because);
@@ -4856,6 +4856,8 @@ impl<S: Streaming + 'static> Session<S> {
         };
         state.admit_within_the_gap();
         state.move_to(Settlement::Capture);
+        // It follows the latest turn, whichever turn's step it is cut at.
+        let turn = state.turns;
         let fired = fire_on(
             &self.shared,
             &mut state,
@@ -27915,7 +27917,7 @@ pub(in crate::drive) mod tests {
             .expect("forked");
         let (forked, _, wrote) = operator_forked(&session);
         assert!(
-            matches!(forked, Event::Forked { of_turn: 1, cut: Some(cut), .. } if cut == called)
+            matches!(forked, Event::Forked { of_turn: 2, cut: Some(cut), .. } if cut == called)
         );
         assert!(!wrote);
         reads_whole(&session);

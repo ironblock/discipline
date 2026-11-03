@@ -274,8 +274,9 @@
 //! tool result or the trunk's end), and their refusals `not-a-source`,
 //! `not-in-source`, `no-working-memory`, `not-on-the-trunk` and
 //! `not-a-pinned-ask`. A fork's `why` may be `operator`: on `interview`,
-//! at an answered trunk request the latest meditation did not replace, cut,
-//! when it names one, at a `tool_call` of that turn; it answers to no gap.
+//! following the latest turn, at an answered trunk request -- that turn's or
+//! an earlier one's -- the latest meditation did not replace, cut, when it
+//! names one, at a `tool_call` at or after it; it answers to no gap.
 //! And `fork.shadowed`, a fork a shadow warrant would have cut, never sent:
 //! its turn, the trunk request at it, the warrant, the trigger and the ask.
 //! Each is refused in a log that declares 31 or less. For a reader of
@@ -3483,11 +3484,11 @@ impl Forks {
         }
     }
 
-    /// The operator's fork (v32, #1021): on `interview`, at an answered
-    /// trunk `request` of turn `of_turn` the latest meditation did not
-    /// replace, cut, when it names one, at a `tool_call` of that turn at or
-    /// after it. It answers to no gap: it is cut while the session awaits,
-    /// whenever the operator asks.
+    /// The operator's fork (v32, #1021): on `interview`, following the
+    /// latest turn `of_turn`, at an answered trunk `request` -- of that turn
+    /// or an earlier one -- the latest meditation did not replace, cut, when
+    /// it names one, at a `tool_call` at or after it. It answers to no gap:
+    /// it is cut while the session awaits, whenever the operator asks.
     fn operator(
         &mut self,
         seq: u64,
@@ -3515,11 +3516,11 @@ impl Forks {
             ));
         }
         if let Some(cut) = cut
-            && (self.tool_calls.get(&cut) != Some(&of_turn) || cut < at)
+            && (!self.tool_calls.contains_key(&cut) || cut < at)
         {
             return Err(format!(
-                "an operator's fork cut at {cut}, which is not a `tool_call` of turn {of_turn} \
-                 at or after request {at}"
+                "an operator's fork cut at {cut}, which is not a `tool_call` at or after \
+                 request {at}"
             ));
         }
         self.cut.insert(seq);
