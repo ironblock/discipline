@@ -27876,6 +27876,52 @@ pub(in crate::drive) mod tests {
         }
     }
 
+    /// #1021: the operator may fork at an earlier turn's tool result, so
+    /// long as no meditation replaced it: the fork answers to no gap, and
+    /// the log reads.
+    #[test]
+    fn the_operators_fork_reaches_an_earlier_turns_result() {
+        let tree = scratch("operator-fork-earlier-turn");
+        std::fs::write(tree.join("notes.md"), "port 5182 is free\n").expect("a note");
+        let session = Session::open_with(
+            Canned::new(vec![
+                vec![bash("call-1", "cat notes.md")],
+                deltas(&["Read it."]),
+                deltas(&["And on."]),
+            ]),
+            looping(),
+            None,
+            Some(tools(
+                Confinement::Unconfined,
+                &tree,
+                &["cat"],
+                None,
+                Decider::Decline,
+            )),
+            None,
+            Some(interviewing(&[])),
+        )
+        .forking_through(Canned::new([deltas(&["It says the port is free."])]));
+        session.ask("look", None).expect("accepted");
+        let log = wait_until(&session, "turn one", settled);
+        let called = seq_of(&log, |event| matches!(event, Event::ToolCalled(_)));
+        session.ask("go on", None).expect("accepted");
+        wait_until(&session, "turn two", two_settled);
+        session
+            .fork(
+                Some(called),
+                &OperatorAsk::Text("What did it say?".to_owned()),
+            )
+            .expect("forked");
+        let (forked, _, wrote) = operator_forked(&session);
+        assert!(
+            matches!(forked, Event::Forked { of_turn: 1, cut: Some(cut), .. } if cut == called)
+        );
+        assert!(!wrote);
+        reads_whole(&session);
+        tidy(&[&tree]);
+    }
+
     /// #1021, #1022: a fork's answer keeps as it was written, its trailer
     /// too -- what trails a fork's last field reaches nothing else.
     #[test]
