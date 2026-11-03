@@ -4,8 +4,8 @@
 // i64, and a JavaScript number is exact only to 2^53. A `timings`
 // millisecond may carry a fraction, written as the server wrote it.
 
-export const VERSION = 33;
-export const READS = [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32, 33] as const;
+export const VERSION = 34;
+export const READS = [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32, 33, 34] as const;
 export const PRESENCE_WINDOW_MS = 2000;
 
 export type Kind =
@@ -46,6 +46,7 @@ export type Kind =
   | "timeout.near"
   | "fork.skipped"
   | "fork.shadowed"
+  | "suggestion"
   | "phase.noted"
   | "trunk.clamped"
   | "trunk.waited"
@@ -88,6 +89,7 @@ export type Command =
   | "grade"
   | "keep"
   | "fork"
+  | "suggestion"
 ;
 
 export type Refusal =
@@ -123,6 +125,8 @@ export type Refusal =
   | "no-working-memory"
   | "not-on-the-trunk"
   | "not-a-pinned-ask"
+  | "not-a-suggestion"
+  | "answered-already"
 ;
 
 export type FailReason =
@@ -292,6 +296,12 @@ export type BackgroundStatus =
   | "cancelled"
 ;
 
+export type SuggestionOutcome =
+  | "accepted"
+  | "rejected"
+  | "unanswered"
+;
+
 export interface HeadMessage {
   role: Role;
   content: string;
@@ -443,7 +453,7 @@ export type SessionStartLine = {
   seq: number;
   t: number;
   kind: "session.start";
-  version: 0 | 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9 | 10 | 11 | 12 | 13 | 14 | 15 | 16 | 17 | 18 | 19 | 20 | 21 | 22 | 23 | 24 | 25 | 26 | 27 | 28 | 29 | 30 | 31 | 32 | 33;
+  version: 0 | 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9 | 10 | 11 | 12 | 13 | 14 | 15 | 16 | 17 | 18 | 19 | 20 | 21 | 22 | 23 | 24 | 25 | 26 | 27 | 28 | 29 | 30 | 31 | 32 | 33 | 34;
   opened: number;
   model: string;
   head: HeadMessage[];
@@ -945,6 +955,15 @@ export type ForkShadowedLine = {
   ask: string;
 };
 
+export type SuggestionLine = {
+  seq: number;
+  t: number;
+  kind: "suggestion";
+  shadow: number;
+  outcome: SuggestionOutcome;
+  fork?: number;
+};
+
 export type PhaseNotedLine = {
   seq: number;
   t: number;
@@ -1064,6 +1083,7 @@ export type LogLine =
   | TimeoutNearLine
   | ForkSkippedLine
   | ForkShadowedLine
+  | SuggestionLine
   | PhaseNotedLine
   | TrunkClampedLine
   | TrunkWaitedLine
