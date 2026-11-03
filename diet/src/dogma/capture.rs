@@ -64,8 +64,32 @@ pub const C2: CaptureSet = CaptureSet {
     ],
 };
 
+/// c2 with `update_record` taking a note in the model's own words and no
+/// field kind, and an optional evidence quote (#1016; the maintainer's
+/// approval of the drafted wording, 2026-11-03): the note is always kept,
+/// `observed` when the quote is found in this turn's tool output or the
+/// user's message, `self-stated` otherwise. `resolve_entry`, the reminder
+/// and the sweep words are c2's, byte for byte.
+pub const C3: CaptureSet = CaptureSet {
+    name: "c3",
+    files: &[
+        (
+            "contract.jsonl",
+            include_str!("../../dogma/self-capture/c3/contract.jsonl"),
+        ),
+        (
+            "reminder.txt",
+            include_str!("../../dogma/self-capture/c3/reminder.txt"),
+        ),
+        (
+            "sweep.txt",
+            include_str!("../../dogma/self-capture/c3/sweep.txt"),
+        ),
+    ],
+};
+
 /// Every set, in the order they were added.
-pub const SETS: &[&CaptureSet] = &[&C1, &C2];
+pub const SETS: &[&CaptureSet] = &[&C1, &C2, &C3];
 
 /// The set a session offers when its regimen names none: c1, today's.
 pub const DEFAULT: &CaptureSet = &C1;
@@ -119,7 +143,7 @@ impl CaptureSet {
 
 #[cfg(test)]
 mod tests {
-    use super::{C1, C2, DEFAULT, SETS, set};
+    use super::{C1, C2, C3, DEFAULT, SETS, set};
     use crate::dogma::MANIFEST;
     use std::collections::BTreeSet;
     use std::path::Path;
@@ -177,6 +201,23 @@ mod tests {
         assert_eq!(on_disk, embedded);
     }
 
+    /// c3 changes `update_record` alone: `resolve_entry`, the reminder and
+    /// the sweep are c2's, byte for byte (#1016).
+    #[test]
+    fn c3_changes_update_record_alone() {
+        for file in ["reminder.txt", "sweep.txt"] {
+            assert_eq!(C3.text(file), C2.text(file), "{file}");
+        }
+        let resolve = |set: &super::CaptureSet| {
+            set.contract()
+                .lines()
+                .find(|line| line.contains("\"tool\":\"resolve_entry\""))
+                .map(str::to_owned)
+        };
+        assert_eq!(resolve(&C3), resolve(&C2));
+        assert_ne!(C3.contract(), C2.contract());
+    }
+
     /// c1 is the words `capture::tools` shipped with.
     #[test]
     fn c1_is_todays_contract_and_reminder() {
@@ -201,7 +242,8 @@ mod tests {
     fn a_set_is_found_by_name_and_c1_is_the_default() {
         assert_eq!(set("c1"), Some(&C1));
         assert_eq!(set("c2"), Some(&C2));
-        assert_eq!(set("c3"), None);
+        assert_eq!(set("c3"), Some(&C3));
+        assert_eq!(set("c4"), None);
         assert_eq!(DEFAULT, &C1);
     }
 }

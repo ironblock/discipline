@@ -676,6 +676,31 @@ pub struct Effect {
     pub confirmation: Option<Confirmed>,
     /// The advisory proposal, when the call made one.
     pub proposal: Option<Proposal>,
+    /// Who vouches for the note it wrote, under a contract whose
+    /// `update_record` takes no field kind (#1016).
+    pub authority: Option<Authority>,
+}
+
+/// Who vouches for a note written under a contract whose `update_record`
+/// takes no field kind (#1016, contract set c3).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Authority {
+    /// Its evidence quote was found verbatim in what the model observed
+    /// that turn: the ask and the tool output, never its own prose.
+    Observed,
+    /// It gave no quote, or one that was not found there.
+    SelfStated,
+}
+
+impl Authority {
+    /// The log's word for it (`log::AUTHORITIES`).
+    #[must_use]
+    pub fn tag(self) -> &'static str {
+        match self {
+            Self::Observed => "observed",
+            Self::SelfStated => "self-stated",
+        }
+    }
 }
 
 /// Why a tool call produced nothing.
@@ -798,10 +823,19 @@ impl Error for ToolError {}
 pub struct Seen {
     source: String,
     session_prefix: String,
+    /// This turn's source less the model's own prose (#1016).
+    observed: String,
 }
 
 impl Seen {
     /// What the model saw by turn `turn`.
+    ///
+    /// Its `observed` holds the turn's tool output alone: it reads no
+    /// request's sent text, where an archive record keeps the ask, so a quote
+    /// of the user's message is not found here. Nothing re-derives a c3
+    /// note's authority from a record -- the served path's `session::seen_by`
+    /// decides it, ask included, and the log's `patch.entry.authority` is
+    /// what a reader reads (#1016).
     ///
     /// The source is that turn's tool output and that turn's own prose on the
     /// canonical lane. Everything from earlier turns is the session prefix:
@@ -822,7 +856,13 @@ impl Seen {
                     tool,
                     output: Some(output),
                     ..
-                } if CaptureTool::from_tag(tool).is_none() => seen.push(*at_turn, turn, output),
+                } if CaptureTool::from_tag(tool).is_none() => {
+                    seen.push(*at_turn, turn, output);
+                    if *at_turn == turn {
+                        seen.observed.push_str(output);
+                        seen.observed.push('\n');
+                    }
+                }
                 Event::Response {
                     to_request,
                     text: Some(text),
@@ -846,16 +886,18 @@ impl Seen {
         bucket.push('\n');
     }
 
-    /// What the model saw, from its two parts (#609): `source`, this turn's
-    /// tool output and prose, and `session_prefix`, everything earlier. A
-    /// served session assembles them from its own log, as [`Seen::of_turn`]
-    /// does from a record, and with the same exclusions: no capture tool's
+    /// What the model saw, from its parts (#609): `source`, this turn's
+    /// tool output and prose, `session_prefix`, everything earlier, and
+    /// `observed`, the source less the model's own prose (#1016). A served
+    /// session assembles them from its own log, as [`Seen::of_turn`] does
+    /// from a record, and with the same exclusions: no capture tool's
     /// output, and no call's arguments.
     #[must_use]
-    pub fn from_parts(source: String, session_prefix: String) -> Self {
+    pub fn from_parts(source: String, session_prefix: String, observed: String) -> Self {
         Self {
             source,
             session_prefix,
+            observed,
         }
     }
 
@@ -865,6 +907,7 @@ impl Seen {
         ContractInput {
             source: &self.source,
             session_prefix: &self.session_prefix,
+            observed: &self.observed,
         }
     }
 }
@@ -949,10 +992,27 @@ pub fn apply_call(
     index: u32,
     saw: ContractInput<'_>,
 ) -> Result<Effect, ToolError> {
+    let specs = contract().map_err(ToolError::NoContract)?;
+    apply_call_under(&specs, (id, at_turn), (tool, args), index, saw)
+}
+
+/// [`apply_call`] under the contract `specs` a session offered (#1016):
+/// its arguments admitted against that contract's parameters, and an
+/// `update_record` grounded as that contract says.
+///
+/// # Errors
+///
+/// As [`apply`].
+pub fn apply_call_under(
+    specs: &[ToolSpec],
+    (id, at_turn): (&str, u32),
+    (tool, args): (&str, &BTreeMap<String, Value>),
+    index: u32,
+    saw: ContractInput<'_>,
+) -> Result<Effect, ToolError> {
     let Some(named) = CaptureTool::from_tag(tool) else {
         return Err(ToolError::NotACaptureTool(tool.to_owned()));
     };
-    let specs = contract().map_err(ToolError::NoContract)?;
     // The phase tool is described by its own pin (#788), not a contract.
     let phase = phase_spec();
     let spec = if named == CaptureTool::ProposePhaseTransition {
@@ -982,7 +1042,7 @@ pub fn apply_call(
         index,
     };
     match named {
-        CaptureTool::UpdateRecord => update_record(id, &args, saw, provenance),
+        CaptureTool::UpdateRecord => update_record(spec, (id, &args), saw, provenance),
         CaptureTool::ResolveEntry => resolve_entry(&args, provenance),
         CaptureTool::ProposePhaseTransition => Ok(advisory(Proposal {
             from_call: id.to_owned(),
@@ -1074,16 +1134,48 @@ fn text_argument(args: &BTreeMap<String, String>, name: &str) -> String {
     args.get(name).cloned().unwrap_or_default()
 }
 
+/// The `update_record` parameter that carries a note's evidence quote,
+/// under a contract that declares it (#1016).
+pub const EVIDENCE: &str = "evidence";
+
+/// The `update_record` parameter that names a fact's field kind; a contract
+/// whose `update_record` declares none takes notes (#1016).
+const FIELD: &str = "field";
+
 /// `update_record`: a fact, if the model actually saw it.
+///
+/// Under a contract whose `update_record` takes no [`FIELD`] (#1016, set
+/// c3), it is a note in the model's own words: always kept, `observed` when
+/// its [`EVIDENCE`] quote is found in what the model observed this turn --
+/// the ask and the tool output, never its own prose -- and `self-stated`
+/// otherwise. Under any other contract, the content itself is grounded, as
+/// before.
 fn update_record(
-    call: &str,
-    args: &BTreeMap<String, String>,
+    spec: &ToolSpec,
+    (call, args): (&str, &BTreeMap<String, String>),
     saw: ContractInput<'_>,
     provenance: Provenance,
 ) -> Result<Effect, ToolError> {
-    let named = text_argument(args, "field");
-    let field = field_kind(&named).ok_or(ToolError::UnknownField(named.clone()))?;
     let content = text_argument(args, "content");
+    if spec.parameter(FIELD).is_none() {
+        let id = EntryId::new(&format!("{call}/note")).map_err(ToolError::BadEntry)?;
+        let authority = if args
+            .get(EVIDENCE)
+            .is_some_and(|quote| grounded::present(saw.observed, quote))
+        {
+            Authority::Observed
+        } else {
+            Authority::SelfStated
+        };
+        let patch = written(args, (id, content), provenance)?;
+        return Ok(Effect {
+            patches: vec![patch],
+            authority: Some(authority),
+            ..Effect::default()
+        });
+    }
+    let named = text_argument(args, FIELD);
+    let field = field_kind(&named).ok_or(ToolError::UnknownField(named.clone()))?;
     // Derived from the row that carried it, never minted. An entry that cannot
     // be walked back to the event it came from is an entry whose provenance is
     // a claim.
@@ -1093,25 +1185,35 @@ fn update_record(
     let kept = !report.kept().is_empty();
     let mut patches = Vec::new();
     if kept {
-        patches.push(match args.get("supersedes") {
-            Some(voids) => Patch::Supersede {
-                id,
-                content,
-                voids: EntryId::new(voids).map_err(ToolError::BadEntry)?,
-                provenance,
-                refuted: None,
-            },
-            None => Patch::Add {
-                id,
-                content,
-                provenance,
-            },
-        });
+        patches.push(written(args, (id, content), provenance)?);
     }
     Ok(Effect {
         patches,
         grounding: Some(report),
         ..Effect::default()
+    })
+}
+
+/// The patch an `update_record` writes: an add, or a supersede of the entry
+/// its `supersedes` names.
+fn written(
+    args: &BTreeMap<String, String>,
+    (id, content): (EntryId, String),
+    provenance: Provenance,
+) -> Result<Patch, ToolError> {
+    Ok(match args.get("supersedes") {
+        Some(voids) => Patch::Supersede {
+            id,
+            content,
+            voids: EntryId::new(voids).map_err(ToolError::BadEntry)?,
+            provenance,
+            refuted: None,
+        },
+        None => Patch::Add {
+            id,
+            content,
+            provenance,
+        },
     })
 }
 
@@ -1409,6 +1511,7 @@ mod tests {
         ContractInput {
             source: SOURCE,
             session_prefix: PREFIX,
+            observed: SOURCE,
         }
     }
 
@@ -1445,6 +1548,110 @@ mod tests {
             .iter()
             .find(|spec| spec.tool == tool)
             .unwrap_or_else(|| panic!("the contract describes `{}`", tool.tag()))
+    }
+
+    // -----------------------------------------------------------------
+    // a note and its evidence: contract set c3 (#1016)
+    // -----------------------------------------------------------------
+
+    /// The model's prose this turn, and what it observed: the ask and the
+    /// tool output.
+    const PROSE: &str = "I think supersede voids the old entry and links the pair.";
+    const OBSERVED: &str = "diet/src/object.rs:412: fn supersede\n\
+                            It voids the old entry and links the pair.";
+
+    /// A c3 `update_record` of `pairs`, seen against this turn's prose and
+    /// what it observed.
+    fn note(pairs: &[(&str, &str)]) -> Result<Effect, ToolError> {
+        let source = format!("{OBSERVED}\n{PROSE}");
+        let args: BTreeMap<String, Value> = pairs
+            .iter()
+            .map(|(key, value)| ((*key).to_owned(), Value::String((*value).to_owned())))
+            .collect();
+        super::apply_call_under(
+            &super::contract_of(&crate::dogma::capture::C3).expect("c3"),
+            ("c1", 1),
+            (CaptureTool::UpdateRecord.tag(), &args),
+            0,
+            ContractInput {
+                source: &source,
+                session_prefix: PREFIX,
+                observed: OBSERVED,
+            },
+        )
+    }
+
+    /// The one note an effect wrote, and who vouches for it.
+    fn kept(effect: &Effect) -> (String, Option<super::Authority>) {
+        let [Patch::Add { content, .. }] = &effect.patches[..] else {
+            panic!("one note kept: {:?}", effect.patches);
+        };
+        (content.clone(), effect.authority)
+    }
+
+    /// #1016: under c3 a note is the model's own words, kept as written;
+    /// with a quote that is a run of one line of what it observed, it is
+    /// `observed`. The same words under c2 are a fact the gate drops.
+    #[test]
+    fn a_paraphrased_note_with_a_verbatim_quote_is_kept_observed() {
+        let claim = "supersede retires an entry and pairs it with its replacement";
+        let effect = note(&[
+            ("content", claim),
+            (super::EVIDENCE, "It voids the old entry"),
+        ])
+        .expect("a well-formed call");
+        assert_eq!(
+            kept(&effect),
+            (claim.to_owned(), Some(super::Authority::Observed))
+        );
+        let c2 = super::contract_of(&crate::dogma::capture::C2).expect("c2");
+        let args: BTreeMap<String, Value> = [
+            ("content", claim),
+            ("field", FieldKind::Fact.canonical_tag()),
+        ]
+        .iter()
+        .map(|(key, value)| ((*key).to_owned(), Value::String((*value).to_owned())))
+        .collect();
+        let effect = super::apply_call_under(
+            &c2,
+            ("c2", 1),
+            (CaptureTool::UpdateRecord.tag(), &args),
+            0,
+            saw(),
+        )
+        .expect("a well-formed call");
+        assert!(effect.patches.is_empty(), "c2 grounds the claim itself");
+    }
+
+    /// #1016: a quote only the model's own reply holds is not evidence: the
+    /// note is kept, `self-stated`; so is one with no quote at all.
+    #[test]
+    fn a_quote_only_in_the_models_own_reply_is_kept_self_stated() {
+        let effect = note(&[
+            ("content", "supersede voids the old entry"),
+            (super::EVIDENCE, "I think supersede voids the old entry"),
+        ])
+        .expect("a well-formed call");
+        assert_eq!(kept(&effect).1, Some(super::Authority::SelfStated));
+        let effect =
+            note(&[("content", "the resolver wants a fresh binary")]).expect("a well-formed call");
+        assert_eq!(kept(&effect).1, Some(super::Authority::SelfStated));
+    }
+
+    /// #1016: c3 takes no field kind: a call naming one is refused as a
+    /// parameter the contract does not have, and c2's `field` is unchanged.
+    #[test]
+    fn a_c3_note_takes_no_field_kind() {
+        assert_eq!(
+            note(&[
+                ("content", "supersede voids the old entry"),
+                ("field", FieldKind::Fact.canonical_tag()),
+            ]),
+            Err(ToolError::UnknownArgument {
+                tool: CaptureTool::UpdateRecord.tag(),
+                parameter: "field".to_owned(),
+            })
+        );
     }
 
     // -----------------------------------------------------------------

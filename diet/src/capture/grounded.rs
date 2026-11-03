@@ -48,6 +48,10 @@ pub struct ContractInput<'a> {
     pub source: &'a str,
     /// What the lane could see but was not told to work from.
     pub session_prefix: &'a str,
+    /// Of `source`, what came from outside the model (#1016): the turn's ask
+    /// and its tool output, the model's own prose left out. What grounds an
+    /// `update_record`'s `evidence` quote under a contract that asks for one.
+    pub observed: &'a str,
 }
 
 /// How an entry relates to the contract input.
@@ -465,6 +469,15 @@ pub fn check(
     }
 }
 
+/// Whether `quote` is present in `source` as the gate reads presence: a
+/// contiguous run of whole tokens on one line, case and punctuation exact
+/// (#1016: a c3 note's evidence quote). An empty quote is present nowhere.
+#[must_use]
+pub fn present(source: &str, quote: &str) -> bool {
+    let needle = tokens(quote);
+    !needle.is_empty() && present_in(&segments(source), &needle)
+}
+
 /// A line's whitespace-separated tokens.
 fn tokens(text: &str) -> Vec<&str> {
     text.split_whitespace().collect()
@@ -626,6 +639,7 @@ mod tests {
         ContractInput {
             source: SOURCE,
             session_prefix: PREFIX,
+            observed: SOURCE,
         }
     }
 
