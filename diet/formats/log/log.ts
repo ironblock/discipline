@@ -4,8 +4,8 @@
 // i64, and a JavaScript number is exact only to 2^53. A `timings`
 // millisecond may carry a fraction, written as the server wrote it.
 
-export const VERSION = 32;
-export const READS = [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32] as const;
+export const VERSION = 33;
+export const READS = [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32, 33] as const;
 export const PRESENCE_WINDOW_MS = 2000;
 
 export type Kind =
@@ -393,6 +393,12 @@ export interface OperatorChange {
   kind: string;
 }
 
+export interface PassedOverRegion {
+  why: string;
+  tag?: string;
+  text: string;
+}
+
 export interface ToolCallPiece {
   index: number;
   id?: string;
@@ -437,7 +443,7 @@ export type SessionStartLine = {
   seq: number;
   t: number;
   kind: "session.start";
-  version: 0 | 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9 | 10 | 11 | 12 | 13 | 14 | 15 | 16 | 17 | 18 | 19 | 20 | 21 | 22 | 23 | 24 | 25 | 26 | 27 | 28 | 29 | 30 | 31 | 32;
+  version: 0 | 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9 | 10 | 11 | 12 | 13 | 14 | 15 | 16 | 17 | 18 | 19 | 20 | 21 | 22 | 23 | 24 | 25 | 26 | 27 | 28 | 29 | 30 | 31 | 32 | 33;
   opened: number;
   model: string;
   head: HeadMessage[];
@@ -672,6 +678,7 @@ export type ForkSettledLine = {
   refused?: string;
   trailer?: string;
   not_run?: number;
+  passed_over?: PassedOverRegion[];
 } & ({ window: number; trunk_tokens: number; beside_tokens: number; fork_tokens: number } | { window?: never; trunk_tokens?: never; beside_tokens?: never; fork_tokens?: never });
 
 export type PatchLine = {
