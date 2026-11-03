@@ -20,6 +20,7 @@
 //! | `cancel`, `end` | `POST /commands` |
 //! | `memory` | `GET /memory` (#756) |
 //! | `edit`, `flag` | `POST /commands` `edit-entry`, `flag-entry` |
+//! | `keep` | `POST /commands` `keep` (#1021) |
 //! | `declare_meditation`, `refill_anyway`, `ratify_phase` | `POST /commands` |
 //! | `open_tangent`, `close_tangent` | `POST /commands` |
 //! | `events` | `GET /events`, the log lines after a seq |
@@ -454,6 +455,21 @@ fn later_tools() -> Vec<Value> {
             ),
         ),
         tool(
+            "keep",
+            "Keep an exact span of a logged line as the operator's entry (the `keep` command, \
+             #1021): an ask, an answer (the trunk's or a fork's, as written), a step's text or a \
+             tool result as shown, named by its seq; the span must appear in it character for \
+             character. Answers the entry's id.",
+            object(
+                json!({
+                    "from": integer("The seq of the line to keep from."),
+                    "span": string("The exact text to keep."),
+                    "tag": string("An optional tag for the entry.")
+                }),
+                &["from", "span"],
+            ),
+        ),
+        tool(
             "declare_meditation",
             "Declare a meditation (the `declare-meditation` command), optionally moving to a \
              phase.",
@@ -782,6 +798,19 @@ pub fn call(serve: &Serve, name: &str, arguments: &Map<String, Value>) -> Result
             "id": args.string("id")?,
             "note": args.string("note")?
         }))?,
+        "keep" => {
+            let mut body = json!({
+                "kind": "keep",
+                "from": args
+                    .optional_count("from")?
+                    .ok_or_else(|| "`from` is required".to_owned())?,
+                "span": args.string("span")?
+            });
+            if let Some(tag) = args.optional_string("tag")? {
+                body["tag"] = json!(tag);
+            }
+            serve.command(&body)?
+        }
         "declare_meditation" => {
             let mut body = json!({"kind": "declare-meditation"});
             if let Some(phase) = args.optional_string("phase")? {
@@ -1445,6 +1474,7 @@ mod tests {
                 "memory",
                 "edit",
                 "flag",
+                "keep",
                 "declare_meditation",
                 "refill_anyway",
                 "propose_phase",
