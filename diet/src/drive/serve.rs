@@ -995,6 +995,17 @@ impl<S: Streaming + 'static> Serving<S> {
                 Ok(()) => (200, BTreeMap::new()),
                 Err(rejection) => rejected(rejection),
             },
+            // The operator's fork (#1021): its seq, to read its answer by.
+            Command::Fork(at, ask) => match self.session.fork(at, &ask) {
+                Ok(fork) => (
+                    200,
+                    BTreeMap::from([(
+                        "fork".to_owned(),
+                        Value::Integer(i64::try_from(fork).unwrap_or(i64::MAX)),
+                    )]),
+                ),
+                Err(rejection) => rejected(rejection),
+            },
             // The operator's keep (#1021): the entry it wrote, by id.
             Command::Keep(from, span, tag) => {
                 match self.session.keep(from, &span, tag.as_deref()) {
@@ -1082,6 +1093,9 @@ enum Command {
     /// Keep this span of the logged line with this seq as an operator
     /// entry, with an optional tag (#1021).
     Keep(u64, String, Option<String>),
+    /// Fork off the trunk at the logged line with this seq, or its end,
+    /// asking this (#1021).
+    Fork(Option<u64>, crate::drive::session::OperatorAsk),
 }
 
 /// A command's word as a client written before #583's rename may send it,
@@ -1168,6 +1182,8 @@ impl Command {
             CommandKind::ProposePhase | CommandKind::MovePhase => &["kind", "to", "meditate"],
             // #1021: the operator's keep ends no idle gap.
             CommandKind::Keep => &["kind", "from", "span", "tag"],
+            // #1021: the operator's fork ends no idle gap.
+            CommandKind::Fork => &["kind", "at", "ask", "text"],
             // #942: a runner's grade ends no idle gap.
             CommandKind::Grade => &[
                 "kind",
@@ -1264,6 +1280,23 @@ impl Command {
             }
             CommandKind::RefillAnyway => Some(Self::RefillAnyway),
             CommandKind::Grade => grade_of(object, task.clone()).map(Self::Grade),
+            CommandKind::Fork => {
+                let at = match object.get("at") {
+                    None => None,
+                    Some(Value::Integer(at)) => Some(u64::try_from(*at).ok()?),
+                    Some(_) => return None,
+                };
+                let ask = match (object.get("ask"), object.get("text")) {
+                    (Some(Value::String(name)), None) => {
+                        crate::drive::session::OperatorAsk::Pinned(name.clone())
+                    }
+                    (None, Some(Value::String(text))) => {
+                        crate::drive::session::OperatorAsk::Text(text.clone())
+                    }
+                    _ => return None,
+                };
+                Some(Self::Fork(at, ask))
+            }
             CommandKind::Keep => {
                 match (object.get("from"), object.get("span"), object.get("tag")) {
                     (Some(Value::Integer(from)), Some(Value::String(span)), tag) => {

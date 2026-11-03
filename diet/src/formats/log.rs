@@ -726,6 +726,8 @@ vocabulary! {
         Grade => "grade",
         /// The operator kept a span of a logged line (v32, #1021).
         Keep => "keep",
+        /// The operator forked off the trunk (v32, #1021).
+        Fork => "fork",
     }
 }
 
@@ -801,6 +803,11 @@ vocabulary! {
         NotInSource => "not-in-source",
         /// A keep in a session that keeps no working memory (v32, #1021).
         NoWorkingMemory => "no-working-memory",
+        /// An operator's fork at a line the trunk no longer holds (v32,
+        /// #1021): a meditation replaced it.
+        NotOnTheTrunk => "not-on-the-trunk",
+        /// An operator's fork naming no pinned fork ask (v32, #1021).
+        NotAPinnedAsk => "not-a-pinned-ask",
     }
 }
 
@@ -845,6 +852,10 @@ vocabulary! {
         /// A failed command, or the operator's message (v9, #878): the
         /// `REFUTE_Q` ask, what it shows was wrong of what the model believed.
         Refutation => "refutation",
+        /// The operator, at the moment it was needed (v32, #1021): a pinned
+        /// ask or the operator's own words, at a step or tool result. Never
+        /// a regimen's interview warrant.
+        Operator => "operator",
     }
 }
 
@@ -3441,6 +3452,50 @@ impl Forks {
         }
     }
 
+    /// The operator's fork (v32, #1021): on `interview`, at an answered
+    /// trunk `request` of turn `of_turn` the latest meditation did not
+    /// replace, cut, when it names one, at a `tool_call` of that turn at or
+    /// after it. It answers to no gap: it is cut while the session awaits,
+    /// whenever the operator asks.
+    fn operator(
+        &mut self,
+        seq: u64,
+        (lane, of_turn, at): (Lane, u32, u64),
+        cut: Option<u64>,
+    ) -> Result<(), String> {
+        if lane != Lane::Interview {
+            return Err(format!(
+                "an operator's fork on the `{}` lane: it is asked on `interview`",
+                lane.tag()
+            ));
+        }
+        if !self.answered.contains(&at) {
+            return Err(format!(
+                "an operator's fork at seq {at}, which is not an answered trunk `request`"
+            ));
+        }
+        if self
+            .last_meditation
+            .is_some_and(|meditation| meditation > at)
+        {
+            return Err(format!(
+                "an operator's fork at seq {at}, before the latest meditation: it replaced the \
+                 trunk the fork would be cut from"
+            ));
+        }
+        if let Some(cut) = cut
+            && (self.tool_calls.get(&cut) != Some(&of_turn) || cut < at)
+        {
+            return Err(format!(
+                "an operator's fork cut at {cut}, which is not a `tool_call` of turn {of_turn} \
+                 at or after request {at}"
+            ));
+        }
+        self.cut.insert(seq);
+        self.of_turn.insert(seq, of_turn);
+        Ok(())
+    }
+
     /// A gap's fork after the gap's others: one alone, or each named by its
     /// `trigger`, each after the one before settled -- but a meditation's
     /// audit's chunk, which runs beside its audit's other chunks.
@@ -3956,6 +4011,7 @@ fn check(lines: &[Line]) -> Result<(), LogError> {
                 lane,
                 of_turn,
                 at: forked_at,
+                why,
                 trigger,
                 after_meditation,
                 cut,
@@ -3976,15 +4032,18 @@ fn check(lines: &[Line]) -> Result<(), LogError> {
                     }
                     forks.arrival = Some(line.seq);
                 }
-                forks
-                    .fork(
+                let checked = if *why == Warrant::Operator {
+                    forks.operator(line.seq, (*lane, *of_turn, *forked_at), *cut)
+                } else {
+                    forks.fork(
                         line.seq,
                         (*lane, *of_turn, *forked_at, trigger.is_some()),
                         (*after_meditation, *cut, *chunk),
                         turns,
                         &trunk,
                     )
-                    .map_err(|why| at(index, why))?;
+                };
+                checked.map_err(|why| at(index, why))?;
             }
             Event::ForkSettled { fork, outcome, .. } => forks
                 .settle(*fork, *outcome)
@@ -6434,12 +6493,18 @@ pub fn tag_introduced(tags: Tags, tag: &str) -> i64 {
         return 18;
     }
     // The operator's gestures (#1021).
-    let gesture = (tags == Tags::Command && Command::from_tag(tag) == Some(Command::Keep))
+    let gesture = (tags == Tags::Command
+        && matches!(Command::from_tag(tag), Some(Command::Keep | Command::Fork)))
+        || (tags == Tags::Warrant && Warrant::from_tag(tag) == Some(Warrant::Operator))
         || (tags == Tags::Refusal
             && Refusal::from_tag(tag).is_some_and(|refusal| {
                 matches!(
                     refusal,
-                    Refusal::NotASource | Refusal::NotInSource | Refusal::NoWorkingMemory
+                    Refusal::NotASource
+                        | Refusal::NotInSource
+                        | Refusal::NoWorkingMemory
+                        | Refusal::NotOnTheTrunk
+                        | Refusal::NotAPinnedAsk
                 )
             }));
     if gesture {

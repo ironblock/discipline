@@ -20,7 +20,7 @@
 //! | `cancel`, `end` | `POST /commands` |
 //! | `memory` | `GET /memory` (#756) |
 //! | `edit`, `flag` | `POST /commands` `edit-entry`, `flag-entry` |
-//! | `keep` | `POST /commands` `keep` (#1021) |
+//! | `fork`, `keep` | `POST /commands` `fork`, `keep` (#1021) |
 //! | `declare_meditation`, `refill_anyway`, `ratify_phase` | `POST /commands` |
 //! | `open_tangent`, `close_tangent` | `POST /commands` |
 //! | `events` | `GET /events`, the log lines after a seq |
@@ -455,6 +455,22 @@ fn later_tools() -> Vec<Value> {
             ),
         ),
         tool(
+            "fork",
+            "Fork off the trunk as the operator (the `fork` command, #1021): at the step, tool \
+             result or trunk answer the line `at` names, or at the trunk's end; asking a pinned \
+             fork ask by its template's name (`ask`, e.g. GOTCHAS) or your own words (`text`), \
+             one of the two. Its answer is logged and shown; it writes nothing to working \
+             memory. Answers the fork's seq.",
+            object(
+                json!({
+                    "at": integer("The seq of the line to fork at; the trunk's end when omitted."),
+                    "ask": string("A pinned fork ask, by its template's name."),
+                    "text": string("Your own words to ask.")
+                }),
+                &[],
+            ),
+        ),
+        tool(
             "keep",
             "Keep an exact span of a logged line as the operator's entry (the `keep` command, \
              #1021): an ask, an answer (the trunk's or a fork's, as written), a step's text or a \
@@ -798,6 +814,19 @@ pub fn call(serve: &Serve, name: &str, arguments: &Map<String, Value>) -> Result
             "id": args.string("id")?,
             "note": args.string("note")?
         }))?,
+        "fork" => {
+            let mut body = json!({"kind": "fork"});
+            if let Some(at) = args.optional_count("at")? {
+                body["at"] = json!(at);
+            }
+            if let Some(ask) = args.optional_string("ask")? {
+                body["ask"] = json!(ask);
+            }
+            if let Some(text) = args.optional_string("text")? {
+                body["text"] = json!(text);
+            }
+            serve.command(&body)?
+        }
         "keep" => {
             let mut body = json!({
                 "kind": "keep",
@@ -1474,6 +1503,7 @@ mod tests {
                 "memory",
                 "edit",
                 "flag",
+                "fork",
                 "keep",
                 "declare_meditation",
                 "refill_anyway",

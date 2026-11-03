@@ -126,6 +126,8 @@ vocabulary! {
         Grade => "grade",
         /// Keep an exact span of a logged line as an operator entry (#1021).
         Keep => "keep",
+        /// Fork off the trunk at a step or tool result (#1021).
+        Fork => "fork",
     }
 }
 
@@ -206,6 +208,11 @@ vocabulary! {
         NotInSource => "not-in-source",
         /// A keep in a session that keeps no working memory (#1021).
         NoWorkingMemory => "no-working-memory",
+        /// An operator's fork at a line the trunk no longer holds (#1021):
+        /// a meditation replaced it.
+        NotOnTheTrunk => "not-on-the-trunk",
+        /// An operator's fork naming no pinned fork ask (#1021).
+        NotAPinnedAsk => "not-a-pinned-ask",
     }
 }
 
@@ -1273,14 +1280,17 @@ pub fn interview_warrant(regimen: &Regimen) -> Result<Vec<log::Warrant>, String>
         .iter()
         .map(|item| match item {
             regimen::Value::String(word) => log::Warrant::from_tag(word)
-                // A meditation's audit is the meditation's, never an interview's (#504).
-                .filter(|rule| *rule != log::Warrant::Meditation)
+                // A meditation's audit is the meditation's, never an interview's
+                // (#504); the operator's fork is the operator's (#1021).
+                .filter(|rule| !matches!(rule, log::Warrant::Meditation | log::Warrant::Operator))
                 .ok_or_else(|| {
                     format!(
                         "`{INTERVIEW_WARRANT}` names `{word}`, which is not a rule: {}",
                         log::Warrant::ALL
                             .iter()
-                            .filter(|rule| **rule != log::Warrant::Meditation)
+                            .filter(|rule| {
+                                !matches!(rule, log::Warrant::Meditation | log::Warrant::Operator)
+                            })
                             .map(|rule| rule.tag())
                             .collect::<Vec<_>>()
                             .join(", ")
@@ -3126,7 +3136,8 @@ impl State {
                 | CommandKind::ProposePhase
                 | CommandKind::MovePhase
                 | CommandKind::Grade
-                | CommandKind::Keep => {
+                | CommandKind::Keep
+                | CommandKind::Fork => {
                     unreachable!("a tangent, background or phase ruling carries no idle gap")
                 }
             };
@@ -3947,7 +3958,7 @@ impl<S: Streaming + 'static> Session<S> {
                 &mut state,
                 (turn, seq),
                 firing,
-                (Some(shape.messages.clone()), Timing::Arrival),
+                (Some(shape.messages.clone()), Timing::Arrival, None),
             )
         });
         // Pushed here, under the lock that admits the ask, and never on the
@@ -4696,6 +4707,97 @@ impl<S: Streaming + 'static> Session<S> {
             unreachable!("a keep adds");
         };
         Ok(id.as_str().to_owned())
+    }
+
+    /// Fork off the trunk as the operator (#1021): at the step or tool
+    /// result the logged line `at` names -- a step's text, a tool result,
+    /// or a trunk answer -- or, with none, at the trunk's end; asking the
+    /// pinned fork ask `ask` names, or the operator's own words. Logged
+    /// `warrant: operator` with the question as sent; its answer is logged
+    /// and shown, and nothing is written to working memory by it. The
+    /// session waits for it, in capture. Returns the fork's seq.
+    ///
+    /// # Errors
+    ///
+    /// [`Refusal::Ended`]; [`Refusal::InFlight`] while a turn or a capture is
+    /// in flight; [`Refusal::Empty`] for no words; [`Refusal::NotAPinnedAsk`]
+    /// for a name no holeless fork template has; [`Refusal::NotASource`] for
+    /// a line that is no step, tool result or trunk answer, or no trunk yet;
+    /// and [`Refusal::NotOnTheTrunk`] for one a meditation replaced.
+    pub fn fork(&self, at: Option<u64>, ask: &OperatorAsk) -> Result<u64, Rejected> {
+        let mut state = self.shared.lock();
+        let because = match state.settlement {
+            Settlement::Ended => Err(Refusal::Ended),
+            Settlement::Turn | Settlement::Capture => Err(Refusal::InFlight),
+            Settlement::Awaiting => operator_firing(ask)
+                .and_then(|firing| forked_at(&state, at).map(|place| (firing, place))),
+        };
+        let (firing, (turn, request, cut, prefix)) = match because {
+            Ok(fired) => fired,
+            Err(because) => {
+                let refused = state.refuse(CommandKind::Fork, because);
+                drop(state);
+                self.shared.changed.notify_all();
+                return Err(Rejected::Refused(refused));
+            }
+        };
+        state.admit_within_the_gap();
+        state.move_to(Settlement::Capture);
+        let fired = fire_on(
+            &self.shared,
+            &mut state,
+            (turn, request),
+            firing,
+            (Some(prefix), Timing::Gap, cut),
+        );
+        let fork = state
+            .log
+            .iter()
+            .rev()
+            .find(|logged| matches!(logged.event, Event::Forked { .. }))
+            .map_or(0, |logged| logged.seq);
+        let Some(fired) = fired else {
+            // Refused unsent for the pool: settled already, the session back
+            // to awaiting.
+            operator_fork_over(&mut state);
+            drop(state);
+            self.shared.changed.notify_all();
+            return Ok(fork);
+        };
+        drop(state);
+        self.shared.changed.notify_all();
+        let shared = Arc::clone(&self.shared);
+        let spawned = std::thread::Builder::new()
+            .name("diet-operator-fork".to_owned())
+            .spawn(move || {
+                let run = stream_fork(&shared, &fired);
+                let mut state = shared.lock();
+                state.flight = None;
+                state.forking = None;
+                state.aside_sizing(|state| settle_fork(&shared, state, &fired, run));
+                operator_fork_over(&mut state);
+                drop(state);
+                shared.changed.notify_all();
+            });
+        if spawned.is_err() {
+            let mut state = self.shared.lock();
+            state.flight = None;
+            state.forking = None;
+            state.push(Event::ForkSettled {
+                trailer: None,
+                fork,
+                outcome: log::ForkOutcome::Failed,
+                prompt_tokens: None,
+                wall_ms: None,
+                refused: None,
+                pool: None,
+                not_run: None,
+            });
+            operator_fork_over(&mut state);
+            drop(state);
+            self.shared.changed.notify_all();
+        }
+        Ok(fork)
     }
 
     /// Log a scenario runner's grade of the latest turn (#942): a `grade`
@@ -6286,6 +6388,7 @@ fn command_of(command: CommandKind) -> log::Command {
         CommandKind::MovePhase => log::Command::MovePhase,
         CommandKind::Grade => log::Command::Grade,
         CommandKind::Keep => log::Command::Keep,
+        CommandKind::Fork => log::Command::Fork,
     }
 }
 
@@ -6320,6 +6423,8 @@ fn refusal_of(refusal: Refusal) -> log::Refusal {
         Refusal::NotASource => log::Refusal::NotASource,
         Refusal::NotInSource => log::Refusal::NotInSource,
         Refusal::NoWorkingMemory => log::Refusal::NoWorkingMemory,
+        Refusal::NotOnTheTrunk => log::Refusal::NotOnTheTrunk,
+        Refusal::NotAPinnedAsk => log::Refusal::NotAPinnedAsk,
     }
 }
 
@@ -9055,6 +9160,150 @@ fn restates(state: &State, id: &str, content: &str) -> Option<Refusal> {
         })
         .is_err()
         .then_some(Refusal::Restates)
+}
+
+/// What the operator's fork asks (#1021): a pinned fork ask, by its
+/// template's name, or the operator's own words.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum OperatorAsk {
+    /// A holeless fork template, by name (`GOTCHAS`, `DECISIONS`, ...).
+    Pinned(String),
+    /// The operator's own words, sent as written.
+    Text(String),
+}
+
+/// The firing the operator's `ask` makes (#1021), or why it is refused.
+fn operator_firing(ask: &OperatorAsk) -> Result<Firing, Refusal> {
+    use crate::dogma::{Site, Template};
+    let (pinned, question) = match ask {
+        OperatorAsk::Text(text) if text.trim().is_empty() => return Err(Refusal::Empty),
+        OperatorAsk::Text(text) => (None, text.clone()),
+        OperatorAsk::Pinned(name) => {
+            let template = Template::from_name(name)
+                .filter(|template| template.site() == Site::Fork && template.holes().is_empty())
+                .ok_or(Refusal::NotAPinnedAsk)?;
+            let question = template.fill(&[]).map_err(|_| Refusal::NotAPinnedAsk)?;
+            (Some(template), question)
+        }
+    };
+    Ok(Firing {
+        why: log::Warrant::Operator,
+        ask: AskKind::Generic,
+        pinned,
+        question,
+        trigger: "operator".to_owned(),
+        offered: None,
+    })
+}
+
+/// Where the operator's fork at the logged line `at` is cut (#1021): the
+/// turn, the trunk `request` it is at, the `tool_call` it is cut at when it
+/// names one, and the trunk up to and with that point. With no line, the
+/// latest answered trunk request and the whole trunk.
+fn forked_at(
+    state: &State,
+    at: Option<u64>,
+) -> Result<(u32, u64, Option<u64>, Vec<Message>), Refusal> {
+    let trunk_turn = |request: u64| {
+        state.log.iter().find_map(|logged| match &logged.event {
+            Event::Requested {
+                turn,
+                lane: Lane::Trunk,
+                ..
+            } if logged.seq == request => Some(*turn),
+            _ => None,
+        })
+    };
+    let Some(at) = at else {
+        let latest = state
+            .log
+            .iter()
+            .rev()
+            .find_map(|logged| match &logged.event {
+                Event::Answered { request, .. } => {
+                    trunk_turn(*request).map(|turn| (turn, *request))
+                }
+                _ => None,
+            });
+        let (turn, request) = latest.ok_or(Refusal::NotASource)?;
+        return Ok((turn, request, None, state.trunk.clone()));
+    };
+    let logged = state
+        .log
+        .iter()
+        .find(|logged| logged.seq == at)
+        .ok_or(Refusal::NotASource)?;
+    let (request, cut, place) = match &logged.event {
+        Event::ToolCalled(line) => {
+            let id = line.id.clone();
+            (
+                line.request,
+                Some(at),
+                state.trunk.iter().position(|message| {
+                    message.role == Role::Tool && message.tool_call_id.as_deref() == Some(&id)
+                }),
+            )
+        }
+        Event::Called { request, .. } => {
+            let ids: Vec<&str> = state
+                .log
+                .iter()
+                .filter_map(|logged| match &logged.event {
+                    Event::ToolCalled(line) if line.request == *request => Some(line.id.as_str()),
+                    _ => None,
+                })
+                .collect();
+            (
+                *request,
+                None,
+                state.trunk.iter().position(|message| {
+                    message
+                        .tool_calls
+                        .iter()
+                        .any(|call| ids.contains(&call.id.as_str()))
+                }),
+            )
+        }
+        Event::Answered { request, text, .. } => (
+            *request,
+            None,
+            state.trunk.iter().rposition(|message| {
+                message.role == Role::Assistant
+                    && message.tool_calls.is_empty()
+                    && message.content == *text
+            }),
+        ),
+        _ => return Err(Refusal::NotASource),
+    };
+    let turn = trunk_turn(request).ok_or(Refusal::NotASource)?;
+    let place = place.ok_or(Refusal::NotOnTheTrunk)?;
+    Ok((turn, request, cut, state.trunk[..=place].to_vec()))
+}
+
+/// The operator's fork has settled (#1021): back to awaiting, or on to
+/// ended when an `end` came meanwhile. Never the turn's end: it counts no
+/// cadence and makes no meditation due.
+fn operator_fork_over(state: &mut State) {
+    state.move_to(Settlement::Awaiting);
+    if state.ending {
+        state.ending = false;
+        state.move_to(Settlement::Ended);
+    }
+}
+
+/// Whether the fork at `fork` is the operator's (#1021): its answer is
+/// logged and shown, and folded into nothing.
+fn operator_fork(log: &[Logged], fork: u64) -> bool {
+    log.iter().any(|logged| {
+        logged.seq == fork
+            && matches!(
+                logged.event,
+                Event::Forked {
+                    why: log::Warrant::Operator,
+                    ..
+                }
+            )
+    })
 }
 
 /// The text of the logged line `from` a keep may keep from (#1021): an
@@ -12001,7 +12250,7 @@ fn fire<S>(
     at: u64,
     firing: Firing,
 ) -> Option<Fired> {
-    fire_on(shared, state, (turn, at), firing, (None, Timing::Gap))
+    fire_on(shared, state, (turn, at), firing, (None, Timing::Gap, None))
 }
 
 /// [`fire`], from `prefix` when given -- the trunk as an arrival fork sees
@@ -12013,7 +12262,7 @@ fn fire_on<S>(
     state: &mut State,
     (turn, at): (u32, u64),
     firing: Firing,
-    (prefix, timing): (Option<Vec<Message>>, Timing),
+    (prefix, timing, cut): (Option<Vec<Message>>, Timing, Option<u64>),
 ) -> Option<Fired> {
     let Firing {
         why,
@@ -12081,7 +12330,7 @@ fn fire_on<S>(
         role,
         seat,
         displaces,
-        cut: None,
+        cut,
         timing,
         view_overridden: None,
         reserved: None,
@@ -13696,6 +13945,10 @@ fn settle_fork<S>(
                 log::ForkOutcome::Cancelled
             } else if cut {
                 log::ForkOutcome::Truncated
+            } else if operator_fork(&state.log, fork) {
+                // The operator's fork writes nothing (#1021): its answer is
+                // logged and shown, and the operator keeps what they want.
+                log::ForkOutcome::Value
             } else if tools {
                 let (outcome, lines) = captured(state, &calls, (turn, request), fork);
                 patches = lines;
@@ -27181,6 +27434,149 @@ pub(in crate::drive) mod tests {
         session
             .keep(called, "port 5182 is free", None)
             .expect("kept");
+        tidy(&[&tree]);
+    }
+
+    /// The operator's fork's line, its request's messages, and whether any
+    /// `patch` line was written.
+    fn operator_forked(session: &Session<Canned>) -> (Event, Vec<Message>, bool) {
+        let log = wait_until(session, "the operator's fork to settle", |log| {
+            !fork_outcomes(log).is_empty()
+                && log.last().is_some_and(|logged| {
+                    matches!(
+                        logged.event,
+                        Event::Settled {
+                            to: Settlement::Awaiting,
+                            ..
+                        }
+                    )
+                })
+        });
+        let forked = log
+            .iter()
+            .find_map(|logged| match &logged.event {
+                event @ Event::Forked { .. } => Some(event.clone()),
+                _ => None,
+            })
+            .expect("a fork line");
+        let sent = session.shared.forks.get().expect("a fork transport").sent();
+        let wrote = log
+            .iter()
+            .any(|logged| matches!(logged.event, Event::Patched { .. }));
+        (
+            forked,
+            sent.last().expect("the fork's request").messages.clone(),
+            wrote,
+        )
+    }
+
+    /// #1021: the operator forks at the trunk's end in their own words: the
+    /// fork is logged `warrant: operator` with the question as sent, born of
+    /// the whole trunk; its answer is logged, and even an answer in the
+    /// fields' grammar writes nothing to working memory; the session is
+    /// back to awaiting, no meditation made due.
+    #[test]
+    fn the_operators_fork_asks_their_words_and_writes_nothing() {
+        let session = Session::open_with(
+            Canned::new([deltas(&["The schema has two tables."])]),
+            template(),
+            None,
+            None,
+            None,
+            Some(interviewing(&[])),
+        )
+        .forking_through(Canned::new([deltas(&[
+            "DECISION: two tables\nPLAN: NONE\n",
+        ])]));
+        session.ask("what is the schema?", None).expect("accepted");
+        wait_until(&session, "the turn", settled);
+        let trunk = session.trunk();
+        let fork = session
+            .fork(None, &OperatorAsk::Text("Why two tables?".to_owned()))
+            .expect("forked");
+        let (forked, messages, wrote) = operator_forked(&session);
+        let Event::Forked {
+            why, question, cut, ..
+        } = forked
+        else {
+            unreachable!("a fork line");
+        };
+        assert_eq!(why, log::Warrant::Operator);
+        assert_eq!(question, "Why two tables?");
+        assert_eq!(cut, None);
+        assert_eq!(messages[..trunk.len()], trunk[..]);
+        assert_eq!(
+            messages.last().map(|message| message.content.as_str()),
+            Some("Why two tables?")
+        );
+        assert!(!wrote, "the operator's fork writes nothing");
+        assert!(fork > 0);
+        assert!(
+            session.events_from(0).iter().any(|logged| matches!(
+                &logged.event,
+                Event::Answered { text, .. } if text.starts_with("DECISION: two tables")
+            )),
+            "its answer is logged"
+        );
+        assert_eq!(session.shared.lock().settlement, Settlement::Awaiting);
+        reads_whole(&session);
+    }
+
+    /// #1021: forked at a tool result, the fork is born of the trunk up to
+    /// that result and cut at its `tool_call`; a pinned ask is its
+    /// template's text; a name no holeless fork template has is refused.
+    #[test]
+    fn the_operators_fork_at_a_tool_result_asks_a_pinned_ask() {
+        let tree = scratch("operator-fork-at-a-result");
+        std::fs::write(tree.join("notes.md"), "port 5182 is free\n").expect("a note");
+        let session = Session::open_with(
+            Canned::new(vec![
+                vec![bash("call-1", "cat notes.md")],
+                deltas(&["Read it; next, the server."]),
+            ]),
+            looping(),
+            None,
+            Some(tools(
+                Confinement::Unconfined,
+                &tree,
+                &["cat"],
+                None,
+                Decider::Decline,
+            )),
+            None,
+            Some(interviewing(&[])),
+        )
+        .forking_through(Canned::new([deltas(&["NONE"])]));
+        session.ask("look", None).expect("accepted");
+        let log = wait_until(&session, "the turn", settled);
+        let called = seq_of(&log, |event| matches!(event, Event::ToolCalled(_)));
+        assert!(matches!(
+            session.fork(Some(called), &OperatorAsk::Pinned("NO_SUCH_ASK".to_owned())),
+            Err(Rejected::Refused(Refusal::NotAPinnedAsk))
+        ));
+        let trunk = session.trunk();
+        let result = trunk
+            .iter()
+            .position(|message| message.tool_call_id.as_deref() == Some("call-1"))
+            .expect("the tool result on the trunk");
+        session
+            .fork(Some(called), &OperatorAsk::Pinned("GOTCHAS".to_owned()))
+            .expect("forked");
+        let (forked, messages, wrote) = operator_forked(&session);
+        let Event::Forked { question, cut, .. } = forked else {
+            unreachable!("a fork line");
+        };
+        let gotchas = crate::dogma::Template::Gotchas.fill(&[]).expect("holeless");
+        assert_eq!(question, gotchas);
+        assert_eq!(cut, Some(called));
+        assert_eq!(
+            messages.len(),
+            result + 2,
+            "the trunk to the result, then the ask"
+        );
+        assert_eq!(messages[..=result], trunk[..=result]);
+        assert!(!wrote);
+        reads_whole(&session);
         tidy(&[&tree]);
     }
 
