@@ -268,6 +268,15 @@
 //! log that declares 28 or less and carries it is refused. For a reader of
 //! earlier logs, the migration is nothing: no session declared one.
 //!
+//! v33 (#1022) records what a fork's answer wrote nothing of. A
+//! `fork.settled` line may carry `passed_over`: each region of a
+//! fields-route answer that wrote no entry, with why (`untagged`, prose or a
+//! tag the grammar does not accept; `declined`; `no-value`; `refused`, an
+//! answer the grammar refused whole), the tag as written when it carried
+//! one, and the text as written. Any other `why`, an empty list, or the key
+//! in a log that declares 32 or less is refused. For a reader of earlier
+//! logs, the migration is nothing: no session wrote it.
+//!
 //! v32 (#1021) carries the operator's gestures and the shadow warrants,
 //! under manual first. The commands `keep` (a span of a logged line, kept
 //! as the operator's entry) and `fork` (the operator's fork at a step, a
@@ -378,12 +387,12 @@ use super::record::vocabulary;
 struct LogParser;
 
 /// The version this module writes, as `session.start` states it.
-pub const VERSION: i64 = 32;
+pub const VERSION: i64 = 33;
 
 /// Every version this module reads.
 pub const READS: &[i64] = &[
     0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25,
-    26, 27, 28, 29, 30, 31, 32,
+    26, 27, 28, 29, 30, 31, 32, 33,
 ];
 
 /// How recent an input event must be, at the moment a turn settles, for the
@@ -1247,6 +1256,25 @@ pub struct OperatorChange {
     pub kind: String,
 }
 
+/// One region of a fields-route fork answer that wrote nothing (v33,
+/// #1022): why, the tag as written when it carried one, and its text as
+/// written -- so nothing a fork answers is lost without a record.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PassedOver {
+    /// One of [`PASSED_OVER_WHYS`]: `untagged`, prose or a tag the grammar
+    /// does not accept; `declined`, a decline such as `NONE`, its reason
+    /// with it; `no-value`, a tag with nothing after it; `refused`, an
+    /// answer the grammar refused whole.
+    pub why: String,
+    /// The tag as written, when the region carried one the grammar read.
+    pub tag: Option<String>,
+    /// The region's text exactly as written; the whole answer, when refused.
+    pub text: String,
+}
+
+/// What a [`PassedOver`] region's `why` may say (v33, #1022).
+pub const PASSED_OVER_WHYS: &[&str] = &["untagged", "declined", "no-value", "refused"];
+
 /// One item a recall carried (v7, #566): its archive key, the digest of its
 /// text, and its score -- under `literal`, how many of the ask's anchors it
 /// holds.
@@ -1850,6 +1878,10 @@ pub enum Event {
         /// `tool_call` line. A fork runs nothing it calls; absent when it
         /// made no such call.
         not_run: Option<u64>,
+        /// Each region of a fields-route answer that wrote nothing, its text
+        /// as written (v33, #1022); empty, and absent from the line, when
+        /// every region wrote or there was no such answer.
+        passed_over: Vec<PassedOver>,
     },
     /// One entry a fork's answer patched into working memory (v5, #374).
     Patch {
@@ -4623,6 +4655,10 @@ fn from_object(object: &BTreeMap<String, Value>) -> Result<Line, String> {
                 _ => None,
             },
             not_run: fields.optional_count("not_run")?,
+            passed_over: match object.get("passed_over") {
+                None => Vec::new(),
+                Some(_) => fields.passed_over("passed_over")?,
+            },
         },
         Kind::Patch => {
             let op = fields.tag("op", PatchOp::from_tag)?;
@@ -5723,6 +5759,9 @@ pub enum Holds {
     /// A `recalled` line's `items` (v7): a non-empty list of objects of the
     /// keys [`RECALLED_ITEM`] declares.
     RecalledItems,
+    /// A `fork.settled` line's `passed_over` (v33, #1022): a non-empty list
+    /// of objects of the keys [`PASSED_OVER`] declares.
+    PassedOverRegions,
     /// A meditation's `operator_changes` (v7, #150): a non-empty list of objects
     /// of the keys [`OPERATOR_CHANGE`] declares.
     OperatorChanges,
@@ -5907,6 +5946,14 @@ pub const TEMPLATE_KWARGS: &[Field] = &[
 ];
 
 /// The keys of each of a meditation's `operator_changes`. Arrived in v7.
+/// The keys of each of a `fork.settled` line's `passed_over` regions.
+/// Arrived in v33.
+pub const PASSED_OVER: &[Field] = &[
+    must_v33("why", Holds::Text),
+    may_v33("tag", Holds::Text),
+    must_v33("text", Holds::Text),
+];
+
 pub const OPERATOR_CHANGE: &[Field] =
     &[must_v7("entry", Holds::Text), must_v7("kind", Holds::Text)];
 
@@ -6030,6 +6077,26 @@ const fn may_v9(key: &'static str, holds: Holds) -> Field {
         holds,
         required: false,
         since: 9,
+    }
+}
+
+/// A key that arrived in v33, optional wherever its object is written.
+const fn may_v33(key: &'static str, holds: Holds) -> Field {
+    Field {
+        key,
+        holds,
+        required: false,
+        since: 33,
+    }
+}
+
+/// A key that arrived in v33 with its object, which always writes it.
+const fn must_v33(key: &'static str, holds: Holds) -> Field {
+    Field {
+        key,
+        holds,
+        required: true,
+        since: 33,
     }
 }
 
@@ -6457,6 +6524,7 @@ pub fn object_fields(holds: Holds) -> Option<&'static [Field]> {
         Holds::DeliveredLines => Some(DELIVERED_LINE),
         Holds::RecalledItems => Some(RECALLED_ITEM),
         Holds::OperatorChanges => Some(OPERATOR_CHANGE),
+        Holds::PassedOverRegions => Some(PASSED_OVER),
         Holds::ToolCallPiece => Some(TOOL_CALL_PIECE),
         Holds::Approval => Some(APPROVAL),
         Holds::Files => Some(RECORDED_FILE),
@@ -6923,6 +6991,7 @@ pub fn schema(kind: Kind) -> &'static [Field] {
                 may_v8("beside_tokens", Count),
                 may_v8("fork_tokens", Count),
                 may_v8("not_run", Count),
+                may_v33("passed_over", Holds::PassedOverRegions),
             ];
             F
         }
@@ -7330,6 +7399,7 @@ fn ts_holds(holds: Holds) -> String {
         Holds::DeliveredLines => "NoteLine[]".to_owned(),
         Holds::RecalledItems => "RecalledItem[]".to_owned(),
         Holds::OperatorChanges => "OperatorChange[]".to_owned(),
+        Holds::PassedOverRegions => "PassedOverRegion[]".to_owned(),
         Holds::Strings => "string[]".to_owned(),
         Holds::Words => "Record<string, string>".to_owned(),
         Holds::ToolCallPiece => "ToolCallPiece".to_owned(),
@@ -7439,6 +7509,7 @@ pub fn typescript() -> String {
         ("NoteLine", DELIVERED_LINE),
         ("RecalledItem", RECALLED_ITEM),
         ("OperatorChange", OPERATOR_CHANGE),
+        ("PassedOverRegion", PASSED_OVER),
         ("ToolCallPiece", TOOL_CALL_PIECE),
         ("Approval", APPROVAL),
         ("RecordedFile", RECORDED_FILE),
@@ -8177,8 +8248,29 @@ fn to_value(line: &Line) -> Value {
             trailer,
             pool,
             not_run,
+            passed_over,
         } => {
             put("fork", count(*fork));
+            if !passed_over.is_empty() {
+                put(
+                    "passed_over",
+                    Value::Array(
+                        passed_over
+                            .iter()
+                            .map(|region| {
+                                let mut object = BTreeMap::from([
+                                    ("why".to_owned(), text(&region.why)),
+                                    ("text".to_owned(), text(&region.text)),
+                                ]);
+                                if let Some(tag) = &region.tag {
+                                    object.insert("tag".to_owned(), text(tag));
+                                }
+                                Value::Object(object)
+                            })
+                            .collect(),
+                    ),
+                );
+            }
             if let Some(calls) = not_run {
                 put("not_run", count(*calls));
             }
@@ -9290,6 +9382,46 @@ impl Fields<'_> {
         Ok(items)
     }
 
+    /// A `fork.settled` line's `passed_over` (v33, #1022): a non-empty list,
+    /// each region the keys of [`PASSED_OVER`] and nothing else, its `why`
+    /// one of [`PASSED_OVER_WHYS`].
+    fn passed_over(&self, key: &str) -> Result<Vec<PassedOver>, String> {
+        let Value::Array(entries) = self.get(key)? else {
+            return Err(format!("`{key}` is not a list"));
+        };
+        if entries.is_empty() {
+            return Err(format!(
+                "`{key}` is empty: it is absent when there are none"
+            ));
+        }
+        let mut regions = Vec::with_capacity(entries.len());
+        for (index, entry) in entries.iter().enumerate() {
+            let at = |why: String| format!("`{key}[{index}]`: {why}");
+            let Value::Object(entry) = entry else {
+                return Err(at("is not an object".to_owned()));
+            };
+            if let Some(extra) = entry
+                .keys()
+                .find(|field| !PASSED_OVER.iter().any(|f| f.key == field.as_str()))
+            {
+                return Err(at(format!("carries `{extra}`")));
+            }
+            let inner = Fields(entry);
+            let why = inner.string("why").map_err(at)?;
+            if !PASSED_OVER_WHYS.contains(&why.as_str()) {
+                return Err(at(format!(
+                    "`why` is `{why}`, not one of {PASSED_OVER_WHYS:?}"
+                )));
+            }
+            regions.push(PassedOver {
+                why,
+                tag: inner.optional_string("tag").map_err(at)?,
+                text: inner.string("text").map_err(at)?,
+            });
+        }
+        Ok(regions)
+    }
+
     fn operator_changes(&self, key: &str) -> Result<Vec<OperatorChange>, String> {
         let Value::Array(entries) = self.get(key)? else {
             return Err(format!("`{key}` is not a list"));
@@ -10064,16 +10196,16 @@ mod tests {
         assert!(refused.why.contains("v8"), "{refused}");
     }
 
-    /// #583, #878, #904, #555, #931, #936, #910, #942, #926, #932, #948, #971, #1016, #1021: this
-    /// module writes v32.
+    /// #583, #878, #904, #555, #931, #936, #910, #942, #926, #932, #948, #971, #1016, #1021,
+    /// #1022: this module writes v33.
     #[test]
-    fn this_module_writes_v32_and_reads_every_version_before_it() {
-        assert_eq!(super::VERSION, 32);
+    fn this_module_writes_v33_and_reads_every_version_before_it() {
+        assert_eq!(super::VERSION, 33);
         assert_eq!(
             super::READS,
             &[
                 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22,
-                23, 24, 25, 26, 27, 28, 29, 30, 31, 32
+                23, 24, 25, 26, 27, 28, 29, 30, 31, 32, 33
             ]
         );
     }
@@ -10507,6 +10639,11 @@ mod tests {
                 refused: None,
                 pool: None,
                 not_run: Some(1),
+                passed_over: vec![PassedOver {
+                    why: "untagged".to_owned(),
+                    tag: None,
+                    text: "DECISION (confirmed): two tables".to_owned(),
+                }],
             },
             Event::Patch {
                 fork: Some(fork),
@@ -10858,6 +10995,7 @@ mod tests {
                 | Holds::DeliveredLines
                 | Holds::RecalledItems
                 | Holds::OperatorChanges
+                | Holds::PassedOverRegions
                 | Holds::PhaseMoves
                 | Holds::InstructionFiles,
                 Value::Array(entries),

@@ -268,6 +268,8 @@ export interface ForkSettled extends At {
   readonly refused?: string;
   /** What its answer wrote after its last field, past a blank line (log v7): read as no entry. */
   readonly trailer?: string;
+  /** Each region of its fields-route answer that wrote no entry, as written (log v33, #1022). */
+  readonly passed_over?: readonly V0.PassedOverRegion[];
 }
 
 export interface Entry {

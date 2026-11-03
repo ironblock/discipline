@@ -723,6 +723,9 @@ pub enum Event {
         pool: Option<log::PoolRoom>,
         /// The calls the fork made that ran nothing (#806).
         not_run: Option<u64>,
+        /// Each region of its fields-route answer that wrote nothing, as
+        /// written (#1022).
+        passed_over: Vec<log::PassedOver>,
     },
     /// A meditation fired, and the trunk was refilled from working memory (#493):
     /// the head with the working object rendered after it, and no turn of
@@ -4914,6 +4917,7 @@ impl<S: Streaming + 'static> Session<S> {
                 refused: None,
                 pool: None,
                 not_run: None,
+                passed_over: Vec::new(),
             });
             operator_fork_over(&mut state);
             drop(state);
@@ -5994,7 +5998,9 @@ pub fn line_of(logged: &Logged) -> log::Line {
             trailer,
             pool,
             not_run,
+            passed_over,
         } => log::Event::ForkSettled {
+            passed_over: passed_over.clone(),
             pool: *pool,
             not_run: *not_run,
             fork: *fork,
@@ -9266,6 +9272,7 @@ impl Event {
             trailer: None,
             pool: None,
             not_run: None,
+            passed_over: Vec::new(),
         }
     }
 }
@@ -12502,6 +12509,7 @@ fn fire_on<S>(
             refused: Some(REFUSED_POOL.to_owned()),
             pool: room,
             not_run: None,
+            passed_over: Vec::new(),
         });
         return None;
     }
@@ -13826,6 +13834,7 @@ fn fire_cut<S>(shared: &Shared<S>, state: &mut State, cut: Cut) -> Launched {
             refused: Some(REFUSED_POOL.to_owned()),
             pool: room,
             not_run: None,
+            passed_over: Vec::new(),
         });
         return Launched::Gone;
     }
@@ -14107,6 +14116,7 @@ fn settle_fork<S>(
     let reasoning = Some(reasoning).filter(|thought| !thought.is_empty());
     let mut patches = Vec::new();
     let mut trailer = None;
+    let mut passed_over = Vec::new();
     let mut prompt_tokens = None;
     let outcome = match result {
         Ok(StreamEnded::Finished {
@@ -14157,6 +14167,8 @@ fn settle_fork<S>(
                     // What trails the last field is no field (levers run A).
                     let (fields, after) = trailed(&text);
                     trailer = after;
+                    // What wrote nothing is recorded as written (#1022).
+                    passed_over = passed_over_of(&fields);
                     let (outcome, lines) = folded(state, &fields, turn, fork);
                     patches = lines;
                     Some(outcome)
@@ -14227,6 +14239,7 @@ fn settle_fork<S>(
         refused: None,
         pool: None,
         not_run,
+        passed_over,
     });
     for patch in patches {
         state.push(patch);
@@ -14429,6 +14442,38 @@ fn unclashed(patches: Vec<Patch>, object: &WorkingObject, (turn, fork): (u32, u6
                 }
             }
             other => other,
+        })
+        .collect()
+}
+
+/// Each region of a fork's fields-route answer `text` that writes no entry,
+/// as written (#1022): prose or a tag the grammar does not accept,
+/// `untagged`; a decline, `declined`, its reason with it; a tag with no
+/// value, `no-value`; or the whole answer, `refused`, when the grammar
+/// refuses it. A region of nothing but blank space is no region.
+fn passed_over_of(text: &str) -> Vec<log::PassedOver> {
+    use crate::formats::interview::Outcome;
+    let region = |why: &str, tag: Option<String>, text: &str| log::PassedOver {
+        why: why.to_owned(),
+        tag,
+        text: text.to_owned(),
+    };
+    let Ok(answer) = crate::formats::interview::parse(text) else {
+        return vec![region("refused", None, text)];
+    };
+    answer
+        .fields
+        .iter()
+        .filter(|field| !field.raw.trim().is_empty())
+        .filter_map(|field| match (&field.tag, &field.outcome) {
+            (Some(_), Outcome::Value(_)) => None,
+            (None, _) => Some(region("untagged", None, &field.raw)),
+            (Some(tag), Outcome::Decline(_)) => {
+                Some(region("declined", Some(tag.as_written.clone()), &field.raw))
+            }
+            (Some(tag), Outcome::Unparseable) => {
+                Some(region("no-value", Some(tag.as_written.clone()), &field.raw))
+            }
         })
         .collect()
 }
@@ -18204,6 +18249,7 @@ pub(in crate::drive) mod tests {
                 refused: None,
                 pool: None,
                 not_run: None,
+                passed_over: Vec::new(),
             },
             Event::Patched {
                 fork: Some(20),
@@ -18819,6 +18865,7 @@ pub(in crate::drive) mod tests {
                 refused: None,
                 pool: None,
                 not_run: None,
+                passed_over: Vec::new(),
             },
             log::Event::Patch {
                 fork: Some(20),
@@ -28114,6 +28161,76 @@ pub(in crate::drive) mod tests {
             "the kept entry rides the refill"
         );
         tidy(&[&tree]);
+    }
+
+    /// The `passed_over` and `trailer` of the gap fork a scoping-marked ask
+    /// warrants, answered `answer`.
+    fn passed_over_by(answer: &str) -> (Vec<log::PassedOver>, Option<String>) {
+        let session = Session::open_with(
+            Canned::new([deltas(&["A tracker."]), deltas(&[answer])]),
+            template(),
+            None,
+            None,
+            None,
+            Some(interviewing(&[log::Warrant::Scoping])),
+        );
+        session
+            .ask_marked("what are we building?", None, true)
+            .expect("accepted");
+        let log = wait_until(&session, "the turn and its gap", |log| {
+            settled(log) && !fork_outcomes(log).is_empty()
+        });
+        reads_whole(&session);
+        log.iter()
+            .find_map(|logged| match &logged.event {
+                Event::ForkSettled {
+                    passed_over,
+                    trailer,
+                    ..
+                } => Some((passed_over.clone(), trailer.clone())),
+                _ => None,
+            })
+            .expect("the fork settled")
+    }
+
+    /// #1022: nothing a fork answers is lost without a record. Prose with
+    /// no tag, a tag the grammar does not accept, a decline with findings
+    /// after it, each is logged as written on the fork's settled line; a
+    /// trailer stays on its own key; a region that wrote is not listed.
+    #[test]
+    fn what_a_fork_answer_wrote_nothing_of_is_logged_as_written() {
+        let (untagged, _) = passed_over_by("The tracker is for one team.");
+        assert_eq!(
+            untagged,
+            [log::PassedOver {
+                why: "untagged".to_owned(),
+                tag: None,
+                text: "The tracker is for one team.".to_owned(),
+            }]
+        );
+        let (refused_tag, _) =
+            passed_over_by("DECISION (confirmed): a tracker\nDECISION: one team\nPLAN: NONE\n");
+        assert!(
+            refused_tag.iter().any(|region| region.why == "untagged"
+                && region.text.contains("DECISION (confirmed): a tracker")),
+            "{refused_tag:?}"
+        );
+        assert!(
+            !refused_tag
+                .iter()
+                .any(|region| region.text.contains("DECISION: one team")),
+            "a region that wrote is not listed: {refused_tag:?}"
+        );
+        let (declined, _) = passed_over_by("DECISION: none at this time\nPLAN: NONE\n");
+        assert!(
+            declined.iter().any(|region| region.why == "declined"
+                && region.tag.as_deref() == Some("DECISION:")
+                && region.text.contains("none at this time")),
+            "{declined:?}"
+        );
+        let (_, trailer) =
+            passed_over_by("DECISION: a tracker\nPLAN: NONE\n\nAlso: the port is taken.");
+        assert_eq!(trailer.as_deref(), Some("Also: the port is taken."));
     }
 
     /// A session with self-capture on, every `every` silent turns, and the
