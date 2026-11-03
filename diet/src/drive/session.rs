@@ -6792,7 +6792,17 @@ fn run_calls<S: Streaming + 'static>(
             turn,
             reason: SettleReason::Final,
         });
-        turn_over(&shared.template, &mut state);
+        // The turn settled `final`, so its gap runs as a final answer's does
+        // (#1015): the scoping judgment, the gap's read and the refutation
+        // fork, each settled before the operator can rule the proposal.
+        state.move_to(Settlement::Capture);
+        let forked = gap(shared, &mut state, turn, request);
+        drop(state);
+        shared.changed.notify_all();
+        if let Some(forked) = forked {
+            interview(shared, forked);
+        }
+        let mut state = shared.lock();
         pool_after_the_turn(shared, &mut state);
         drop(state);
         shared.changed.notify_all();
@@ -11730,8 +11740,9 @@ struct Fired {
 /// The capture gap after `turn` settled `final` at its trunk request `at`
 /// (#374): at most one fork, fired when the regimen's warrant holds, born
 /// off the warm trunk -- its messages, then the question -- and never
-/// appended to it. One call site, after one `final` settling, so one gap
-/// cannot fire two. With no warrant, or an `end` admitted meanwhile, the gap
+/// appended to it. Called once per `final` settling -- a final answer, or a
+/// step whose phase proposal ended the turn (#1015), whose text stands in
+/// for the answer -- so one gap cannot fire two. With no warrant, or an `end` admitted meanwhile, the gap
 /// passes through to `awaiting`.
 fn gap<S>(shared: &Shared<S>, state: &mut State, turn: u32, at: u64) -> Option<Fired> {
     let answer = state
@@ -11739,7 +11750,11 @@ fn gap<S>(shared: &Shared<S>, state: &mut State, turn: u32, at: u64) -> Option<F
         .iter()
         .rev()
         .find_map(|logged| match &logged.event {
-            Event::Answered { request, text, .. } if *request == at => Some(text.as_str()),
+            Event::Answered { request, text, .. } | Event::Called { request, text, .. }
+                if *request == at =>
+            {
+                Some(text.as_str())
+            }
             _ => None,
         })
         .unwrap_or_default();
@@ -29153,6 +29168,136 @@ pub(in crate::drive) mod tests {
             .expect("ruled");
         assert_eq!(session.shared.lock().phase.as_deref(), Some("build"));
         reads_whole(&session);
+    }
+
+    /// A [`two_keys`] session whose forks, on their own transport, play
+    /// `forks`, under `timing`.
+    fn two_keys_forking(
+        acts: Vec<Vec<Step>>,
+        forks: Vec<Vec<Step>>,
+        timing: Timing,
+    ) -> Session<Canned> {
+        let interview = Interview {
+            operator_unilateral: true,
+            timing,
+            fork_slots: 1,
+            ..phased()
+        };
+        let mut shape = template();
+        declare_phase_tool(&mut shape, Some(&interview));
+        Session::open_with(Canned::new(acts), shape, None, None, None, Some(interview))
+            .forking_through(Canned::new(forks))
+    }
+
+    /// A turn of a scoping-marked ask whose step proposes `build`.
+    fn proposing_step() -> Vec<Vec<Step>> {
+        vec![vec![
+            Step::Delta("The plan is settled; next, I will write the files.".to_owned()),
+            propose(
+                "call-p",
+                &serde_json::json!({"to": "build", "reason": "the plan is settled"}),
+            ),
+        ]]
+    }
+
+    /// The `render` of the session's meditation, once it meditated.
+    fn meditated_render(log: &[Logged]) -> String {
+        log.iter()
+            .find_map(|logged| match &logged.event {
+                Event::Meditated { render, .. } => Some(render.clone()),
+                _ => None,
+            })
+            .expect("a meditation")
+    }
+
+    /// #1015: a turn that ends in the model's phase proposal settles
+    /// `final`, so its gap runs as a final answer's does: on a scoping-marked
+    /// ask the judgment fork fires after the turn settles, under either
+    /// timing, and its capture is in the render of the meditation the
+    /// operator then rules.
+    #[test]
+    fn a_proposal_ended_turn_runs_its_gap_and_the_meditation_renders_its_capture() {
+        for timing in [Timing::Gap, Timing::DuringTurn] {
+            let session = two_keys_forking(
+                proposing_step(),
+                vec![deltas(&[
+                    "DECISION: the terrain is noise-generated\nPLAN: NONE\n",
+                ])],
+                timing,
+            );
+            session
+                .ask_marked("scope it", None, true)
+                .expect("accepted");
+            let log = wait_until(&session, "the gap's fork", |log| {
+                !fork_outcomes(log).is_empty() && settled(log)
+            });
+            assert_eq!(
+                fork_whys(&log),
+                [log::Warrant::Scoping],
+                "{timing:?}: {log:#?}"
+            );
+            let forked = log
+                .iter()
+                .find_map(|logged| {
+                    matches!(logged.event, Event::Forked { .. }).then_some(logged.seq)
+                })
+                .expect("forked");
+            assert!(
+                turn_settled_at(&log).is_some_and(|settled| settled < forked),
+                "{timing:?}: cut at the gap"
+            );
+            session
+                .ratify_phase("call-p", PhaseChoice::Meditation)
+                .expect("ruled");
+            let log = wait_until(&session, "the meditation", meditated);
+            assert!(
+                meditated_render(&log).contains("the terrain is noise-generated"),
+                "{timing:?}: {}",
+                meditated_render(&log)
+            );
+        }
+    }
+
+    /// #1015: while the gap's fork after a proposal-ended turn is in flight,
+    /// the operator's ruling is refused `in_flight` and the proposal stays
+    /// pending, so no meditation renders without the fork; once it settles,
+    /// the ruling is admitted and the render carries its capture.
+    #[test]
+    fn a_ruling_while_the_gap_fork_is_in_flight_waits_for_it() {
+        let gate = Gate::new();
+        let session = two_keys_forking(
+            proposing_step(),
+            vec![vec![
+                Step::Hold(gate.clone()),
+                Step::Delta("DECISION: the terrain is noise-generated\nPLAN: NONE\n".to_owned()),
+            ]],
+            Timing::Gap,
+        );
+        session
+            .ask_marked("scope it", None, true)
+            .expect("accepted");
+        wait_until(&session, "the gap's fork in flight", |log| {
+            log.iter()
+                .any(|logged| matches!(logged.event, Event::Forked { .. }))
+        });
+        assert_eq!(
+            session.ratify_phase("call-p", PhaseChoice::Meditation),
+            Err(Rejected::Refused(Refusal::InFlight))
+        );
+        assert!(session.shared.lock().proposal.is_some(), "still pending");
+        gate.open();
+        wait_until(&session, "the fork to settle", |log| {
+            !fork_outcomes(log).is_empty() && settled(log)
+        });
+        session
+            .ratify_phase("call-p", PhaseChoice::Meditation)
+            .expect("ruled once the fork settled");
+        let log = wait_until(&session, "the meditation", meditated);
+        assert!(
+            meditated_render(&log).contains("the terrain is noise-generated"),
+            "{}",
+            meditated_render(&log)
+        );
     }
 
     /// #788: the operator's proposal is put to the model in a note on its
