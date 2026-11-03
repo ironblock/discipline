@@ -268,6 +268,14 @@
 //! log that declares 28 or less and carries it is refused. For a reader of
 //! earlier logs, the migration is nothing: no session declared one.
 //!
+//! v31 (#1016) names who vouches for a self-capture note. Under contract
+//! set c3 a `patch`'s entry may carry `authority`: `observed` when the
+//! note's evidence quote was found verbatim in what the model observed that
+//! turn (its ask and tool output, never its own prose), `self-stated`
+//! otherwise. Any other word is refused, and so is the key in a log that
+//! declares 30 or less. For a reader of earlier logs, the migration is
+//! nothing: no session wrote it.
+//!
 //! v30 (#971) names several supplied tools. `serve --answer-tool FILE` may
 //! be given more than once, each tool declared in the order given, and
 //! `session.start` names each file's sha256 in that order as the list
@@ -356,12 +364,12 @@ use super::record::vocabulary;
 struct LogParser;
 
 /// The version this module writes, as `session.start` states it.
-pub const VERSION: i64 = 30;
+pub const VERSION: i64 = 31;
 
 /// Every version this module reads.
 pub const READS: &[i64] = &[
     0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25,
-    26, 27, 28, 29, 30,
+    26, 27, 28, 29, 30, 31,
 ];
 
 /// How recent an input event must be, at the moment a turn settles, for the
@@ -2416,6 +2424,11 @@ pub struct PatchEntry {
     pub text: String,
     /// Its category, when named.
     pub category: Option<String>,
+    /// Who vouches for it (v31, #1016): `observed`, a self-capture note
+    /// whose evidence quote was found in what the model observed that turn,
+    /// or `self-stated`, one whose was not or that gave none; written by
+    /// contract set c3 alone.
+    pub authority: Option<String>,
 }
 
 /// An `add` merged into a live entry of its kind for its likeness (v8, the
@@ -5853,7 +5866,11 @@ pub const PATCH_ENTRY: &[Field] = &[
     must_v5("id", Holds::Text),
     must_v5("text", Holds::Text),
     may_v5("category", Holds::Text),
+    may_v31("authority", Holds::Text),
 ];
+
+/// What a `patch` entry's `authority` may say (v31, #1016).
+pub const AUTHORITIES: &[&str] = &["observed", "self-stated"];
 
 /// An optional key that arrived in v5.
 const fn may_v5(key: &'static str, holds: Holds) -> Field {
@@ -5921,6 +5938,16 @@ const fn may_v30(key: &'static str, holds: Holds) -> Field {
         holds,
         required: false,
         since: 30,
+    }
+}
+
+/// A key that arrived in v31, optional wherever its object is written.
+const fn may_v31(key: &'static str, holds: Holds) -> Field {
+    Field {
+        key,
+        holds,
+        required: false,
+        since: 31,
     }
 }
 
@@ -8072,6 +8099,9 @@ fn to_value(line: &Line) -> Value {
             if let Some(category) = &entry.category {
                 object.insert("category".to_owned(), text(category));
             }
+            if let Some(authority) = &entry.authority {
+                object.insert("authority".to_owned(), text(authority));
+            }
             put("entry", Value::Object(object));
             if let Some(replaced) = supersedes {
                 put("supersedes", text(replaced));
@@ -9310,6 +9340,14 @@ impl Fields<'_> {
             id: inner.string("id").map_err(within)?,
             text: inner.string("text").map_err(within)?,
             category: inner.optional_string("category").map_err(within)?,
+            authority: match inner.optional_string("authority").map_err(within)? {
+                Some(said) if !AUTHORITIES.contains(&said.as_str()) => {
+                    return Err(within(format!(
+                        "`authority` is `{said}`, not one of {AUTHORITIES:?}"
+                    )));
+                }
+                said => said,
+            },
         })
     }
 
@@ -9861,15 +9899,16 @@ mod tests {
         assert!(refused.why.contains("v8"), "{refused}");
     }
 
-    /// #583, #878, #904, #555, #931, #936, #910, #942, #926, #932, #948, #971: this module writes v30.
+    /// #583, #878, #904, #555, #931, #936, #910, #942, #926, #932, #948, #971, #1016: this module
+    /// writes v31.
     #[test]
-    fn this_module_writes_v30_and_reads_every_version_before_it() {
-        assert_eq!(super::VERSION, 30);
+    fn this_module_writes_v31_and_reads_every_version_before_it() {
+        assert_eq!(super::VERSION, 31);
         assert_eq!(
             super::READS,
             &[
                 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22,
-                23, 24, 25, 26, 27, 28, 29, 30
+                23, 24, 25, 26, 27, 28, 29, 30, 31
             ]
         );
     }
@@ -10305,6 +10344,7 @@ mod tests {
                     id: "d1".to_owned(),
                     text: "a tracker".to_owned(),
                     category: None,
+                    authority: None,
                 },
                 supersedes: None,
                 tangent: Some("t/1".to_owned()),
@@ -10322,6 +10362,7 @@ mod tests {
                     id: "d3".to_owned(),
                     text: "gotcha: a tracker, one per team".to_owned(),
                     category: None,
+                    authority: None,
                 },
                 supersedes: None,
                 tangent: None,
@@ -10341,6 +10382,7 @@ mod tests {
                     id: "d2".to_owned(),
                     text: "a tracker for one team".to_owned(),
                     category: Some("scope".to_owned()),
+                    authority: Some("observed".to_owned()),
                 },
                 supersedes: Some("d1".to_owned()),
                 tangent: None,

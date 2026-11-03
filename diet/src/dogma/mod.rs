@@ -138,7 +138,13 @@ pub mod vocabulary;
 ///   message of `meditation_carry = "native_summary"`'s summary request, by
 ///   the harness vote Dispatch relayed on 2026-10-20. No template already
 ///   pinned changed.
-pub const VERSION: u32 = 13;
+/// * 14, 2026-11-03: self-capture set `c3` joined (#1016): `update_record`
+///   takes a note in the model's own words, no field kind, and an optional
+///   evidence quote, the maintainer's approval of the drafted wording on
+///   2026-11-03 (relayed by Dispatch). `resolve_entry`, the reminder and the
+///   sweep are c2's, byte for byte. No template and no set already pinned
+///   changed.
+pub const VERSION: u32 = 14;
 
 /// The digest of `diet/dogma/MANIFEST.tsv` that [`VERSION`] was declared
 /// against.
@@ -148,7 +154,7 @@ pub const VERSION: u32 = 13;
 /// that recomputes it fails until both lines are edited together. Without it
 /// the manifest could be regenerated after an edit and the version left at
 /// what it was, which is a bump that never happened.
-pub const MANIFEST_DIGEST: &str = "e8a8f985e02d19bd";
+pub const MANIFEST_DIGEST: &str = "709fb5be1d2200b5";
 
 /// The per-model operating points, as TOML text, exactly as pinned.
 ///

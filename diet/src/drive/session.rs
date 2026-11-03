@@ -2666,6 +2666,10 @@ struct State {
     /// The files the latest native refill listed (#1012): the next one
     /// gathers them in, as Pi's compaction gathers its previous one's.
     native_files: crate::meditation::native::Files,
+    /// Who vouches for the note the latest self-capture call wrote, under a
+    /// contract whose `update_record` takes no field kind (#1016): read by
+    /// its result and its `patch` lines, and taken.
+    vouched: Option<crate::capture::tools::Authority>,
 }
 
 impl State {
@@ -2820,6 +2824,7 @@ impl State {
             phase_grown: 0,
             meditation_floor: 0,
             native_files: crate::meditation::native::Files::default(),
+            vouched: None,
             jobs: BTreeMap::new(),
             notices: Vec::new(),
             promotable: None,
@@ -7105,7 +7110,9 @@ fn capture_call<S>(
     // place for every working-memory change.
     let mut lines = Vec::new();
     let refuting = call.name == crate::dogma::refutation::NAME;
+    state.vouched = None;
     let (read, items) = trunk_patches(&mut state, (turn, request), call);
+    let vouched = state.vouched.take();
     let (outcome, entries, why) = match read {
         Err(why) => ("refused", Vec::new(), Some(why)),
         Ok(patches) => {
@@ -7179,11 +7186,8 @@ fn capture_call<S>(
         }
         moved = Some((from, to));
     }
-    let shown = match (&why, entries.first()) {
-        (Some(why), _) => format!("{outcome}: {why}"),
-        (None, Some(entry)) => format!("{outcome}: {entry}"),
-        (None, None) => outcome.to_owned(),
-    };
+    let shown = capture_shown(outcome, (why.as_deref(), entries.first()), vouched);
+    vouch(&mut lines, vouched);
     state.push(Event::Captured {
         request,
         call: call.id.clone(),
@@ -7341,14 +7345,23 @@ fn capture_patches(
     // A served call's id is the model's, and the model may reuse one across
     // turns; the request's sequence number makes the entry's id the record's.
     let id = format!("r{request}/{}", call.id);
+    // Under the contract set the session offered (#1016): its parameters
+    // admit the call, and its `update_record` says what is grounded.
+    let set = state
+        .interview
+        .as_ref()
+        .map_or(crate::dogma::capture::DEFAULT, |interview| {
+            interview.capture_contract
+        });
+    let specs = crate::capture::tools::contract_of(set)
+        .map_err(|why| format!("the contract set {}: {why}", set.name))?;
     let effect = crate::formats::record::json::line(&call.arguments)
         .map_err(|why| format!("the arguments are not a JSON object: {why}"))
         .and_then(|args| {
-            crate::capture::tools::apply_call(
-                &id,
-                turn,
-                &call.name,
-                &args,
+            crate::capture::tools::apply_call_under(
+                &specs,
+                (&id, turn),
+                (&call.name, &args),
                 index,
                 seen.contract_input(),
             )
@@ -7358,6 +7371,7 @@ fn capture_patches(
         .tangent
         .as_ref()
         .map(|(tangent, _)| tangent.id().to_owned());
+    state.vouched = effect.authority;
     let mut patches = effect.patches;
     for patch in &mut patches {
         provenance_of(patch).tangent.clone_from(&tangent);
@@ -7415,13 +7429,14 @@ fn capture_outcome(
 
 /// What the model saw by turn `turn`, as the groundedness gate reads it
 /// (#609): that turn's ask, trunk prose and non-capture tool output as the
-/// source, every earlier turn's as the session prefix -- from the log, as
+/// source, every earlier turn's as the session prefix, and the source less
+/// the model's prose as what it observed (#1016) -- from the log, as
 /// `capture::tools::Seen::of_turn` reads a record.
 fn seen_by(log: &[Logged], turn: u32) -> crate::capture::tools::Seen {
     use crate::capture::tools::CaptureTool;
     let mut trunk_turn = BTreeMap::new();
-    let (mut source, mut prefix) = (String::new(), String::new());
-    let mut file = |at: u32, text: &str| {
+    let (mut source, mut prefix, mut observed) = (String::new(), String::new(), String::new());
+    let mut file = |at: u32, text: &str, outside: bool| {
         let bucket = match at.cmp(&turn) {
             std::cmp::Ordering::Equal => &mut source,
             std::cmp::Ordering::Less => &mut prefix,
@@ -7429,11 +7444,15 @@ fn seen_by(log: &[Logged], turn: u32) -> crate::capture::tools::Seen {
         };
         bucket.push_str(text);
         bucket.push('\n');
+        if outside && at == turn {
+            observed.push_str(text);
+            observed.push('\n');
+        }
     };
     for logged in log {
         match &logged.event {
             // The operator's ask: the model saw it (#609, run 3).
-            Event::Asked { turn: at, text, .. } => file(*at, text),
+            Event::Asked { turn: at, text, .. } => file(*at, text, true),
             Event::Requested {
                 turn: at,
                 lane: Lane::Trunk,
@@ -7443,18 +7462,18 @@ fn seen_by(log: &[Logged], turn: u32) -> crate::capture::tools::Seen {
             }
             Event::Answered { request, text, .. } | Event::Called { request, text, .. } => {
                 if let Some(at) = trunk_turn.get(request) {
-                    file(*at, text);
+                    file(*at, text, false);
                 }
             }
             Event::ToolCalled(line) if CaptureTool::from_tag(&line.name).is_none() => {
                 if let Some(shown) = &line.shown {
-                    file(line.turn, shown);
+                    file(line.turn, shown, true);
                 }
             }
             _ => {}
         }
     }
-    crate::capture::tools::Seen::from_parts(source, prefix)
+    crate::capture::tools::Seen::from_parts(source, prefix, observed)
 }
 
 fn standard_call(
@@ -9002,6 +9021,37 @@ fn operator_refusal(state: &State, id: &str, text: &str) -> Option<Refusal> {
         None => Some(Refusal::UnknownEntry),
         Some(false) => Some(Refusal::NotLive),
         Some(true) => None,
+    }
+}
+
+/// What a self-capture call shows the model: its outcome, then why it was
+/// refused or the entry it wrote -- and, for a note, who vouches for it
+/// (#1016, the maintainer's short form, approved 2026-11-03).
+fn capture_shown(
+    outcome: &str,
+    (why, entry): (Option<&str>, Option<&String>),
+    vouched: Option<crate::capture::tools::Authority>,
+) -> String {
+    match (why, entry, vouched) {
+        (Some(why), _, _) => format!("{outcome}: {why}"),
+        (None, Some(entry), Some(authority)) => {
+            format!("{outcome}: {entry} ({})", authority.tag())
+        }
+        (None, Some(entry), None) => format!("{outcome}: {entry}"),
+        (None, None, _) => outcome.to_owned(),
+    }
+}
+
+/// `lines`' `patch` lines, each its note's `authority` when one vouches
+/// (#1016).
+fn vouch(lines: &mut [Event], vouched: Option<crate::capture::tools::Authority>) {
+    let Some(authority) = vouched else {
+        return;
+    };
+    for line in lines {
+        if let Event::Patched { entry, .. } = line {
+            entry.authority = Some(authority.tag().to_owned());
+        }
     }
 }
 
@@ -13682,7 +13732,8 @@ fn captured_in(
             }
             _ => capture_patches(state, (turn, request), call),
         };
-        let (refused, entries, patched) = match read {
+        let vouched = state.vouched.take();
+        let (refused, entries, mut patched) = match read {
             Err(why) => (Some(why), Vec::new(), Vec::new()),
             Ok(mut patches) => {
                 for patch in &mut patches {
@@ -13711,6 +13762,7 @@ fn captured_in(
                 }
             }
         };
+        vouch(&mut patched, vouched);
         let (outcome, entries, why) = if refuting(call) {
             refute_outcome(refused, entries, &items)
         } else {
@@ -14405,6 +14457,7 @@ fn patched(fork: Option<u64>, patch: &Patch, object: &WorkingObject) -> Event {
             id: id.as_str().to_owned(),
             text,
             category: None,
+            authority: None,
         },
         supersedes,
         tangent: patch.provenance().tangent.clone(),
@@ -17591,6 +17644,7 @@ pub(in crate::drive) mod tests {
                     id: "interview-t1-0".to_owned(),
                     text: "decision: keep it".to_owned(),
                     category: None,
+                    authority: None,
                 },
                 supersedes: None,
                 tangent: Some("t/1".to_owned()),
@@ -18197,6 +18251,7 @@ pub(in crate::drive) mod tests {
                     id: "interview-t1-0".to_owned(),
                     text: "decision: keep it".to_owned(),
                     category: None,
+                    authority: None,
                 },
                 supersedes: None,
                 tangent: Some("t/1".to_owned()),
@@ -23245,6 +23300,7 @@ pub(in crate::drive) mod tests {
                 id: id.to_owned(),
                 text: "a note".to_owned(),
                 category: None,
+                authority: None,
             },
             supersedes: None,
             tangent: None,
@@ -28237,6 +28293,90 @@ pub(in crate::drive) mod tests {
         )
     }
 
+    /// #1016: under contract set c3 a note is always kept, and the model is
+    /// shown who vouches for it: `observed` when its quote is a run of one
+    /// line of the ask or a tool result, `self-stated` when only its own
+    /// reply holds the quote; each `patch` line names its authority.
+    #[test]
+    fn a_c3_note_is_kept_and_its_result_names_who_vouches_for_it() {
+        const ASK: &str = "the schema has two tables, users and orders";
+        const SAID: &str = "I expect a third table for audit rows.";
+        let note = |id: &str, content: &str, evidence: &str| {
+            Step::call(
+                0,
+                id,
+                "update_record",
+                &serde_json::json!({ "content": content, "evidence": evidence }).to_string(),
+            )
+        };
+        let mut interview = interviewing(&[]);
+        interview.self_capture = Some(crate::capture::tools::Cadence::DEFAULT);
+        interview.capture_contract = &crate::dogma::capture::C3;
+        let mut shape = template();
+        declare_self_capture(&mut shape, Some(&interview));
+        let session = Session::open_with(
+            Canned::new(vec![
+                vec![
+                    Step::Delta(SAID.to_owned()),
+                    note(
+                        "call-1",
+                        "two tables: users, orders",
+                        "two tables, users and orders",
+                    ),
+                ],
+                vec![note(
+                    "call-2",
+                    "an audit table is likely",
+                    "a third table for audit rows.",
+                )],
+                deltas(&["done"]),
+            ]),
+            shape,
+            None,
+            None,
+            None,
+            Some(interview),
+        );
+        session.ask(ASK, None).expect("accepted");
+        let log = wait_until(&session, "the turn", settled);
+        let shown: Vec<String> = log
+            .iter()
+            .filter_map(|logged| match &logged.event {
+                Event::ToolCalled(line) if line.name == "update_record" => line.shown.clone(),
+                _ => None,
+            })
+            .collect();
+        let requests: Vec<u64> = log
+            .iter()
+            .filter_map(|logged| match &logged.event {
+                Event::Requested {
+                    lane: Lane::Trunk, ..
+                } => Some(logged.seq),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(
+            shown,
+            [
+                format!("recorded: r{}/call-1/note (observed)", requests[0]),
+                format!("recorded: r{}/call-2/note (self-stated)", requests[1]),
+            ],
+            "{log:#?}"
+        );
+        let vouched: Vec<Option<String>> = log
+            .iter()
+            .filter_map(|logged| match &logged.event {
+                Event::Patched { entry, .. } => Some(entry.authority.clone()),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(
+            vouched,
+            [Some("observed".to_owned()), Some("self-stated".to_owned())]
+        );
+        reads_whole(&session);
+    }
+
     fn captures(log: &[Logged]) -> Vec<(String, Vec<String>)> {
         log.iter()
             .filter_map(|logged| match &logged.event {
@@ -28324,6 +28464,7 @@ pub(in crate::drive) mod tests {
                     id: entry.clone(),
                     text: "The parser drops blank lines before it tokenizes.".to_owned(),
                     category: None,
+                    authority: None,
                 }
             )]
         );
