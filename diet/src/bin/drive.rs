@@ -1855,6 +1855,9 @@ fn serving_interview(
     let shadow = session::interview_shadow(&read).map_err(|why| format!("{path}: {why}"))?;
     let shadow_step =
         session::step_warrants(&read, &shadow).map_err(|why| format!("{path}: {why}"))?;
+    // #1031: whether each is offered to the operator as a suggestion.
+    let shadow_offer =
+        session::interview_shadow_offer(&read).map_err(|why| format!("{path}: {why}"))?;
     // #788: whether the operator may move the phase alone.
     let operator_unilateral =
         session::operator_unilateral(&read).map_err(|why| format!("{path}: {why}"))?;
@@ -1977,6 +1980,7 @@ fn serving_interview(
             step,
             shadow,
             shadow_step,
+            shadow_offer,
             operator_unilateral,
             refutation,
         }))

@@ -249,4 +249,7 @@ export const refusalOf = registry<Refusal>({
   'not-on-the-trunk': { label: 'not taken: a meditation has replaced that part of the trunk', level: 'quiet' },
   'not-a-pinned-ask': { label: 'not taken: no pinned fork ask has that name', level: 'warn' },
   restates: { label: 'already kept: working memory holds that span as yours', level: 'quiet' },
+  // A shadow's suggestion (#1031).
+  'not-a-suggestion': { label: 'not taken: no suggestion was offered at that line', level: 'warn' },
+  'answered-already': { label: 'not taken: that suggestion was already answered, or let go', level: 'quiet' },
 });

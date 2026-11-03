@@ -953,6 +953,7 @@ export type ForkShadowedLine = {
   why: Warrant;
   trigger: string;
   ask: string;
+  question?: string;
 };
 
 export type SuggestionLine = {

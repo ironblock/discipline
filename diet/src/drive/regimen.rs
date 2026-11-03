@@ -707,6 +707,13 @@ fn shadow_lever(regimen: &Regimen) -> String {
     }
 }
 
+/// How the shadows appear while the operator drives (#1031): `hidden` or
+/// `chips`.
+fn shadow_offer_lever(regimen: &Regimen) -> String {
+    crate::drive::session::interview_shadow_offer(regimen)
+        .map_or_else(|_| UNDECLARED.to_owned(), |offer| offer.word().to_owned())
+}
+
 /// The state of each lever (docs/program.md §2) a session `serve` runs
 /// under `regimen`, with `output_cap` its output cap and where that came
 /// from ([`output_cap`]), sits at, by
@@ -842,6 +849,12 @@ pub fn serve_levers(regimen: &Regimen, output_cap: (u32, &str)) -> BTreeMap<Stri
         ("fork_warrant".to_owned(), warrant.clone()),
         // #1021: the warrants evaluated and never fired.
         ("interview_shadow".to_owned(), shadow_lever(regimen)),
+        // #1031: hidden, or offered as suggestions; while offered, the
+        // operator's own forks are no longer independent of the automation.
+        (
+            "interview_shadow_offer".to_owned(),
+            shadow_offer_lever(regimen),
+        ),
         ("warrant_gate".to_owned(), warrant_gate_lever(regimen)),
         // #784: each settled tool call's touches into working memory.
         ("mechanical_capture".to_owned(), mechanical_lever(regimen)),
@@ -1825,6 +1838,24 @@ mod tests {
                 "interview_shadow"
             ),
             "none"
+        );
+        // #1031: how the shadows appear while the operator drives.
+        assert_eq!(at(&manual, "interview_shadow_offer"), "hidden");
+        let offer =
+            |text: &str| serve_levers(&regimen::parse(text).expect("a regimen"), (8192, "default"));
+        assert_eq!(
+            at(
+                &offer("interview_shadow_offer = \"chips\"\n"),
+                "interview_shadow_offer"
+            ),
+            "chips"
+        );
+        assert_eq!(
+            at(
+                &offer("interview_shadow_offer = \"shown\"\n"),
+                "interview_shadow_offer"
+            ),
+            UNDECLARED
         );
         // A regimen that says nothing still gets a table, never an error.
         let empty = serve_levers(

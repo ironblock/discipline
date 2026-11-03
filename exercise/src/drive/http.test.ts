@@ -296,6 +296,25 @@ describe('HttpTransport: commands', () => {
     ]);
   });
 
+  it('posts an answer to a suggestion as serve takes it (#1031), and reads the fork an accept fired', async () => {
+    const posted: Record<string, unknown>[] = [];
+    const { transport } = stand({
+      commands: (body) => {
+        posted.push(body);
+        if (body['answer'] === 'accept') return new Response('{"fork":18}', { status: 200 });
+        return body['shadow'] === 13 ? new Response('{}', { status: 200 }) : new Response('{"refused":"answered-already"}', { status: 409 });
+      },
+    });
+    await expect(transport.dispatch({ kind: 'suggestion', shadow: 12, answer: 'accept' })).resolves.toEqual({ ok: true, answer: { fork: 18 } });
+    await expect(transport.dispatch({ kind: 'suggestion', shadow: 13, answer: 'reject' })).resolves.toEqual({ ok: true });
+    await expect(transport.dispatch({ kind: 'suggestion', shadow: 14, answer: 'reject' })).resolves.toEqual({ ok: false, refused: 'answered-already' });
+    expect(posted).toEqual([
+      { kind: 'suggestion', shadow: 12, answer: 'accept' },
+      { kind: 'suggestion', shadow: 13, answer: 'reject' },
+      { kind: 'suggestion', shadow: 14, answer: 'reject' },
+    ]);
+  });
+
   it('posts an end as serve.rs takes it (#289)', async () => {
     const posted: Record<string, unknown>[] = [];
     const { transport } = stand({ commands: (body) => (posted.push(body), new Response('{}', { status: 200 })) });

@@ -268,8 +268,9 @@
 //! log that declares 28 or less and carries it is refused. For a reader of
 //! earlier logs, the migration is nothing: no session declared one.
 //!
-//! v34 (#1031) offers the shadow warrants' forks to the operator. Under
-//! `interview_shadow_offer = "chips"` each `fork.shadowed` line is a
+//! v34 (#1031) offers the shadow warrants' forks to the operator. A
+//! `fork.shadowed` line carries `question`, the question its fork would
+//! have asked. Under `interview_shadow_offer = "chips"` each is a
 //! suggestion the operator answers with the command `suggestion`, and each
 //! answer is a `suggestion` line: the `fork.shadowed` line it answers, the
 //! outcome (`accepted`, `rejected`, or `unanswered` when the turn moved on
@@ -2329,6 +2330,9 @@ pub enum Event {
         /// The ask it would have used: its pinned template's name, or the
         /// router's ask.
         ask: String,
+        /// The question it would have asked (v34, #1031): what a suggestion
+        /// shows the operator. Absent before v34.
+        question: Option<String>,
     },
     /// The operator's answer to a shadow's fork offered as a suggestion
     /// (v34, #1031): accepted, rejected, or left unanswered.
@@ -4904,6 +4908,7 @@ fn from_object(object: &BTreeMap<String, Value>) -> Result<Line, String> {
             why: fields.tag("why", Warrant::from_tag)?,
             trigger: fields.string("trigger")?,
             ask: fields.string("ask")?,
+            question: fields.optional_string("question")?,
         },
         Kind::Suggestion => Event::Suggestion {
             shadow: fields.count("shadow")?,
@@ -7203,6 +7208,7 @@ pub fn schema(kind: Kind) -> &'static [Field] {
                 must_v32("why", Tag(Tags::Warrant)),
                 must_v32("trigger", Text),
                 must_v32("ask", Text),
+                may_v34("question", Text),
             ];
             F
         }
@@ -8581,12 +8587,16 @@ fn to_value(line: &Line) -> Value {
             why,
             trigger,
             ask,
+            question,
         } => {
             put("of_turn", count(u64::from(*of_turn)));
             put("at", count(*at));
             put("why", text(why.tag()));
             put("trigger", text(trigger));
             put("ask", text(ask));
+            if let Some(question) = question {
+                put("question", text(question));
+            }
             Kind::ForkShadowed
         }
         Event::Suggestion {
@@ -10803,6 +10813,7 @@ mod tests {
                 why: Warrant::Trouble,
                 trigger: format!("trouble:{request}"),
                 ask: "gotchas".to_owned(),
+                question: Some("What went wrong?".to_owned()),
             },
             Event::ForkSettled {
                 trailer: None,
@@ -11120,7 +11131,9 @@ mod tests {
             })
             .filter(|request| {
                 matches!(
-                    events.get(*request as usize),
+                    usize::try_from(*request)
+                        .ok()
+                        .and_then(|request| events.get(request)),
                     Some(Event::Request {
                         lane: Lane::Trunk,
                         ..
@@ -11137,6 +11150,7 @@ mod tests {
                 why: Warrant::Read,
                 trigger: "call:document-read:call-9".to_owned(),
                 ask: "finding".to_owned(),
+                question: Some("What did the read find?".to_owned()),
             },
             Event::Fork {
                 after_meditation: None,

@@ -170,9 +170,17 @@ export interface LoggedText {
 
 /** A fork a shadow warrant would have cut at this step, never sent (log v32, #1021): where the automation would have fired. */
 export interface Shadowed {
+  /** Its `fork.shadowed` line's `seq` (#1031): what an answer to it names. */
+  readonly seq: number;
   readonly why: string;
   readonly trigger: string;
   readonly ask: string;
+  /** The question its fork would have asked (log v34, #1031). */
+  readonly question?: string;
+  /** Offered to the operator as a suggestion while driving (#1031): the start line's `interview_shadow_offer` is `chips`. */
+  readonly offered: boolean;
+  /** How the operator answered it (#1031), once a `suggestion` line says: `unanswered` when the turn moved on first. */
+  readonly answer?: 'accepted' | 'rejected' | 'unanswered';
 }
 
 export interface Gate {
@@ -721,6 +729,9 @@ export function fold(written: readonly LogLine[]): Session {
   // The warrant gate's lines (#850), by the request of the step they decided.
   const gated = new Map<number, LineOf<'warrant.gated'>[]>();
   const shadows = new Map<number, Shadowed[]>();
+  // Each shadow's trunk request, by its line (#1031): where its answer is folded.
+  const shadowAt = new Map<number, number>();
+  const offered = start.levers?.['interview_shadow_offer'] === 'chips';
   const prunes = new Map<number, LineOf<'pruned'>[]>();
   // The calls whose output a meditation replaced by its pointer (#630): every meditation's `pruned`.
   const replacedByMeditation = new Set<string>();
@@ -997,8 +1008,15 @@ export function fold(written: readonly LogLine[]): Session {
         break;
       // A fork a shadow warrant would have cut (#1021): never sent; onto the step it would have fired at, quietly.
       case 'fork.shadowed':
-        shadows.set(e.at, [...(shadows.get(e.at) ?? []), { why: e.why, trigger: e.trigger, ask: e.ask }]);
+        shadowAt.set(e.seq, e.at);
+        shadows.set(e.at, [...(shadows.get(e.at) ?? []), { seq: e.seq, why: e.why, trigger: e.trigger, ask: e.ask, ...(e.question !== undefined ? { question: e.question } : {}), offered }]);
         break;
+      // The operator's answer to a shadow offered as a suggestion (#1031): onto the shadow it answers.
+      case 'suggestion': {
+        const at = shadowAt.get(e.shadow);
+        if (at !== undefined) shadows.set(at, (shadows.get(at) ?? []).map((shadow) => (shadow.seq === e.shadow ? { ...shadow, answer: e.outcome } : shadow)));
+        break;
+      }
       // A hosted API's 429 or 529, retried (#555): the request's own attempt, drawn on no node yet.
       case 'request.retried':
         break;

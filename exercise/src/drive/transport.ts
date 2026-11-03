@@ -66,7 +66,9 @@ export type Command =
    */
   | ({ readonly kind: 'fork'; readonly at?: number } & ({ readonly ask: string } | { readonly text: string }))
   /** The operator keeps an exact span of a logged line (#1021): an operator entry, with an optional tag. */
-  | { readonly kind: 'keep'; readonly from: number; readonly span: string; readonly tag?: string };
+  | { readonly kind: 'keep'; readonly from: number; readonly span: string; readonly tag?: string }
+  /** The operator answers a shadow offered as a suggestion (#1031): by its `fork.shadowed` line, accept or reject. */
+  | { readonly kind: 'suggestion'; readonly shadow: number; readonly answer: 'accept' | 'reject' };
 
 /** How the operator rules on a proposed phase move (#651, #788): `keep` moves without a meditation (v7's `continue`). */
 export type PhaseChoice = 'meditation' | 'keep' | 'stay';
@@ -162,6 +164,9 @@ export type Refusal = Open<
   | 'not-on-the-trunk'
   | 'not-a-pinned-ask'
   | 'restates'
+  /** `diet`'s answers to a suggestion's (#1031): no shadow offered at that line; one answered already, or let go. */
+  | 'not-a-suggestion'
+  | 'answered-already'
 >;
 
 /**

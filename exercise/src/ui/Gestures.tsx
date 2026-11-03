@@ -181,20 +181,72 @@ export function KeepAction({ logged, label }: { readonly logged: LoggedText; rea
 
 /**
  * Where the automation would have fired here (#1021): each fork a shadow warrant would have cut at this step, never
- * sent -- shown in a replay and the read-only views, to review afterwards against where the operator forked. Never
- * during a live drive (where the gestures are taken): seen there, a shadow becomes a suggestion, and the operator's
- * own forks stop being the independent label the automation is scored against. The log keeps them either way.
+ * sent -- shown in a replay and the read-only views, to review afterwards against where the operator forked, with how
+ * the operator answered each one offered. During a live drive (where the gestures are taken) only a session whose start
+ * line says `chips` shows them, each as a suggestion to accept or reject (#1031): seen there, a shadow is no longer
+ * independent of the operator's own forks, which is why the start line says which mode ran. Hidden, the log keeps them.
  */
 export function ShadowMarks({ shadowed }: { readonly shadowed: readonly Shadowed[] | undefined }) {
-  const live = useGestures() !== undefined;
-  if (live || !shadowed || shadowed.length === 0) return null;
+  const act = useGestures();
+  if (!shadowed || shadowed.length === 0) return null;
+  if (act) {
+    const offered = shadowed.filter((shadow) => shadow.offered);
+    if (offered.length === 0) return null;
+    return (
+      <ul className="ex-shadow ex-shadow--offered" aria-label="suggestions from the shadow warrants">
+        {offered.map((shadow) => (
+          <SuggestionChip key={shadow.seq} shadow={shadow} act={act} />
+        ))}
+      </ul>
+    );
+  }
   return (
     <ul className="ex-shadow" aria-label="where a shadow warrant would have forked">
-      {shadowed.map((shadow, at) => (
-        <li key={at} className="ex-shadow__mark" title={`${shadow.trigger}: never sent`}>
+      {shadowed.map((shadow) => (
+        <li key={shadow.seq} className="ex-shadow__mark" title={`${shadow.trigger}: never sent`}>
           would fork · {shadow.why} → {shadow.ask}
+          {shadow.answer ? ` · ${shadow.answer}` : ''}
         </li>
       ))}
     </ul>
+  );
+}
+
+/**
+ * One shadow offered as a suggestion (#1031): its warrant, its trigger and the question its fork would ask. Accept
+ * fires that fork as the operator's; reject declines it. Either answer is logged, and so is one never given.
+ */
+function SuggestionChip({ shadow, act }: { readonly shadow: Shadowed; readonly act: (command: Command) => Promise<Ack> }) {
+  const [busy, setBusy] = useState(false);
+  const [refused, setRefused] = useState<string>();
+  if (shadow.answer) {
+    return (
+      <li className="ex-shadow__mark" title={shadow.trigger}>
+        {shadow.why} → {shadow.ask} · {shadow.answer}
+      </li>
+    );
+  }
+  const question = shadow.question ?? shadow.ask;
+  const answer = async (word: 'accept' | 'reject') => {
+    setBusy(true);
+    const ack = await act({ kind: 'suggestion', shadow: shadow.seq, answer: word });
+    setBusy(false);
+    setRefused(ack.ok ? undefined : refusedOf(ack));
+  };
+  return (
+    <li className="ex-shadow__chip">
+      <span className="ex-shadow__said">this automatic fork would have fired, using this question:</span>
+      <q className="ex-shadow__question">{question}</q>
+      <span className="ex-shadow__why">
+        {shadow.why} · {shadow.trigger}
+      </span>
+      <button type="button" disabled={busy} aria-label={`Accept: ${question}`} onClick={() => void answer('accept')}>
+        Accept
+      </button>
+      <button type="button" disabled={busy} aria-label={`Reject: ${question}`} onClick={() => void answer('reject')}>
+        Reject
+      </button>
+      {refused ? <span role="alert">{refused}</span> : null}
+    </li>
   );
 }

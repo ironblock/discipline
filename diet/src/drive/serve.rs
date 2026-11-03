@@ -931,7 +931,8 @@ impl<S: Streaming + 'static> Serving<S> {
     }
 
     /// The operator's fork and keep (#1021): the fork's seq, to read its
-    /// answer by, or the entry the keep wrote, by id.
+    /// answer by, or the entry the keep wrote, by id; and an answer to a
+    /// shadow's suggestion (#1031): accepted, the fork it fired.
     fn gesture(&self, command: Command) -> Result<BTreeMap<String, Value>, Rejected> {
         match command {
             Command::Fork(at, ask) => self.session.fork(at, &ask).map(|fork| {
@@ -944,6 +945,16 @@ impl<S: Streaming + 'static> Serving<S> {
                 .session
                 .keep(from, &span, tag.as_deref())
                 .map(|entry| BTreeMap::from([("entry".to_owned(), Value::String(entry))])),
+            Command::Suggestion(shadow, answer) => {
+                self.session.suggestion(shadow, answer).map(|fork| {
+                    fork.map_or_else(BTreeMap::new, |fork| {
+                        BTreeMap::from([(
+                            "fork".to_owned(),
+                            Value::Integer(i64::try_from(fork).unwrap_or(i64::MAX)),
+                        )])
+                    })
+                })
+            }
             _ => unreachable!("only the operator's gestures"),
         }
     }
@@ -1016,10 +1027,12 @@ impl<S: Streaming + 'static> Serving<S> {
                 Err(rejection) => rejected(rejection),
             },
             // The operator's gestures (#1021).
-            command @ (Command::Fork(..) | Command::Keep(..)) => match self.gesture(command) {
-                Ok(body) => (200, body),
-                Err(rejection) => rejected(rejection),
-            },
+            command @ (Command::Fork(..) | Command::Keep(..) | Command::Suggestion(..)) => {
+                match self.gesture(command) {
+                    Ok(body) => (200, body),
+                    Err(rejection) => rejected(rejection),
+                }
+            }
             // The operator's phase commands (#788).
             Command::StartPhase(phase) => match self.session.start_phase(&phase) {
                 Ok(()) => (200, BTreeMap::new()),
@@ -1100,6 +1113,8 @@ enum Command {
     /// Fork off the trunk at the logged line with this seq, or its end,
     /// asking this (#1021).
     Fork(Option<u64>, crate::drive::session::OperatorAsk),
+    /// Answer the shadow at the `fork.shadowed` line with this seq (#1031).
+    Suggestion(u64, crate::drive::session::SuggestionAnswer),
 }
 
 /// A command's word as a client written before #583's rename may send it,
@@ -1188,6 +1203,8 @@ impl Command {
             CommandKind::Keep => &["kind", "from", "span", "tag"],
             // #1021: the operator's fork ends no idle gap.
             CommandKind::Fork => &["kind", "at", "ask", "text"],
+            // #1031: the answer to a shadow's suggestion ends no idle gap.
+            CommandKind::Suggestion => &["kind", "shadow", "answer"],
             // #942: a runner's grade ends no idle gap.
             CommandKind::Grade => &[
                 "kind",
@@ -1300,6 +1317,20 @@ impl Command {
                     _ => return None,
                 };
                 Some(Self::Fork(at, ask))
+            }
+            CommandKind::Suggestion => {
+                use crate::drive::session::SuggestionAnswer;
+                let answer = match object.get("answer") {
+                    Some(Value::String(word)) if word == "accept" => SuggestionAnswer::Accept,
+                    Some(Value::String(word)) if word == "reject" => SuggestionAnswer::Reject,
+                    _ => return None,
+                };
+                match object.get("shadow") {
+                    Some(Value::Integer(shadow)) => u64::try_from(*shadow)
+                        .ok()
+                        .map(|shadow| Self::Suggestion(shadow, answer)),
+                    _ => None,
+                }
             }
             CommandKind::Keep => {
                 match (object.get("from"), object.get("span"), object.get("tag")) {
@@ -2055,6 +2086,35 @@ mod tests {
             r#"{"kind":"fork","ask":"GOTCHAS","text":"x"}"#,
             r#"{"kind":"fork","at":"9","text":"x"}"#,
             r#"{"kind":"fork","text":"x","idle_gap":{}}"#,
+        ] {
+            assert!(read(refused).is_none(), "{refused}");
+        }
+    }
+
+    /// #1031: an answer to a shadow's suggestion names its `fork.shadowed`
+    /// line and `accept` or `reject`; anything else, or an idle gap, is no
+    /// command.
+    #[test]
+    fn a_suggestions_answer_reads_its_shadow_and_answer_and_nothing_else() {
+        use crate::drive::session::SuggestionAnswer;
+        let read = |body: &str| {
+            let object = crate::formats::record::json::line(body).expect("an object");
+            Command::from_object(&object).map(|posted| posted.command)
+        };
+        assert!(matches!(
+            read(r#"{"kind":"suggestion","shadow":12,"answer":"accept"}"#),
+            Some(Command::Suggestion(12, SuggestionAnswer::Accept))
+        ));
+        assert!(matches!(
+            read(r#"{"kind":"suggestion","shadow":12,"answer":"reject"}"#),
+            Some(Command::Suggestion(12, SuggestionAnswer::Reject))
+        ));
+        for refused in [
+            r#"{"kind":"suggestion","shadow":12}"#,
+            r#"{"kind":"suggestion","answer":"accept"}"#,
+            r#"{"kind":"suggestion","shadow":-1,"answer":"accept"}"#,
+            r#"{"kind":"suggestion","shadow":12,"answer":"unanswered"}"#,
+            r#"{"kind":"suggestion","shadow":12,"answer":"accept","idle_gap":{}}"#,
         ] {
             assert!(read(refused).is_none(), "{refused}");
         }

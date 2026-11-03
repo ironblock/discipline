@@ -10,14 +10,14 @@
 {"finish_reason":"stop","kind":"response","seq":9,"t":16,"text":"Read it. Next, the schema.","to_request":7}
 {"kind":"turn.settled","reason":"final","seq":10,"t":16,"turn":1}
 {"from":"turn","kind":"settlement","seq":11,"t":16,"to":"capture"}
-{"ask":"finding","at":7,"kind":"fork.shadowed","of_turn":1,"seq":12,"t":17,"trigger":"call:document-read:call-1","why":"read"}
-{"ask":"open_next","at":7,"kind":"fork.shadowed","of_turn":1,"seq":13,"t":17,"trigger":"open:7","why":"open"}
-{"ask":"gotchas","at":3,"kind":"fork.shadowed","of_turn":1,"seq":14,"t":17,"trigger":"trouble:3","why":"trouble"}
+{"ask":"finding","at":7,"kind":"fork.shadowed","of_turn":1,"question":"What did the read find?","seq":12,"t":17,"trigger":"call:document-read:call-1","why":"read"}
+{"ask":"open_next","at":7,"kind":"fork.shadowed","of_turn":1,"question":"What is open next?","seq":13,"t":17,"trigger":"open:7","why":"open"}
+{"ask":"gotchas","at":3,"kind":"fork.shadowed","of_turn":1,"question":"What went wrong?","seq":14,"t":17,"trigger":"trouble:3","why":"trouble"}
 {"from":"capture","kind":"settlement","seq":15,"t":17,"to":"awaiting"}
 {"kind":"suggestion","outcome":"rejected","seq":16,"shadow":13,"t":18}
 {"from":"awaiting","kind":"settlement","seq":17,"t":19,"to":"capture"}
 {"ask":"finding","at":7,"kind":"fork","lane":"interview","of_turn":1,"question":"What did the read find?","seq":18,"t":19,"trigger":"operator","why":"operator"}
-{"fork":18,"kind":"request","lane":"interview","max_tokens":64,"seq":19,"sized_tokens":22,"t":19,"turn":1}
+{"fork":18,"head_sha256":"7c8ed42760e0b4c2d303d216ae94759ad28684091e153236bda8b6c874491506","kind":"request","lane":"interview","max_tokens":64,"seq":19,"sized_tokens":22,"t":19,"turn":1}
 {"kind":"delta","request":19,"seq":20,"t":20,"text":"It holds a note."}
 {"finish_reason":"stop","kind":"response","seq":21,"t":20,"text":"It holds a note.","to_request":19}
 {"fork":18,"kind":"fork.settled","outcome":"value","seq":22,"t":20}
