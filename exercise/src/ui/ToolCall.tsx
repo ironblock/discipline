@@ -4,7 +4,7 @@ import type { AssistantNode, Folded, ToolNode } from '../session/fold.ts';
 import { Block } from './Block.tsx';
 import { bytes, count, lines, size, took } from './format.ts';
 import { Copy } from './Copy.tsx';
-import { ForkAction, KeepAction } from './Gestures.tsx';
+import { ForkAction, KeepAction, WrapAction } from './Gestures.tsx';
 import { alarmOf, approvalOf, callOf, callOutcomeOf, callRefusalOf, heldOf } from './sets.ts';
 import { usePromptOf } from './Approval.tsx';
 import { JudgedSegments } from './GateSegments.tsx';
@@ -138,6 +138,8 @@ export function ToolBlock({ node, caller, first = false }: { readonly node: Fold
           {/* The operator's gestures (#1021): fork at this result, or keep a span of it as the model was shown it. */}
           {node.logged ? <ForkAction at={node.logged} label={`call ${node.call?.id ?? node.id}`} /> : null}
           {node.logged && node.logged.text !== '' ? <KeepAction logged={node.logged} label={`call ${node.call?.id ?? node.id}`} /> : null}
+          {/* The operator's wrap (#1030): a span of it in its place on the trunk, from the next request. */}
+          {node.logged && node.logged.text !== '' && !node.wrapped && !node.wrapWaiting ? <WrapAction call={node.logged.seq} from={node.logged} label={`call ${node.call?.id ?? node.id}`} /> : null}
         </>
       }
     >
@@ -156,6 +158,13 @@ export function ToolBlock({ node, caller, first = false }: { readonly node: Fold
       {/* What a self-capture call did to working memory (#619): its outcome, and the entries it wrote or why not. */}
       {/* A phase proposal the operator ruled on (#651): how. */}
       {node.ruled ? <p className="ex-ruled">{`ruled · ${node.ruled.choice} → ${node.ruled.to}`}</p> : null}
+      {/* The operator's wrap (#1030): what the trunk carries in its place, and from which turn's request. */}
+      {node.wrapped ? (
+        <p className="ex-pruned" title={node.wrapped.text}>
+          {`wrapped by you (${size(node.wrapped.bytesBefore)} → ${size(node.wrapped.bytesAfter)}) · from turn ${node.wrapped.turn}'s request · about ${node.wrapped.tailTokens} tokens prefilled again`}
+        </p>
+      ) : null}
+      {node.wrapWaiting ? <p className="ex-pruned">wrapped by you · in its place from the next request</p> : null}
       {/* Output the model pruned (#630): kept whole until the turn's meditation replaces it by its pointer. */}
       {node.pruned ? (
         <p className="ex-pruned" data-replaced={node.pruned.replaced ? '' : undefined}>

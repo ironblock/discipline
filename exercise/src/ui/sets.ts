@@ -252,4 +252,6 @@ export const refusalOf = registry<Refusal>({
   // A shadow's suggestion (#1031).
   'not-a-suggestion': { label: 'not taken: no suggestion was offered at that line', level: 'warn' },
   'answered-already': { label: 'not taken: that suggestion was already answered, or let go', level: 'quiet' },
+  // The operator's wrap (#1030).
+  'wrapped-already': { label: 'not taken: that result is wrapped already, or waits for the next request', level: 'quiet' },
 });

@@ -422,6 +422,28 @@ describe('the operator\u2019s gestures, as the fold names their lines (#1021)', 
   });
 });
 
+describe('the operator\u2019s wrap, as the fold names it (#1030)', () => {
+  const session = fold(logOf('a-v35-operator-wrap.jsonl'));
+  const nodes = session.eras.flatMap((era) => era.nodes);
+
+  it('puts the wrap on the call whose result it replaced', () => {
+    const tool = nodes.find((n) => n.kind === 'tool');
+    expect(tool?.kind === 'tool' && tool.wrapped).toEqual({ text: 'It holds a note.', turn: 2, bytesBefore: 7, bytesAfter: 16, tailTokens: 11 });
+  });
+
+  it('marks a wrap accepted and never applied as waiting', () => {
+    const waiting = fold(logOf('a-v35-wrap-accepted-never-applied.jsonl'))
+      .eras.flatMap((era) => era.nodes)
+      .find((n) => n.kind === 'tool');
+    expect(waiting?.kind === 'tool' && [waiting.wrapWaiting, waiting.wrapped]).toEqual([true, undefined]);
+  });
+
+  it('names the tool call the operator\u2019s fork was cut at, what a wrap from its answer wraps', () => {
+    const branch = [...session.branches.values()].flat().find((b) => b.why === 'operator');
+    expect(branch?.cut).toBe(6);
+  });
+});
+
 describe('the shadows offered as suggestions, as the fold names their answers (#1031)', () => {
   const session = fold(logOf('a-v34-shadow-suggestions.jsonl'));
   const nodes = session.eras.flatMap((era) => era.nodes);

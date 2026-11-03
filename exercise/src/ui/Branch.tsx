@@ -2,7 +2,7 @@ import { useState } from 'react';
 
 import type { BranchNode, Folded, PatchNode } from '../session/fold.ts';
 import { Block } from './Block.tsx';
-import { KeepAction } from './Gestures.tsx';
+import { KeepAction, WrapAction } from './Gestures.tsx';
 import { barHeight, rowsOf } from './condensed.ts';
 import { edgeOf, readingOf, warmOf, writingOf } from './flow.ts';
 import { Flowing } from './Flowing.tsx';
@@ -88,7 +88,17 @@ export function Branch({ node, open: initiallyOpen = false }: { readonly node: F
         provenance={node}
         id={node.id}
         // The operator's keep (#1021): a span of the answer as written, trailer and all.
-        {...(node.logged && node.logged.text !== '' ? { actions: <KeepAction logged={node.logged} label={`fork ${node.id}`} /> } : {})}
+        {...(node.logged && node.logged.text !== ''
+          ? {
+              actions: (
+                <>
+                  <KeepAction logged={node.logged} label={`fork ${node.id}`} />
+                  {/* The operator's fork cut at a tool result (#1030): a span of its answer may wrap that result. */}
+                  {node.why === 'operator' && node.cut !== undefined ? <WrapAction call={node.cut} from={node.logged} label={`fork ${node.id}`} /> : null}
+                </>
+              ),
+            }
+          : {})}
       >
         {open ? (
           <div className="ex-branch__exchange">

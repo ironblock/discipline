@@ -262,6 +262,13 @@ export interface ToolNode extends Provenance {
   readonly background?: { readonly job: string; readonly status?: string; readonly exit?: number };
   /** The model pruned its output (log v7's `pruned`, #630): the bytes, and whether a meditation has since replaced it by its pointer. */
   readonly pruned?: { readonly bytes: number; readonly replaced: boolean };
+  /**
+   * The operator wrapped it (log v35, #1030): the span the trunk carries in its place from the turn named on, the bytes
+   * before and after, and the tokens from it to the trunk's end, prefilled again.
+   */
+  readonly wrapped?: { readonly text: string; readonly turn: number; readonly bytesBefore: number; readonly bytesAfter: number; readonly tailTokens: number };
+  /** The operator's wrap of it, accepted and not yet carried by a trunk request (log v35's `wrap.accepted`, #1030). */
+  readonly wrapWaiting?: true;
   /** A phase proposal the operator ruled on (#651): the choice, and the phase it proposed. */
   readonly ruled?: { readonly choice: string; readonly to: string };
   /** Running, it is near its timeout (log v7's `timeout.near`, #613): its timeout, and when the warning came. */
@@ -310,6 +317,8 @@ export interface BranchNode extends Provenance, Partial<Generation> {
   readonly slot: number;
   /** The trunk node it branched from: an assistant node, or a tool call. */
   readonly at: string;
+  /** The `tool_call` line it was cut at (log v32's `cut`, #1021), when it names one: what a wrap from its answer wraps. */
+  readonly cut?: number;
   readonly why: string;
   readonly question: string;
   /** AHEAD (`slots`): prefix tokens shared with the trunk; `diet`'s fork line does not say. */
@@ -733,6 +742,9 @@ export function fold(written: readonly LogLine[]): Session {
   const shadowAt = new Map<number, number>();
   const offered = start.levers?.['interview_shadow_offer'] === 'chips';
   const prunes = new Map<number, LineOf<'pruned'>[]>();
+  // The operator's wraps (#1030), by the `tool_call` line each replaced.
+  const wraps = new Map<number, LineOf<'wrapped'>>();
+  const wrapsAccepted = new Set<number>();
   // The calls whose output a meditation replaced by its pointer (#630): every meditation's `pruned`.
   const replacedByMeditation = new Set<string>();
   const reminders = new Map<number, LineOf<'reminded'>>();
@@ -1040,6 +1052,14 @@ export function fold(written: readonly LogLine[]): Session {
       case 'pruned':
         prunes.set(e.turn, [...(prunes.get(e.turn) ?? []), e]);
         break;
+      // The operator's wrap (#1030): onto the call whose result it replaced.
+      case 'wrapped':
+        wraps.set(e.call, e);
+        break;
+      // The operator's wrap, accepted (#1030): waiting until its `wrapped` line.
+      case 'wrap.accepted':
+        wrapsAccepted.add(e.call);
+        break;
       case 'reminded':
         reminders.set(e.turn, e);
         break;
@@ -1305,6 +1325,11 @@ export function fold(written: readonly LogLine[]): Session {
                     const cut = (prunes.get(line.turn) ?? []).find((p) => p.call === line.id);
                     return cut ? { pruned: { bytes: cut.bytes, replaced: replacedByMeditation.has(line.id) } } : {};
                   })(),
+                  ...(() => {
+                    const wrap = wraps.get(line.seq);
+                    if (wrap) return { wrapped: { text: wrap.text, turn: wrap.turn, bytesBefore: wrap.bytes_before, bytesAfter: wrap.bytes_after, tailTokens: wrap.tail_tokens } };
+                    return wrapsAccepted.has(line.seq) ? { wrapWaiting: true as const } : {};
+                  })(),
                   ...(line.background !== undefined
                     ? (() => {
                         const ended = backgroundEnds.get(line.background);
@@ -1404,6 +1429,7 @@ export function fold(written: readonly LogLine[]): Session {
       lane: fork.lane,
       slot,
       at,
+      ...(fork.cut !== undefined ? { cut: fork.cut } : {}),
       why: fork.why,
       question: fork.question,
       ...(fork.prefix_tokens !== undefined ? { prefixTokens: fork.prefix_tokens } : {}),

@@ -130,6 +130,8 @@ vocabulary! {
         Fork => "fork",
         /// Answer a shadow's suggestion: accept or reject it (#1031).
         Suggestion => "suggestion",
+        /// Wrap a tool result on the trunk: a kept span in its place (#1030).
+        Wrap => "wrap",
     }
 }
 
@@ -221,6 +223,9 @@ vocabulary! {
         /// An answer to a suggestion already answered, or logged unanswered
         /// (#1031).
         AnsweredAlready => "answered-already",
+        /// A wrap of a tool result already wrapped, or waiting to be at the
+        /// next trunk request (#1030).
+        WrappedAlready => "wrapped-already",
     }
 }
 
@@ -1073,6 +1078,41 @@ pub enum Event {
         ask: String,
         /// The question it would have asked (#1031).
         question: String,
+    },
+    /// The operator's wrap, accepted (#1030): applied at the next trunk
+    /// request, or never, when the session ends first.
+    WrapAccepted {
+        /// The `tool_call` line whose result it wraps.
+        call: u64,
+        /// The line the span came from.
+        from: u64,
+        /// The operator entry that holds the span.
+        entry: String,
+    },
+    /// A tool result the operator wrapped (#1030), replaced on the trunk as
+    /// the trunk request after this line carries it.
+    Wrapped {
+        /// The turn whose trunk request first carries it.
+        turn: u32,
+        /// The `tool_call` line whose result it replaced.
+        call: u64,
+        /// The line the span came from: the call, or an operator's fork's
+        /// answer cut at it.
+        from: u64,
+        /// The operator entry that holds the span.
+        entry: String,
+        /// What the trunk carries in the result's place.
+        text: String,
+        /// The result's bytes as the trunk carried it.
+        bytes_before: u64,
+        /// The replacement's bytes.
+        bytes_after: u64,
+        /// The next trunk request's head digest had the result stayed.
+        prefix_before: String,
+        /// The next trunk request's head digest with the replacement.
+        prefix_after: String,
+        /// The estimated tokens from the replaced result to the trunk's end.
+        tail_tokens: u64,
     },
     /// The operator's answer to a shadow offered as a suggestion (#1031).
     Suggestion {
@@ -2824,6 +2864,9 @@ struct State {
     shadow_counters: crate::drive::warrants::Counters,
     /// The shadows offered as suggestions (#1031).
     suggestions: Suggestions,
+    /// The operator's wraps (#1030), by the `tool_call` line each replaces:
+    /// waiting for the next trunk request, or applied there.
+    wraps: BTreeMap<u64, Wrap>,
     /// The forks the step warrants fired this turn that run in its gap
     /// (#783): every step's under the gap timing, the final answer's under
     /// either.
@@ -2930,6 +2973,7 @@ impl State {
     }
 
     /// A session's state as it opens: awaiting, on `trunk`, in `phase`.
+    #[allow(clippy::too_many_lines)]
     fn opening(
         trunk: Vec<Message>,
         phase: Option<String>,
@@ -3014,6 +3058,7 @@ impl State {
             step_counters: crate::drive::warrants::Counters::default(),
             shadow_counters: crate::drive::warrants::Counters::default(),
             suggestions: Suggestions::default(),
+            wraps: BTreeMap::new(),
             gap_firings: Vec::new(),
             // As far past the cooldown as `trouble`'s counter starts (#783).
             refute_steps: (99, 99),
@@ -3326,7 +3371,8 @@ impl State {
                 | CommandKind::Grade
                 | CommandKind::Keep
                 | CommandKind::Fork
-                | CommandKind::Suggestion => {
+                | CommandKind::Suggestion
+                | CommandKind::Wrap => {
                     unreachable!("a tangent, background or phase ruling carries no idle gap")
                 }
             };
@@ -4895,28 +4941,64 @@ impl<S: Streaming + 'static> Session<S> {
             return Err(held.map_or(Rejected::Refused(refused), Rejected::KeptAlready));
         }
         state.admit_within_the_gap();
-        let patch = kept_patch(&state, span);
-        let Some(interview) = state.interview.as_mut() else {
-            unreachable!("working memory was checked above");
-        };
-        // A new entry, or -- the span restating a live entry the model or a
-        // fork wrote -- the operator's endorsement of it: its provenance
-        // recorded on that entry, which reads as the operator's from here.
-        let Ok(crate::object::Applied::Created(entry) | crate::object::Applied::Deduped(entry)) =
-            interview.object.apply(&patch)
-        else {
-            unreachable!("a keep the refusal admitted applies");
-        };
-        let mut line = patched(None, &patch, &interview.object);
-        if let Event::Patched { entry: written, .. } = &mut line {
-            entry.as_str().clone_into(&mut written.id);
-            written.category = tag.map(str::to_owned);
-            written.authority = Some(log::OPERATOR_AUTHORITY.to_owned());
-        }
-        state.push(line);
+        let entry = operator_entry(&mut state, span, tag);
         drop(state);
         self.shared.changed.notify_all();
-        Ok(entry.as_str().to_owned())
+        Ok(entry)
+    }
+
+    /// Wrap the tool result of the `tool_call` line `call` (#1030): the
+    /// `span` the operator keeps from it, or from the answer `from` names of
+    /// an operator's fork cut at it, takes its place on the trunk. The span
+    /// is an operator entry at once, as a [`Self::keep`]'s is, or the one the
+    /// operator already kept of it, and a `wrap.accepted` line names the
+    /// call, the source and the entry. The trunk changes at the next trunk
+    /// request, never the one in flight: a step's, while the turn runs, or
+    /// the next ask's; a `wrapped` line just before that request says so.
+    /// Until then a fork reads the trunk as it was. Returns the entry's id.
+    ///
+    /// # Errors
+    ///
+    /// [`Refusal::Ended`]; [`Refusal::NoWorkingMemory`]; [`Refusal::Empty`]
+    /// for no span; [`Refusal::NotASource`] for a `call` that is no shown
+    /// tool result, or a `from` that is neither it nor the answer to an
+    /// operator's fork cut at it; [`Refusal::WrappedAlready`];
+    /// [`Refusal::NotInSource`] for a span not in that line;
+    /// [`Refusal::NotOnTheTrunk`] for a result a meditation took off it; and
+    /// [`Refusal::Restates`] for a span working memory holds otherwise.
+    pub fn wrap(&self, call: u64, from: u64, span: &str) -> Result<String, Rejected> {
+        let mut state = self.shared.lock();
+        let (id, shown, held) = match wrap_refusal(&state, call, from, span) {
+            Ok(admitted) => admitted,
+            Err(because) => {
+                let refused = state.refuse(CommandKind::Wrap, because);
+                drop(state);
+                self.shared.changed.notify_all();
+                return Err(Rejected::Refused(refused));
+            }
+        };
+        state.admit_within_the_gap();
+        let entry = held.unwrap_or_else(|| operator_entry(&mut state, span, None));
+        // Accepted: the operator's label, kept though no request carries it.
+        state.push(Event::WrapAccepted {
+            call,
+            from,
+            entry: entry.clone(),
+        });
+        state.wraps.insert(
+            call,
+            Wrap {
+                id,
+                shown,
+                from,
+                entry: entry.clone(),
+                text: span.to_owned(),
+                applied: false,
+            },
+        );
+        drop(state);
+        self.shared.changed.notify_all();
+        Ok(entry)
     }
 
     /// Answer the shadow at the `fork.shadowed` line `shadow`, offered as a
@@ -6344,6 +6426,34 @@ pub fn line_of(logged: &Logged) -> log::Line {
             ask: ask.clone(),
             question: Some(question.clone()),
         },
+        Event::WrapAccepted { call, from, entry } => log::Event::WrapAccepted {
+            call: *call,
+            from: *from,
+            entry: entry.clone(),
+        },
+        Event::Wrapped {
+            turn,
+            call,
+            from,
+            entry,
+            text,
+            bytes_before,
+            bytes_after,
+            prefix_before,
+            prefix_after,
+            tail_tokens,
+        } => log::Event::Wrapped {
+            turn: *turn,
+            call: *call,
+            from: *from,
+            entry: entry.clone(),
+            text: text.clone(),
+            bytes_before: *bytes_before,
+            bytes_after: *bytes_after,
+            prefix_before: prefix_before.clone(),
+            prefix_after: prefix_after.clone(),
+            tail_tokens: *tail_tokens,
+        },
         Event::Suggestion {
             shadow,
             outcome,
@@ -6730,6 +6840,7 @@ fn command_of(command: CommandKind) -> log::Command {
         CommandKind::Keep => log::Command::Keep,
         CommandKind::Fork => log::Command::Fork,
         CommandKind::Suggestion => log::Command::Suggestion,
+        CommandKind::Wrap => log::Command::Wrap,
     }
 }
 
@@ -6768,6 +6879,7 @@ fn refusal_of(refusal: Refusal) -> log::Refusal {
         Refusal::NotAPinnedAsk => log::Refusal::NotAPinnedAsk,
         Refusal::NotASuggestion => log::Refusal::NotASuggestion,
         Refusal::AnsweredAlready => log::Refusal::AnsweredAlready,
+        Refusal::WrappedAlready => log::Refusal::WrappedAlready,
     }
 }
 
@@ -7358,6 +7470,9 @@ fn run_calls<S: Streaming + 'static>(
     state.ran.clone_from(exchange);
     shape.messages.push(said);
     shape.messages.extend(results);
+    // The operator's wraps (#1030), at this boundary: the request in flight
+    // stood as sent; the next one carries them.
+    apply_wraps(&mut state, shape, Some(exchange), turn);
     // The automatic meditation (#617), between the turn's steps too; under
     // a native summary (#936) its request first, waited for.
     let (mut state, summary) = window_summary(shared, state, shape, false);
@@ -8158,6 +8273,8 @@ fn trunk_opening(
     turn: u32,
     shape: &mut RequestShape,
 ) -> (u64, Cancel) {
+    // The operator's wraps waiting since the last trunk request (#1030).
+    apply_wraps(state, shape, None, turn);
     // Under a native summary a due meditation was made on the turn's
     // thread before this (#936); here it refills with none.
     window_meditation(template, state, shape, false, None);
@@ -9516,6 +9633,24 @@ pub enum OperatorAsk {
     Text(String),
 }
 
+/// One of the operator's wraps (#1030): the result it replaces, by its call
+/// id and the text the trunk carries, and its replacement.
+#[derive(Debug, Clone)]
+struct Wrap {
+    /// The call's id, which the result's message names.
+    id: String,
+    /// The result as the trunk carries it.
+    shown: String,
+    /// The line the span came from.
+    from: u64,
+    /// The operator entry that holds the span.
+    entry: String,
+    /// The span, which takes the result's place.
+    text: String,
+    /// Whether a trunk request has carried it yet.
+    applied: bool,
+}
+
 /// The shadows offered as suggestions (#1031).
 #[derive(Debug, Default)]
 struct Suggestions {
@@ -9679,6 +9814,178 @@ fn keep_source(state: &State, from: u64) -> Option<&str> {
         }
         Event::ToolCalled(line) => line.shown.as_deref(),
         _ => None,
+    }
+}
+
+/// The operator's entry of `span` (#1021), written and logged: a new entry,
+/// or -- the span restating a live entry the model or a fork wrote -- the
+/// operator's endorsement of it, its provenance recorded on that entry,
+/// which reads as the operator's from here. Its id.
+fn operator_entry(state: &mut State, span: &str, tag: Option<&str>) -> String {
+    let patch = kept_patch(state, span);
+    let Some(interview) = state.interview.as_mut() else {
+        unreachable!("working memory was checked before");
+    };
+    let Ok(crate::object::Applied::Created(entry) | crate::object::Applied::Deduped(entry)) =
+        interview.object.apply(&patch)
+    else {
+        unreachable!("an entry the refusal admitted applies");
+    };
+    let mut line = patched(None, &patch, &interview.object);
+    if let Event::Patched { entry: written, .. } = &mut line {
+        entry.as_str().clone_into(&mut written.id);
+        written.category = tag.map(str::to_owned);
+        written.authority = Some(log::OPERATOR_AUTHORITY.to_owned());
+    }
+    state.push(line);
+    entry.as_str().to_owned()
+}
+
+/// Why a wrap of the result at `call` by `span` from the line `from` is
+/// refused, if it is (#1030); admitted, the call's id, the result as the
+/// trunk carries it, and the operator's entry that already holds the span,
+/// when one does.
+fn wrap_refusal(
+    state: &State,
+    call: u64,
+    from: u64,
+    span: &str,
+) -> Result<(String, String, Option<String>), Refusal> {
+    if state.settlement == Settlement::Ended {
+        return Err(Refusal::Ended);
+    }
+    let Some(interview) = state.interview.as_ref() else {
+        return Err(Refusal::NoWorkingMemory);
+    };
+    if span.trim().is_empty() {
+        return Err(Refusal::Empty);
+    }
+    let line_at = |seq: u64| state.log.iter().find(|logged| logged.seq == seq);
+    let Some((id, shown)) = line_at(call).and_then(|logged| match &logged.event {
+        Event::ToolCalled(line) => line.shown.clone().map(|shown| (line.id.clone(), shown)),
+        _ => None,
+    }) else {
+        return Err(Refusal::NotASource);
+    };
+    if state.wraps.contains_key(&call) {
+        return Err(Refusal::WrappedAlready);
+    }
+    let source = if from == call {
+        shown.clone()
+    } else {
+        // The answer to an operator's fork cut at the call.
+        let answer = line_at(from).and_then(|logged| match &logged.event {
+            Event::Answered { request, text, .. } => Some((*request, text.clone())),
+            _ => None,
+        });
+        let fork_of = |request: u64| {
+            line_at(request).and_then(|logged| match &logged.event {
+                Event::Requested { fork, .. } => *fork,
+                _ => None,
+            })
+        };
+        let cut_at_the_call = |fork: u64| {
+            line_at(fork).is_some_and(|logged| {
+                matches!(
+                    logged.event,
+                    Event::Forked {
+                        why: log::Warrant::Operator,
+                        cut: Some(cut),
+                        ..
+                    } if cut == call
+                )
+            })
+        };
+        match answer {
+            Some((request, text)) if fork_of(request).is_some_and(cut_at_the_call) => text,
+            _ => return Err(Refusal::NotASource),
+        }
+    };
+    if !source.contains(span) {
+        return Err(Refusal::NotInSource);
+    }
+    let carried = |message: &Message| {
+        message.role == Role::Tool
+            && message.tool_call_id.as_deref() == Some(id.as_str())
+            && message.content == shown
+    };
+    if !state.trunk.iter().chain(&state.ran).any(carried) {
+        return Err(Refusal::NotOnTheTrunk);
+    }
+    // The span as the operator's entry: a new one, or one the model or a
+    // fork wrote, endorsed; one the operator kept already is the wrap's.
+    let mut trial = interview.object.clone();
+    let held = match trial.apply(&kept_patch(state, span)) {
+        Ok(crate::object::Applied::Created(_)) => None,
+        Ok(crate::object::Applied::Deduped(held)) if !interview.object.by_operator(&held) => None,
+        Ok(crate::object::Applied::Deduped(held) | crate::object::Applied::Unchanged(held)) => {
+            Some(held.as_str().to_owned())
+        }
+        _ => return Err(Refusal::Restates),
+    };
+    Ok((id, shown, held))
+}
+
+/// Each wrap waiting for a trunk request (#1030), applied to `shape`, the
+/// request about to be sent, and to every copy of the trunk the session
+/// holds -- the settled trunk, the running turn's steps and, mid-turn, its
+/// `exchange` -- each logged `wrapped` with `shape`'s head before and after.
+/// A wrap whose result `shape` no longer carries waits.
+fn apply_wraps(
+    state: &mut State,
+    shape: &mut RequestShape,
+    mut exchange: Option<&mut Vec<Message>>,
+    turn: u32,
+) {
+    let waiting: Vec<u64> = state
+        .wraps
+        .iter()
+        .filter(|(_, wrap)| !wrap.applied)
+        .map(|(call, _)| *call)
+        .collect();
+    for call in waiting {
+        let wrap = state.wraps[&call].clone();
+        let carried = |message: &Message| {
+            message.role == Role::Tool
+                && message.tool_call_id.as_deref() == Some(wrap.id.as_str())
+                && message.content == wrap.shown
+        };
+        let Some(at) = shape.messages.iter().position(carried) else {
+            continue;
+        };
+        let prefix_before = crate::client::head::Head::of(shape).digest().to_owned();
+        let tail_tokens = shape.messages[at..]
+            .iter()
+            .map(crate::meditation::render::estimated_tokens)
+            .sum();
+        let wrapped = |message: &mut Message| {
+            if carried(message) {
+                message.content.clone_from(&wrap.text);
+                message.images.clear();
+            }
+        };
+        shape.messages.iter_mut().for_each(wrapped);
+        state.trunk.iter_mut().for_each(wrapped);
+        state.ran.iter_mut().for_each(wrapped);
+        if let Some(exchange) = exchange.as_deref_mut() {
+            exchange.iter_mut().for_each(wrapped);
+        }
+        let prefix_after = crate::client::head::Head::of(shape).digest().to_owned();
+        if let Some(applied) = state.wraps.get_mut(&call) {
+            applied.applied = true;
+        }
+        state.push(Event::Wrapped {
+            turn,
+            call,
+            from: wrap.from,
+            entry: wrap.entry,
+            text: wrap.text.clone(),
+            bytes_before: wrap.shown.len() as u64,
+            bytes_after: wrap.text.len() as u64,
+            prefix_before,
+            prefix_after,
+            tail_tokens,
+        });
     }
 }
 
@@ -18746,6 +19053,24 @@ pub(in crate::drive) mod tests {
             outcome: log::SuggestionOutcome::Rejected,
             fork: None,
         });
+        // #1030: a wrap, accepted and applied.
+        events.push(Event::WrapAccepted {
+            call: 9,
+            from: 9,
+            entry: "operator-9".to_owned(),
+        });
+        events.push(Event::Wrapped {
+            turn: 2,
+            call: 9,
+            from: 9,
+            entry: "operator-9".to_owned(),
+            text: "a".to_owned(),
+            bytes_before: 2,
+            bytes_after: 1,
+            prefix_before: "a".repeat(64),
+            prefix_after: "b".repeat(64),
+            tail_tokens: 3,
+        });
         let mut kinds = std::collections::BTreeSet::new();
         for event in &events {
             kinds.insert(match event {
@@ -18802,9 +19127,11 @@ pub(in crate::drive) mod tests {
                 Event::MeditationSkipped { .. } => 50,
                 Event::Shadowed { .. } => 51,
                 Event::Suggestion { .. } => 52,
+                Event::Wrapped { .. } => 53,
+                Event::WrapAccepted { .. } => 54,
             });
         }
-        assert_eq!(kinds.len(), 53, "a variant has no sample");
+        assert_eq!(kinds.len(), 55, "a variant has no sample");
         events
             .into_iter()
             .enumerate()
@@ -19388,6 +19715,23 @@ pub(in crate::drive) mod tests {
                 outcome: log::SuggestionOutcome::Rejected,
                 fork: None,
             },
+            log::Event::WrapAccepted {
+                call: 9,
+                from: 9,
+                entry: "operator-9".to_owned(),
+            },
+            log::Event::Wrapped {
+                turn: 2,
+                call: 9,
+                from: 9,
+                entry: "operator-9".to_owned(),
+                text: "a".to_owned(),
+                bytes_before: 2,
+                bytes_after: 1,
+                prefix_before: "a".repeat(64),
+                prefix_after: "b".repeat(64),
+                tail_tokens: 3,
+            },
         ]
     }
 
@@ -19855,12 +20199,12 @@ pub(in crate::drive) mod tests {
             ),
             "ask cancel declare-meditation end open-tangent close-tangent background ratify-phase \
              edit-entry flag-entry refill-anyway start-phase propose-phase move-phase grade keep fork \
-             suggestion"
+             suggestion wrap"
         );
         assert_eq!(
             tags(&Refusal::ALL.iter().map(|it| it.tag()).collect::<Vec<_>>()),
             "in-flight ended nothing-in-flight nothing-to-meditate no-phase-graph not-a-phase \
-             already-in-phase no-phase-edge stale tangent-open no-tangent bad-tangent not-the-scope nothing-running no-proposal unknown-entry not-live empty meditation-held nothing-held restates not-unilateral already-asked proposal-pending no-vision api-cap not-a-source not-in-source no-working-memory not-on-the-trunk not-a-pinned-ask not-a-suggestion answered-already"
+             already-in-phase no-phase-edge stale tangent-open no-tangent bad-tangent not-the-scope nothing-running no-proposal unknown-entry not-live empty meditation-held nothing-held restates not-unilateral already-asked proposal-pending no-vision api-cap not-a-source not-in-source no-working-memory not-on-the-trunk not-a-pinned-ask not-a-suggestion answered-already wrapped-already"
         );
         assert_eq!(
             tags(
@@ -28166,6 +28510,317 @@ pub(in crate::drive) mod tests {
         assert_eq!(messages[..=result], trunk[..=result]);
         assert!(!wrote);
         reads_whole(&session);
+        tidy(&[&tree]);
+    }
+
+    /// A session with working memory, its trunk playing `acts` in `tree`,
+    /// where `notes.md` holds two lines, and the operator's forks answering
+    /// `forks` (#1030).
+    fn wrapping(tree: &Path, acts: Vec<Vec<Step>>, forks: Vec<Vec<Step>>) -> Session<Canned> {
+        std::fs::write(tree.join("notes.md"), "port 5182 is free\nand more\n").expect("a note");
+        Session::open_with(
+            Canned::new(acts),
+            looping(),
+            None,
+            Some(tools(
+                Confinement::Unconfined,
+                tree,
+                &["cat"],
+                None,
+                Decider::Decline,
+            )),
+            None,
+            Some(interviewing(&[])),
+        )
+        .forking_through(Canned::new(forks))
+    }
+
+    /// Each `wrapped` line, with its seq.
+    fn wrapped_lines(log: &[Logged]) -> Vec<(u64, Event)> {
+        log.iter()
+            .filter(|logged| matches!(logged.event, Event::Wrapped { .. }))
+            .map(|logged| (logged.seq, logged.event.clone()))
+            .collect()
+    }
+
+    /// The first trunk request after `seq`: its seq and head digest.
+    fn trunk_request_after(log: &[Logged], seq: u64) -> (u64, String) {
+        log.iter()
+            .find_map(|logged| match &logged.event {
+                Event::Requested {
+                    lane: Lane::Trunk,
+                    head_sha256,
+                    ..
+                } if logged.seq > seq => Some((logged.seq, head_sha256.clone())),
+                _ => None,
+            })
+            .expect("a trunk request after it")
+    }
+
+    /// Every trunk head in `log` rebuilt by the projection (#1030): what the
+    /// record says was sent is what was.
+    fn heads_rebuild(log: &[Logged]) {
+        let lines: Vec<_> = log.iter().map(line_of).collect();
+        let projected =
+            crate::drive::projection::project(&lines, &regime(), None).expect("projected");
+        let unrebuilt: Vec<&str> = projected
+            .unspellable
+            .iter()
+            .filter(|named| named.why.contains("could not be rebuilt"))
+            .map(|named| named.why.as_str())
+            .collect();
+        assert!(unrebuilt.is_empty(), "{unrebuilt:#?}");
+    }
+
+    /// What the tool result for `id` says in `messages`.
+    fn result_in(messages: &[Message], id: &str) -> Option<String> {
+        messages
+            .iter()
+            .find(|message| message.tool_call_id.as_deref() == Some(id))
+            .map(|message| message.content.clone())
+    }
+
+    /// #1030: between turns the operator wraps a tool result with a span of
+    /// it: the span is an operator entry at once, and the result's place on
+    /// the trunk is the span's from the next trunk request, the `wrapped`
+    /// line just before it naming the call, the bytes and that request's
+    /// head; the request before it stood as sent; a second wrap is refused.
+    #[test]
+    fn a_wrap_between_turns_replaces_the_result_at_the_next_trunk_request() {
+        let tree = scratch("wrap-between-turns");
+        let session = wrapping(
+            &tree,
+            vec![
+                vec![bash("call-1", "cat notes.md")],
+                deltas(&["Read it."]),
+                deltas(&["Next."]),
+            ],
+            Vec::new(),
+        );
+        session.ask("look", None).expect("accepted");
+        let log = wait_until(&session, "the turn", settled);
+        let called = seq_of(&log, |event| matches!(event, Event::ToolCalled(_)));
+        assert_eq!(
+            session.wrap(called, called, "port 5182 is taken"),
+            Err(Rejected::Refused(Refusal::NotInSource))
+        );
+        let entry = session
+            .wrap(called, called, "port 5182 is free")
+            .expect("wrapped");
+        assert_eq!(
+            session.wrap(called, called, "and more"),
+            Err(Rejected::Refused(Refusal::WrappedAlready))
+        );
+        let log = session.events_from(0);
+        assert!(
+            wrapped_lines(&log).is_empty(),
+            "nothing is sent until the next request"
+        );
+        assert!(log.iter().any(|logged| matches!(
+            &logged.event,
+            Event::Patched { entry: written, .. }
+                if written.id == entry && written.text == "port 5182 is free"
+        )));
+        session.ask("go on", None).expect("accepted");
+        let log = wait_until(&session, "the second turn", two_settled);
+        let [(seq, wrapped)] = &wrapped_lines(&log)[..] else {
+            unreachable!("one wrapped line: {:?}", wrapped_lines(&log));
+        };
+        let Event::Wrapped {
+            turn,
+            call,
+            from,
+            entry: named,
+            text,
+            bytes_before,
+            bytes_after,
+            prefix_before,
+            prefix_after,
+            tail_tokens,
+        } = wrapped
+        else {
+            unreachable!("a wrapped line");
+        };
+        assert_eq!((*turn, *call, *from), (2, called, called));
+        assert_eq!(
+            (named.as_str(), text.as_str()),
+            (entry.as_str(), "port 5182 is free")
+        );
+        assert_eq!((*bytes_before, *bytes_after), (27, 17));
+        assert_ne!(prefix_before, prefix_after);
+        assert!(*tail_tokens > 0);
+        let (_, head) = trunk_request_after(&log, *seq);
+        assert_eq!(&head, prefix_after, "the next trunk request carries it");
+        let sent = session.shared.transport.sent();
+        assert_eq!(
+            result_in(&sent[1].messages, "call-1").as_deref(),
+            Some("port 5182 is free\nand more\n"),
+            "the request before it stood as sent"
+        );
+        assert_eq!(
+            result_in(&sent[2].messages, "call-1").as_deref(),
+            Some("port 5182 is free")
+        );
+        reads_whole(&session);
+        heads_rebuild(&session.events_from(0));
+        tidy(&[&tree]);
+    }
+
+    /// #1030: a wrap is logged when it is accepted -- its call, its source
+    /// and its entry -- so a session that ends before the next trunk request
+    /// keeps it as accepted and never applied: no `wrapped` line, and the log
+    /// reads.
+    #[test]
+    fn a_wrap_the_session_ends_on_is_logged_accepted_and_never_applied() {
+        let tree = scratch("wrap-never-applied");
+        let session = wrapping(
+            &tree,
+            vec![vec![bash("call-1", "cat notes.md")], deltas(&["Read it."])],
+            Vec::new(),
+        );
+        session.ask("look", None).expect("accepted");
+        let log = wait_until(&session, "the turn", settled);
+        let called = seq_of(&log, |event| matches!(event, Event::ToolCalled(_)));
+        let entry = session
+            .wrap(called, called, "port 5182 is free")
+            .expect("wrapped");
+        session.end(None).expect("ended");
+        let log = session.events_from(0);
+        let accepted: Vec<_> = log
+            .iter()
+            .filter_map(|logged| match &logged.event {
+                Event::WrapAccepted { call, from, entry } => Some((*call, *from, entry.clone())),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(accepted, vec![(called, called, entry)]);
+        assert!(wrapped_lines(&log).is_empty(), "never applied");
+        reads_whole(&session);
+        tidy(&[&tree]);
+    }
+
+    /// #1030: wrapped while the turn's next request is decoding, the result
+    /// is replaced from the request after it: the one in flight is never
+    /// cancelled or sent again, and the `wrapped` line follows the step it
+    /// finished.
+    #[test]
+    fn a_wrap_during_a_turn_spares_the_request_in_flight() {
+        let tree = scratch("wrap-during-a-turn");
+        let gate = Gate::new();
+        let session = wrapping(
+            &tree,
+            vec![
+                vec![bash("call-1", "cat notes.md")],
+                vec![Step::Hold(gate.clone()), bash("call-2", "cat notes.md")],
+                deltas(&["Read it twice."]),
+            ],
+            Vec::new(),
+        );
+        session.ask("look", None).expect("accepted");
+        assert!(
+            gate.wait_for_a_waiter(Duration::from_secs(10)),
+            "the second step never reached the gate"
+        );
+        let log = session.events_from(0);
+        let called = seq_of(&log, |event| matches!(event, Event::ToolCalled(_)));
+        session
+            .wrap(called, called, "port 5182 is free")
+            .expect("wrapped mid-turn");
+        assert!(wrapped_lines(&session.events_from(0)).is_empty());
+        gate.open();
+        let log = wait_until(&session, "the turn", settled);
+        let [
+            (
+                seq,
+                Event::Wrapped {
+                    prefix_after, turn, ..
+                },
+            ),
+        ] = &wrapped_lines(&log)[..]
+        else {
+            unreachable!("one wrapped line: {:?}", wrapped_lines(&log));
+        };
+        assert_eq!(*turn, 1);
+        let (_, head) = trunk_request_after(&log, *seq);
+        assert_eq!(&head, prefix_after);
+        let sent = session.shared.transport.sent();
+        assert_eq!(sent.len(), 3, "no request was sent again");
+        assert_eq!(
+            result_in(&sent[1].messages, "call-1").as_deref(),
+            Some("port 5182 is free\nand more\n"),
+            "the request in flight stood as sent"
+        );
+        assert_eq!(
+            result_in(&sent[2].messages, "call-1").as_deref(),
+            Some("port 5182 is free")
+        );
+        assert_eq!(
+            result_in(&sent[2].messages, "call-2").as_deref(),
+            Some("port 5182 is free\nand more\n"),
+            "only the wrapped result changed"
+        );
+        reads_whole(&session);
+        heads_rebuild(&session.events_from(0));
+        tidy(&[&tree]);
+    }
+
+    /// #1030: the span may come from the answer to the operator's fork cut
+    /// at the result, never from another line.
+    #[test]
+    fn a_wrap_takes_its_span_from_the_operators_fork_at_the_result() {
+        let tree = scratch("wrap-from-a-fork");
+        let session = wrapping(
+            &tree,
+            vec![
+                vec![bash("call-1", "cat notes.md")],
+                deltas(&["Read it."]),
+                deltas(&["Next."]),
+            ],
+            vec![deltas(&["Port 5182 is free; the rest is noise."])],
+        );
+        session.ask("look", None).expect("accepted");
+        let log = wait_until(&session, "the turn", settled);
+        let called = seq_of(&log, |event| matches!(event, Event::ToolCalled(_)));
+        let said = log
+            .iter()
+            .rev()
+            .find(|logged| matches!(logged.event, Event::Answered { .. }))
+            .map(|logged| logged.seq)
+            .expect("the trunk's answer");
+        assert_eq!(
+            session.wrap(called, said, "Read it."),
+            Err(Rejected::Refused(Refusal::NotASource))
+        );
+        session
+            .fork(
+                Some(called),
+                &OperatorAsk::Text("What matters here?".to_owned()),
+            )
+            .expect("forked");
+        operator_forked(&session);
+        let answer = session
+            .events_from(0)
+            .iter()
+            .rev()
+            .find(|logged| matches!(logged.event, Event::Answered { .. }))
+            .map(|logged| logged.seq)
+            .expect("the fork's answer");
+        session
+            .wrap(called, answer, "Port 5182 is free")
+            .expect("wrapped from the fork");
+        session.ask("go on", None).expect("accepted");
+        let log = wait_until(&session, "the second turn", two_settled);
+        let [(_, Event::Wrapped { from, text, .. })] = &wrapped_lines(&log)[..] else {
+            unreachable!("one wrapped line");
+        };
+        assert_eq!((*from, text.as_str()), (answer, "Port 5182 is free"));
+        let sent = session.shared.transport.sent();
+        assert_eq!(
+            result_in(&sent.last().expect("a request").messages, "call-1").as_deref(),
+            Some("Port 5182 is free")
+        );
+        reads_whole(&session);
+        heads_rebuild(&session.events_from(0));
         tidy(&[&tree]);
     }
 

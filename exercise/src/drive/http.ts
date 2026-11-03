@@ -180,7 +180,7 @@ export class HttpTransport implements DriveTransport {
     if (typeof plain['refused'] === 'string') return { ok: false, refused: plain['refused'] };
     // What the drive answered rides back only for the operator's gestures (#1021): a fork's seq, a keep's entry, and an
     // accepted suggestion's fork (#1031).
-    if (command.kind === 'fork' || command.kind === 'keep' || command.kind === 'suggestion') return (await this.#post(plain, 'commands', true)).ack;
+    if (command.kind === 'fork' || command.kind === 'keep' || command.kind === 'suggestion' || command.kind === 'wrap') return (await this.#post(plain, 'commands', true)).ack;
     const gap = extras?.idle_gap;
     const first = await this.#post(gap ? { ...plain, idle_gap: gap } : plain);
     // An ask whose attachment the drive refused is refused for that, gap or none: it does not go again.
@@ -267,6 +267,8 @@ export class HttpTransport implements DriveTransport {
         return { kind: 'keep', from: command.from, span: command.span, ...(command.tag !== undefined ? { tag: command.tag } : {}) };
       case 'suggestion':
         return { kind: 'suggestion', shadow: command.shadow, answer: command.answer };
+      case 'wrap':
+        return { kind: 'wrap', call: command.call, from: command.from, span: command.span };
     }
   }
 
