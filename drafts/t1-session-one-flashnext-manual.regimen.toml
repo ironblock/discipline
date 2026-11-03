@@ -1,0 +1,81 @@
+# T1 session one, manual first (#1021): drafts/t1-session-one-flashnext.regimen.toml with the maintainer's stance of
+# 2026-11-03 -- nothing forks on its own; every interview and every keep is the operator's, at the moment it is
+# needed; automation comes back later as suggestions the operator accepts or dismisses. Its deltas from that draft:
+# - `interview_warrant` names `scoping` alone: an interview only through the operator's scoping toggle on an ask
+#   (rule (b), fired at the gap under the default `gap` cadence, on a marked turn and nothing else);
+# - `interview_timing = "gap"`: with no step warrant firing there is nothing to cut during the turn;
+# - `interview_shadow` names the other four: evaluated on the patterns, logged as `fork.shadowed`, never fired, so
+#   the session scores the automated policy against the operator's own `fork` and `keep`, offline;
+# - self-capture under contract set c3 (#1016): a note in the model's own words, always kept, observed or
+#   self-stated.
+# Everything else is that draft's, and its header's notes hold here too.
+arm = "t1-session-one-flashnext-manual"
+dogma_version = 0
+
+substrate = "ada48-tabbyapi-exl3-qwen38flashnext-2p05"
+substrate_reasoning = "on"
+# The registry's hardware_fingerprint for the entry's equipment.
+substrate_hardware = "19d9fa21007ab8fef48b62d9d8773ac241fa177b2f8b3de670ddd4128aa10c7b"
+
+# The session's window (#1008, #1010): the floor's, so the drive meditates where the floor's runs did.
+context_window = 163840
+
+isolation = "sandbox"
+network = "host"
+sandbox_reads = "all"
+# The reference is read-only: no `sandbox_writable` entry (docs/trajectories/t1.md, 2026-10-12).
+# The run's browser socket, from drafts/t1-browser.sh start (browser.env line 1), filled by the operator per run:
+# a literal path, never a pattern, at most 103 bytes resolved.
+# sandbox_unix_sockets = ["/private/tmp/chrome-devtools-mcp-<session id>-<uid>.sock"]
+
+approval = "none"
+# Names only: the values are set by whoever starts `serve`. The chrome-devtools CLI: CD4A_INTERNAL_DAEMON_SESSION_ID
+# selects the run's own daemon; the other two keep the CLI from calling home.
+env_passthrough = ["npm_config_cache", "pnpm_config_store_dir", "CD4A_INTERNAL_DAEMON_SESSION_ID", "CHROME_DEVTOOLS_MCP_NO_UPDATE_CHECKS", "CHROME_DEVTOOLS_MCP_NO_USAGE_STATISTICS"]
+approval_policy = "approvals are off: every command runs without a gate decision or a prompt; Seatbelt confines writes to the worktree and the session's TMPDIR"
+
+tool_surface = "standard"
+
+# Phases (#787, #788): the starter library, starting in orient.
+phase_library = "starter"
+starting_phase = "orient"
+self_capture = "on"
+self_capture_contract = "c3"
+
+# Manual first (#1021): the operator's scoping toggle alone fires an interview; the other four warrants shadow.
+interview_warrant = ["scoping"]
+interview_timing = "gap"
+interview_shadow = ["read", "evidence", "trouble", "open"]
+mechanical_capture = "on"
+capture_modality = "fields"
+fork_asks = "v4"
+warrant_gate = "regex"
+refutation_interview = "off"
+fork_delivery = "meditation"
+
+# Meditation: declared at a phase move, or automatic before the window fills (the default). The total refill
+# (`meditation_tail_tokens` unset), working memory rendered (`render`), warmed. No audit, so the reconcile gate is
+# `carry`: an operator change no audit addressed is refilled and recorded `unaddressed`.
+meditation_carry = "render"
+meditation_audit = "off"
+meditation_warm = "on"
+reconcile_gate = "carry"
+meditation_tool_outputs = "reference"
+# The render budget (#565), as the 2026-10-16 run had it: 40k, tiered.
+render_budget_tokens = 40000
+render_over_budget = "tier"
+archive_recall = "literal"
+
+# Write-time dedupe (#872): TF-IDF against live notes of the same kind, merged through alias and provenance.
+note_dedupe = "on"
+
+[reasoning]
+effort = "xhigh"
+budget_tokens = "none"
+
+# The Flash-Next line's sampler card (the registry's sampler_card, preset qwen38_thinking), every key declared.
+[sampler]
+temperature = 1.0
+top_k = 20
+top_p = 0.95
+min_p = 0.0

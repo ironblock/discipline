@@ -268,6 +268,20 @@
 //! log that declares 28 or less and carries it is refused. For a reader of
 //! earlier logs, the migration is nothing: no session declared one.
 //!
+//! v32 (#1021) carries the operator's gestures and the shadow warrants,
+//! under manual first. The commands `keep` (a span of a logged line, kept
+//! as the operator's entry) and `fork` (the operator's fork at a step, a
+//! tool result or the trunk's end), and their refusals `not-a-source`,
+//! `not-in-source`, `no-working-memory`, `not-on-the-trunk` and
+//! `not-a-pinned-ask`. A fork's `why` may be `operator`: on `interview`,
+//! following the latest turn, at an answered trunk request -- that turn's or
+//! an earlier one's -- the latest meditation did not replace, cut, when it
+//! names one, at a `tool_call` at or after it; it answers to no gap.
+//! And `fork.shadowed`, a fork a shadow warrant would have cut, never sent:
+//! its turn, the trunk request at it, the warrant, the trigger and the ask.
+//! Each is refused in a log that declares 31 or less. For a reader of
+//! earlier logs, the migration is nothing: no session wrote them.
+//!
 //! v31 (#1016) names who vouches for a self-capture note. Under contract
 //! set c3 a `patch`'s entry may carry `authority`: `observed` when the
 //! note's evidence quote was found verbatim in what the model observed that
@@ -364,12 +378,12 @@ use super::record::vocabulary;
 struct LogParser;
 
 /// The version this module writes, as `session.start` states it.
-pub const VERSION: i64 = 31;
+pub const VERSION: i64 = 32;
 
 /// Every version this module reads.
 pub const READS: &[i64] = &[
     0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25,
-    26, 27, 28, 29, 30, 31,
+    26, 27, 28, 29, 30, 31, 32,
 ];
 
 /// How recent an input event must be, at the moment a turn settles, for the
@@ -465,6 +479,8 @@ vocabulary! {
         /// A fork the turn's own self-capture already recorded, screened out
         /// of its gap (v7, #611).
         ForkSkipped => "fork.skipped",
+        /// A fork a shadow warrant would have cut, never fired (v32, #1021).
+        ForkShadowed => "fork.shadowed",
         /// A phase's ground rules, as a note on an ask (v8, #787).
         PhaseNoted => "phase.noted",
         /// A trunk request's output cap cut below what the window alone
@@ -724,6 +740,10 @@ vocabulary! {
         MovePhase => "move-phase",
         /// A scenario runner graded an attempt (v18, #942).
         Grade => "grade",
+        /// The operator kept a span of a logged line (v32, #1021).
+        Keep => "keep",
+        /// The operator forked off the trunk (v32, #1021).
+        Fork => "fork",
     }
 }
 
@@ -793,6 +813,17 @@ vocabulary! {
         /// An ask after the session's `max_api_requests` was reached (v12,
         /// #555): nothing more is sent.
         ApiCap => "api-cap",
+        /// A keep naming no line with text to keep from (v32, #1021).
+        NotASource => "not-a-source",
+        /// A keep whose span is not in the line it names (v32, #1021).
+        NotInSource => "not-in-source",
+        /// A keep in a session that keeps no working memory (v32, #1021).
+        NoWorkingMemory => "no-working-memory",
+        /// An operator's fork at a line the trunk no longer holds (v32,
+        /// #1021): a meditation replaced it.
+        NotOnTheTrunk => "not-on-the-trunk",
+        /// An operator's fork naming no pinned fork ask (v32, #1021).
+        NotAPinnedAsk => "not-a-pinned-ask",
     }
 }
 
@@ -837,6 +868,10 @@ vocabulary! {
         /// A failed command, or the operator's message (v9, #878): the
         /// `REFUTE_Q` ask, what it shows was wrong of what the model believed.
         Refutation => "refutation",
+        /// The operator, at the moment it was needed (v32, #1021): a pinned
+        /// ask or the operator's own words, at a step or tool result. Never
+        /// a regimen's interview warrant.
+        Operator => "operator",
     }
 }
 
@@ -2211,6 +2246,22 @@ pub enum Event {
         /// with `reason`.
         cut: Option<u64>,
     },
+    /// A fork a shadow warrant would have cut (v32, #1021): evaluated as
+    /// the warrant is, logged here, never sent -- so a manual session can
+    /// score the automated policy against the operator's own forks, offline.
+    ForkShadowed {
+        /// The turn it would have been cut in, or followed.
+        of_turn: u32,
+        /// The `seq` of the trunk `request` whose step or answer warranted it.
+        at: u64,
+        /// The warrant that would have fired it.
+        why: Warrant,
+        /// What would have fired it, as a real fork's `trigger` says.
+        trigger: String,
+        /// The ask it would have used: its pinned template's name, or the
+        /// router's ask.
+        ask: String,
+    },
     Reminded {
         /// The turn whose request carried it.
         turn: u32,
@@ -2426,8 +2477,9 @@ pub struct PatchEntry {
     pub category: Option<String>,
     /// Who vouches for it (v31, #1016): `observed`, a self-capture note
     /// whose evidence quote was found in what the model observed that turn,
-    /// or `self-stated`, one whose was not or that gave none; written by
-    /// contract set c3 alone.
+    /// or `self-stated`, one whose was not or that gave none, written by
+    /// contract set c3 alone; or `operator` (v32, #1021), the operator's
+    /// keep -- a new entry, or their endorsement of one already held.
     pub authority: Option<String>,
 }
 
@@ -3433,6 +3485,50 @@ impl Forks {
         }
     }
 
+    /// The operator's fork (v32, #1021): on `interview`, following the
+    /// latest turn `of_turn`, at an answered trunk `request` -- of that turn
+    /// or an earlier one -- the latest meditation did not replace, cut, when
+    /// it names one, at a `tool_call` at or after it. It answers to no gap:
+    /// it is cut while the session awaits, whenever the operator asks.
+    fn operator(
+        &mut self,
+        seq: u64,
+        (lane, of_turn, at): (Lane, u32, u64),
+        cut: Option<u64>,
+    ) -> Result<(), String> {
+        if lane != Lane::Interview {
+            return Err(format!(
+                "an operator's fork on the `{}` lane: it is asked on `interview`",
+                lane.tag()
+            ));
+        }
+        if !self.answered.contains(&at) {
+            return Err(format!(
+                "an operator's fork at seq {at}, which is not an answered trunk `request`"
+            ));
+        }
+        if self
+            .last_meditation
+            .is_some_and(|meditation| meditation > at)
+        {
+            return Err(format!(
+                "an operator's fork at seq {at}, before the latest meditation: it replaced the \
+                 trunk the fork would be cut from"
+            ));
+        }
+        if let Some(cut) = cut
+            && (!self.tool_calls.contains_key(&cut) || cut < at)
+        {
+            return Err(format!(
+                "an operator's fork cut at {cut}, which is not a `tool_call` at or after \
+                 request {at}"
+            ));
+        }
+        self.cut.insert(seq);
+        self.of_turn.insert(seq, of_turn);
+        Ok(())
+    }
+
     /// A gap's fork after the gap's others: one alone, or each named by its
     /// `trigger`, each after the one before settled -- but a meditation's
     /// audit's chunk, which runs beside its audit's other chunks.
@@ -3948,6 +4044,7 @@ fn check(lines: &[Line]) -> Result<(), LogError> {
                 lane,
                 of_turn,
                 at: forked_at,
+                why,
                 trigger,
                 after_meditation,
                 cut,
@@ -3968,15 +4065,18 @@ fn check(lines: &[Line]) -> Result<(), LogError> {
                     }
                     forks.arrival = Some(line.seq);
                 }
-                forks
-                    .fork(
+                let checked = if *why == Warrant::Operator {
+                    forks.operator(line.seq, (*lane, *of_turn, *forked_at), *cut)
+                } else {
+                    forks.fork(
                         line.seq,
                         (*lane, *of_turn, *forked_at, trigger.is_some()),
                         (*after_meditation, *cut, *chunk),
                         turns,
                         &trunk,
                     )
-                    .map_err(|why| at(index, why))?;
+                };
+                checked.map_err(|why| at(index, why))?;
             }
             Event::ForkSettled { fork, outcome, .. } => forks
                 .settle(*fork, *outcome)
@@ -4649,6 +4749,13 @@ fn from_object(object: &BTreeMap<String, Value>) -> Result<Line, String> {
                 cut,
             }
         }
+        Kind::ForkShadowed => Event::ForkShadowed {
+            of_turn: fields.turn("of_turn")?,
+            at: fields.count("at")?,
+            why: fields.tag("why", Warrant::from_tag)?,
+            trigger: fields.string("trigger")?,
+            ask: fields.string("ask")?,
+        },
         Kind::Reminded => Event::Reminded {
             turn: fields.turn("turn")?,
             text: fields.string("text")?,
@@ -5869,8 +5976,13 @@ pub const PATCH_ENTRY: &[Field] = &[
     may_v31("authority", Holds::Text),
 ];
 
-/// What a `patch` entry's `authority` may say (v31, #1016).
-pub const AUTHORITIES: &[&str] = &["observed", "self-stated"];
+/// What a `patch` entry's `authority` may say: a self-capture note's (v31,
+/// #1016), or the operator's keep (v32, #1021).
+pub const AUTHORITIES: &[&str] = &["observed", "self-stated", OPERATOR_AUTHORITY];
+
+/// A `patch` entry's `authority` when the operator kept it (v32, #1021): a
+/// new entry, or their endorsement of one the model or a fork wrote.
+pub const OPERATOR_AUTHORITY: &str = "operator";
 
 /// An optional key that arrived in v5.
 const fn may_v5(key: &'static str, holds: Holds) -> Field {
@@ -5918,6 +6030,16 @@ const fn may_v9(key: &'static str, holds: Holds) -> Field {
         holds,
         required: false,
         since: 9,
+    }
+}
+
+/// A key that arrived in v32 with its object, which always writes it.
+const fn must_v32(key: &'static str, holds: Holds) -> Field {
+    Field {
+        key,
+        holds,
+        required: true,
+        since: 32,
     }
 }
 
@@ -6378,6 +6500,7 @@ pub fn introduced(kind: Kind) -> i64 {
         Kind::RequestRetried => 13,
         Kind::Grade => 18,
         Kind::MeditationSkipped => 21,
+        Kind::ForkShadowed => 32,
         _ => 0,
     }
 }
@@ -6424,6 +6547,24 @@ pub fn tag_introduced(tags: Tags, tag: &str) -> i64 {
     }
     if tags == Tags::Command && Command::from_tag(tag) == Some(Command::Grade) {
         return 18;
+    }
+    // The operator's gestures (#1021).
+    let gesture = (tags == Tags::Command
+        && matches!(Command::from_tag(tag), Some(Command::Keep | Command::Fork)))
+        || (tags == Tags::Warrant && Warrant::from_tag(tag) == Some(Warrant::Operator))
+        || (tags == Tags::Refusal
+            && Refusal::from_tag(tag).is_some_and(|refusal| {
+                matches!(
+                    refusal,
+                    Refusal::NotASource
+                        | Refusal::NotInSource
+                        | Refusal::NoWorkingMemory
+                        | Refusal::NotOnTheTrunk
+                        | Refusal::NotAPinnedAsk
+                )
+            }));
+    if gesture {
+        return 32;
     }
     if tags == Tags::Refusal
         && matches!(
@@ -6829,6 +6970,16 @@ pub fn schema(kind: Kind) -> &'static [Field] {
                 may_v7("field", Text),
                 may_v8("reason", Text),
                 may_v8("cut", Count),
+            ];
+            F
+        }
+        Kind::ForkShadowed => {
+            const F: &[Field] = &[
+                must_v32("of_turn", Count),
+                must_v32("at", Count),
+                must_v32("why", Tag(Tags::Warrant)),
+                must_v32("trigger", Text),
+                must_v32("ask", Text),
             ];
             F
         }
@@ -8169,6 +8320,20 @@ fn to_value(line: &Line) -> Value {
                 put("cut", count(*cut));
             }
             Kind::ForkSkipped
+        }
+        Event::ForkShadowed {
+            of_turn,
+            at,
+            why,
+            trigger,
+            ask,
+        } => {
+            put("of_turn", count(u64::from(*of_turn)));
+            put("at", count(*at));
+            put("why", text(why.tag()));
+            put("trigger", text(trigger));
+            put("ask", text(ask));
+            Kind::ForkShadowed
         }
         Event::Reminded { turn, text: note } => {
             put("turn", count(u64::from(*turn)));
@@ -9899,16 +10064,16 @@ mod tests {
         assert!(refused.why.contains("v8"), "{refused}");
     }
 
-    /// #583, #878, #904, #555, #931, #936, #910, #942, #926, #932, #948, #971, #1016: this module
-    /// writes v31.
+    /// #583, #878, #904, #555, #931, #936, #910, #942, #926, #932, #948, #971, #1016, #1021: this
+    /// module writes v32.
     #[test]
-    fn this_module_writes_v31_and_reads_every_version_before_it() {
-        assert_eq!(super::VERSION, 31);
+    fn this_module_writes_v32_and_reads_every_version_before_it() {
+        assert_eq!(super::VERSION, 32);
         assert_eq!(
             super::READS,
             &[
                 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22,
-                23, 24, 25, 26, 27, 28, 29, 30, 31
+                23, 24, 25, 26, 27, 28, 29, 30, 31, 32
             ]
         );
     }
@@ -10325,6 +10490,13 @@ mod tests {
                 field: None,
                 reason: Some(SKIPPED_BACKLOG.to_owned()),
                 cut: Some(request),
+            },
+            Event::ForkShadowed {
+                of_turn: 5,
+                at: request,
+                why: Warrant::Trouble,
+                trigger: format!("trouble:{request}"),
+                ask: "gotchas".to_owned(),
             },
             Event::ForkSettled {
                 trailer: None,
@@ -11982,7 +12154,7 @@ mod tests {
             tags(Kind::ALL.iter().map(|it| it.tag()).collect()),
             "session.start ask settlement request refused delta stop.asked response \
              cancelled request.failed turn.settled idle.gap progress tool_call fork \
-             fork.settled patch meditation delivered recalled flag meditation.held patch.refused pruned phase.ruled phase.proposed phase.answered phase.started tangent.open tangent.close capture reminded background.ended notice timeout.near fork.skipped phase.noted trunk.clamped trunk.waited warrant.gated request.retried grade meditation.skipped"
+             fork.settled patch meditation delivered recalled flag meditation.held patch.refused pruned phase.ruled phase.proposed phase.answered phase.started tangent.open tangent.close capture reminded background.ended notice timeout.near fork.skipped fork.shadowed phase.noted trunk.clamped trunk.waited warrant.gated request.retried grade meditation.skipped"
         );
         assert_eq!(
             tags(FailReason::ALL.iter().map(|it| it.tag()).collect()),
@@ -11991,7 +12163,7 @@ mod tests {
         assert_eq!(
             tags(Refusal::ALL.iter().map(|it| it.tag()).collect()),
             "in-flight ended nothing-in-flight meditation-not-built nothing-to-meditate no-phase-graph not-a-phase \
-             already-in-phase no-phase-edge stale tangent-open no-tangent bad-tangent not-the-scope nothing-running no-proposal unknown-entry not-live empty meditation-held nothing-held restates not-unilateral already-asked proposal-pending no-vision api-cap"
+             already-in-phase no-phase-edge stale tangent-open no-tangent bad-tangent not-the-scope nothing-running no-proposal unknown-entry not-live empty meditation-held nothing-held restates not-unilateral already-asked proposal-pending no-vision api-cap not-a-source not-in-source no-working-memory not-on-the-trunk not-a-pinned-ask"
         );
         assert_eq!(
             tags(SettleReason::ALL.iter().map(|it| it.tag()).collect()),
@@ -12019,7 +12191,7 @@ mod tests {
         );
         assert_eq!(
             tags(Warrant::ALL.iter().map(|it| it.tag()).collect()),
-            "read scoping meditation evidence trouble open refutation"
+            "read scoping meditation evidence trouble open refutation operator"
         );
         assert_eq!(
             tags(ForkOutcome::ALL.iter().map(|it| it.tag()).collect()),

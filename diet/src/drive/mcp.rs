@@ -20,6 +20,7 @@
 //! | `cancel`, `end` | `POST /commands` |
 //! | `memory` | `GET /memory` (#756) |
 //! | `edit`, `flag` | `POST /commands` `edit-entry`, `flag-entry` |
+//! | `fork`, `keep` | `POST /commands` `fork`, `keep` (#1021) |
 //! | `declare_meditation`, `refill_anyway`, `ratify_phase` | `POST /commands` |
 //! | `open_tangent`, `close_tangent` | `POST /commands` |
 //! | `events` | `GET /events`, the log lines after a seq |
@@ -454,6 +455,37 @@ fn later_tools() -> Vec<Value> {
             ),
         ),
         tool(
+            "fork",
+            "Fork off the trunk as the operator (the `fork` command, #1021): at the step, tool \
+             result or trunk answer the line `at` names, or at the trunk's end; asking a pinned \
+             fork ask by its template's name (`ask`, e.g. GOTCHAS) or your own words (`text`), \
+             one of the two. Its answer is logged and shown; it writes nothing to working \
+             memory. Answers the fork's seq.",
+            object(
+                json!({
+                    "at": integer("The seq of the line to fork at; the trunk's end when omitted."),
+                    "ask": string("A pinned fork ask, by its template's name."),
+                    "text": string("Your own words to ask.")
+                }),
+                &[],
+            ),
+        ),
+        tool(
+            "keep",
+            "Keep an exact span of a logged line as the operator's entry (the `keep` command, \
+             #1021): an ask, an answer (the trunk's or a fork's, as written), a step's text or a \
+             tool result as shown, named by its seq; the span must appear in it character for \
+             character. Answers the entry's id.",
+            object(
+                json!({
+                    "from": integer("The seq of the line to keep from."),
+                    "span": string("The exact text to keep."),
+                    "tag": string("An optional tag for the entry.")
+                }),
+                &["from", "span"],
+            ),
+        ),
+        tool(
             "declare_meditation",
             "Declare a meditation (the `declare-meditation` command), optionally moving to a \
              phase.",
@@ -723,6 +755,32 @@ fn pending_model_proposal(serve: &Serve) -> Result<Option<String>, String> {
         .flatten())
 }
 
+/// The body of the operator's `fork` or `keep` (#1021), from the tool's
+/// arguments.
+fn gesture(name: &str, args: &Args<'_>) -> Result<Value, String> {
+    let mut body = json!({ "kind": name });
+    if name == "keep" {
+        body["from"] = json!(
+            args.optional_count("from")?
+                .ok_or_else(|| "`from` is required".to_owned())?
+        );
+        body["span"] = json!(args.string("span")?);
+        if let Some(tag) = args.optional_string("tag")? {
+            body["tag"] = json!(tag);
+        }
+        return Ok(body);
+    }
+    if let Some(at) = args.optional_count("at")? {
+        body["at"] = json!(at);
+    }
+    for key in ["ask", "text"] {
+        if let Some(value) = args.optional_string(key)? {
+            body[key] = json!(value);
+        }
+    }
+    Ok(body)
+}
+
 /// Tool `name` called with `arguments` against `serve`: its result as JSON
 /// text, or why it could not be called.
 ///
@@ -782,6 +840,7 @@ pub fn call(serve: &Serve, name: &str, arguments: &Map<String, Value>) -> Result
             "id": args.string("id")?,
             "note": args.string("note")?
         }))?,
+        "fork" | "keep" => serve.command(&gesture(name, &args)?)?,
         "declare_meditation" => {
             let mut body = json!({"kind": "declare-meditation"});
             if let Some(phase) = args.optional_string("phase")? {
@@ -1445,6 +1504,8 @@ mod tests {
                 "memory",
                 "edit",
                 "flag",
+                "fork",
+                "keep",
                 "declare_meditation",
                 "refill_anyway",
                 "propose_phase",

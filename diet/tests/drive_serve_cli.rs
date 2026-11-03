@@ -1162,7 +1162,7 @@ fn a_drive_server_confirms_a_declared_engines_model_settings_and_draft() {
         ]),
         "{start_line}"
     );
-    assert_eq!(start_line["version"], 31, "{start_line}");
+    assert_eq!(start_line["version"], 32, "{start_line}");
     // And its server speaks TabbyAPI's dialect, by name (#496).
     assert_eq!(start_line["serving"]["dialect"], "tabbyapi", "{start_line}");
 }
@@ -5128,7 +5128,7 @@ fn an_mcp_client_drives_a_served_session_to_a_held_meditation_and_refills_anyway
     let listed = mcp.request("tools/list", serde_json::json!({}));
     assert_eq!(
         listed["tools"].as_array().map(Vec::len),
-        Some(20),
+        Some(22),
         "{listed}"
     );
 

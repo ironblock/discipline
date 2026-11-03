@@ -1003,6 +1003,7 @@ impl<'a> Walk<'a> {
             Line::BackgroundEnded { .. } => log::Kind::BackgroundEnded,
             Line::TimeoutNear { .. } => log::Kind::TimeoutNear,
             Line::ForkSkipped { .. } => log::Kind::ForkSkipped,
+            Line::ForkShadowed { .. } => log::Kind::ForkShadowed,
             Line::Flag { .. } => log::Kind::Flag,
             Line::MeditationHeld { .. } => log::Kind::MeditationHeld,
             Line::MeditationSkipped { .. } => log::Kind::MeditationSkipped,
@@ -1143,6 +1144,7 @@ impl<'a> Walk<'a> {
             | Line::BackgroundEnded { .. }
             | Line::TimeoutNear { .. }
             | Line::ForkSkipped { .. }
+            | Line::ForkShadowed { .. }
             | Line::Capture { .. }
             // The operator's ruling on a phase proposal (#124): a meditation it
             // declares has its own row.

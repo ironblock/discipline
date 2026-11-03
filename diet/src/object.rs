@@ -797,8 +797,11 @@ impl WorkingObject {
             });
         }
         // Not the same text, but perhaps the same note: merged as an
-        // identical one is, into a live entry of its kind only.
-        if let Some((held, cosine)) = self.similar_to(content)
+        // identical one is, into a live entry of its kind only. Never the
+        // operator's keep (#1021): their span is theirs, and folding it into
+        // another entry would lose it.
+        if provenance.lane != OPERATOR
+            && let Some((held, cosine)) = self.similar_to(content)
             && self.canonical(id).is_none()
         {
             self.record_alias(id, &held);
@@ -1606,6 +1609,35 @@ mod tests {
             object.apply(&add("e3", RESTATED, second)),
             Ok(Applied::Unchanged(id("e1")))
         );
+    }
+
+    /// #1021: the operator's keep is never folded into another entry, and
+    /// a later model note like it folds into theirs: the operator's survives
+    /// either way, content and authority.
+    #[test]
+    fn an_operator_kept_entry_is_never_folded_away() {
+        let mut object = merging("0.40");
+        let model = from(3, "interview", Some("f1"));
+        let operator = from(4, super::OPERATOR, None);
+        object
+            .apply(&add("e1", STALE, model.clone()))
+            .expect("a model's note");
+        // Kept like the model's note, the operator's span is its own entry.
+        assert_eq!(
+            object.apply(&add("operator-9", RESTATED, operator)),
+            Ok(Applied::Created(id("operator-9")))
+        );
+        // A later model note like the operator's folds into theirs.
+        let later = from(5, "interview", Some("f2"));
+        let again = "gotcha: Stale pnpm lockfile in packages/core -- run pnpm install first!";
+        assert!(matches!(
+            object.apply(&add("e3", again, later)),
+            Ok(Applied::Deduped(into)) if into == id("operator-9") || into == id("e1")
+        ));
+        let kept = object.entry(&id("operator-9")).expect("the operator's");
+        assert!(kept.state.is_live());
+        assert_eq!(kept.content, RESTATED);
+        assert!(object.by_operator(&id("operator-9")));
     }
 
     #[test]

@@ -124,6 +124,10 @@ vocabulary! {
         MovePhase => "move-phase",
         /// Log a scenario runner's grade of the latest turn (#942).
         Grade => "grade",
+        /// Keep an exact span of a logged line as an operator entry (#1021).
+        Keep => "keep",
+        /// Fork off the trunk at a step or tool result (#1021).
+        Fork => "fork",
     }
 }
 
@@ -196,6 +200,19 @@ vocabulary! {
         /// An ask after the session's `max_api_requests` was reached (#555):
         /// nothing more is sent.
         ApiCap => "api-cap",
+        /// A keep naming no line that holds text to keep from (#1021): not
+        /// an ask, an answer, a step's text or a tool result.
+        NotASource => "not-a-source",
+        /// A keep whose span is not, character for character, in the line
+        /// it names (#1021).
+        NotInSource => "not-in-source",
+        /// A keep in a session that keeps no working memory (#1021).
+        NoWorkingMemory => "no-working-memory",
+        /// An operator's fork at a line the trunk no longer holds (#1021):
+        /// a meditation replaced it.
+        NotOnTheTrunk => "not-on-the-trunk",
+        /// An operator's fork naming no pinned fork ask (#1021).
+        NotAPinnedAsk => "not-a-pinned-ask",
     }
 }
 
@@ -1030,6 +1047,20 @@ pub enum Event {
         /// The field that call recorded under.
         field: String,
     },
+    /// A fork a shadow warrant would have cut (#1021): evaluated, logged,
+    /// never sent.
+    Shadowed {
+        /// The turn it would have been cut in, or followed.
+        of_turn: u32,
+        /// The trunk request whose step or answer warranted it.
+        at: u64,
+        /// The warrant that would have fired it.
+        why: log::Warrant,
+        /// What would have fired it.
+        trigger: String,
+        /// The ask it would have used.
+        ask: String,
+    },
     /// The step warrants' classifier gate on one step: a probe's decision,
     /// the step's fallback to the patterns, or its decision dropped as stale.
     WarrantGated {
@@ -1223,6 +1254,64 @@ impl ToolLine {
 /// Absent or empty, no fork ever fires.
 pub const INTERVIEW_WARRANT: &str = "interview_warrant";
 
+/// The regimen key naming the warrants evaluated and never fired (#1021):
+/// each would-be fork is a `fork.shadowed` line, at no decode cost, so a
+/// manual session can score the automated policy against the operator's.
+pub const INTERVIEW_SHADOW: &str = "interview_shadow";
+
+/// The warrants a shadow may name (#1021): the gap's and the step's.
+const SHADOWABLE: &[log::Warrant] = &[
+    log::Warrant::Scoping,
+    log::Warrant::Read,
+    log::Warrant::Evidence,
+    log::Warrant::Trouble,
+    log::Warrant::Open,
+];
+
+/// The warrants `regimen` shadows under [`INTERVIEW_SHADOW`] (#1021), in
+/// the order it lists them; empty when it lists none.
+///
+/// # Errors
+///
+/// The key is not a list, an item is not one of the shadowable warrants,
+/// or it also fires under [`INTERVIEW_WARRANT`].
+pub fn interview_shadow(regimen: &Regimen) -> Result<Vec<log::Warrant>, String> {
+    let Some(value) = regimen.get(INTERVIEW_SHADOW) else {
+        return Ok(Vec::new());
+    };
+    let regimen::Value::Array(items) = value else {
+        return Err(format!("`{INTERVIEW_SHADOW}` is not a list"));
+    };
+    let firing = interview_warrant(regimen)?;
+    items
+        .iter()
+        .map(|item| {
+            let regimen::Value::String(word) = item else {
+                return Err(format!("`{INTERVIEW_SHADOW}` holds a non-string"));
+            };
+            let rule = log::Warrant::from_tag(word)
+                .filter(|rule| SHADOWABLE.contains(rule))
+                .ok_or_else(|| {
+                    format!(
+                        "`{INTERVIEW_SHADOW}` names `{word}`, which no shadow evaluates: {}",
+                        SHADOWABLE
+                            .iter()
+                            .map(|rule| rule.tag())
+                            .collect::<Vec<_>>()
+                            .join(", ")
+                    )
+                })?;
+            if firing.contains(&rule) {
+                return Err(format!(
+                    "`{word}` is in both `{INTERVIEW_WARRANT}` and `{INTERVIEW_SHADOW}`: a \
+                     warrant fires or shadows, not both"
+                ));
+            }
+            Ok(rule)
+        })
+        .collect()
+}
+
 /// The regimen key for the fork delivery lever.
 pub const FORK_DELIVERY: &str = "fork_delivery";
 
@@ -1263,14 +1352,17 @@ pub fn interview_warrant(regimen: &Regimen) -> Result<Vec<log::Warrant>, String>
         .iter()
         .map(|item| match item {
             regimen::Value::String(word) => log::Warrant::from_tag(word)
-                // A meditation's audit is the meditation's, never an interview's (#504).
-                .filter(|rule| *rule != log::Warrant::Meditation)
+                // A meditation's audit is the meditation's, never an interview's
+                // (#504); the operator's fork is the operator's (#1021).
+                .filter(|rule| !matches!(rule, log::Warrant::Meditation | log::Warrant::Operator))
                 .ok_or_else(|| {
                     format!(
                         "`{INTERVIEW_WARRANT}` names `{word}`, which is not a rule: {}",
                         log::Warrant::ALL
                             .iter()
-                            .filter(|rule| **rule != log::Warrant::Meditation)
+                            .filter(|rule| {
+                                !matches!(rule, log::Warrant::Meditation | log::Warrant::Operator)
+                            })
                             .map(|rule| rule.tag())
                             .collect::<Vec<_>>()
                             .join(", ")
@@ -1441,6 +1533,11 @@ pub struct Interview {
     /// The warrants that look at what a step produced, and their numbers
     /// (#783).
     pub step: crate::drive::warrants::StepWarrants,
+    /// The warrants evaluated and never fired (#1021), as
+    /// [`interview_shadow`] read them: each would-be fork logged.
+    pub shadow: Vec<log::Warrant>,
+    /// Of [`Self::shadow`], the step warrants, with the regimen's numbers.
+    pub shadow_step: crate::drive::warrants::StepWarrants,
     /// Whether the operator may move the phase alone (#788), the
     /// regimen's `operator_unilateral`: on unless it says otherwise.
     pub operator_unilateral: bool,
@@ -2053,7 +2150,13 @@ fn firings(interview: &Interview, log: &[Logged], turn: u32, answer: &str) -> Ve
     } else {
         Vec::new()
     };
-    firings_over(interview, log, (turn, answer), &calls, true)
+    firings_over(
+        (interview, &interview.rules),
+        log,
+        (turn, answer),
+        &calls,
+        true,
+    )
 }
 
 /// The forks a step of `turn` warrants during the turn (#782): the per-call
@@ -2075,19 +2178,45 @@ fn step_firings(
         .into_iter()
         .filter(|call| ids.contains(&call.id))
         .collect();
-    firings_over(interview, log, (turn, said), &calls, false)
+    firings_over(
+        (interview, &interview.rules),
+        log,
+        (turn, said),
+        &calls,
+        false,
+    )
+}
+
+/// The forks the gap's shadow warrants would have cut after `turn`
+/// (#1021): `scoping` on a marked turn, `read` over the turn's routed calls,
+/// under the session's cadence; logged, never fired.
+fn shadow_firings(interview: &Interview, log: &[Logged], turn: u32, answer: &str) -> Vec<Firing> {
+    if interview.shadow.is_empty() {
+        return Vec::new();
+    }
+    let calls = if interview.shadow.contains(&log::Warrant::Read) {
+        routed(log, turn)
+    } else {
+        Vec::new()
+    };
+    firings_over(
+        (interview, &interview.shadow),
+        log,
+        (turn, answer),
+        &calls,
+        true,
+    )
 }
 
 /// [`firings`] over `calls`, the judgment ask on a marked turn only when
-/// `judge`.
+/// `judge`, under `rules`: the session's, or its shadow's (#1021).
 fn firings_over(
-    interview: &Interview,
+    (interview, rules): (&Interview, &[log::Warrant]),
     log: &[Logged],
     (turn, answer): (u32, &str),
     calls: &[Routed],
     judge: bool,
 ) -> Vec<Firing> {
-    let rules = &interview.rules;
     let intent = router::stated_intent(answer);
     // The working record, for an ask in a set that shows it (#595).
     let record = crate::meditation::render::entries(&interview.object);
@@ -2406,7 +2535,7 @@ pub struct Admitted {
 }
 
 /// Why a command did not do what it asked.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Rejected {
     /// The session refused it, and logged the refusal (and any gap it
     /// carried, before it).
@@ -2417,6 +2546,9 @@ pub enum Rejected {
     /// The gap it carried cannot be logged, so neither it nor the command
     /// is: the command was not carried out.
     BadGap(GapError),
+    /// A keep of a span the operator already kept (#1021): refused
+    /// [`Refusal::Restates`], and logged, naming the entry that holds it.
+    KeptAlready(String),
 }
 
 /// An event and its place in the log.
@@ -2618,6 +2750,9 @@ struct State {
     deferred: Option<Deferred>,
     /// What the step warrants carry from step to step (#783).
     step_counters: crate::drive::warrants::Counters,
+    /// The shadow step warrants' own counts (#1021), so evaluating them
+    /// moves no real warrant's cooldown.
+    shadow_counters: crate::drive::warrants::Counters,
     /// The forks the step warrants fired this turn that run in its gap
     /// (#783): every step's under the gap timing, the final answer's under
     /// either.
@@ -2806,6 +2941,7 @@ impl State {
             pool_queue: std::collections::VecDeque::new(),
             deferred: None,
             step_counters: crate::drive::warrants::Counters::default(),
+            shadow_counters: crate::drive::warrants::Counters::default(),
             gap_firings: Vec::new(),
             // As far past the cooldown as `trouble`'s counter starts (#783).
             refute_steps: (99, 99),
@@ -3115,7 +3251,9 @@ impl State {
                 | CommandKind::StartPhase
                 | CommandKind::ProposePhase
                 | CommandKind::MovePhase
-                | CommandKind::Grade => {
+                | CommandKind::Grade
+                | CommandKind::Keep
+                | CommandKind::Fork => {
                     unreachable!("a tangent, background or phase ruling carries no idle gap")
                 }
             };
@@ -3936,7 +4074,7 @@ impl<S: Streaming + 'static> Session<S> {
                 &mut state,
                 (turn, seq),
                 firing,
-                (Some(shape.messages.clone()), Timing::Arrival),
+                (Some(shape.messages.clone()), Timing::Arrival, None),
             )
         });
         // Pushed here, under the lock that admits the ask, and never on the
@@ -4641,6 +4779,147 @@ impl<S: Streaming + 'static> Session<S> {
         drop(state);
         self.shared.changed.notify_all();
         Ok(())
+    }
+
+    /// Keep `span` of the logged line `from` as the operator's entry (#1021):
+    /// an ask, an answer -- the trunk's or a fork's, as it was written,
+    /// trailers and all -- a step's text, or a tool result as the model was
+    /// shown it. The span must be in that line character for character; it
+    /// becomes a working-memory entry of the operator's, no field kind, its
+    /// `tag` on the `patch` line when given, and the render carries it.
+    /// Returns the entry's id.
+    ///
+    /// # Errors
+    ///
+    /// [`Refusal::Ended`]; [`Refusal::InFlight`] while a turn or a capture is
+    /// in flight; [`Refusal::NoWorkingMemory`]; [`Refusal::Empty`] for no
+    /// span; [`Refusal::NotASource`] for a line with no text to keep from;
+    /// [`Refusal::NotInSource`] for a span the line does not hold; and
+    /// [`Refusal::Restates`] for a span working memory already holds.
+    pub fn keep(&self, from: u64, span: &str, tag: Option<&str>) -> Result<String, Rejected> {
+        let mut state = self.shared.lock();
+        if let Err((because, held)) = keep_refusal(&state, from, span) {
+            let refused = state.refuse(CommandKind::Keep, because);
+            drop(state);
+            self.shared.changed.notify_all();
+            return Err(held.map_or(Rejected::Refused(refused), Rejected::KeptAlready));
+        }
+        state.admit_within_the_gap();
+        let patch = kept_patch(&state, span);
+        let Some(interview) = state.interview.as_mut() else {
+            unreachable!("working memory was checked above");
+        };
+        // A new entry, or -- the span restating a live entry the model or a
+        // fork wrote -- the operator's endorsement of it: its provenance
+        // recorded on that entry, which reads as the operator's from here.
+        let Ok(crate::object::Applied::Created(entry) | crate::object::Applied::Deduped(entry)) =
+            interview.object.apply(&patch)
+        else {
+            unreachable!("a keep the refusal admitted applies");
+        };
+        let mut line = patched(None, &patch, &interview.object);
+        if let Event::Patched { entry: written, .. } = &mut line {
+            entry.as_str().clone_into(&mut written.id);
+            written.category = tag.map(str::to_owned);
+            written.authority = Some(log::OPERATOR_AUTHORITY.to_owned());
+        }
+        state.push(line);
+        drop(state);
+        self.shared.changed.notify_all();
+        Ok(entry.as_str().to_owned())
+    }
+
+    /// Fork off the trunk as the operator (#1021): at the step or tool
+    /// result the logged line `at` names -- a step's text, a tool result,
+    /// or a trunk answer -- or, with none, at the trunk's end; asking the
+    /// pinned fork ask `ask` names, or the operator's own words. Logged
+    /// `warrant: operator` with the question as sent; its answer is logged
+    /// and shown, and nothing is written to working memory by it. The
+    /// session waits for it, in capture. Returns the fork's seq.
+    ///
+    /// # Errors
+    ///
+    /// [`Refusal::Ended`]; [`Refusal::InFlight`] while a turn or a capture is
+    /// in flight; [`Refusal::Empty`] for no words; [`Refusal::NotAPinnedAsk`]
+    /// for a name no holeless fork template has; [`Refusal::NotASource`] for
+    /// a line that is no step, tool result or trunk answer, or no trunk yet;
+    /// and [`Refusal::NotOnTheTrunk`] for one a meditation replaced.
+    pub fn fork(&self, at: Option<u64>, ask: &OperatorAsk) -> Result<u64, Rejected> {
+        let mut state = self.shared.lock();
+        let because = match state.settlement {
+            Settlement::Ended => Err(Refusal::Ended),
+            Settlement::Turn | Settlement::Capture => Err(Refusal::InFlight),
+            Settlement::Awaiting => operator_firing(ask)
+                .and_then(|firing| forked_at(&state, at).map(|place| (firing, place))),
+        };
+        let (firing, (_, request, cut, prefix)) = match because {
+            Ok(fired) => fired,
+            Err(because) => {
+                let refused = state.refuse(CommandKind::Fork, because);
+                drop(state);
+                self.shared.changed.notify_all();
+                return Err(Rejected::Refused(refused));
+            }
+        };
+        state.admit_within_the_gap();
+        state.move_to(Settlement::Capture);
+        // It follows the latest turn, whichever turn's step it is cut at.
+        let turn = state.turns;
+        let fired = fire_on(
+            &self.shared,
+            &mut state,
+            (turn, request),
+            firing,
+            (Some(prefix), Timing::Gap, cut),
+        );
+        let fork = state
+            .log
+            .iter()
+            .rev()
+            .find(|logged| matches!(logged.event, Event::Forked { .. }))
+            .map_or(0, |logged| logged.seq);
+        let Some(fired) = fired else {
+            // Refused unsent for the pool: settled already, the session back
+            // to awaiting.
+            operator_fork_over(&mut state);
+            drop(state);
+            self.shared.changed.notify_all();
+            return Ok(fork);
+        };
+        drop(state);
+        self.shared.changed.notify_all();
+        let shared = Arc::clone(&self.shared);
+        let spawned = std::thread::Builder::new()
+            .name("diet-operator-fork".to_owned())
+            .spawn(move || {
+                let run = stream_fork(&shared, &fired);
+                let mut state = shared.lock();
+                state.flight = None;
+                state.forking = None;
+                state.aside_sizing(|state| settle_fork(&shared, state, &fired, run));
+                operator_fork_over(&mut state);
+                drop(state);
+                shared.changed.notify_all();
+            });
+        if spawned.is_err() {
+            let mut state = self.shared.lock();
+            state.flight = None;
+            state.forking = None;
+            state.push(Event::ForkSettled {
+                trailer: None,
+                fork,
+                outcome: log::ForkOutcome::Failed,
+                prompt_tokens: None,
+                wall_ms: None,
+                refused: None,
+                pool: None,
+                not_run: None,
+            });
+            operator_fork_over(&mut state);
+            drop(state);
+            self.shared.changed.notify_all();
+        }
+        Ok(fork)
     }
 
     /// Log a scenario runner's grade of the latest turn (#942): a `grade`
@@ -5856,6 +6135,19 @@ pub fn line_of(logged: &Logged) -> log::Line {
             reason: None,
             cut: None,
         },
+        Event::Shadowed {
+            of_turn,
+            at,
+            why,
+            trigger,
+            ask,
+        } => log::Event::ForkShadowed {
+            of_turn: *of_turn,
+            at: *at,
+            why: *why,
+            trigger: trigger.clone(),
+            ask: ask.clone(),
+        },
         Event::WarrantGated {
             request,
             outcome,
@@ -6230,6 +6522,8 @@ fn command_of(command: CommandKind) -> log::Command {
         CommandKind::ProposePhase => log::Command::ProposePhase,
         CommandKind::MovePhase => log::Command::MovePhase,
         CommandKind::Grade => log::Command::Grade,
+        CommandKind::Keep => log::Command::Keep,
+        CommandKind::Fork => log::Command::Fork,
     }
 }
 
@@ -6261,6 +6555,11 @@ fn refusal_of(refusal: Refusal) -> log::Refusal {
         Refusal::NotUnilateral => log::Refusal::NotUnilateral,
         Refusal::AlreadyAsked => log::Refusal::AlreadyAsked,
         Refusal::ProposalPending => log::Refusal::ProposalPending,
+        Refusal::NotASource => log::Refusal::NotASource,
+        Refusal::NotInSource => log::Refusal::NotInSource,
+        Refusal::NoWorkingMemory => log::Refusal::NoWorkingMemory,
+        Refusal::NotOnTheTrunk => log::Refusal::NotOnTheTrunk,
+        Refusal::NotAPinnedAsk => log::Refusal::NotAPinnedAsk,
     }
 }
 
@@ -8996,6 +9295,219 @@ fn restates(state: &State, id: &str, content: &str) -> Option<Refusal> {
         })
         .is_err()
         .then_some(Refusal::Restates)
+}
+
+/// What the operator's fork asks (#1021): a pinned fork ask, by its
+/// template's name, or the operator's own words.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum OperatorAsk {
+    /// A holeless fork template, by name (`GOTCHAS`, `DECISIONS`, ...).
+    Pinned(String),
+    /// The operator's own words, sent as written.
+    Text(String),
+}
+
+/// The firing the operator's `ask` makes (#1021), or why it is refused.
+fn operator_firing(ask: &OperatorAsk) -> Result<Firing, Refusal> {
+    use crate::dogma::{Site, Template};
+    let (pinned, question) = match ask {
+        OperatorAsk::Text(text) if text.trim().is_empty() => return Err(Refusal::Empty),
+        OperatorAsk::Text(text) => (None, text.clone()),
+        OperatorAsk::Pinned(name) => {
+            let template = Template::from_name(name)
+                .filter(|template| template.site() == Site::Fork && template.holes().is_empty())
+                .ok_or(Refusal::NotAPinnedAsk)?;
+            let question = template.fill(&[]).map_err(|_| Refusal::NotAPinnedAsk)?;
+            (Some(template), question)
+        }
+    };
+    Ok(Firing {
+        why: log::Warrant::Operator,
+        ask: AskKind::Generic,
+        pinned,
+        question,
+        trigger: "operator".to_owned(),
+        offered: None,
+    })
+}
+
+/// Where the operator's fork at the logged line `at` is cut (#1021): the
+/// turn, the trunk `request` it is at, the `tool_call` it is cut at when it
+/// names one, and the trunk up to and with that point. With no line, the
+/// latest answered trunk request and the whole trunk.
+fn forked_at(
+    state: &State,
+    at: Option<u64>,
+) -> Result<(u32, u64, Option<u64>, Vec<Message>), Refusal> {
+    let trunk_turn = |request: u64| {
+        state.log.iter().find_map(|logged| match &logged.event {
+            Event::Requested {
+                turn,
+                lane: Lane::Trunk,
+                ..
+            } if logged.seq == request => Some(*turn),
+            _ => None,
+        })
+    };
+    let Some(at) = at else {
+        let latest = state
+            .log
+            .iter()
+            .rev()
+            .find_map(|logged| match &logged.event {
+                Event::Answered { request, .. } => {
+                    trunk_turn(*request).map(|turn| (turn, *request))
+                }
+                _ => None,
+            });
+        let (turn, request) = latest.ok_or(Refusal::NotASource)?;
+        return Ok((turn, request, None, state.trunk.clone()));
+    };
+    let logged = state
+        .log
+        .iter()
+        .find(|logged| logged.seq == at)
+        .ok_or(Refusal::NotASource)?;
+    let (request, cut, place) = match &logged.event {
+        Event::ToolCalled(line) => {
+            let id = line.id.clone();
+            (
+                line.request,
+                Some(at),
+                state.trunk.iter().position(|message| {
+                    message.role == Role::Tool && message.tool_call_id.as_deref() == Some(&id)
+                }),
+            )
+        }
+        Event::Called { request, .. } => {
+            let ids: Vec<&str> = state
+                .log
+                .iter()
+                .filter_map(|logged| match &logged.event {
+                    Event::ToolCalled(line) if line.request == *request => Some(line.id.as_str()),
+                    _ => None,
+                })
+                .collect();
+            (
+                *request,
+                None,
+                state.trunk.iter().position(|message| {
+                    message
+                        .tool_calls
+                        .iter()
+                        .any(|call| ids.contains(&call.id.as_str()))
+                }),
+            )
+        }
+        Event::Answered { request, text, .. } => (
+            *request,
+            None,
+            state.trunk.iter().rposition(|message| {
+                message.role == Role::Assistant
+                    && message.tool_calls.is_empty()
+                    && message.content == *text
+            }),
+        ),
+        _ => return Err(Refusal::NotASource),
+    };
+    let turn = trunk_turn(request).ok_or(Refusal::NotASource)?;
+    let place = place.ok_or(Refusal::NotOnTheTrunk)?;
+    Ok((turn, request, cut, state.trunk[..=place].to_vec()))
+}
+
+/// The operator's fork has settled (#1021): back to awaiting, or on to
+/// ended when an `end` came meanwhile. Never the turn's end: it counts no
+/// cadence and makes no meditation due.
+fn operator_fork_over(state: &mut State) {
+    state.move_to(Settlement::Awaiting);
+    if state.ending {
+        state.ending = false;
+        state.move_to(Settlement::Ended);
+    }
+}
+
+/// Whether the fork at `fork` is the operator's (#1021): its answer is
+/// logged and shown, and folded into nothing.
+fn operator_fork(log: &[Logged], fork: u64) -> bool {
+    log.iter().any(|logged| {
+        logged.seq == fork
+            && matches!(
+                logged.event,
+                Event::Forked {
+                    why: log::Warrant::Operator,
+                    ..
+                }
+            )
+    })
+}
+
+/// The text of the logged line `from` a keep may keep from (#1021): an
+/// ask, an answer or a step's text as written, or a tool result as shown.
+fn keep_source(state: &State, from: u64) -> Option<&str> {
+    let logged = state.log.iter().find(|logged| logged.seq == from)?;
+    match &logged.event {
+        Event::Asked { text, .. } | Event::Answered { text, .. } | Event::Called { text, .. } => {
+            Some(text.as_str())
+        }
+        Event::ToolCalled(line) => line.shown.as_deref(),
+        _ => None,
+    }
+}
+
+/// The operator's entry a keep of `span` adds (#1021): coined from the
+/// log's position, the operator's lane, no field kind.
+fn kept_patch(state: &State, span: &str) -> Patch {
+    let Ok(id) = crate::object::EntryId::new(&format!("operator-{}", state.log.len())) else {
+        unreachable!("an id this session coins");
+    };
+    Patch::Add {
+        id,
+        content: span.to_owned(),
+        provenance: crate::object::Provenance {
+            turn: state.turns,
+            lane: crate::object::OPERATOR.to_owned(),
+            fork: None,
+            tangent: state
+                .tangent
+                .as_ref()
+                .map(|(tangent, _)| tangent.id().to_owned()),
+            index: 0,
+        },
+    }
+}
+
+/// Why a keep of `span` from the line `from` is refused, if it is (#1021),
+/// with the entry that already holds it when the operator kept it before.
+fn keep_refusal(state: &State, from: u64, span: &str) -> Result<(), (Refusal, Option<String>)> {
+    let refused = |because: Refusal| Err((because, None));
+    match state.settlement {
+        Settlement::Ended => return refused(Refusal::Ended),
+        Settlement::Turn | Settlement::Capture => return refused(Refusal::InFlight),
+        Settlement::Awaiting => {}
+    }
+    let Some(interview) = state.interview.as_ref() else {
+        return refused(Refusal::NoWorkingMemory);
+    };
+    if span.trim().is_empty() {
+        return refused(Refusal::Empty);
+    }
+    let Some(source) = keep_source(state, from) else {
+        return refused(Refusal::NotASource);
+    };
+    if !source.contains(span) {
+        return refused(Refusal::NotInSource);
+    }
+    // A span a live entry already holds is the operator's endorsement of it
+    // -- unless the operator kept it already: then the keep changes nothing.
+    let mut trial = interview.object.clone();
+    match trial.apply(&kept_patch(state, span)) {
+        Ok(crate::object::Applied::Created(_)) => Ok(()),
+        Ok(crate::object::Applied::Deduped(held)) if !interview.object.by_operator(&held) => Ok(()),
+        Ok(crate::object::Applied::Deduped(held) | crate::object::Applied::Unchanged(held)) => {
+            Err((Refusal::Restates, Some(held.as_str().to_owned())))
+        }
+        _ => refused(Refusal::Restates),
+    }
 }
 
 /// Why an operator edit or flag of `id` with `text` is refused, if it is.
@@ -11829,9 +12341,18 @@ fn gap<S>(shared: &Shared<S>, state: &mut State, turn: u32, at: u64) -> Option<F
         })
         .unwrap_or_default()
         .into();
+    // What a shadow warrant would have cut here (#1021), read before the
+    // gap logs anything.
+    let shadows = state.interview.as_ref().map_or_else(Vec::new, |interview| {
+        shadow_firings(interview, &state.log, turn, answer)
+    });
     // Each fork screened out (#611), before the gap fires any.
     for skip in std::mem::take(&mut skipped) {
         state.push(skip);
+    }
+    // Each fork a shadow warrant would have cut, logged and never fired.
+    for firing in &shadows {
+        shadowed(state, (turn, at), firing);
     }
     // Then what the turn's steps warranted by their output (#783).
     let content = std::mem::take(&mut state.gap_firings);
@@ -11879,7 +12400,7 @@ fn fire<S>(
     at: u64,
     firing: Firing,
 ) -> Option<Fired> {
-    fire_on(shared, state, (turn, at), firing, (None, Timing::Gap))
+    fire_on(shared, state, (turn, at), firing, (None, Timing::Gap, None))
 }
 
 /// [`fire`], from `prefix` when given -- the trunk as an arrival fork sees
@@ -11891,7 +12412,7 @@ fn fire_on<S>(
     state: &mut State,
     (turn, at): (u32, u64),
     firing: Firing,
-    (prefix, timing): (Option<Vec<Message>>, Timing),
+    (prefix, timing, cut): (Option<Vec<Message>>, Timing, Option<u64>),
 ) -> Option<Fired> {
     let Firing {
         why,
@@ -11959,7 +12480,7 @@ fn fire_on<S>(
         role,
         seat,
         displaces,
-        cut: None,
+        cut,
         timing,
         view_overridden: None,
         reserved: None,
@@ -12334,11 +12855,11 @@ fn content_firings(
     verdict: &Verdict,
 ) -> Vec<Firing> {
     use crate::drive::warrants::{Step, StepCall, ident};
-    let Some(warrants) = state
+    let Some((warrants, shadow)) = state
         .interview
         .as_ref()
-        .map(|interview| interview.step)
-        .filter(crate::drive::warrants::StepWarrants::any)
+        .map(|interview| (interview.step, interview.shadow_step))
+        .filter(|(warrants, shadow)| warrants.any() || shadow.any())
     else {
         return Vec::new();
     };
@@ -12380,10 +12901,54 @@ fn content_firings(
         ),
         calls,
     };
+    if shadow.any() {
+        shadow_step(state, (turn, request), &step);
+    }
+    if !warrants.any() {
+        return Vec::new();
+    }
     let mut counters = std::mem::take(&mut state.step_counters);
     let fired = verdict_gates(&warrants, &mut counters, &step, verdict);
     state.step_counters = counters;
     pinned_firings(fired, request)
+}
+
+/// The shadow step warrants on one step (#1021): evaluated on the
+/// patterns, never a classifier, with counts of their own; each fork they
+/// would have cut logged, none fired.
+fn shadow_step(
+    state: &mut State,
+    (turn, request): (u32, u64),
+    step: &crate::drive::warrants::Step,
+) {
+    let Some(warrants) = state
+        .interview
+        .as_ref()
+        .map(|interview| interview.shadow_step)
+    else {
+        return;
+    };
+    let mut counters = std::mem::take(&mut state.shadow_counters);
+    let fired = crate::drive::warrants::gates(&warrants, &mut counters, step);
+    state.shadow_counters = counters;
+    for firing in pinned_firings(fired, request) {
+        shadowed(state, (turn, request), &firing);
+    }
+}
+
+/// `firing`, a fork a shadow warrant would have cut, logged (#1021).
+fn shadowed(state: &mut State, (turn, at): (u32, u64), firing: &Firing) {
+    let ask = firing.pinned.map_or_else(
+        || firing.ask.tag().to_owned(),
+        |template| template.name().to_ascii_lowercase(),
+    );
+    state.push(Event::Shadowed {
+        of_turn: turn,
+        at,
+        why: firing.why,
+        trigger: firing.trigger.clone(),
+        ask,
+    });
 }
 
 /// The gates one step fires under `verdict`: the patterns'; a classifier's
@@ -13574,6 +14139,10 @@ fn settle_fork<S>(
                 log::ForkOutcome::Cancelled
             } else if cut {
                 log::ForkOutcome::Truncated
+            } else if operator_fork(&state.log, fork) {
+                // The operator's fork writes nothing (#1021): its answer is
+                // logged and shown, and the operator keeps what they want.
+                log::ForkOutcome::Value
             } else if tools {
                 let (outcome, lines) = captured(state, &calls, (turn, request), fork);
                 patches = lines;
@@ -17881,6 +18450,13 @@ pub(in crate::drive) mod tests {
                     check_sha256: "c".repeat(64),
                 },
             },
+            Event::Shadowed {
+                of_turn: 1,
+                at: 3,
+                why: log::Warrant::Trouble,
+                trigger: "trouble:3".to_owned(),
+                ask: "gotchas".to_owned(),
+            },
         ];
         let mut kinds = std::collections::BTreeSet::new();
         for event in &events {
@@ -17936,9 +18512,10 @@ pub(in crate::drive) mod tests {
                 Event::Retried { .. } => 48,
                 Event::Graded { .. } => 49,
                 Event::MeditationSkipped { .. } => 50,
+                Event::Shadowed { .. } => 51,
             });
         }
-        assert_eq!(kinds.len(), 51, "a variant has no sample");
+        assert_eq!(kinds.len(), 52, "a variant has no sample");
         events
             .into_iter()
             .enumerate()
@@ -18508,6 +19085,13 @@ pub(in crate::drive) mod tests {
                 timed_out: Some(true),
                 check_sha256: "c".repeat(64),
             },
+            log::Event::ForkShadowed {
+                of_turn: 1,
+                at: 3,
+                why: log::Warrant::Trouble,
+                trigger: "trouble:3".to_owned(),
+                ask: "gotchas".to_owned(),
+            },
         ]
     }
 
@@ -18974,12 +19558,12 @@ pub(in crate::drive) mod tests {
                     .collect::<Vec<_>>()
             ),
             "ask cancel declare-meditation end open-tangent close-tangent background ratify-phase \
-             edit-entry flag-entry refill-anyway start-phase propose-phase move-phase grade"
+             edit-entry flag-entry refill-anyway start-phase propose-phase move-phase grade keep fork"
         );
         assert_eq!(
             tags(&Refusal::ALL.iter().map(|it| it.tag()).collect::<Vec<_>>()),
             "in-flight ended nothing-in-flight nothing-to-meditate no-phase-graph not-a-phase \
-             already-in-phase no-phase-edge stale tangent-open no-tangent bad-tangent not-the-scope nothing-running no-proposal unknown-entry not-live empty meditation-held nothing-held restates not-unilateral already-asked proposal-pending no-vision api-cap"
+             already-in-phase no-phase-edge stale tangent-open no-tangent bad-tangent not-the-scope nothing-running no-proposal unknown-entry not-live empty meditation-held nothing-held restates not-unilateral already-asked proposal-pending no-vision api-cap not-a-source not-in-source no-working-memory not-on-the-trunk not-a-pinned-ask"
         );
         assert_eq!(
             tags(
@@ -21521,6 +22105,8 @@ pub(in crate::drive) mod tests {
             pool_chunk: POOL_CHUNK_DEFAULT,
             timing: Timing::Gap,
             step: crate::drive::warrants::StepWarrants::DEFAULTS,
+            shadow: Vec::new(),
+            shadow_step: crate::drive::warrants::StepWarrants::DEFAULTS,
             operator_unilateral: true,
             served_batch: None,
             refutation: None,
@@ -26934,6 +27520,600 @@ pub(in crate::drive) mod tests {
             session.open_tangent("t/2"),
             Err(Rejected::Refused(Refusal::TangentOpen))
         ));
+    }
+
+    /// The seq of the first logged line `pick` matches.
+    fn seq_of(log: &[Logged], pick: impl Fn(&Event) -> bool) -> u64 {
+        log.iter()
+            .find(|logged| pick(&logged.event))
+            .map(|logged| logged.seq)
+            .expect("the line")
+    }
+
+    /// #1021: the operator keeps an exact span of a logged answer: it is
+    /// an entry of the operator's, no field kind, the span as written, its
+    /// tag on the `patch` line, and the render carries it.
+    #[test]
+    fn the_operator_keeps_an_exact_span_of_an_answer() {
+        const SAID: &str = "The schema has two tables, users and orders.\nNEXT: migrations";
+        let session = Session::open_with(
+            Canned::new([deltas(&[SAID])]),
+            template(),
+            None,
+            None,
+            None,
+            Some(interviewing(&[])),
+        );
+        session.ask("what is the schema?", None).expect("accepted");
+        let log = wait_until(&session, "the turn", settled);
+        let answered = seq_of(&log, |event| matches!(event, Event::Answered { .. }));
+        let entry = session
+            .keep(answered, "two tables, users and orders", Some("schema"))
+            .expect("kept");
+        let log = session.events_from(0);
+        let Some((lane, patch)) = log.iter().rev().find_map(|logged| match &logged.event {
+            Event::Patched { lane, entry, .. } => Some((lane.clone(), entry.clone())),
+            _ => None,
+        }) else {
+            panic!("a patch line: {log:#?}");
+        };
+        assert_eq!(lane.as_deref(), Some(crate::object::OPERATOR));
+        assert_eq!(patch.id, entry);
+        assert_eq!(patch.text, "two tables, users and orders");
+        assert_eq!(patch.category.as_deref(), Some("schema"));
+        let state = session.shared.lock();
+        let interview = state.interview.as_ref().expect("memory");
+        let rendered = marked_render(&state, interview, None).text;
+        assert!(
+            rendered.contains("two tables, users and orders"),
+            "{rendered}"
+        );
+        drop(state);
+        reads_whole(&session);
+    }
+
+    /// #1021: a keep is refused, and logged, when its span is not in the
+    /// line character for character, when the line holds no text to keep,
+    /// when the span is empty or working memory holds it already, and in a
+    /// session with no working memory.
+    #[test]
+    fn a_keep_is_refused_off_its_source_or_twice() {
+        let session = Session::open_with(
+            Canned::new([deltas(&["The schema has two tables."])]),
+            template(),
+            None,
+            None,
+            None,
+            Some(interviewing(&[])),
+        );
+        session.ask("what is the schema?", None).expect("accepted");
+        let log = wait_until(&session, "the turn", settled);
+        let answered = seq_of(&log, |event| matches!(event, Event::Answered { .. }));
+        let settled_at = seq_of(&log, |event| matches!(event, Event::TurnSettled { .. }));
+        let refused = |from: u64, span: &str| match session.keep(from, span, None) {
+            Err(Rejected::Refused(because)) => Some(because),
+            _ => None,
+        };
+        assert_eq!(refused(answered, "two Tables"), Some(Refusal::NotInSource));
+        assert_eq!(refused(settled_at, "two tables"), Some(Refusal::NotASource));
+        assert_eq!(refused(answered, "  "), Some(Refusal::Empty));
+        let kept = session.keep(answered, "two tables", None).expect("kept");
+        assert_eq!(
+            session.keep(answered, "two tables", None),
+            Err(Rejected::KeptAlready(kept)),
+            "the second keep names the first"
+        );
+        assert!(session.events_from(0).iter().any(|logged| matches!(
+            &logged.event,
+            Event::Refused {
+                command: CommandKind::Keep,
+                ..
+            }
+        )));
+        let bare = Session::open(Canned::new([deltas(&["hello"])]), template());
+        bare.ask("hi", None).expect("accepted");
+        let log = wait_until(&bare, "the turn", settled);
+        let answered = seq_of(&log, |event| matches!(event, Event::Answered { .. }));
+        assert!(matches!(
+            bare.keep(answered, "hello", None),
+            Err(Rejected::Refused(Refusal::NoWorkingMemory))
+        ));
+        reads_whole(&session);
+    }
+
+    /// #1021: a keep of a model note's exact text is the operator's
+    /// endorsement of it: no new entry and no refusal; the note reads as the
+    /// operator's from here, and its `patch` line names it, `authority:
+    /// operator`.
+    #[test]
+    fn a_keep_of_a_model_notes_text_endorses_that_note() {
+        let session = Session::open_with(
+            Canned::new([deltas(&["The schema has two tables."])]),
+            template(),
+            None,
+            None,
+            None,
+            Some(interviewing(&[])),
+        );
+        session.ask("what is the schema?", None).expect("accepted");
+        let log = wait_until(&session, "the turn", settled);
+        let answered = seq_of(&log, |event| matches!(event, Event::Answered { .. }));
+        let note = crate::object::EntryId::new("r3/call-1/note").expect("an id");
+        {
+            let mut state = session.shared.lock();
+            let object = &mut state.interview.as_mut().expect("memory").object;
+            object
+                .apply(&Patch::Add {
+                    id: note.clone(),
+                    content: "two tables".to_owned(),
+                    provenance: crate::object::Provenance {
+                        turn: 1,
+                        lane: "self-capture".to_owned(),
+                        fork: None,
+                        tangent: None,
+                        index: 0,
+                    },
+                })
+                .expect("the model's note");
+        }
+        let entries = |session: &Session<Canned>| {
+            session
+                .shared
+                .lock()
+                .interview
+                .as_ref()
+                .expect("memory")
+                .object
+                .entries()
+                .count()
+        };
+        let before = entries(&session);
+        assert_eq!(
+            session.keep(answered, "two tables", Some("schema")),
+            Ok(note.as_str().to_owned()),
+            "the keep names the note it endorsed"
+        );
+        assert_eq!(entries(&session), before, "no new entry");
+        assert!(
+            session
+                .shared
+                .lock()
+                .interview
+                .as_ref()
+                .expect("memory")
+                .object
+                .by_operator(&note)
+        );
+        let log = session.events_from(0);
+        let Some(entry) = log.iter().rev().find_map(|logged| match &logged.event {
+            Event::Patched { entry, .. } => Some(entry.clone()),
+            _ => None,
+        }) else {
+            panic!("a patch line");
+        };
+        assert_eq!(entry.id, note.as_str());
+        assert_eq!(entry.authority.as_deref(), Some(log::OPERATOR_AUTHORITY));
+        assert_eq!(entry.category.as_deref(), Some("schema"));
+        reads_whole(&session);
+    }
+
+    /// #1021: a tool result keeps as the model was shown it.
+    #[test]
+    fn a_keep_takes_a_span_of_a_tool_result() {
+        let tree = scratch("keep-tool-result");
+        std::fs::write(tree.join("notes.md"), "port 5182 is free\n").expect("a note");
+        let session = Session::open_with(
+            Canned::new(vec![
+                vec![bash("call-1", "cat notes.md")],
+                deltas(&["Read it."]),
+            ]),
+            looping(),
+            None,
+            Some(tools(
+                Confinement::Unconfined,
+                &tree,
+                &["cat"],
+                None,
+                Decider::Decline,
+            )),
+            None,
+            Some(interviewing(&[])),
+        );
+        session.ask("look", None).expect("accepted");
+        let log = wait_until(&session, "the turn", settled);
+        let called = seq_of(&log, |event| matches!(event, Event::ToolCalled(_)));
+        session
+            .keep(called, "port 5182 is free", None)
+            .expect("kept");
+        tidy(&[&tree]);
+    }
+
+    /// The operator's fork's line, its request's messages, and whether any
+    /// `patch` line was written.
+    fn operator_forked(session: &Session<Canned>) -> (Event, Vec<Message>, bool) {
+        let log = wait_until(session, "the operator's fork to settle", |log| {
+            !fork_outcomes(log).is_empty()
+                && log.last().is_some_and(|logged| {
+                    matches!(
+                        logged.event,
+                        Event::Settled {
+                            to: Settlement::Awaiting,
+                            ..
+                        }
+                    )
+                })
+        });
+        let forked = log
+            .iter()
+            .find_map(|logged| match &logged.event {
+                event @ Event::Forked { .. } => Some(event.clone()),
+                _ => None,
+            })
+            .expect("a fork line");
+        let sent = session.shared.forks.get().expect("a fork transport").sent();
+        let wrote = log
+            .iter()
+            .any(|logged| matches!(logged.event, Event::Patched { .. }));
+        (
+            forked,
+            sent.last().expect("the fork's request").messages.clone(),
+            wrote,
+        )
+    }
+
+    /// #1021: the operator forks at the trunk's end in their own words: the
+    /// fork is logged `warrant: operator` with the question as sent, born of
+    /// the whole trunk; its answer is logged, and even an answer in the
+    /// fields' grammar writes nothing to working memory; the session is
+    /// back to awaiting, no meditation made due.
+    #[test]
+    fn the_operators_fork_asks_their_words_and_writes_nothing() {
+        let session = Session::open_with(
+            Canned::new([deltas(&["The schema has two tables."])]),
+            template(),
+            None,
+            None,
+            None,
+            Some(interviewing(&[])),
+        )
+        .forking_through(Canned::new([deltas(&[
+            "DECISION: two tables\nPLAN: NONE\n",
+        ])]));
+        session.ask("what is the schema?", None).expect("accepted");
+        wait_until(&session, "the turn", settled);
+        let trunk = session.trunk();
+        let fork = session
+            .fork(None, &OperatorAsk::Text("Why two tables?".to_owned()))
+            .expect("forked");
+        let (forked, messages, wrote) = operator_forked(&session);
+        let Event::Forked {
+            why, question, cut, ..
+        } = forked
+        else {
+            unreachable!("a fork line");
+        };
+        assert_eq!(why, log::Warrant::Operator);
+        assert_eq!(question, "Why two tables?");
+        assert_eq!(cut, None);
+        assert_eq!(messages[..trunk.len()], trunk[..]);
+        assert_eq!(
+            messages.last().map(|message| message.content.as_str()),
+            Some("Why two tables?")
+        );
+        assert!(!wrote, "the operator's fork writes nothing");
+        assert!(fork > 0);
+        assert!(
+            session.events_from(0).iter().any(|logged| matches!(
+                &logged.event,
+                Event::Answered { text, .. } if text.starts_with("DECISION: two tables")
+            )),
+            "its answer is logged"
+        );
+        assert_eq!(session.shared.lock().settlement, Settlement::Awaiting);
+        reads_whole(&session);
+    }
+
+    /// #1021: forked at a tool result, the fork is born of the trunk up to
+    /// that result and cut at its `tool_call`; a pinned ask is its
+    /// template's text; a name no holeless fork template has is refused.
+    #[test]
+    fn the_operators_fork_at_a_tool_result_asks_a_pinned_ask() {
+        let tree = scratch("operator-fork-at-a-result");
+        std::fs::write(tree.join("notes.md"), "port 5182 is free\n").expect("a note");
+        let session = Session::open_with(
+            Canned::new(vec![
+                vec![bash("call-1", "cat notes.md")],
+                deltas(&["Read it; next, the server."]),
+            ]),
+            looping(),
+            None,
+            Some(tools(
+                Confinement::Unconfined,
+                &tree,
+                &["cat"],
+                None,
+                Decider::Decline,
+            )),
+            None,
+            Some(interviewing(&[])),
+        )
+        .forking_through(Canned::new([deltas(&["NONE"])]));
+        session.ask("look", None).expect("accepted");
+        let log = wait_until(&session, "the turn", settled);
+        let called = seq_of(&log, |event| matches!(event, Event::ToolCalled(_)));
+        assert!(matches!(
+            session.fork(Some(called), &OperatorAsk::Pinned("NO_SUCH_ASK".to_owned())),
+            Err(Rejected::Refused(Refusal::NotAPinnedAsk))
+        ));
+        let trunk = session.trunk();
+        let result = trunk
+            .iter()
+            .position(|message| message.tool_call_id.as_deref() == Some("call-1"))
+            .expect("the tool result on the trunk");
+        session
+            .fork(Some(called), &OperatorAsk::Pinned("GOTCHAS".to_owned()))
+            .expect("forked");
+        let (forked, messages, wrote) = operator_forked(&session);
+        let Event::Forked { question, cut, .. } = forked else {
+            unreachable!("a fork line");
+        };
+        let gotchas = crate::dogma::Template::Gotchas.fill(&[]).expect("holeless");
+        assert_eq!(question, gotchas);
+        assert_eq!(cut, Some(called));
+        assert_eq!(
+            messages.len(),
+            result + 2,
+            "the trunk to the result, then the ask"
+        );
+        assert_eq!(messages[..=result], trunk[..=result]);
+        assert!(!wrote);
+        reads_whole(&session);
+        tidy(&[&tree]);
+    }
+
+    /// A session with no firing warrant and `shadow` evaluated, its trunk
+    /// playing `acts` in `tree`, any fork it cut failing the test.
+    fn shadowing(tree: &Path, acts: Vec<Vec<Step>>, shadow: &[log::Warrant]) -> Session<Canned> {
+        std::fs::write(tree.join("notes.md"), "a note\n").expect("a note");
+        let mut interview = interviewing(&[]);
+        interview.shadow = shadow.to_vec();
+        interview.shadow_step = crate::drive::warrants::StepWarrants {
+            evidence: shadow.contains(&log::Warrant::Evidence),
+            trouble: shadow.contains(&log::Warrant::Trouble),
+            open: shadow.contains(&log::Warrant::Open),
+            ..crate::drive::warrants::StepWarrants::DEFAULTS
+        };
+        Session::open_with(
+            Canned::new(acts),
+            looping(),
+            None,
+            Some(tools(
+                Confinement::Unconfined,
+                tree,
+                &["cat"],
+                None,
+                Decider::Decline,
+            )),
+            None,
+            Some(interview),
+        )
+        .forking_through(Canned::new(Vec::<Vec<Step>>::new()))
+    }
+
+    /// Each `fork.shadowed` line's warrant and trigger.
+    fn shadows(log: &[Logged]) -> Vec<(log::Warrant, String)> {
+        log.iter()
+            .filter_map(|logged| match &logged.event {
+                Event::Shadowed { why, trigger, .. } => Some((*why, trigger.clone())),
+                _ => None,
+            })
+            .collect()
+    }
+
+    /// #1021: a shadow `trouble` warrant on a step whose command failed, and
+    /// a shadow `read` at the gap after a turn that read a file: each fork
+    /// they would have cut is a `fork.shadowed` line, and none is fired.
+    #[test]
+    fn shadow_warrants_log_their_forks_and_fire_none() {
+        let tree = scratch("shadow-warrants");
+        let session = shadowing(
+            &tree,
+            vec![
+                vec![bash("call-1", "cat missing.md")],
+                vec![bash("call-2", "cat notes.md")],
+                deltas(&["Read it. Next, I will write the schema."]),
+            ],
+            &[log::Warrant::Trouble, log::Warrant::Read],
+        );
+        session.ask("look around", None).expect("accepted");
+        let log = wait_until(&session, "the turn and its gap", settled);
+        let shadowed = shadows(&log);
+        assert!(
+            shadowed
+                .iter()
+                .any(|(why, _)| *why == log::Warrant::Trouble),
+            "{shadowed:?}"
+        );
+        assert!(
+            shadowed
+                .iter()
+                .any(|(why, trigger)| *why == log::Warrant::Read && trigger.contains("call-2")),
+            "{shadowed:?}"
+        );
+        assert!(
+            !log.iter()
+                .any(|logged| matches!(logged.event, Event::Forked { .. })),
+            "a shadow fires nothing"
+        );
+        reads_whole(&session);
+        tidy(&[&tree]);
+    }
+
+    /// #1021: a shadow names the gap's and the step's warrants, never one
+    /// that also fires; the lever says which.
+    #[test]
+    fn interview_shadow_is_refused_where_it_overlaps_or_names_no_warrant() {
+        let read = |text: &str| interview_shadow(&regimen::parse(text).expect("a regimen"));
+        assert_eq!(
+            read("interview_shadow = [\"read\", \"trouble\"]\n"),
+            Ok(vec![log::Warrant::Read, log::Warrant::Trouble])
+        );
+        assert_eq!(read(""), Ok(Vec::new()));
+        assert!(
+            read("interview_warrant = [\"read\"]\ninterview_shadow = [\"read\"]\n")
+                .is_err_and(|why| why.contains("both"))
+        );
+        for word in ["operator", "meditation", "refutation", "nope"] {
+            assert!(
+                read(&format!("interview_shadow = [\"{word}\"]\n")).is_err(),
+                "{word}"
+            );
+        }
+    }
+
+    /// #1021: the operator may fork at an earlier turn's tool result, so
+    /// long as no meditation replaced it: the fork answers to no gap, and
+    /// the log reads.
+    #[test]
+    fn the_operators_fork_reaches_an_earlier_turns_result() {
+        let tree = scratch("operator-fork-earlier-turn");
+        std::fs::write(tree.join("notes.md"), "port 5182 is free\n").expect("a note");
+        let session = Session::open_with(
+            Canned::new(vec![
+                vec![bash("call-1", "cat notes.md")],
+                deltas(&["Read it."]),
+                deltas(&["And on."]),
+            ]),
+            looping(),
+            None,
+            Some(tools(
+                Confinement::Unconfined,
+                &tree,
+                &["cat"],
+                None,
+                Decider::Decline,
+            )),
+            None,
+            Some(interviewing(&[])),
+        )
+        .forking_through(Canned::new([deltas(&["It says the port is free."])]));
+        session.ask("look", None).expect("accepted");
+        let log = wait_until(&session, "turn one", settled);
+        let called = seq_of(&log, |event| matches!(event, Event::ToolCalled(_)));
+        session.ask("go on", None).expect("accepted");
+        wait_until(&session, "turn two", two_settled);
+        session
+            .fork(
+                Some(called),
+                &OperatorAsk::Text("What did it say?".to_owned()),
+            )
+            .expect("forked");
+        let (forked, _, wrote) = operator_forked(&session);
+        assert!(
+            matches!(forked, Event::Forked { of_turn: 2, cut: Some(cut), .. } if cut == called)
+        );
+        assert!(!wrote);
+        reads_whole(&session);
+        tidy(&[&tree]);
+    }
+
+    /// #1021, #1022: a fork's answer keeps as it was written, its trailer
+    /// too -- what trails a fork's last field reaches nothing else.
+    #[test]
+    fn a_keep_takes_a_span_of_a_fork_answers_trailer() {
+        let session = Session::open_with(
+            Canned::new([deltas(&["The schema has two tables."])]),
+            template(),
+            None,
+            None,
+            None,
+            Some(interviewing(&[])),
+        )
+        .forking_through(Canned::new([deltas(&[
+            "DECISION: two tables\nPLAN: NONE\n\nThe orders table needs an index on user_id.",
+        ])]));
+        session.ask("what is the schema?", None).expect("accepted");
+        wait_until(&session, "the turn", settled);
+        let fork = session
+            .fork(None, &OperatorAsk::Text("What else?".to_owned()))
+            .expect("forked");
+        let log = wait_until(&session, "the fork's answer", |log| {
+            !fork_outcomes(log).is_empty() && settled(log)
+        });
+        let request = seq_of(
+            &log,
+            |event| matches!(event, Event::Requested { fork: Some(forked), .. } if *forked == fork),
+        );
+        let answered = seq_of(
+            &log,
+            |event| matches!(event, Event::Answered { request: to, .. } if *to == request),
+        );
+        session
+            .keep(
+                answered,
+                "The orders table needs an index on user_id.",
+                None,
+            )
+            .expect("kept");
+        reads_whole(&session);
+    }
+
+    /// #1021: a fork is refused while a turn is in flight, and at a line a
+    /// meditation has since replaced on the trunk; the operator's kept
+    /// entry rides the refill.
+    #[test]
+    fn the_operators_fork_waits_for_the_turn_and_a_meditation_replaces_its_line() {
+        let tree = scratch("operator-fork-after-a-meditation");
+        std::fs::write(tree.join("notes.md"), "port 5182 is free\n").expect("a note");
+        let gate = Gate::new();
+        let session = Session::open_with(
+            Canned::new(vec![
+                vec![bash("call-1", "cat notes.md")],
+                vec![Step::Hold(gate.clone()), Step::Delta("Read it.".to_owned())],
+                deltas(&["Next."]),
+            ]),
+            looping(),
+            None,
+            Some(tools(
+                Confinement::Unconfined,
+                &tree,
+                &["cat"],
+                None,
+                Decider::Decline,
+            )),
+            None,
+            Some(interviewing(&[])),
+        )
+        .forking_through(Canned::new(Vec::<Vec<Step>>::new()));
+        session.ask("look", None).expect("accepted");
+        wait_until(&session, "the call", |log| {
+            log.iter()
+                .any(|logged| matches!(logged.event, Event::ToolCalled(_)))
+        });
+        assert!(matches!(
+            session.fork(None, &OperatorAsk::Text("why?".to_owned())),
+            Err(Rejected::Refused(Refusal::InFlight))
+        ));
+        gate.open();
+        let log = wait_until(&session, "the turn", settled);
+        let called = seq_of(&log, |event| matches!(event, Event::ToolCalled(_)));
+        session
+            .keep(called, "port 5182 is free", None)
+            .expect("kept");
+        session.declare_meditation(None).expect("admitted");
+        wait_until(&session, "the meditation", meditated);
+        assert!(matches!(
+            session.fork(Some(called), &OperatorAsk::Text("why?".to_owned())),
+            Err(Rejected::Refused(Refusal::NotOnTheTrunk))
+        ));
+        assert!(
+            session
+                .trunk()
+                .iter()
+                .any(|message| message.content.contains("port 5182 is free")),
+            "the kept entry rides the refill"
+        );
+        tidy(&[&tree]);
     }
 
     /// A session with self-capture on, every `every` silent turns, and the

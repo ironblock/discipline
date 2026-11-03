@@ -912,6 +912,7 @@ impl<S: Streaming + 'static> Serving<S> {
                 (409, body)
             }
             Err(Rejected::NoSuchTurn(_) | Rejected::BadGap(_)) => (400, BTreeMap::new()),
+            Err(Rejected::KeptAlready(_)) => unreachable!("an ask is no keep"),
         }
     }
 
@@ -927,6 +928,24 @@ impl<S: Streaming + 'static> Serving<S> {
                 })
             })
             .collect()
+    }
+
+    /// The operator's fork and keep (#1021): the fork's seq, to read its
+    /// answer by, or the entry the keep wrote, by id.
+    fn gesture(&self, command: Command) -> Result<BTreeMap<String, Value>, Rejected> {
+        match command {
+            Command::Fork(at, ask) => self.session.fork(at, &ask).map(|fork| {
+                BTreeMap::from([(
+                    "fork".to_owned(),
+                    Value::Integer(i64::try_from(fork).unwrap_or(i64::MAX)),
+                )])
+            }),
+            Command::Keep(from, span, tag) => self
+                .session
+                .keep(from, &span, tag.as_deref())
+                .map(|entry| BTreeMap::from([("entry".to_owned(), Value::String(entry))])),
+            _ => unreachable!("only the operator's gestures"),
+        }
     }
 
     fn run(&self, command: Posted) -> (u16, BTreeMap<String, Value>) {
@@ -950,6 +969,7 @@ impl<S: Streaming + 'static> Serving<S> {
             // Not a command the session could refuse, or a gap it could not
             // log: either way nothing was logged, and the request was wrong.
             Rejected::NoSuchTurn(_) | Rejected::BadGap(_) => (400, BTreeMap::new()),
+            Rejected::KeptAlready(entry) => kept_already(entry),
         };
         match command {
             Command::Ask(text, files) => self.asked(&text, &files, gap, (scoping, task)),
@@ -993,6 +1013,11 @@ impl<S: Streaming + 'static> Serving<S> {
             },
             Command::FlagEntry(id, note) => match self.session.flag_entry(&id, &note) {
                 Ok(()) => (200, BTreeMap::new()),
+                Err(rejection) => rejected(rejection),
+            },
+            // The operator's gestures (#1021).
+            command @ (Command::Fork(..) | Command::Keep(..)) => match self.gesture(command) {
+                Ok(body) => (200, body),
                 Err(rejection) => rejected(rejection),
             },
             // The operator's phase commands (#788).
@@ -1069,6 +1094,12 @@ enum Command {
     MovePhase(String, bool),
     /// A scenario runner's grade of the latest turn (#942).
     Grade(crate::drive::session::Grade),
+    /// Keep this span of the logged line with this seq as an operator
+    /// entry, with an optional tag (#1021).
+    Keep(u64, String, Option<String>),
+    /// Fork off the trunk at the logged line with this seq, or its end,
+    /// asking this (#1021).
+    Fork(Option<u64>, crate::drive::session::OperatorAsk),
 }
 
 /// A command's word as a client written before #583's rename may send it,
@@ -1153,6 +1184,10 @@ impl Command {
             // #788: the operator's phase commands; none ends an idle gap.
             CommandKind::StartPhase => &["kind", "phase"],
             CommandKind::ProposePhase | CommandKind::MovePhase => &["kind", "to", "meditate"],
+            // #1021: the operator's keep ends no idle gap.
+            CommandKind::Keep => &["kind", "from", "span", "tag"],
+            // #1021: the operator's fork ends no idle gap.
+            CommandKind::Fork => &["kind", "at", "ask", "text"],
             // #942: a runner's grade ends no idle gap.
             CommandKind::Grade => &[
                 "kind",
@@ -1249,6 +1284,38 @@ impl Command {
             }
             CommandKind::RefillAnyway => Some(Self::RefillAnyway),
             CommandKind::Grade => grade_of(object, task.clone()).map(Self::Grade),
+            CommandKind::Fork => {
+                let at = match object.get("at") {
+                    None => None,
+                    Some(Value::Integer(at)) => Some(u64::try_from(*at).ok()?),
+                    Some(_) => return None,
+                };
+                let ask = match (object.get("ask"), object.get("text")) {
+                    (Some(Value::String(name)), None) => {
+                        crate::drive::session::OperatorAsk::Pinned(name.clone())
+                    }
+                    (None, Some(Value::String(text))) => {
+                        crate::drive::session::OperatorAsk::Text(text.clone())
+                    }
+                    _ => return None,
+                };
+                Some(Self::Fork(at, ask))
+            }
+            CommandKind::Keep => {
+                match (object.get("from"), object.get("span"), object.get("tag")) {
+                    (Some(Value::Integer(from)), Some(Value::String(span)), tag) => {
+                        let tag = match tag {
+                            None => None,
+                            Some(Value::String(tag)) => Some(tag.clone()),
+                            Some(_) => return None,
+                        };
+                        u64::try_from(*from)
+                            .ok()
+                            .map(|from| Self::Keep(from, span.clone(), tag))
+                    }
+                    _ => None,
+                }
+            }
         }?;
         Some(Posted {
             command,
@@ -1643,6 +1710,21 @@ fn respond_with(stream: &mut TcpStream, status: u16, headers: &str, body: &Value
     let _ = stream.shutdown(Shutdown::Write);
 }
 
+/// A keep the operator made before (#1021): refused `restates`, naming the
+/// entry that holds it.
+fn kept_already(entry: String) -> (u16, BTreeMap<String, Value>) {
+    (
+        409,
+        BTreeMap::from([
+            (
+                "refused".to_owned(),
+                Value::String(Refusal::Restates.tag().to_owned()),
+            ),
+            ("entry".to_owned(), Value::String(entry)),
+        ]),
+    )
+}
+
 #[cfg(test)]
 mod tests {
     use std::time::Instant;
@@ -1934,6 +2016,45 @@ mod tests {
             r#"{"kind":"ratify-phase","call":"call-p","choice":"maybe"}"#,
             r#"{"kind":"ratify-phase","choice":"meditation"}"#,
             r#"{"kind":"ratify-phase","call":"call-p","choice":"meditation","idle_gap":{}}"#,
+        ] {
+            assert!(read(refused).is_none(), "{refused}");
+        }
+    }
+
+    /// #1021: `keep` takes the line's seq, the span and an optional tag;
+    /// `fork` an optional seq and exactly one of a pinned ask's name or the
+    /// operator's words; a stray key, both asks or neither is no command.
+    #[test]
+    fn the_operators_keep_and_fork_read_their_line_and_ask_and_nothing_else() {
+        use crate::drive::session::OperatorAsk;
+        let read = |body: &str| {
+            let object = crate::formats::record::json::line(body).expect("an object");
+            Command::from_object(&object).map(|posted| posted.command)
+        };
+        assert!(matches!(
+            read(r#"{"kind":"keep","from":7,"span":"two tables","tag":"schema"}"#),
+            Some(Command::Keep(7, span, Some(tag))) if span == "two tables" && tag == "schema"
+        ));
+        assert!(matches!(
+            read(r#"{"kind":"keep","from":7,"span":"two tables"}"#),
+            Some(Command::Keep(7, _, None))
+        ));
+        assert!(matches!(
+            read(r#"{"kind":"fork","at":9,"ask":"GOTCHAS"}"#),
+            Some(Command::Fork(Some(9), OperatorAsk::Pinned(name))) if name == "GOTCHAS"
+        ));
+        assert!(matches!(
+            read(r#"{"kind":"fork","text":"Why two tables?"}"#),
+            Some(Command::Fork(None, OperatorAsk::Text(text))) if text == "Why two tables?"
+        ));
+        for refused in [
+            r#"{"kind":"keep","span":"x"}"#,
+            r#"{"kind":"keep","from":-1,"span":"x"}"#,
+            r#"{"kind":"keep","from":7,"span":"x","note":"y"}"#,
+            r#"{"kind":"fork"}"#,
+            r#"{"kind":"fork","ask":"GOTCHAS","text":"x"}"#,
+            r#"{"kind":"fork","at":"9","text":"x"}"#,
+            r#"{"kind":"fork","text":"x","idle_gap":{}}"#,
         ] {
             assert!(read(refused).is_none(), "{refused}");
         }
