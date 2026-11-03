@@ -46,7 +46,16 @@
 # above.)
 # Added 2026-09-20 with the first JavaScript package (`exercise/`); disclosed
 # on that PR as an edit outside its directory.
-ssh-user-at-host	(git|hg)@(github\.com|gitlab\.com|bitbucket\.org|codeberg\.org|sr\.ht):|@[0-9]+\.[0-9]+\.[0-9]+(-[A-Za-z]+\.[0-9]+)?[:()']
+#
+# AND A CODE REFERENCE IN A MODEL'S PROSE (#1018), by the same argument. A model writes `function@file:line` -- a
+# function's name, `@`, the file it is in, `:`, the line -- which the pattern reads as a login at a dotted host. A
+# single-label file name with a source extension, `:`, a line number, then a character no path continues with (or the
+# line's end), is a place in code and not a host. A login at a dotted host whose last label is no source extension
+# still fires, and so does one followed by a path after its colon, which is how a remote is written. The cost, stated:
+# `.rs`, `.py` and `.sh` are also country domains, so a login at a two-label host under one of them, written with a
+# bare number after its colon and nothing else, would be read as a code reference. (No literal instance is written
+# here, per the rule above.)
+ssh-user-at-host	(git|hg)@(github\.com|gitlab\.com|bitbucket\.org|codeberg\.org|sr\.ht):|@[0-9]+\.[0-9]+\.[0-9]+(-[A-Za-z]+\.[0-9]+)?[:()']|@[A-Za-z0-9_-]+\.(ts|tsx|js|jsx|mjs|cjs|rs|py|go|rb|java|kt|swift|c|h|cc|cpp|hpp|cs|php|sh|lua|zig|scala|ex|exs|hs|ml|dart|vue|svelte|sql|toml|yaml|yml|json):[0-9]+([^0-9A-Za-z/._-]|$)
 #
 # AND A PYTHON REQUIREMENTS PIN, by the same argument as the lockfile key form. `pip freeze` (and `uv pip freeze`)
 # spells a pinned package as `name==1.2.3.4`, and a four-part version that opens with 10 reads to `private-ipv4` as a

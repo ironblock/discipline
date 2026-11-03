@@ -241,6 +241,74 @@ fn the_dotenv_name_assembles_and_a_local_host_is_still_refused() {
     let _ = std::fs::remove_dir_all(&runs);
 }
 
+/// `who` at `host`, colon after: an account at a host as `ssh-user-at-host`
+/// reads one, built here so this file carries no literal of the shape.
+fn at_host(who: &str, host: &str, after: &str) -> String {
+    format!("{who}{}{host}:{after}", '@')
+}
+
+/// #1018: the model's `function@file:line` notation is no account at a host.
+/// A code reference -- a name, `@`, a file with a source extension, `:`, a
+/// line number -- passes the tree's gate and the assembler alike; a login
+/// at a dotted host still fails, colon-terminated or with a path after it,
+/// even where the host's last label is a source extension.
+#[test]
+fn a_code_reference_is_no_host_and_a_login_at_one_still_fails() {
+    let gate = |name: &str, line: &str| {
+        let tree = scratch(name);
+        std::fs::write(tree.join("note.txt"), format!("{line}\n")).expect("a file");
+        let ran = Command::new("bash")
+            .current_dir(root())
+            .args(["scripts/hygiene.sh", "--tree", &tree.to_string_lossy()])
+            .output()
+            .expect("bash runs the gate");
+        let _ = std::fs::remove_dir_all(&tree);
+        ran.status.code()
+    };
+    for (name, line) in [
+        (
+            "code-ts",
+            "the bug is in buildParcel@main.ts:15 where it returns".to_owned(),
+        ),
+        ("code-pair", "{a@b.rs:3, c@d.py:9}".to_owned()),
+    ] {
+        assert_eq!(gate(name, &line), Some(0), "{line}");
+    }
+    for (name, line) in [
+        ("login-example", at_host("deploy", "build.example", "")),
+        (
+            "login-internal",
+            at_host("ops", &format!("box.{}", ["inter", "nal"].concat()), "22"),
+        ),
+        ("login-path", at_host("ops", "box.rs", "/srv/app")),
+        (
+            "login-beside",
+            format!(
+                "{} and {}",
+                "buildParcel@main.ts:15",
+                at_host("ops", "box.example", "")
+            ),
+        ),
+    ] {
+        assert_ne!(gate(name, &line), Some(0), "{line}");
+    }
+    // The assembler reads the same table: a run whose model wrote the notation assembles.
+    let home = home_of("someone-planted");
+    let runs = scratch("code-ref-runs");
+    let stage = staged("code-ref", |log: String| {
+        log.replacen(
+            r#""text":""#,
+            r#""text":"see buildParcel@main.ts:15 -- "#,
+            1,
+        )
+    });
+    let out = runs.join("2026-11-03-code-ref");
+    let assembled = assemble(&stage, &out, &home);
+    assert!(assembled.status.success(), "{}", said(&assembled));
+    let _ = std::fs::remove_dir_all(&stage);
+    let _ = std::fs::remove_dir_all(&runs);
+}
+
 /// The same carve-out in the tree's own gate: `hygiene.sh --tree` passes
 /// the dotenv name and still fails a host-shaped `.local` name.
 #[test]
