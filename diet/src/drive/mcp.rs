@@ -755,6 +755,32 @@ fn pending_model_proposal(serve: &Serve) -> Result<Option<String>, String> {
         .flatten())
 }
 
+/// The body of the operator's `fork` or `keep` (#1021), from the tool's
+/// arguments.
+fn gesture(name: &str, args: &Args<'_>) -> Result<Value, String> {
+    let mut body = json!({ "kind": name });
+    if name == "keep" {
+        body["from"] = json!(
+            args.optional_count("from")?
+                .ok_or_else(|| "`from` is required".to_owned())?
+        );
+        body["span"] = json!(args.string("span")?);
+        if let Some(tag) = args.optional_string("tag")? {
+            body["tag"] = json!(tag);
+        }
+        return Ok(body);
+    }
+    if let Some(at) = args.optional_count("at")? {
+        body["at"] = json!(at);
+    }
+    for key in ["ask", "text"] {
+        if let Some(value) = args.optional_string(key)? {
+            body[key] = json!(value);
+        }
+    }
+    Ok(body)
+}
+
 /// Tool `name` called with `arguments` against `serve`: its result as JSON
 /// text, or why it could not be called.
 ///
@@ -814,32 +840,7 @@ pub fn call(serve: &Serve, name: &str, arguments: &Map<String, Value>) -> Result
             "id": args.string("id")?,
             "note": args.string("note")?
         }))?,
-        "fork" => {
-            let mut body = json!({"kind": "fork"});
-            if let Some(at) = args.optional_count("at")? {
-                body["at"] = json!(at);
-            }
-            if let Some(ask) = args.optional_string("ask")? {
-                body["ask"] = json!(ask);
-            }
-            if let Some(text) = args.optional_string("text")? {
-                body["text"] = json!(text);
-            }
-            serve.command(&body)?
-        }
-        "keep" => {
-            let mut body = json!({
-                "kind": "keep",
-                "from": args
-                    .optional_count("from")?
-                    .ok_or_else(|| "`from` is required".to_owned())?,
-                "span": args.string("span")?
-            });
-            if let Some(tag) = args.optional_string("tag")? {
-                body["tag"] = json!(tag);
-            }
-            serve.command(&body)?
-        }
+        "fork" | "keep" => serve.command(&gesture(name, &args)?)?,
         "declare_meditation" => {
             let mut body = json!({"kind": "declare-meditation"});
             if let Some(phase) = args.optional_string("phase")? {

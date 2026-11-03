@@ -929,6 +929,24 @@ impl<S: Streaming + 'static> Serving<S> {
             .collect()
     }
 
+    /// The operator's fork and keep (#1021): the fork's seq, to read its
+    /// answer by, or the entry the keep wrote, by id.
+    fn gesture(&self, command: Command) -> Result<BTreeMap<String, Value>, Rejected> {
+        match command {
+            Command::Fork(at, ask) => self.session.fork(at, &ask).map(|fork| {
+                BTreeMap::from([(
+                    "fork".to_owned(),
+                    Value::Integer(i64::try_from(fork).unwrap_or(i64::MAX)),
+                )])
+            }),
+            Command::Keep(from, span, tag) => self
+                .session
+                .keep(from, &span, tag.as_deref())
+                .map(|entry| BTreeMap::from([("entry".to_owned(), Value::String(entry))])),
+            _ => unreachable!("only the operator's gestures"),
+        }
+    }
+
     fn run(&self, command: Posted) -> (u16, BTreeMap<String, Value>) {
         let refused = |because: Refusal| {
             (
@@ -995,27 +1013,11 @@ impl<S: Streaming + 'static> Serving<S> {
                 Ok(()) => (200, BTreeMap::new()),
                 Err(rejection) => rejected(rejection),
             },
-            // The operator's fork (#1021): its seq, to read its answer by.
-            Command::Fork(at, ask) => match self.session.fork(at, &ask) {
-                Ok(fork) => (
-                    200,
-                    BTreeMap::from([(
-                        "fork".to_owned(),
-                        Value::Integer(i64::try_from(fork).unwrap_or(i64::MAX)),
-                    )]),
-                ),
+            // The operator's gestures (#1021).
+            command @ (Command::Fork(..) | Command::Keep(..)) => match self.gesture(command) {
+                Ok(body) => (200, body),
                 Err(rejection) => rejected(rejection),
             },
-            // The operator's keep (#1021): the entry it wrote, by id.
-            Command::Keep(from, span, tag) => {
-                match self.session.keep(from, &span, tag.as_deref()) {
-                    Ok(entry) => (
-                        200,
-                        BTreeMap::from([("entry".to_owned(), Value::String(entry))]),
-                    ),
-                    Err(rejection) => rejected(rejection),
-                }
-            }
             // The operator's phase commands (#788).
             Command::StartPhase(phase) => match self.session.start_phase(&phase) {
                 Ok(()) => (200, BTreeMap::new()),
