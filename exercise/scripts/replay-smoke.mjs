@@ -61,14 +61,23 @@ const strings = (value, into = new Set()) => {
   else if (value && typeof value === 'object') for (const v of Object.values(value)) strings(v, into);
   return into;
 };
+// The pinned fork asks' texts (#1021) the page ships for its fork picker, generated from the dogma: a recording's fork
+// asked them too, so they are in both by design and no sign that a recording was bundled. Each is a JSON string on its
+// line of the generated file.
+const pinned = new Set(
+  [...readFileSync(new URL('../../diet/dogma/fork-asks.ts', import.meta.url), 'utf8').matchAll(/text: ("(?:[^"\\]|\\.)*")/g)].map((m) => JSON.parse(m[1])),
+);
 for (const name of [...PUBLISHED, ...EXAMPLES]) {
   const payload = path.join(site, 'replay', 'data', `${name}.js`);
   if (!existsSync(payload)) continue; // named below, when it does not load
-  const forms = [...strings(JSON.parse(readFileSync(payload, 'utf8').replace(/^export default /, '')))].flatMap((t) => [t, JSON.stringify(t).slice(1, -1)]);
+  const forms = [...strings(JSON.parse(readFileSync(payload, 'utf8').replace(/^export default /, '')))]
+    .filter((t) => !pinned.has(t))
+    .flatMap((t) => [t, JSON.stringify(t).slice(1, -1)]);
   if (forms.length === 0) problems.push(`${name} has no string of 40 characters or more, so nothing shows whether it is bundled into the page's code`);
   const [file] = code.find(([, text]) => forms.some((form) => text.includes(form))) ?? [];
   if (file) problems.push(`${name} is bundled into the page's code (replay/${file}), not only beside it`);
 }
+if (pinned.size === 0) problems.push('diet/dogma/fork-asks.ts gave no pinned ask text to set aside: its shape changed');
 const browser = await chromium.launch();
 try {
   const page = await browser.newPage();
