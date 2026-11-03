@@ -2740,14 +2740,14 @@ fn each_sealed_leg_of_the_probe_catches_its_leak() {
     }
 }
 
-/// #948: a native refill restores only files under the worktree, so a seal
-/// outside it (Lite's checkout) is never restored and `carried_source`
-/// reads nothing. A seal inside the worktree is restored when the first
-/// session read a file under it, and the carried start names that file,
-/// relative to its sealed root.
+/// #948, #1012: a native refill carries no file's content, only Pi's path
+/// lists in the summary. So a sealed file the first session read, inside
+/// the worktree, is named in the summary's `<read-files>` and never
+/// restored: the meditation names no `restored_files`, and the carried
+/// start no `carried_source`.
 #[test]
 #[cfg(target_os = "macos")]
-fn a_carried_start_names_the_sealed_file_its_refill_restored() {
+fn a_native_refill_carries_a_sealed_files_path_and_never_its_content() {
     let dir = scratch("carry-restored");
     let canned = std::fs::read_to_string(root().join("diet/scenarios/canned.toml"))
         .expect("the canned regimen");
@@ -2799,20 +2799,17 @@ fn a_carried_start_names_the_sealed_file_its_refill_restored() {
         .into_iter()
         .next()
         .expect("the first session meditated");
+    assert_eq!(
+        meditation["render"],
+        "<state_snapshot>it reads 42</state_snapshot>\n\n<read-files>\nreference/source.ts\n</read-files>",
+        "the summary names the file it read: {meditation}"
+    );
     assert!(
-        meditation["restored_files"]
-            .as_array()
-            .is_some_and(|files| files.iter().any(|f| f
-                .as_str()
-                .is_some_and(|f| f.ends_with("/reference/source.ts")))),
-        "the refill restored the file it read: {meditation}"
+        meditation.get("restored_files").is_none(),
+        "the refill restored no file: {meditation}"
     );
     let start = first_line(&out.join("next/session.log"));
-    assert_eq!(
-        start["carried_source"],
-        serde_json::json!(["source.ts"]),
-        "{start}"
-    );
+    assert!(start.get("carried_source").is_none(), "{start}");
     let _ = std::fs::remove_dir_all(&dir);
 }
 

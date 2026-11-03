@@ -29,34 +29,38 @@
 //!     on to the next request (`oc:packages/core/src/session/runner/llm.ts:220-225`).
 //!     Qwen Code alone adds "Got it. Thanks for the additional context!"
 //!     (`qc:…/postCompactAttachments.ts:856-858`). Pi and `OpenCode` 2 agree.
-//!   - **The restored files: voted, not applied (the maintainer's call).**
-//!     Pi and `OpenCode` 2 agree on no file contents, only paths: Pi appends
+//!   - **The restored files: ruled (#1012), Pi's path lists.** Pi and
+//!     `OpenCode` 2 agree on no file contents, only paths: Pi appends
 //!     `<read-files>`/`<modified-files>` lists to the summary
 //!     (`pi:…/compaction/compaction.ts:1056-1058`, `utils.ts:77-87`), and
 //!     `OpenCode` 2's summary template has a "Relevant Files" section of at
-//!     most 15 (`oc:packages/core/src/session/compaction.ts:129-131`). They
-//!     differ on how the paths get there, and Qwen Code, which embeds the
-//!     contents, breaks that tie toward neither. Until ruled, the native arm
-//!     keeps Qwen Code's: one user message holding the files the model's
-//!     file tools last touched (at most 5, each embedded whole up to 5,000
-//!     tokens, within a 50,000-token budget, else listed by path) and the
-//!     last 3 images (`qc:…/postCompactAttachments.ts:58-60,385-428`).
-//!   - **The kept recent turns: voted, not applied (the maintainer's call).**
-//!     Pi keeps them as messages, 20,000 tokens by default
+//!     most 15 (`oc:packages/core/src/session/compaction.ts:129-131`); Qwen
+//!     Code embeds the contents. The maintainer ruled for Pi's lists, so no
+//!     restored-files message and no images follow the summary. Pi's
+//!     definitions (`utils.ts:47-72`) map onto our file tools: a `read`'s
+//!     `path` is read, a `write`'s `path` and an `edit`'s `file_path` are
+//!     modified, each as the call named it, failed or not; read lists only
+//!     what was not modified; both sorted, each list left out when empty.
+//!     They gather over the history summarized and every earlier native
+//!     refill's lists, the earlier read as read and the earlier modified as
+//!     modified (`compaction.ts:60-89,917-923`).
+//!   - **The kept recent turns: ruled (#1012), as built.** Pi keeps them as
+//!     messages, 20,000 tokens by default
 //!     (`pi:…/compaction/compaction.ts:126-130,802-829`); `OpenCode` 2 as
 //!     text inside its checkpoint, 15,000 by default
 //!     (`oc:packages/core/src/session/compaction.ts:197,704-811`); Qwen Code
-//!     keeps none (`qc:…/chatCompressionService.ts:570-574`). Pi and
-//!     `OpenCode` 2 agree on a tail and not on its form, which Qwen Code
-//!     cannot break. Until ruled, the compaction depth lever
-//!     (`meditation_tail_tokens`) decides, total by default.
+//!     keeps none (`qc:…/chatCompressionService.ts:570-574`). The maintainer
+//!     ruled that the compaction depth lever (`meditation_tail_tokens`)
+//!     decides, as built, total by default.
 //!
 //!   Qwen Code's plan-mode reminder and running-subagent list are not
 //!   carried: this harness has neither. The start line's `meditation_carry`
-//!   lever names the layout, `native_summary:summary+restored`; runs before
-//!   #1009 read `native_summary` alone, with the acknowledgement between.
+//!   lever names the layout, `native_summary:summary+paths`; runs between
+//!   #1009 and #1012 read `native_summary:summary+restored`, Qwen Code's
+//!   restored files after the summary, and runs before #1009 read
+//!   `native_summary` alone, with the acknowledgement between.
 
-use std::path::Path;
+use std::collections::BTreeSet;
 
 use crate::client::shape::{Message, RequestShape, Role};
 use crate::formats::record::json::Value;
@@ -77,33 +81,24 @@ pub const OUTPUT_CAP: u64 = 20_000;
 /// What the cap leaves of the window below the prompt (`:69`).
 const OUTPUT_MARGIN: u64 = 1_024;
 
-/// The files restored at most (`postCompactAttachments.ts:27`).
-const MAX_FILES: usize = 5;
-
-/// The images restored at most (`:60`).
-const MAX_IMAGES: usize = 3;
-
-/// Characters a token stands for (`compactionInputSlimming.ts:31`).
-const CHARS_PER_TOKEN: usize = 4;
-
-/// The tokens one file may be embedded in (`postCompactAttachments.ts:58`).
-const MAX_TOKENS_PER_FILE: usize = 5_000;
-
-/// The tokens every embedded file shares (`:59`).
-const TOKEN_BUDGET: usize = 50_000;
-
 /// What a native summary's refill carries (#936): the summary, its analysis
-/// stripped, and the restored files and images to follow the
-/// acknowledgement.
+/// stripped, then Pi's path lists (#1012).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Summary {
-    /// The summary, never empty.
+    /// The summary, never empty, the lists of `files` appended.
     pub text: String,
-    /// The user message of restored files and images, when there are any.
-    pub restored: Option<Message>,
-    /// The files whose content `restored` embeds, as the worktree joined
-    /// them (#948): what a carry from this refill holds of them.
-    pub embedded: Vec<String>,
+    /// The files it lists: what the next native refill gathers from.
+    pub files: Files,
+}
+
+/// The files a native refill names (#1012): Pi's read and modified lists
+/// (`pi:…/compaction/utils.ts:67-72`), read holding none of modified.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct Files {
+    /// Read and not modified.
+    pub read: BTreeSet<String>,
+    /// Written or edited.
+    pub modified: BTreeSet<String>,
 }
 
 /// The summary request: `history` -- the trunk past its head, and what rides
@@ -162,209 +157,58 @@ pub fn stripped(raw: &str) -> String {
     text.trim().to_owned()
 }
 
-/// What the model's file tools last touched in `history`, newest first, the
-/// last call of a step counted first, each once, at most [`MAX_FILES`]: a
-/// `read`, `write` or `edit` whose result did not fail, its path inside
-/// `worktree` (`postCompactAttachments.ts:96-160,815-817`).
-fn touched(history: &[Message], worktree: &Path) -> Vec<String> {
-    let failed: std::collections::BTreeSet<&str> = history
-        .iter()
-        .filter(|message| message.role == Role::Tool && message.tool_error)
-        .filter_map(|message| message.tool_call_id.as_deref())
-        .collect();
-    let mut seen = Vec::new();
-    for message in history.iter().rev().filter(|m| m.role == Role::Assistant) {
-        for call in message.tool_calls.iter().rev() {
-            let key = match call.name.as_str() {
-                crate::drive::standard::READ | crate::drive::standard::WRITE => "path",
-                crate::drive::standard::EDIT => "file_path",
-                _ => continue,
-            };
-            if failed.contains(call.id.as_str()) {
-                continue;
-            }
-            let Some(path) = serde_json::from_str::<serde_json::Value>(&call.arguments)
-                .ok()
-                .and_then(|arguments| arguments.get(key)?.as_str().map(str::to_owned))
-            else {
-                continue;
-            };
-            let inside = worktree.join(&path).starts_with(worktree)
-                && !path.split('/').any(|part| part == "..");
-            if !inside || seen.contains(&path) {
-                continue;
-            }
-            seen.push(path);
-            if seen.len() >= MAX_FILES {
-                return seen;
-            }
-        }
-    }
-    seen
-}
-
-/// How Qwen Code restores a file (`postCompactAttachments.ts:299-371`).
-enum Restore {
-    /// Embedded whole: its text.
-    Embed(String),
-    /// Listed by path: too large to embed.
-    Reference,
-    /// Left out: missing, or binary.
-    Skip,
-}
-
-/// How the file at `path` is restored.
-fn sized(path: &Path) -> Restore {
-    let max_chars = MAX_TOKENS_PER_FILE * CHARS_PER_TOKEN;
-    let Ok(metadata) = std::fs::metadata(path) else {
-        return Restore::Skip;
-    };
-    if metadata.len() > (max_chars * 4) as u64 {
-        return Restore::Reference;
-    }
-    let Ok(bytes) = std::fs::read(path) else {
-        return Restore::Skip;
-    };
-    let sample = &bytes[..bytes.len().min(512)];
-    let unprintable = sample
-        .iter()
-        .filter(|byte| {
-            !((0x20..=0x7e).contains(*byte)
-                || matches!(**byte, 0x09 | 0x0a | 0x0d)
-                || **byte >= 0x80)
-        })
-        .count();
-    if !sample.is_empty() && unprintable * 10 > sample.len() * 3 {
-        return Restore::Skip;
-    }
-    let text = String::from_utf8_lossy(&bytes).into_owned();
-    if text.chars().count() <= max_chars {
-        Restore::Embed(text)
-    } else {
-        Restore::Reference
-    }
-}
-
-/// The longest run of backticks in `text`.
-fn longest_backticks(text: &str) -> usize {
-    text.split(|c| c != '`').map(str::len).max().unwrap_or(0)
-}
-
-/// The user message Qwen Code puts after the acknowledgement: the files
-/// `history`'s file tools last touched, read from `worktree` now (none
-/// without one: a session that runs no commands has no file tools), and its
-/// last images; `None` when there are neither
-/// (`postCompactAttachments.ts:385-488,837-845`).
+/// The files `history`'s file tools named, with `earlier`'s, as Pi
+/// gathers them (`pi:…/compaction/utils.ts:47-72`, `compaction.ts:60-89`):
+/// a `read`'s `path` read, a `write`'s `path` and an `edit`'s `file_path`
+/// modified, each as the call named it, whether or not it failed; read
+/// keeps only what was not modified.
 #[must_use]
-pub fn restored(history: &[Message], worktree: Option<&Path>) -> Option<Message> {
-    restored_embedding(history, worktree).0
-}
-
-/// [`restored`], and the files whose content it embeds, each as the
-/// worktree joined it (#948).
-#[must_use]
-pub fn restored_embedding(
-    history: &[Message],
-    worktree: Option<&Path>,
-) -> (Option<Message>, Vec<String>) {
-    let mut references = Vec::new();
-    let mut embeds = Vec::new();
-    let mut embedded = Vec::new();
-    let mut used = 0;
-    let files = worktree.map(|tree| (tree, touched(history, tree)));
-    for (tree, path) in files
+pub fn files(history: &[Message], earlier: &Files) -> Files {
+    let mut read = earlier.read.clone();
+    let mut modified = earlier.modified.clone();
+    for call in history
         .iter()
-        .flat_map(|(tree, paths)| paths.iter().map(move |path| (*tree, path.clone())))
+        .filter(|message| message.role == Role::Assistant)
+        .flat_map(|message| &message.tool_calls)
     {
-        let worktree = tree;
-        match sized(&worktree.join(&path)) {
-            Restore::Skip => {}
-            Restore::Reference => references.push(path),
-            Restore::Embed(content) => {
-                let chars = content.chars().count();
-                if used + chars > TOKEN_BUDGET * CHARS_PER_TOKEN {
-                    references.push(path);
-                } else {
-                    used += chars;
-                    embedded.push(worktree.join(&path).display().to_string());
-                    embeds.push((path, content));
-                }
-            }
+        let (key, into) = match call.name.as_str() {
+            crate::drive::standard::READ => ("path", &mut read),
+            crate::drive::standard::WRITE => ("path", &mut modified),
+            crate::drive::standard::EDIT => ("file_path", &mut modified),
+            _ => continue,
+        };
+        if let Some(path) = serde_json::from_str::<serde_json::Value>(&call.arguments)
+            .ok()
+            .and_then(|arguments| arguments.get(key)?.as_str().map(str::to_owned))
+            .filter(|path| !path.is_empty())
+        {
+            into.insert(path);
         }
     }
-    let mut parts = Vec::new();
-    if !references.is_empty() {
-        let mut lines = vec![
-            "The following files were recently accessed before context was compacted. They are \
-             listed as reference only because they are large. Use `read_file` to view current \
-             content for any file you need:"
-                .to_owned(),
-            String::new(),
-        ];
-        lines.extend(references.iter().map(|path| format!("- {}", shown(path))));
-        parts.push(lines.join("\n"));
-    }
-    for (path, content) in &embeds {
-        let fence = "`".repeat((longest_backticks(content) + 1).max(3));
-        parts.push(format!(
-            "Recently accessed file (full current content embedded):\n\n## {}\n\n{fence}\n{content}\n{fence}",
-            shown(path)
-        ));
-    }
-    let mut images = Vec::new();
-    let mut sources = Vec::new();
-    'outer: for (at, message) in history.iter().enumerate().rev() {
-        if message.images.is_empty() {
-            continue;
-        }
-        let source = at
-            .checked_sub(1)
-            .and_then(|before| history.get(before))
-            .filter(|before| before.role == Role::Assistant)
-            .and_then(|before| before.tool_calls.first());
-        for image in message.images.iter().rev() {
-            images.insert(0, image.clone());
-            sources.insert(
-                0,
-                source.map_or_else(
-                    || format!("- turn {at}: user-provided image"),
-                    |call| {
-                        let arguments = serde_json::from_str::<serde_json::Value>(&call.arguments)
-                            .map_or_else(|_| "{}".to_owned(), |value| value.to_string());
-                        format!("- turn {at}: {} args={arguments}", call.name)
-                    },
-                ),
-            );
-            if images.len() >= MAX_IMAGES {
-                break 'outer;
-            }
-        }
-    }
-    if !images.is_empty() {
-        let mut lines = vec![
-            "Recent visual snapshots preserved from before context was compacted (most recent \
-             last). Each image corresponds to a tool result or user-pasted image earlier in the \
-             conversation:"
-                .to_owned(),
-            String::new(),
-        ];
-        lines.extend(sources);
-        parts.push(lines.join("\n"));
-    }
-    if parts.is_empty() {
-        return (None, embedded);
-    }
-    let mut message = Message::new(Role::User, parts.join("\n\n"));
-    message.images = images;
-    (Some(message), embedded)
+    read.retain(|path| !modified.contains(path));
+    Files { read, modified }
 }
 
-/// `path` with the characters that would break its line taken out
-/// (`postCompactAttachments.ts:55-57`).
-fn shown(path: &str) -> String {
-    path.chars()
-        .filter(|c| !matches!(c, '\r' | '\n' | '\t'))
-        .collect()
+/// `files` as Pi appends them to its summary
+/// (`pi:…/compaction/utils.ts:77-87`): a `<read-files>` and a
+/// `<modified-files>` section, a path a line, each left out when empty;
+/// empty when both are.
+#[must_use]
+pub fn listed(files: &Files) -> String {
+    let mut sections = Vec::new();
+    for (tag, paths) in [
+        ("read-files", &files.read),
+        ("modified-files", &files.modified),
+    ] {
+        if !paths.is_empty() {
+            let lines: Vec<&str> = paths.iter().map(String::as_str).collect();
+            sections.push(format!("<{tag}>\n{}\n</{tag}>", lines.join("\n")));
+        }
+    }
+    if sections.is_empty() {
+        return String::new();
+    }
+    format!("\n\n{}", sections.join("\n\n"))
 }
 
 #[cfg(test)]
@@ -455,35 +299,31 @@ mod tests {
         );
     }
 
-    /// #936: what Qwen Code restores beside the summary -- the files the
-    /// model's file tools last touched, newest first, each once, small ones
-    /// embedded, a missing one left out; and the last images, with where
-    /// each came from.
+    /// An assistant message calling `name` with `arguments`.
+    fn call(id: &str, name: &str, arguments: &str) -> Message {
+        let mut message = Message::new(Role::Assistant, String::new());
+        message.tool_calls.push(crate::client::shape::ToolCall {
+            id: id.to_owned(),
+            name: name.to_owned(),
+            arguments: arguments.to_owned(),
+        });
+        message
+    }
+
+    /// #1012: Pi's definitions on our file tools -- a `read`'s `path` is
+    /// read, a `write`'s `path` and an `edit`'s `file_path` modified, a
+    /// failed call counted too, a shell command never; read keeps only what
+    /// was not modified, both sorted; and an earlier refill's lists gather
+    /// in, its read as read and its modified as modified.
     #[test]
-    fn the_files_a_file_tool_touched_are_restored_and_images_kept() {
-        let tree = std::env::temp_dir().join(format!(
-            "diet-native-restored-{}-{}",
-            std::process::id(),
-            std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .map_or(0, |since| since.as_nanos())
-        ));
-        std::fs::create_dir_all(&tree).expect("a tree");
-        std::fs::write(tree.join("a.rs"), "fn a() {}\n").expect("a file");
-        std::fs::write(tree.join("b.md"), "notes with ``` a fence\n").expect("a file");
-        let call = |id: &str, name: &str, arguments: &str| {
-            let mut message = Message::new(Role::Assistant, String::new());
-            message.tool_calls.push(crate::client::shape::ToolCall {
-                id: id.to_owned(),
-                name: name.to_owned(),
-                arguments: arguments.to_owned(),
-            });
-            message
-        };
+    fn the_file_tools_name_pis_read_and_modified_files() {
+        let mut failed = Message::new(Role::Tool, "no such file".to_owned());
+        failed.tool_call_id = Some("c3".to_owned());
+        failed.tool_error = true;
         let history = vec![
             Message::new(Role::User, "go".to_owned()),
-            call("c1", "read", r#"{"path": "a.rs"}"#),
-            Message::new(Role::Tool, "fn a() {}".to_owned()),
+            call("c1", "read", r#"{"path": "src/z.rs"}"#),
+            Message::new(Role::Tool, "fn z() {}".to_owned()),
             call(
                 "c2",
                 "edit",
@@ -491,33 +331,73 @@ mod tests {
             ),
             Message::new(Role::Tool, "ok".to_owned()),
             call("c3", "read", r#"{"path": "gone.txt"}"#),
-            Message::new(Role::Tool, "missing".to_owned()),
-            call("c4", "bash", r#"{"command": "cat a.rs"}"#),
-            Message::new(Role::Tool, "fn a() {}".to_owned()),
+            failed,
+            call("c4", "read", r#"{"path": "b.md"}"#),
+            Message::new(Role::Tool, "y".to_owned()),
+            call("c5", "write", r#"{"path": "out/new.txt", "content": "n"}"#),
+            Message::new(Role::Tool, "ok".to_owned()),
+            call("c6", "bash", r#"{"command": "cat a.rs > c.rs"}"#),
+            Message::new(Role::Tool, String::new()),
         ];
-        assert_eq!(touched(&history, &tree), ["gone.txt", "b.md", "a.rs"]);
-        let message = restored(&history, Some(&tree)).expect("files to restore");
-        assert_eq!(message.role, Role::User);
-        let b = message.content.find("## b.md").expect("b.md embedded");
-        let a = message.content.find("## a.rs").expect("a.rs embedded");
-        assert!(b < a, "newest first: {}", message.content);
-        assert!(
-            message
-                .content
-                .contains("````\nnotes with ``` a fence\n\n````"),
-            "{}",
-            message.content
+        let found = files(&history, &Files::default());
+        assert_eq!(
+            found.read.iter().collect::<Vec<_>>(),
+            ["gone.txt", "src/z.rs"]
         );
-        assert!(
-            !message.content.contains("gone.txt"),
-            "a missing file is left out"
+        assert_eq!(
+            found.modified.iter().collect::<Vec<_>>(),
+            ["b.md", "out/new.txt"]
         );
-        assert!(message.images.is_empty());
-        assert!(
-            restored(&history[..1], Some(&tree)).is_none(),
-            "nothing to restore"
+        let earlier = Files {
+            read: ["old.rs".to_owned(), "out/new.txt".to_owned()].into(),
+            modified: ["kept.md".to_owned()].into(),
+        };
+        let gathered = files(&history, &earlier);
+        assert_eq!(
+            gathered.read.iter().collect::<Vec<_>>(),
+            ["gone.txt", "old.rs", "src/z.rs"]
         );
-        assert!(restored(&history, None).is_none(), "no worktree, no files");
-        let _ = std::fs::remove_dir_all(&tree);
+        assert_eq!(
+            gathered.modified.iter().collect::<Vec<_>>(),
+            ["b.md", "kept.md", "out/new.txt"]
+        );
+    }
+
+    /// #1012: the lists ride as Pi appends them -- after a blank line, a
+    /// `<read-files>` then a `<modified-files>` section, a path a line --
+    /// and a list with no file is left out; with neither, nothing is
+    /// appended, as Pi emits none.
+    #[test]
+    fn the_lists_take_pis_tags_and_an_empty_one_is_left_out() {
+        let both = Files {
+            read: ["a.rs".to_owned(), "c.rs".to_owned()].into(),
+            modified: ["b.md".to_owned()].into(),
+        };
+        assert_eq!(
+            listed(&both),
+            "\n\n<read-files>\na.rs\nc.rs\n</read-files>\n\n<modified-files>\nb.md\n</modified-files>"
+        );
+        let modified = Files {
+            read: BTreeSet::new(),
+            modified: ["b.md".to_owned()].into(),
+        };
+        assert_eq!(
+            listed(&modified),
+            "\n\n<modified-files>\nb.md\n</modified-files>"
+        );
+        let read = Files {
+            read: ["a.rs".to_owned()].into(),
+            modified: BTreeSet::new(),
+        };
+        assert_eq!(listed(&read), "\n\n<read-files>\na.rs\n</read-files>");
+        assert_eq!(listed(&Files::default()), "");
+        assert_eq!(
+            listed(&files(
+                &[call("c1", "bash", r#"{"command": "ls"}"#)],
+                &Files::default()
+            )),
+            "",
+            "no file tool, no lists"
+        );
     }
 }
