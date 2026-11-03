@@ -36,8 +36,12 @@ function useModal(open: boolean, onClose: () => void) {
   useEffect(() => {
     const dialog = ref.current;
     if (!dialog) return;
-    dialog.addEventListener('close', onClose);
-    return () => dialog.removeEventListener('close', onClose);
+    // `close` arrives a task after the dialog closed: one that arrives after it opened again is stale, and is not heard.
+    const closed = () => {
+      if (!dialog.open) onClose();
+    };
+    dialog.addEventListener('close', closed);
+    return () => dialog.removeEventListener('close', closed);
   }, [onClose]);
   return ref;
 }
