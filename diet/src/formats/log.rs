@@ -465,6 +465,8 @@ vocabulary! {
         /// A fork the turn's own self-capture already recorded, screened out
         /// of its gap (v7, #611).
         ForkSkipped => "fork.skipped",
+        /// A fork a shadow warrant would have cut, never fired (v32, #1021).
+        ForkShadowed => "fork.shadowed",
         /// A phase's ground rules, as a note on an ask (v8, #787).
         PhaseNoted => "phase.noted",
         /// A trunk request's output cap cut below what the window alone
@@ -2229,6 +2231,22 @@ pub enum Event {
         /// The `seq` of the step's last `tool_call` it was cut at (v8, #822),
         /// with `reason`.
         cut: Option<u64>,
+    },
+    /// A fork a shadow warrant would have cut (v32, #1021): evaluated as
+    /// the warrant is, logged here, never sent -- so a manual session can
+    /// score the automated policy against the operator's own forks, offline.
+    ForkShadowed {
+        /// The turn it would have been cut in, or followed.
+        of_turn: u32,
+        /// The `seq` of the trunk `request` whose step or answer warranted it.
+        at: u64,
+        /// The warrant that would have fired it.
+        why: Warrant,
+        /// What would have fired it, as a real fork's `trigger` says.
+        trigger: String,
+        /// The ask it would have used: its pinned template's name, or the
+        /// router's ask.
+        ask: String,
     },
     Reminded {
         /// The turn whose request carried it.
@@ -4716,6 +4734,13 @@ fn from_object(object: &BTreeMap<String, Value>) -> Result<Line, String> {
                 cut,
             }
         }
+        Kind::ForkShadowed => Event::ForkShadowed {
+            of_turn: fields.turn("of_turn")?,
+            at: fields.count("at")?,
+            why: fields.tag("why", Warrant::from_tag)?,
+            trigger: fields.string("trigger")?,
+            ask: fields.string("ask")?,
+        },
         Kind::Reminded => Event::Reminded {
             turn: fields.turn("turn")?,
             text: fields.string("text")?,
@@ -5988,6 +6013,16 @@ const fn may_v9(key: &'static str, holds: Holds) -> Field {
     }
 }
 
+/// A key that arrived in v32 with its object, which always writes it.
+const fn must_v32(key: &'static str, holds: Holds) -> Field {
+    Field {
+        key,
+        holds,
+        required: true,
+        since: 32,
+    }
+}
+
 /// A key that arrived in v8 and is required wherever its object is written.
 const fn must_v8(key: &'static str, holds: Holds) -> Field {
     Field {
@@ -6445,6 +6480,7 @@ pub fn introduced(kind: Kind) -> i64 {
         Kind::RequestRetried => 13,
         Kind::Grade => 18,
         Kind::MeditationSkipped => 21,
+        Kind::ForkShadowed => 32,
         _ => 0,
     }
 }
@@ -6914,6 +6950,16 @@ pub fn schema(kind: Kind) -> &'static [Field] {
                 may_v7("field", Text),
                 may_v8("reason", Text),
                 may_v8("cut", Count),
+            ];
+            F
+        }
+        Kind::ForkShadowed => {
+            const F: &[Field] = &[
+                must_v32("of_turn", Count),
+                must_v32("at", Count),
+                must_v32("why", Tag(Tags::Warrant)),
+                must_v32("trigger", Text),
+                must_v32("ask", Text),
             ];
             F
         }
@@ -8254,6 +8300,20 @@ fn to_value(line: &Line) -> Value {
                 put("cut", count(*cut));
             }
             Kind::ForkSkipped
+        }
+        Event::ForkShadowed {
+            of_turn,
+            at,
+            why,
+            trigger,
+            ask,
+        } => {
+            put("of_turn", count(u64::from(*of_turn)));
+            put("at", count(*at));
+            put("why", text(why.tag()));
+            put("trigger", text(trigger));
+            put("ask", text(ask));
+            Kind::ForkShadowed
         }
         Event::Reminded { turn, text: note } => {
             put("turn", count(u64::from(*turn)));
@@ -10410,6 +10470,13 @@ mod tests {
                 field: None,
                 reason: Some(SKIPPED_BACKLOG.to_owned()),
                 cut: Some(request),
+            },
+            Event::ForkShadowed {
+                of_turn: 5,
+                at: request,
+                why: Warrant::Trouble,
+                trigger: format!("trouble:{request}"),
+                ask: "gotchas".to_owned(),
             },
             Event::ForkSettled {
                 trailer: None,

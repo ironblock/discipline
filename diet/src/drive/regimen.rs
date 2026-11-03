@@ -690,6 +690,23 @@ fn warrant_lever(regimen: &Regimen) -> String {
     }
 }
 
+/// The shadow warrants lever (#1021): the warrants evaluated and never
+/// fired, joined by `+`; `none` without any.
+fn shadow_lever(regimen: &Regimen) -> String {
+    match crate::drive::session::interview_shadow(regimen) {
+        Ok(rules) if rules.is_empty() => "none".to_owned(),
+        Ok(rules) => format!(
+            "shadow:{}",
+            rules
+                .iter()
+                .map(|rule| rule.tag())
+                .collect::<Vec<_>>()
+                .join("+")
+        ),
+        Err(_) => UNDECLARED.to_owned(),
+    }
+}
+
 /// The state of each lever (docs/program.md §2) a session `serve` runs
 /// under `regimen`, with `output_cap` its output cap and where that came
 /// from ([`output_cap`]), sits at, by
@@ -823,6 +840,8 @@ pub fn serve_levers(regimen: &Regimen, output_cap: (u32, &str)) -> BTreeMap<Stri
             crate::drive::archive::Recall::lever(regimen),
         ),
         ("fork_warrant".to_owned(), warrant.clone()),
+        // #1021: the warrants evaluated and never fired.
+        ("interview_shadow".to_owned(), shadow_lever(regimen)),
         ("warrant_gate".to_owned(), warrant_gate_lever(regimen)),
         // #784: each settled tool call's touches into working memory.
         ("mechanical_capture".to_owned(), mechanical_lever(regimen)),

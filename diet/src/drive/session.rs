@@ -1047,6 +1047,20 @@ pub enum Event {
         /// The field that call recorded under.
         field: String,
     },
+    /// A fork a shadow warrant would have cut (#1021): evaluated, logged,
+    /// never sent.
+    Shadowed {
+        /// The turn it would have been cut in, or followed.
+        of_turn: u32,
+        /// The trunk request whose step or answer warranted it.
+        at: u64,
+        /// The warrant that would have fired it.
+        why: log::Warrant,
+        /// What would have fired it.
+        trigger: String,
+        /// The ask it would have used.
+        ask: String,
+    },
     /// The step warrants' classifier gate on one step: a probe's decision,
     /// the step's fallback to the patterns, or its decision dropped as stale.
     WarrantGated {
@@ -1239,6 +1253,64 @@ impl ToolLine {
 /// [`tool_loop::APPROVAL_POLICY`]: the regimen format does not register it.
 /// Absent or empty, no fork ever fires.
 pub const INTERVIEW_WARRANT: &str = "interview_warrant";
+
+/// The regimen key naming the warrants evaluated and never fired (#1021):
+/// each would-be fork is a `fork.shadowed` line, at no decode cost, so a
+/// manual session can score the automated policy against the operator's.
+pub const INTERVIEW_SHADOW: &str = "interview_shadow";
+
+/// The warrants a shadow may name (#1021): the gap's and the step's.
+const SHADOWABLE: &[log::Warrant] = &[
+    log::Warrant::Scoping,
+    log::Warrant::Read,
+    log::Warrant::Evidence,
+    log::Warrant::Trouble,
+    log::Warrant::Open,
+];
+
+/// The warrants `regimen` shadows under [`INTERVIEW_SHADOW`] (#1021), in
+/// the order it lists them; empty when it lists none.
+///
+/// # Errors
+///
+/// The key is not a list, an item is not one of the shadowable warrants,
+/// or it also fires under [`INTERVIEW_WARRANT`].
+pub fn interview_shadow(regimen: &Regimen) -> Result<Vec<log::Warrant>, String> {
+    let Some(value) = regimen.get(INTERVIEW_SHADOW) else {
+        return Ok(Vec::new());
+    };
+    let regimen::Value::Array(items) = value else {
+        return Err(format!("`{INTERVIEW_SHADOW}` is not a list"));
+    };
+    let firing = interview_warrant(regimen)?;
+    items
+        .iter()
+        .map(|item| {
+            let regimen::Value::String(word) = item else {
+                return Err(format!("`{INTERVIEW_SHADOW}` holds a non-string"));
+            };
+            let rule = log::Warrant::from_tag(word)
+                .filter(|rule| SHADOWABLE.contains(rule))
+                .ok_or_else(|| {
+                    format!(
+                        "`{INTERVIEW_SHADOW}` names `{word}`, which no shadow evaluates: {}",
+                        SHADOWABLE
+                            .iter()
+                            .map(|rule| rule.tag())
+                            .collect::<Vec<_>>()
+                            .join(", ")
+                    )
+                })?;
+            if firing.contains(&rule) {
+                return Err(format!(
+                    "`{word}` is in both `{INTERVIEW_WARRANT}` and `{INTERVIEW_SHADOW}`: a \
+                     warrant fires or shadows, not both"
+                ));
+            }
+            Ok(rule)
+        })
+        .collect()
+}
 
 /// The regimen key for the fork delivery lever.
 pub const FORK_DELIVERY: &str = "fork_delivery";
@@ -1461,6 +1533,11 @@ pub struct Interview {
     /// The warrants that look at what a step produced, and their numbers
     /// (#783).
     pub step: crate::drive::warrants::StepWarrants,
+    /// The warrants evaluated and never fired (#1021), as
+    /// [`interview_shadow`] read them: each would-be fork logged.
+    pub shadow: Vec<log::Warrant>,
+    /// Of [`Self::shadow`], the step warrants, with the regimen's numbers.
+    pub shadow_step: crate::drive::warrants::StepWarrants,
     /// Whether the operator may move the phase alone (#788), the
     /// regimen's `operator_unilateral`: on unless it says otherwise.
     pub operator_unilateral: bool,
@@ -2073,7 +2150,13 @@ fn firings(interview: &Interview, log: &[Logged], turn: u32, answer: &str) -> Ve
     } else {
         Vec::new()
     };
-    firings_over(interview, log, (turn, answer), &calls, true)
+    firings_over(
+        (interview, &interview.rules),
+        log,
+        (turn, answer),
+        &calls,
+        true,
+    )
 }
 
 /// The forks a step of `turn` warrants during the turn (#782): the per-call
@@ -2095,19 +2178,45 @@ fn step_firings(
         .into_iter()
         .filter(|call| ids.contains(&call.id))
         .collect();
-    firings_over(interview, log, (turn, said), &calls, false)
+    firings_over(
+        (interview, &interview.rules),
+        log,
+        (turn, said),
+        &calls,
+        false,
+    )
+}
+
+/// The forks the gap's shadow warrants would have cut after `turn`
+/// (#1021): `scoping` on a marked turn, `read` over the turn's routed calls,
+/// under the session's cadence; logged, never fired.
+fn shadow_firings(interview: &Interview, log: &[Logged], turn: u32, answer: &str) -> Vec<Firing> {
+    if interview.shadow.is_empty() {
+        return Vec::new();
+    }
+    let calls = if interview.shadow.contains(&log::Warrant::Read) {
+        routed(log, turn)
+    } else {
+        Vec::new()
+    };
+    firings_over(
+        (interview, &interview.shadow),
+        log,
+        (turn, answer),
+        &calls,
+        true,
+    )
 }
 
 /// [`firings`] over `calls`, the judgment ask on a marked turn only when
-/// `judge`.
+/// `judge`, under `rules`: the session's, or its shadow's (#1021).
 fn firings_over(
-    interview: &Interview,
+    (interview, rules): (&Interview, &[log::Warrant]),
     log: &[Logged],
     (turn, answer): (u32, &str),
     calls: &[Routed],
     judge: bool,
 ) -> Vec<Firing> {
-    let rules = &interview.rules;
     let intent = router::stated_intent(answer);
     // The working record, for an ask in a set that shows it (#595).
     let record = crate::meditation::render::entries(&interview.object);
@@ -2638,6 +2747,9 @@ struct State {
     deferred: Option<Deferred>,
     /// What the step warrants carry from step to step (#783).
     step_counters: crate::drive::warrants::Counters,
+    /// The shadow step warrants' own counts (#1021), so evaluating them
+    /// moves no real warrant's cooldown.
+    shadow_counters: crate::drive::warrants::Counters,
     /// The forks the step warrants fired this turn that run in its gap
     /// (#783): every step's under the gap timing, the final answer's under
     /// either.
@@ -2826,6 +2938,7 @@ impl State {
             pool_queue: std::collections::VecDeque::new(),
             deferred: None,
             step_counters: crate::drive::warrants::Counters::default(),
+            shadow_counters: crate::drive::warrants::Counters::default(),
             gap_firings: Vec::new(),
             // As far past the cooldown as `trouble`'s counter starts (#783).
             refute_steps: (99, 99),
@@ -6012,6 +6125,19 @@ pub fn line_of(logged: &Logged) -> log::Line {
             field: Some(field.clone()),
             reason: None,
             cut: None,
+        },
+        Event::Shadowed {
+            of_turn,
+            at,
+            why,
+            trigger,
+            ask,
+        } => log::Event::ForkShadowed {
+            of_turn: *of_turn,
+            at: *at,
+            why: *why,
+            trigger: trigger.clone(),
+            ask: ask.clone(),
         },
         Event::WarrantGated {
             request,
@@ -12200,9 +12326,18 @@ fn gap<S>(shared: &Shared<S>, state: &mut State, turn: u32, at: u64) -> Option<F
         })
         .unwrap_or_default()
         .into();
+    // What a shadow warrant would have cut here (#1021), read before the
+    // gap logs anything.
+    let shadows = state.interview.as_ref().map_or_else(Vec::new, |interview| {
+        shadow_firings(interview, &state.log, turn, answer)
+    });
     // Each fork screened out (#611), before the gap fires any.
     for skip in std::mem::take(&mut skipped) {
         state.push(skip);
+    }
+    // Each fork a shadow warrant would have cut, logged and never fired.
+    for firing in &shadows {
+        shadowed(state, (turn, at), firing);
     }
     // Then what the turn's steps warranted by their output (#783).
     let content = std::mem::take(&mut state.gap_firings);
@@ -12705,11 +12840,11 @@ fn content_firings(
     verdict: &Verdict,
 ) -> Vec<Firing> {
     use crate::drive::warrants::{Step, StepCall, ident};
-    let Some(warrants) = state
+    let Some((warrants, shadow)) = state
         .interview
         .as_ref()
-        .map(|interview| interview.step)
-        .filter(crate::drive::warrants::StepWarrants::any)
+        .map(|interview| (interview.step, interview.shadow_step))
+        .filter(|(warrants, shadow)| warrants.any() || shadow.any())
     else {
         return Vec::new();
     };
@@ -12751,10 +12886,54 @@ fn content_firings(
         ),
         calls,
     };
+    if shadow.any() {
+        shadow_step(state, (turn, request), &step);
+    }
+    if !warrants.any() {
+        return Vec::new();
+    }
     let mut counters = std::mem::take(&mut state.step_counters);
     let fired = verdict_gates(&warrants, &mut counters, &step, verdict);
     state.step_counters = counters;
     pinned_firings(fired, request)
+}
+
+/// The shadow step warrants on one step (#1021): evaluated on the
+/// patterns, never a classifier, with counts of their own; each fork they
+/// would have cut logged, none fired.
+fn shadow_step(
+    state: &mut State,
+    (turn, request): (u32, u64),
+    step: &crate::drive::warrants::Step,
+) {
+    let Some(warrants) = state
+        .interview
+        .as_ref()
+        .map(|interview| interview.shadow_step)
+    else {
+        return;
+    };
+    let mut counters = std::mem::take(&mut state.shadow_counters);
+    let fired = crate::drive::warrants::gates(&warrants, &mut counters, step);
+    state.shadow_counters = counters;
+    for firing in pinned_firings(fired, request) {
+        shadowed(state, (turn, request), &firing);
+    }
+}
+
+/// `firing`, a fork a shadow warrant would have cut, logged (#1021).
+fn shadowed(state: &mut State, (turn, at): (u32, u64), firing: &Firing) {
+    let ask = firing.pinned.map_or_else(
+        || firing.ask.tag().to_owned(),
+        |template| template.name().to_ascii_lowercase(),
+    );
+    state.push(Event::Shadowed {
+        of_turn: turn,
+        at,
+        why: firing.why,
+        trigger: firing.trigger.clone(),
+        ask,
+    });
 }
 
 /// The gates one step fires under `verdict`: the patterns'; a classifier's
@@ -18256,6 +18435,13 @@ pub(in crate::drive) mod tests {
                     check_sha256: "c".repeat(64),
                 },
             },
+            Event::Shadowed {
+                of_turn: 1,
+                at: 3,
+                why: log::Warrant::Trouble,
+                trigger: "trouble:3".to_owned(),
+                ask: "gotchas".to_owned(),
+            },
         ];
         let mut kinds = std::collections::BTreeSet::new();
         for event in &events {
@@ -18311,9 +18497,10 @@ pub(in crate::drive) mod tests {
                 Event::Retried { .. } => 48,
                 Event::Graded { .. } => 49,
                 Event::MeditationSkipped { .. } => 50,
+                Event::Shadowed { .. } => 51,
             });
         }
-        assert_eq!(kinds.len(), 51, "a variant has no sample");
+        assert_eq!(kinds.len(), 52, "a variant has no sample");
         events
             .into_iter()
             .enumerate()
@@ -18882,6 +19069,13 @@ pub(in crate::drive) mod tests {
                 right: false,
                 timed_out: Some(true),
                 check_sha256: "c".repeat(64),
+            },
+            log::Event::ForkShadowed {
+                of_turn: 1,
+                at: 3,
+                why: log::Warrant::Trouble,
+                trigger: "trouble:3".to_owned(),
+                ask: "gotchas".to_owned(),
             },
         ]
     }
@@ -21896,6 +22090,8 @@ pub(in crate::drive) mod tests {
             pool_chunk: POOL_CHUNK_DEFAULT,
             timing: Timing::Gap,
             step: crate::drive::warrants::StepWarrants::DEFAULTS,
+            shadow: Vec::new(),
+            shadow_step: crate::drive::warrants::StepWarrants::DEFAULTS,
             operator_unilateral: true,
             served_batch: None,
             refutation: None,
@@ -27578,6 +27774,105 @@ pub(in crate::drive) mod tests {
         assert!(!wrote);
         reads_whole(&session);
         tidy(&[&tree]);
+    }
+
+    /// A session with no firing warrant and `shadow` evaluated, its trunk
+    /// playing `acts` in `tree`, any fork it cut failing the test.
+    fn shadowing(tree: &Path, acts: Vec<Vec<Step>>, shadow: &[log::Warrant]) -> Session<Canned> {
+        std::fs::write(tree.join("notes.md"), "a note\n").expect("a note");
+        let mut interview = interviewing(&[]);
+        interview.shadow = shadow.to_vec();
+        interview.shadow_step = crate::drive::warrants::StepWarrants {
+            evidence: shadow.contains(&log::Warrant::Evidence),
+            trouble: shadow.contains(&log::Warrant::Trouble),
+            open: shadow.contains(&log::Warrant::Open),
+            ..crate::drive::warrants::StepWarrants::DEFAULTS
+        };
+        Session::open_with(
+            Canned::new(acts),
+            looping(),
+            None,
+            Some(tools(
+                Confinement::Unconfined,
+                tree,
+                &["cat"],
+                None,
+                Decider::Decline,
+            )),
+            None,
+            Some(interview),
+        )
+        .forking_through(Canned::new(Vec::<Vec<Step>>::new()))
+    }
+
+    /// Each `fork.shadowed` line's warrant and trigger.
+    fn shadows(log: &[Logged]) -> Vec<(log::Warrant, String)> {
+        log.iter()
+            .filter_map(|logged| match &logged.event {
+                Event::Shadowed { why, trigger, .. } => Some((*why, trigger.clone())),
+                _ => None,
+            })
+            .collect()
+    }
+
+    /// #1021: a shadow `trouble` warrant on a step whose command failed, and
+    /// a shadow `read` at the gap after a turn that read a file: each fork
+    /// they would have cut is a `fork.shadowed` line, and none is fired.
+    #[test]
+    fn shadow_warrants_log_their_forks_and_fire_none() {
+        let tree = scratch("shadow-warrants");
+        let session = shadowing(
+            &tree,
+            vec![
+                vec![bash("call-1", "cat missing.md")],
+                vec![bash("call-2", "cat notes.md")],
+                deltas(&["Read it. Next, I will write the schema."]),
+            ],
+            &[log::Warrant::Trouble, log::Warrant::Read],
+        );
+        session.ask("look around", None).expect("accepted");
+        let log = wait_until(&session, "the turn and its gap", settled);
+        let shadowed = shadows(&log);
+        assert!(
+            shadowed
+                .iter()
+                .any(|(why, _)| *why == log::Warrant::Trouble),
+            "{shadowed:?}"
+        );
+        assert!(
+            shadowed
+                .iter()
+                .any(|(why, trigger)| *why == log::Warrant::Read && trigger.contains("call-2")),
+            "{shadowed:?}"
+        );
+        assert!(
+            !log.iter()
+                .any(|logged| matches!(logged.event, Event::Forked { .. })),
+            "a shadow fires nothing"
+        );
+        tidy(&[&tree]);
+    }
+
+    /// #1021: a shadow names the gap's and the step's warrants, never one
+    /// that also fires; the lever says which.
+    #[test]
+    fn interview_shadow_is_refused_where_it_overlaps_or_names_no_warrant() {
+        let read = |text: &str| interview_shadow(&regimen::parse(text).expect("a regimen"));
+        assert_eq!(
+            read("interview_shadow = [\"read\", \"trouble\"]\n"),
+            Ok(vec![log::Warrant::Read, log::Warrant::Trouble])
+        );
+        assert_eq!(read(""), Ok(Vec::new()));
+        assert!(
+            read("interview_warrant = [\"read\"]\ninterview_shadow = [\"read\"]\n")
+                .is_err_and(|why| why.contains("both"))
+        );
+        for word in ["operator", "meditation", "refutation", "nope"] {
+            assert!(
+                read(&format!("interview_shadow = [\"{word}\"]\n")).is_err(),
+                "{word}"
+            );
+        }
     }
 
     /// A session with self-capture on, every `every` silent turns, and the

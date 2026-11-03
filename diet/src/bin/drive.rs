@@ -1850,6 +1850,11 @@ fn serving_interview(
         diet::drive::warrant_gate::read(&read).map_err(|why| format!("{path}: {why}"))?;
     // #783: the warrants that look at what a step produced.
     let step = session::step_warrants(&read, &rules).map_err(|why| format!("{path}: {why}"))?;
+    // #1021: the warrants evaluated and never fired, and theirs among the
+    // step's.
+    let shadow = session::interview_shadow(&read).map_err(|why| format!("{path}: {why}"))?;
+    let shadow_step =
+        session::step_warrants(&read, &shadow).map_err(|why| format!("{path}: {why}"))?;
     // #788: whether the operator may move the phase alone.
     let operator_unilateral =
         session::operator_unilateral(&read).map_err(|why| format!("{path}: {why}"))?;
@@ -1920,6 +1925,9 @@ fn serving_interview(
         None => object,
     };
     Ok((!rules.is_empty()
+        // #1021: a shadow is scored against the operator's forks and keeps,
+        // which need a working object.
+        || !shadow.is_empty()
         || self_capture.is_some()
         || mechanical
         || refutation.is_some()
@@ -1967,6 +1975,8 @@ fn serving_interview(
             pool_chunk,
             served_batch,
             step,
+            shadow,
+            shadow_step,
             operator_unilateral,
             refutation,
         }))
