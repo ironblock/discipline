@@ -4,8 +4,12 @@
 # - `interview_warrant` names `scoping` alone: an interview only through the operator's scoping toggle on an ask
 #   (rule (b), fired at the gap under the default `gap` cadence, on a marked turn and nothing else);
 # - `interview_timing = "gap"`: with no step warrant firing there is nothing to cut during the turn;
-# - `interview_shadow` names the other four: evaluated on the patterns, logged as `fork.shadowed`, never fired, so
-#   the session scores the automated policy against the operator's own `fork` and `keep`, offline;
+# - `interview_shadow` names the other four: evaluated on the patterns, logged as `fork.shadowed`, never fired on
+#   their own;
+# - `interview_shadow_offer = "chips"` (#1031): each shadow is offered on its step as a suggestion the operator
+#   accepts or rejects, every answer logged. The maintainer, 2026-11-03: "my intended use is to see UI offering a
+#   chip off of a particular node... giving me the opportunity to accept or reject it." Shown, a shadow is no longer
+#   independent of the operator's own forks: the acceptance is the measure, and the start row says chips;
 # - self-capture under contract set c3 (#1016): a note in the model's own words, always kept, observed or
 #   self-stated.
 # Everything else is that draft's, and its header's notes hold here too.
@@ -46,6 +50,7 @@ self_capture_contract = "c3"
 interview_warrant = ["scoping"]
 interview_timing = "gap"
 interview_shadow = ["read", "evidence", "trouble", "open"]
+interview_shadow_offer = "chips"
 mechanical_capture = "on"
 capture_modality = "fields"
 fork_asks = "v4"

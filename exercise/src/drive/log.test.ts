@@ -417,7 +417,30 @@ describe('the operator\u2019s gestures, as the fold names their lines (#1021)', 
   it('puts a shadow warrant\u2019s would-be fork on the step it would have fired at, quietly', () => {
     const answer = nodes.find((n) => n.kind === 'assistant' && n.id === '7');
     expect(answer?.kind === 'assistant' && answer.shadowed).toEqual([
-      { why: 'read', trigger: 'call:document-read:call-1', ask: 'finding' },
+      { seq: 12, why: 'read', trigger: 'call:document-read:call-1', ask: 'finding', offered: false },
     ]);
+  });
+});
+
+describe('the shadows offered as suggestions, as the fold names their answers (#1031)', () => {
+  const session = fold(logOf('a-v34-shadow-suggestions.jsonl'));
+  const nodes = session.eras.flatMap((era) => era.nodes);
+  const shadowsAt = (id: string) => {
+    const node = nodes.find((n) => n.kind === 'assistant' && n.id === id);
+    return node?.kind === 'assistant' ? node.shadowed : undefined;
+  };
+
+  it('puts each answer on the shadow it answers, with the question it would have asked', () => {
+    expect(shadowsAt('7')).toEqual([
+      { seq: 12, why: 'read', trigger: 'call:document-read:call-1', ask: 'finding', question: 'What did the read find?', offered: false, answer: 'accepted' },
+      { seq: 13, why: 'open', trigger: 'open:7', ask: 'open_next', question: 'What is open next?', offered: false, answer: 'rejected' },
+    ]);
+    expect(shadowsAt('3')).toEqual([{ seq: 14, why: 'trouble', trigger: 'trouble:3', ask: 'gotchas', question: 'What went wrong?', offered: false, answer: 'unanswered' }]);
+  });
+
+  it('offers them only where the start line says chips', () => {
+    const chips = logOf('a-v34-shadow-suggestions.jsonl').map((line) => (line.kind === 'session.start' ? { ...line, levers: { interview_shadow_offer: 'chips' } } : line));
+    const offered = fold(chips).eras.flatMap((era) => era.nodes).flatMap((n) => (n.kind === 'assistant' ? (n.shadowed ?? []) : []));
+    expect(offered.map((shadow) => shadow.offered)).toEqual([true, true, true]);
   });
 });

@@ -28,6 +28,7 @@ import meditationReconciles from '../../../diet/formats/log/fixtures/valid/a-v8-
 import toolCallRan from '../../../diet/formats/log/fixtures/valid/a-v3-tool-call-that-ran.jsonl?raw';
 import forks from '../../../diet/formats/log/fixtures/valid/a-v5-scoping-fork-that-patched-and-a-read-fork-that-declined.jsonl?raw';
 import gestures from '../../../diet/formats/log/fixtures/valid/a-v32-operator-keep-fork-and-shadow.jsonl?raw';
+import suggestions from '../../../diet/formats/log/fixtures/valid/a-v34-shadow-suggestions.jsonl?raw';
 import { App, PHASES } from '../App.tsx';
 import { fold } from '../session/fold.ts';
 import { SessionView } from '../ui/SessionView.tsx';
@@ -1110,8 +1111,10 @@ export const ServedKeepFromTheRawText: Story = {
     await waitFor(async () => expect(says(canvasElement)).toBe('the session has ended'));
     const slow = { timeout: 5_000 };
     await cornerClick(await page.findByRole('button', { name: 'Keep from call call-1' }));
-    // The log holds a shadow at this step; the live drive shows none.
+    // The log holds a shadow at this step; the live drive shows none, as a mark or as a suggestion: its start line
+    // names no `chips` (#1031).
     await expect(page.queryByText('would fork · read → finding')).toBeNull();
+    await expect(page.queryByText('this automatic fork would have fired, using this question:')).toBeNull();
     const raw = await page.findByLabelText('What call call-1 logged', undefined, slow);
     await expect(raw.textContent).toBe('a note\n');
     // Select "a note" in the raw view, as a person would.
@@ -1133,6 +1136,35 @@ export const ServedKeepFromTheRawText: Story = {
   },
 };
 
+/** The v34 fixture's session as it stood awaiting, before any shadow was answered, its start line saying `chips`. */
+const offering = suggestions
+  .trimEnd()
+  .split('\n')
+  .map((line) => JSON.parse(line) as { seq: number; kind: string; levers?: Record<string, string> })
+  .filter((line) => line.seq <= 15)
+  .map((line) => JSON.stringify(line.kind === 'session.start' ? { ...line, levers: { interview_shadow_offer: 'chips' } } : line))
+  .join('\n');
+
+/** `?drive` (#1031): under `chips`, each shadow is a suggestion on the step it names -- the question its fork would ask --
+ * which the operator accepts, firing it as their fork, or rejects; each answer is posted. */
+export const ServedShadowSuggestions: Story = {
+  name: '?drive: a shadow offered as a suggestion, accepted or rejected',
+  args: { drive: true, web: posting(offering) },
+  play: async ({ canvasElement }) => {
+    const page = within(canvasElement.ownerDocument.body);
+    const slow = { timeout: 5_000 };
+    // Each of the three shadows is offered, with the question it would ask.
+    await waitFor(async () => expect(page.getAllByText('this automatic fork would have fired, using this question:')).toHaveLength(3), slow);
+    await expect(page.getByText('What did the read find?')).toBeTruthy();
+    posted.length = 0;
+    await userEvent.click(page.getByRole('button', { name: 'Accept: What did the read find?' }));
+    await waitFor(async () => expect(posted).toEqual([{ kind: 'suggestion', shadow: 12, answer: 'accept' }]), slow);
+    posted.length = 0;
+    await userEvent.click(page.getByRole('button', { name: 'Reject: What went wrong?' }));
+    await waitFor(async () => expect(posted).toEqual([{ kind: 'suggestion', shadow: 14, answer: 'reject' }]), slow);
+  },
+};
+
 /** A replay of a drive (#1021): where a shadow warrant would have forked shows quietly on its step, to review against
  * where the operator forked; and no gesture is offered, the session being over. */
 export const ReplayShowsTheShadows: Story = {
@@ -1148,6 +1180,24 @@ export const ReplayShowsTheShadows: Story = {
     const page = within(canvasElement);
     await expect(await page.findByText('would fork · read → finding')).toBeTruthy();
     await expect(page.queryByRole('button', { name: /^(Fork at|Keep from) / })).toBeNull();
+  },
+};
+
+/** A replay of a drive that offered its shadows (#1031): each mark says how the operator answered it. */
+export const ReplayShowsTheAnswers: Story = {
+  name: 'replay: each shadow offered, and how it was answered',
+  render: () => (
+    <SessionView
+      session={fold(suggestions.trimEnd().split('\n').map((line) => respelled(JSON.parse(line) as LogLine)))}
+      surface={{ curtain: true, gaps: false }}
+      composer={{ phases: PHASES }}
+    />
+  ),
+  play: async ({ canvasElement }) => {
+    const page = within(canvasElement);
+    await expect(await page.findByText('would fork · read → finding · accepted')).toBeTruthy();
+    await expect(page.getByText('would fork · trouble → gotchas · unanswered')).toBeTruthy();
+    await expect(page.queryByRole('button', { name: /^(Accept|Reject): / })).toBeNull();
   },
 };
 

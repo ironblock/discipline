@@ -355,6 +355,8 @@ export type TimeoutNear = V0.TimeoutNearLine;
 export type ForkSkipped = V0.ForkSkippedLine;
 /** A fork a shadow warrant would have cut, never sent (v32, #1021). Folded, not yet drawn. */
 export type ForkShadowed = V0.ForkShadowedLine;
+/** The operator's answer to a shadow offered as a suggestion (v34, #1031): accepted, rejected, or let go. */
+export type Suggestion = V0.SuggestionLine;
 /** A step's warrant-gate decision by a classifier, one line per probe, or its fallback (v8, #850). Folded, not yet
  * drawn: the kitchen sink writes them (#862), and the page draws them next. */
 export type WarrantGated = V0.WarrantGatedLine;
@@ -403,6 +405,7 @@ export type LogLine =
   | TimeoutNear
   | ForkSkipped
   | ForkShadowed
+  | Suggestion
   | RequestRetried
   | Grade
   | MeditationSkipped

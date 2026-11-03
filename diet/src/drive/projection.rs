@@ -188,6 +188,28 @@ pub fn sidecar_value(projection: &Projection) -> crate::formats::record::json::V
     if let Some(refusal) = &projection.refusal {
         fields.insert("refusal".to_owned(), Value::String(refusal.clone()));
     }
+    // Each shadow warrant's fires and acts (#1031): absent with none.
+    if !projection.shadows.is_empty() {
+        let count = |many: usize| Value::Integer(i64::try_from(many).unwrap_or(i64::MAX));
+        fields.insert(
+            "shadows".to_owned(),
+            Value::Object(
+                projection
+                    .shadows
+                    .iter()
+                    .map(|(why, counted)| {
+                        (
+                            (*why).to_owned(),
+                            Value::Object(BTreeMap::from([
+                                ("fires".to_owned(), count(counted.fires)),
+                                ("acts".to_owned(), count(counted.acts)),
+                            ])),
+                        )
+                    })
+                    .collect(),
+            ),
+        );
+    }
     // An offline projection's gaps (#879): absent for serve's own.
     if !projection.unfilled.is_empty() {
         fields.insert(
@@ -238,6 +260,45 @@ pub struct Projection {
     /// only the running session held it (#879), each with why: a field's
     /// dotted name, and the reason.
     pub unfilled: BTreeMap<String, String>,
+    /// Each shadow warrant's counts (#1031), by its tag: fires, the
+    /// `fork.shadowed` lines, and acts, the ones a suggestion accepted. The
+    /// start line's `interview_shadow_offer` lever says whether they were
+    /// offered at all.
+    pub shadows: BTreeMap<&'static str, ShadowCount>,
+}
+
+/// One shadow warrant's two numbers (#1031), never one rate.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct ShadowCount {
+    /// The shadows it logged.
+    pub fires: usize,
+    /// Of them, the ones the operator accepted as a suggestion.
+    pub acts: usize,
+}
+
+/// Each shadow warrant's fires and acts in `lines` (#1031).
+fn shadow_counts(lines: &[log::Line]) -> BTreeMap<&'static str, ShadowCount> {
+    let mut whys = BTreeMap::new();
+    let mut counts: BTreeMap<&'static str, ShadowCount> = BTreeMap::new();
+    for line in lines {
+        match &line.event {
+            Line::ForkShadowed { why, .. } => {
+                whys.insert(line.seq, why.tag());
+                counts.entry(why.tag()).or_default().fires += 1;
+            }
+            Line::Suggestion {
+                shadow,
+                outcome: log::SuggestionOutcome::Accepted,
+                ..
+            } => {
+                if let Some(why) = whys.get(shadow) {
+                    counts.entry(why).or_default().acts += 1;
+                }
+            }
+            _ => {}
+        }
+    }
+    counts
 }
 
 /// What [`kept`] wrote for a projection (#645).
@@ -579,6 +640,7 @@ pub fn project_in(
         repairs: Vec::new(),
         refusal: None,
         unfilled: BTreeMap::new(),
+        shadows: shadow_counts(lines),
     })
 }
 
@@ -1004,6 +1066,7 @@ impl<'a> Walk<'a> {
             Line::TimeoutNear { .. } => log::Kind::TimeoutNear,
             Line::ForkSkipped { .. } => log::Kind::ForkSkipped,
             Line::ForkShadowed { .. } => log::Kind::ForkShadowed,
+            Line::Suggestion { .. } => log::Kind::Suggestion,
             Line::Flag { .. } => log::Kind::Flag,
             Line::MeditationHeld { .. } => log::Kind::MeditationHeld,
             Line::MeditationSkipped { .. } => log::Kind::MeditationSkipped,
@@ -1145,6 +1208,7 @@ impl<'a> Walk<'a> {
             | Line::TimeoutNear { .. }
             | Line::ForkSkipped { .. }
             | Line::ForkShadowed { .. }
+            | Line::Suggestion { .. }
             | Line::Capture { .. }
             // The operator's ruling on a phase proposal (#124): a meditation it
             // declares has its own row.
@@ -3415,6 +3479,34 @@ mod tests {
             .map(|u| u.text.as_deref())
             .collect();
         assert_eq!(named, vec![Some("ls -la (")]);
+    }
+
+    /// #1031: the sidecar counts each warrant's shadows -- fires, the
+    /// shadows logged, and acts, the ones the operator accepted -- as two
+    /// numbers, never one rate.
+    #[test]
+    fn the_sidecar_counts_each_warrants_fires_and_acts() {
+        use crate::formats::record::json::Value;
+        let text = include_str!("../../formats/log/fixtures/valid/a-v34-shadow-suggestions.jsonl");
+        let lines = log::parse(text).expect("the fixture reads");
+        let projected = project(&lines, &regime(), None).expect("projected");
+        let count = |fires: i64, acts: i64| {
+            Value::Object(BTreeMap::from([
+                ("acts".to_owned(), Value::Integer(acts)),
+                ("fires".to_owned(), Value::Integer(fires)),
+            ]))
+        };
+        let Value::Object(sidecar) = sidecar_value(&projected) else {
+            unreachable!("an object");
+        };
+        assert_eq!(
+            sidecar.get("shadows"),
+            Some(&Value::Object(BTreeMap::from([
+                ("open".to_owned(), count(1, 0)),
+                ("read".to_owned(), count(1, 1)),
+                ("trouble".to_owned(), count(1, 0)),
+            ])))
+        );
     }
 
     /// #612: a meditation that applied a prune names it on its row -- the pruned

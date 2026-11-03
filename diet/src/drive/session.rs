@@ -52,7 +52,7 @@
 //! header line, a turn counter, a `request` per call that the call's other
 //! events cite by its sequence number, and a `turn.settled` with a reason.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::fmt;
 use std::sync::{Arc, Condvar, Mutex, MutexGuard, PoisonError};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
@@ -128,6 +128,8 @@ vocabulary! {
         Keep => "keep",
         /// Fork off the trunk at a step or tool result (#1021).
         Fork => "fork",
+        /// Answer a shadow's suggestion: accept or reject it (#1031).
+        Suggestion => "suggestion",
     }
 }
 
@@ -213,6 +215,12 @@ vocabulary! {
         NotOnTheTrunk => "not-on-the-trunk",
         /// An operator's fork naming no pinned fork ask (#1021).
         NotAPinnedAsk => "not-a-pinned-ask",
+        /// An answer naming no shadow offered as a suggestion (#1031): no
+        /// `fork.shadowed` line, or shadows not offered in this session.
+        NotASuggestion => "not-a-suggestion",
+        /// An answer to a suggestion already answered, or logged unanswered
+        /// (#1031).
+        AnsweredAlready => "answered-already",
     }
 }
 
@@ -1063,6 +1071,17 @@ pub enum Event {
         trigger: String,
         /// The ask it would have used.
         ask: String,
+        /// The question it would have asked (#1031).
+        question: String,
+    },
+    /// The operator's answer to a shadow offered as a suggestion (#1031).
+    Suggestion {
+        /// The `fork.shadowed` line it answers.
+        shadow: u64,
+        /// Accepted, rejected, or unanswered.
+        outcome: log::SuggestionOutcome,
+        /// Accepted, the operator's fork it fired.
+        fork: Option<u64>,
     },
     /// The step warrants' classifier gate on one step: a probe's decision,
     /// the step's fallback to the patterns, or its decision dropped as stale.
@@ -1261,6 +1280,50 @@ pub const INTERVIEW_WARRANT: &str = "interview_warrant";
 /// each would-be fork is a `fork.shadowed` line, at no decode cost, so a
 /// manual session can score the automated policy against the operator's.
 pub const INTERVIEW_SHADOW: &str = "interview_shadow";
+
+/// The regimen key saying how the shadows appear while the operator drives
+/// (#1031): `hidden`, logged only, or `chips`, each offered on the step it
+/// names as a suggestion the operator accepts or rejects. Absent, `hidden`.
+/// Recorded on the start line: while chips are shown, the operator's own
+/// forks are no longer independent of the automation.
+pub const INTERVIEW_SHADOW_OFFER: &str = "interview_shadow_offer";
+
+/// How the shadows appear while the operator drives (#1031).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ShadowOffer {
+    /// Logged only, never shown live.
+    Hidden,
+    /// Each offered as a suggestion the operator accepts or rejects.
+    Chips,
+}
+
+impl ShadowOffer {
+    /// Its word, as the regimen and the start line say it.
+    #[must_use]
+    pub const fn word(self) -> &'static str {
+        match self {
+            Self::Hidden => "hidden",
+            Self::Chips => "chips",
+        }
+    }
+}
+
+/// How `regimen` shows its shadows under [`INTERVIEW_SHADOW_OFFER`]
+/// (#1031).
+///
+/// # Errors
+///
+/// The key is neither `hidden` nor `chips`.
+pub fn interview_shadow_offer(regimen: &Regimen) -> Result<ShadowOffer, String> {
+    match regimen.get(INTERVIEW_SHADOW_OFFER) {
+        None => Ok(ShadowOffer::Hidden),
+        Some(regimen::Value::String(word)) if word == "hidden" => Ok(ShadowOffer::Hidden),
+        Some(regimen::Value::String(word)) if word == "chips" => Ok(ShadowOffer::Chips),
+        Some(_) => Err(format!(
+            "`{INTERVIEW_SHADOW_OFFER}` is neither `hidden` nor `chips`"
+        )),
+    }
+}
 
 /// The warrants a shadow may name (#1021): the gap's and the step's.
 const SHADOWABLE: &[log::Warrant] = &[
@@ -1541,6 +1604,9 @@ pub struct Interview {
     pub shadow: Vec<log::Warrant>,
     /// Of [`Self::shadow`], the step warrants, with the regimen's numbers.
     pub shadow_step: crate::drive::warrants::StepWarrants,
+    /// How each shadow appears while the operator drives (#1031), the
+    /// regimen's [`INTERVIEW_SHADOW_OFFER`].
+    pub shadow_offer: ShadowOffer,
     /// Whether the operator may move the phase alone (#788), the
     /// regimen's `operator_unilateral`: on unless it says otherwise.
     pub operator_unilateral: bool,
@@ -2756,6 +2822,8 @@ struct State {
     /// The shadow step warrants' own counts (#1021), so evaluating them
     /// moves no real warrant's cooldown.
     shadow_counters: crate::drive::warrants::Counters,
+    /// The shadows offered as suggestions (#1031).
+    suggestions: Suggestions,
     /// The forks the step warrants fired this turn that run in its gap
     /// (#783): every step's under the gap timing, the final answer's under
     /// either.
@@ -2945,6 +3013,7 @@ impl State {
             deferred: None,
             step_counters: crate::drive::warrants::Counters::default(),
             shadow_counters: crate::drive::warrants::Counters::default(),
+            suggestions: Suggestions::default(),
             gap_firings: Vec::new(),
             // As far past the cooldown as `trouble`'s counter starts (#783).
             refute_steps: (99, 99),
@@ -3256,7 +3325,8 @@ impl State {
                 | CommandKind::MovePhase
                 | CommandKind::Grade
                 | CommandKind::Keep
-                | CommandKind::Fork => {
+                | CommandKind::Fork
+                | CommandKind::Suggestion => {
                     unreachable!("a tangent, background or phase ruling carries no idle gap")
                 }
             };
@@ -3343,12 +3413,29 @@ impl State {
         } else {
             to
         };
+        // A suggestion the turn moved on from, or the session ended on, is
+        // logged unanswered (#1031).
+        if matches!(to, Settlement::Turn | Settlement::Ended) {
+            self.unanswered();
+        }
         if to == Settlement::Ended {
             self.stop_jobs();
         }
         let from = self.settlement;
         self.settlement = to;
         self.push(Event::Settled { from, to });
+    }
+
+    /// Each suggestion not yet answered, logged `unanswered` (#1031).
+    fn unanswered(&mut self) {
+        for shadow in std::mem::take(&mut self.suggestions.offered).into_keys() {
+            self.suggestions.answered.insert(shadow);
+            self.push(Event::Suggestion {
+                shadow,
+                outcome: log::SuggestionOutcome::Unanswered,
+                fork: None,
+            });
+        }
     }
 
     /// Stop every running background job as the session ends (#614), and
@@ -4832,6 +4919,83 @@ impl<S: Streaming + 'static> Session<S> {
         Ok(entry.as_str().to_owned())
     }
 
+    /// Answer the shadow at the `fork.shadowed` line `shadow`, offered as a
+    /// suggestion (#1031). Rejected, a `suggestion` line says so. Accepted,
+    /// its fork fires as the operator's ([`Self::fork`]'s path), at the
+    /// shadow's trunk request with the shadow's ask, and the line names that
+    /// fork, whose seq is returned. Neither ends an idle gap.
+    ///
+    /// # Errors
+    ///
+    /// [`Refusal::Ended`]; [`Refusal::NotASuggestion`] for a line that is no
+    /// shadow offered; [`Refusal::AnsweredAlready`] for one answered, or
+    /// logged unanswered; and, accepted, any of [`Self::fork`]'s refusals of
+    /// its place, the suggestion staying open.
+    pub fn suggestion(
+        &self,
+        shadow: u64,
+        answer: SuggestionAnswer,
+    ) -> Result<Option<u64>, Rejected> {
+        let mut state = self.shared.lock();
+        let offered = if state.settlement == Settlement::Ended {
+            Err(Refusal::Ended)
+        } else if state.suggestions.answered.contains(&shadow) {
+            Err(Refusal::AnsweredAlready)
+        } else {
+            state
+                .suggestions
+                .offered
+                .get(&shadow)
+                .cloned()
+                .ok_or(Refusal::NotASuggestion)
+        };
+        let (at, firing) = match offered {
+            Ok(offered) => offered,
+            Err(because) => {
+                let refused = state.refuse(CommandKind::Suggestion, because);
+                drop(state);
+                self.shared.changed.notify_all();
+                return Err(Rejected::Refused(refused));
+            }
+        };
+        if answer == SuggestionAnswer::Reject {
+            state.admit_within_the_gap();
+            state.suggestions.offered.remove(&shadow);
+            state.suggestions.answered.insert(shadow);
+            state.push(Event::Suggestion {
+                shadow,
+                outcome: log::SuggestionOutcome::Rejected,
+                fork: None,
+            });
+            drop(state);
+            self.shared.changed.notify_all();
+            return Ok(None);
+        }
+        let firing = Firing {
+            why: log::Warrant::Operator,
+            trigger: "operator".to_owned(),
+            offered: None,
+            ..firing
+        };
+        // Cut where a fork at the shadow's trunk request is: the line that
+        // answered that request, its calls or its words.
+        let place = state
+            .log
+            .iter()
+            .find(|logged| match &logged.event {
+                Event::Called { request, .. } | Event::Answered { request, .. } => *request == at,
+                _ => false,
+            })
+            .map_or(at, |logged| logged.seq);
+        self.operator_fork(
+            state,
+            (CommandKind::Suggestion, Some(place)),
+            Ok(firing),
+            Some(shadow),
+        )
+        .map(Some)
+    }
+
     /// Fork off the trunk as the operator (#1021): at the step or tool
     /// result the logged line `at` names -- a step's text, a tool result,
     /// or a trunk answer -- or, with none, at the trunk's end; asking the
@@ -4848,17 +5012,32 @@ impl<S: Streaming + 'static> Session<S> {
     /// a line that is no step, tool result or trunk answer, or no trunk yet;
     /// and [`Refusal::NotOnTheTrunk`] for one a meditation replaced.
     pub fn fork(&self, at: Option<u64>, ask: &OperatorAsk) -> Result<u64, Rejected> {
-        let mut state = self.shared.lock();
+        let state = self.shared.lock();
+        self.operator_fork(state, (CommandKind::Fork, at), operator_firing(ask), None)
+    }
+
+    /// The operator's fork (#1021) of `firing` at the logged line `at`, for
+    /// `command`; for an accepted suggestion (#1031), `shadow` names the
+    /// `fork.shadowed` line, answered by a `suggestion` line once the fork
+    /// is logged. Returns the fork's seq.
+    fn operator_fork(
+        &self,
+        mut state: MutexGuard<'_, State>,
+        (command, at): (CommandKind, Option<u64>),
+        firing: Result<Firing, Refusal>,
+        shadow: Option<u64>,
+    ) -> Result<u64, Rejected> {
         let because = match state.settlement {
             Settlement::Ended => Err(Refusal::Ended),
             Settlement::Turn | Settlement::Capture => Err(Refusal::InFlight),
-            Settlement::Awaiting => operator_firing(ask)
-                .and_then(|firing| forked_at(&state, at).map(|place| (firing, place))),
+            Settlement::Awaiting => {
+                firing.and_then(|firing| forked_at(&state, at).map(|place| (firing, place)))
+            }
         };
         let (firing, (_, request, cut, prefix)) = match because {
             Ok(fired) => fired,
             Err(because) => {
-                let refused = state.refuse(CommandKind::Fork, because);
+                let refused = state.refuse(command, because);
                 drop(state);
                 self.shared.changed.notify_all();
                 return Err(Rejected::Refused(refused));
@@ -4881,6 +5060,15 @@ impl<S: Streaming + 'static> Session<S> {
             .rev()
             .find(|logged| matches!(logged.event, Event::Forked { .. }))
             .map_or(0, |logged| logged.seq);
+        if let Some(shadow) = shadow {
+            state.suggestions.offered.remove(&shadow);
+            state.suggestions.answered.insert(shadow);
+            state.push(Event::Suggestion {
+                shadow,
+                outcome: log::SuggestionOutcome::Accepted,
+                fork: Some(fork),
+            });
+        }
         let Some(fired) = fired else {
             // Refused unsent for the pool: settled already, the session back
             // to awaiting.
@@ -6147,12 +6335,23 @@ pub fn line_of(logged: &Logged) -> log::Line {
             why,
             trigger,
             ask,
+            question,
         } => log::Event::ForkShadowed {
             of_turn: *of_turn,
             at: *at,
             why: *why,
             trigger: trigger.clone(),
             ask: ask.clone(),
+            question: Some(question.clone()),
+        },
+        Event::Suggestion {
+            shadow,
+            outcome,
+            fork,
+        } => log::Event::Suggestion {
+            shadow: *shadow,
+            outcome: *outcome,
+            fork: *fork,
         },
         Event::WarrantGated {
             request,
@@ -6530,6 +6729,7 @@ fn command_of(command: CommandKind) -> log::Command {
         CommandKind::Grade => log::Command::Grade,
         CommandKind::Keep => log::Command::Keep,
         CommandKind::Fork => log::Command::Fork,
+        CommandKind::Suggestion => log::Command::Suggestion,
     }
 }
 
@@ -6566,6 +6766,8 @@ fn refusal_of(refusal: Refusal) -> log::Refusal {
         Refusal::NoWorkingMemory => log::Refusal::NoWorkingMemory,
         Refusal::NotOnTheTrunk => log::Refusal::NotOnTheTrunk,
         Refusal::NotAPinnedAsk => log::Refusal::NotAPinnedAsk,
+        Refusal::NotASuggestion => log::Refusal::NotASuggestion,
+        Refusal::AnsweredAlready => log::Refusal::AnsweredAlready,
     }
 }
 
@@ -9312,6 +9514,25 @@ pub enum OperatorAsk {
     Pinned(String),
     /// The operator's own words, sent as written.
     Text(String),
+}
+
+/// The shadows offered as suggestions (#1031).
+#[derive(Debug, Default)]
+struct Suggestions {
+    /// Each not yet answered, by its `fork.shadowed` line: the trunk
+    /// request it is at, and the firing it would have made.
+    offered: BTreeMap<u64, (u64, Firing)>,
+    /// Each a `suggestion` line answered.
+    answered: BTreeSet<u64>,
+}
+
+/// The operator's answer to a shadow's suggestion (#1031).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SuggestionAnswer {
+    /// Fire the shadow's fork as the operator's.
+    Accept,
+    /// Decline it.
+    Reject,
 }
 
 /// The firing the operator's `ask` makes (#1021), or why it is refused.
@@ -12956,7 +13177,21 @@ fn shadowed(state: &mut State, (turn, at): (u32, u64), firing: &Firing) {
         why: firing.why,
         trigger: firing.trigger.clone(),
         ask,
+        question: firing.question.clone(),
     });
+    // Offered as a suggestion (#1031): the operator may fire it.
+    if state
+        .interview
+        .as_ref()
+        .is_some_and(|interview| interview.shadow_offer == ShadowOffer::Chips)
+        && let Some(logged) = state.log.last()
+    {
+        let shadow = logged.seq;
+        state
+            .suggestions
+            .offered
+            .insert(shadow, (at, firing.clone()));
+    }
 }
 
 /// The gates one step fires under `verdict`: the patterns'; a classifier's
@@ -17999,7 +18234,7 @@ pub(in crate::drive) mod tests {
     /// has a sample, and so a line. One entry per variant is its length.
     #[allow(clippy::too_many_lines)]
     fn one_of_every_event() -> Vec<Logged> {
-        let events = vec![
+        let mut events = vec![
             Event::Started {
                 phase_document: None,
                 run: None,
@@ -18502,8 +18737,15 @@ pub(in crate::drive) mod tests {
                 why: log::Warrant::Trouble,
                 trigger: "trouble:3".to_owned(),
                 ask: "gotchas".to_owned(),
+                question: "What went wrong?".to_owned(),
             },
         ];
+        // #1031: the shadow just above, rejected.
+        events.push(Event::Suggestion {
+            shadow: events.len() as u64 - 1,
+            outcome: log::SuggestionOutcome::Rejected,
+            fork: None,
+        });
         let mut kinds = std::collections::BTreeSet::new();
         for event in &events {
             kinds.insert(match event {
@@ -18559,9 +18801,10 @@ pub(in crate::drive) mod tests {
                 Event::Graded { .. } => 49,
                 Event::MeditationSkipped { .. } => 50,
                 Event::Shadowed { .. } => 51,
+                Event::Suggestion { .. } => 52,
             });
         }
-        assert_eq!(kinds.len(), 52, "a variant has no sample");
+        assert_eq!(kinds.len(), 53, "a variant has no sample");
         events
             .into_iter()
             .enumerate()
@@ -19138,6 +19381,12 @@ pub(in crate::drive) mod tests {
                 why: log::Warrant::Trouble,
                 trigger: "trouble:3".to_owned(),
                 ask: "gotchas".to_owned(),
+                question: Some("What went wrong?".to_owned()),
+            },
+            log::Event::Suggestion {
+                shadow: 53,
+                outcome: log::SuggestionOutcome::Rejected,
+                fork: None,
             },
         ]
     }
@@ -19605,12 +19854,13 @@ pub(in crate::drive) mod tests {
                     .collect::<Vec<_>>()
             ),
             "ask cancel declare-meditation end open-tangent close-tangent background ratify-phase \
-             edit-entry flag-entry refill-anyway start-phase propose-phase move-phase grade keep fork"
+             edit-entry flag-entry refill-anyway start-phase propose-phase move-phase grade keep fork \
+             suggestion"
         );
         assert_eq!(
             tags(&Refusal::ALL.iter().map(|it| it.tag()).collect::<Vec<_>>()),
             "in-flight ended nothing-in-flight nothing-to-meditate no-phase-graph not-a-phase \
-             already-in-phase no-phase-edge stale tangent-open no-tangent bad-tangent not-the-scope nothing-running no-proposal unknown-entry not-live empty meditation-held nothing-held restates not-unilateral already-asked proposal-pending no-vision api-cap not-a-source not-in-source no-working-memory not-on-the-trunk not-a-pinned-ask"
+             already-in-phase no-phase-edge stale tangent-open no-tangent bad-tangent not-the-scope nothing-running no-proposal unknown-entry not-live empty meditation-held nothing-held restates not-unilateral already-asked proposal-pending no-vision api-cap not-a-source not-in-source no-working-memory not-on-the-trunk not-a-pinned-ask not-a-suggestion answered-already"
         );
         assert_eq!(
             tags(
@@ -22154,6 +22404,7 @@ pub(in crate::drive) mod tests {
             step: crate::drive::warrants::StepWarrants::DEFAULTS,
             shadow: Vec::new(),
             shadow_step: crate::drive::warrants::StepWarrants::DEFAULTS,
+            shadow_offer: ShadowOffer::Hidden,
             operator_unilateral: true,
             served_batch: None,
             refutation: None,
@@ -28016,6 +28267,205 @@ pub(in crate::drive) mod tests {
                 "{word}"
             );
         }
+    }
+
+    /// A session with `shadow` evaluated and offered as suggestions when
+    /// `offered` (#1031), its trunk playing `acts` in `tree` and the forks
+    /// the operator fires answering `forks`.
+    fn offering(
+        tree: &Path,
+        acts: Vec<Vec<Step>>,
+        (shadow, offered): (&[log::Warrant], bool),
+        forks: Vec<Vec<Step>>,
+    ) -> Session<Canned> {
+        std::fs::write(tree.join("notes.md"), "a note\n").expect("a note");
+        let mut interview = interviewing(&[]);
+        interview.shadow = shadow.to_vec();
+        interview.shadow_step = crate::drive::warrants::StepWarrants {
+            evidence: shadow.contains(&log::Warrant::Evidence),
+            trouble: shadow.contains(&log::Warrant::Trouble),
+            open: shadow.contains(&log::Warrant::Open),
+            ..crate::drive::warrants::StepWarrants::DEFAULTS
+        };
+        interview.shadow_offer = if offered {
+            ShadowOffer::Chips
+        } else {
+            ShadowOffer::Hidden
+        };
+        Session::open_with(
+            Canned::new(acts),
+            looping(),
+            None,
+            Some(tools(
+                Confinement::Unconfined,
+                tree,
+                &["cat"],
+                None,
+                Decider::Decline,
+            )),
+            None,
+            Some(interview),
+        )
+        .forking_through(Canned::new(forks))
+    }
+
+    /// Each `fork.shadowed` line's seq, warrant, trunk request and ask.
+    fn shadow_lines(log: &[Logged]) -> Vec<(u64, log::Warrant, u64, String)> {
+        log.iter()
+            .filter_map(|logged| match &logged.event {
+                Event::Shadowed { why, at, ask, .. } => Some((logged.seq, *why, *at, ask.clone())),
+                _ => None,
+            })
+            .collect()
+    }
+
+    /// Each `suggestion` line: the shadow, the outcome and the fork.
+    fn suggestion_lines(log: &[Logged]) -> Vec<(u64, log::SuggestionOutcome, Option<u64>)> {
+        log.iter()
+            .filter_map(|logged| match &logged.event {
+                Event::Suggestion {
+                    shadow,
+                    outcome,
+                    fork,
+                } => Some((*shadow, *outcome, *fork)),
+                _ => None,
+            })
+            .collect()
+    }
+
+    /// #1031: offered as chips, each shadow is a suggestion the operator
+    /// answers. Rejected, it is logged so, and a second answer is refused;
+    /// accepted, it fires as the operator's fork at the shadow's trunk
+    /// request with the shadow's ask, and is logged with that fork; one the
+    /// turn moved on from, or the session ended on, is logged unanswered.
+    #[test]
+    fn offered_shadows_are_answered_and_every_answer_is_logged() {
+        use log::SuggestionOutcome::{Accepted, Rejected as Declined, Unanswered};
+        let tree = scratch("shadow-suggestions");
+        let session = offering(
+            &tree,
+            vec![
+                vec![bash("call-1", "cat missing.md")],
+                vec![bash("call-2", "cat notes.md")],
+                deltas(&["Read it. Next, I will write the schema."]),
+                vec![bash("call-3", "cat missing.md")],
+                vec![bash("call-4", "cat notes.md")],
+                deltas(&["Read it again."]),
+            ],
+            (&[log::Warrant::Trouble, log::Warrant::Read], true),
+            vec![deltas(&["It holds a note."])],
+        );
+        session.ask("look around", None).expect("accepted");
+        let log = wait_until(&session, "the first turn and its gap", settled);
+        let first = shadow_lines(&log);
+        let of = |shadows: &[(u64, log::Warrant, u64, String)], why| {
+            shadows
+                .iter()
+                .find(|(_, warrant, _, _)| *warrant == why)
+                .cloned()
+                .expect("a shadow of that warrant")
+        };
+        let (trouble, _, _, _) = of(&first, log::Warrant::Trouble);
+        let (read, _, _, _) = of(&first, log::Warrant::Read);
+        assert_eq!(
+            session.suggestion(9_999, SuggestionAnswer::Accept),
+            Err(Rejected::Refused(Refusal::NotASuggestion))
+        );
+        assert_eq!(
+            session.suggestion(trouble, SuggestionAnswer::Reject),
+            Ok(None)
+        );
+        assert_eq!(
+            session.suggestion(trouble, SuggestionAnswer::Accept),
+            Err(Rejected::Refused(Refusal::AnsweredAlready))
+        );
+        // The read shadow is left open, and the next turn moves on from it.
+        session.ask("go on", None).expect("accepted");
+        let log = wait_until(&session, "the second turn and its gap", two_settled);
+        assert_eq!(
+            session.suggestion(read, SuggestionAnswer::Accept),
+            Err(Rejected::Refused(Refusal::AnsweredAlready))
+        );
+        let second: Vec<_> = shadow_lines(&log)
+            .into_iter()
+            .filter(|(seq, ..)| *seq > read)
+            .collect();
+        let (again, _, at, ask) = of(&second, log::Warrant::Read);
+        let (open, _, _, _) = of(&second, log::Warrant::Trouble);
+        let fork = session
+            .suggestion(again, SuggestionAnswer::Accept)
+            .expect("accepted")
+            .expect("a fork");
+        let (forked, _, wrote) = operator_forked(&session);
+        let Event::Forked {
+            why,
+            at: forked_at,
+            ask: router,
+            pinned,
+            ..
+        } = forked
+        else {
+            unreachable!("a fork line");
+        };
+        assert_eq!(why, log::Warrant::Operator);
+        assert_eq!(forked_at, at, "cut at the shadow's trunk request");
+        assert_eq!(
+            pinned.map_or_else(
+                || router.tag().to_owned(),
+                |template| template.name().to_ascii_lowercase()
+            ),
+            ask,
+            "the shadow's ask"
+        );
+        assert!(!wrote, "the operator's fork writes nothing");
+        session.end(None).expect("ended");
+        let log = session.events_from(0);
+        // A failed step's trouble offers several asks: each one left open is
+        // logged unanswered, in the order it was offered, the first turn's as
+        // the second began and the second's as the session ended.
+        let left = |shadows: &[(u64, log::Warrant, u64, String)], answered: u64| {
+            shadows
+                .iter()
+                .filter(|(seq, ..)| *seq != answered)
+                .map(|(seq, ..)| (*seq, Unanswered, None))
+                .collect::<Vec<_>>()
+        };
+        let mut expected = vec![(trouble, Declined, None)];
+        expected.extend(left(&first, trouble));
+        expected.push((again, Accepted, Some(fork)));
+        expected.extend(left(&second, again));
+        assert!(expected.contains(&(read, Unanswered, None)));
+        assert!(expected.contains(&(open, Unanswered, None)));
+        assert_eq!(suggestion_lines(&log), expected);
+        reads_whole(&session);
+        tidy(&[&tree]);
+    }
+
+    /// #1031: hidden, as before, a shadow is only logged: no answer names
+    /// one, and nothing is logged unanswered.
+    #[test]
+    fn hidden_shadows_take_no_answer_and_log_none() {
+        let tree = scratch("shadow-suggestions-hidden");
+        let session = offering(
+            &tree,
+            vec![
+                vec![bash("call-1", "cat missing.md")],
+                deltas(&["It is missing."]),
+            ],
+            (&[log::Warrant::Trouble], false),
+            Vec::new(),
+        );
+        session.ask("look around", None).expect("accepted");
+        let log = wait_until(&session, "the turn and its gap", settled);
+        let (trouble, ..) = shadow_lines(&log).first().cloned().expect("a shadow");
+        assert_eq!(
+            session.suggestion(trouble, SuggestionAnswer::Reject),
+            Err(Rejected::Refused(Refusal::NotASuggestion))
+        );
+        session.end(None).expect("ended");
+        assert_eq!(suggestion_lines(&session.events_from(0)), Vec::new());
+        reads_whole(&session);
+        tidy(&[&tree]);
     }
 
     /// #1021: the operator may fork at an earlier turn's tool result, so

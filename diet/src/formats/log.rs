@@ -268,6 +268,20 @@
 //! log that declares 28 or less and carries it is refused. For a reader of
 //! earlier logs, the migration is nothing: no session declared one.
 //!
+//! v34 (#1031) offers the shadow warrants' forks to the operator. A
+//! `fork.shadowed` line carries `question`, the question its fork would
+//! have asked. Under `interview_shadow_offer = "chips"` each is a
+//! suggestion the operator answers with the command `suggestion`, and each
+//! answer is a `suggestion` line: the `fork.shadowed` line it answers, the
+//! outcome (`accepted`, `rejected`, or `unanswered` when the turn moved on
+//! or the session ended first) and, accepted, the operator's fork it fired.
+//! A suggestion names an earlier `fork.shadowed` line no other suggestion
+//! answered; accepted, it names an earlier fork of `why: operator` at the
+//! shadow's trunk request, and otherwise none. The command's refusals are `not-a-suggestion` and
+//! `answered-already`. Each is refused in a log that declares 33 or less.
+//! For a reader of earlier logs, the migration is nothing: no session wrote
+//! them.
+//!
 //! v33 (#1022) records what a fork's answer wrote nothing of. A
 //! `fork.settled` line may carry `passed_over`: each region of a
 //! fields-route answer that wrote no entry, with why (`untagged`, prose or a
@@ -387,12 +401,12 @@ use super::record::vocabulary;
 struct LogParser;
 
 /// The version this module writes, as `session.start` states it.
-pub const VERSION: i64 = 33;
+pub const VERSION: i64 = 34;
 
 /// Every version this module reads.
 pub const READS: &[i64] = &[
     0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25,
-    26, 27, 28, 29, 30, 31, 32, 33,
+    26, 27, 28, 29, 30, 31, 32, 33, 34,
 ];
 
 /// How recent an input event must be, at the moment a turn settles, for the
@@ -490,6 +504,9 @@ vocabulary! {
         ForkSkipped => "fork.skipped",
         /// A fork a shadow warrant would have cut, never fired (v32, #1021).
         ForkShadowed => "fork.shadowed",
+        /// The operator's answer to a shadow's fork offered as a suggestion
+        /// (v34, #1031).
+        Suggestion => "suggestion",
         /// A phase's ground rules, as a note on an ask (v8, #787).
         PhaseNoted => "phase.noted",
         /// A trunk request's output cap cut below what the window alone
@@ -753,6 +770,8 @@ vocabulary! {
         Keep => "keep",
         /// The operator forked off the trunk (v32, #1021).
         Fork => "fork",
+        /// The operator answered a shadow's suggestion (v34, #1031).
+        Suggestion => "suggestion",
     }
 }
 
@@ -833,6 +852,12 @@ vocabulary! {
         NotOnTheTrunk => "not-on-the-trunk",
         /// An operator's fork naming no pinned fork ask (v32, #1021).
         NotAPinnedAsk => "not-a-pinned-ask",
+        /// A suggestion's answer naming no shadow offered to the operator
+        /// (v34, #1031).
+        NotASuggestion => "not-a-suggestion",
+        /// A suggestion's answer to a shadow already answered, or logged
+        /// unanswered (v34, #1031).
+        AnsweredAlready => "answered-already",
     }
 }
 
@@ -901,6 +926,18 @@ vocabulary! {
         Cancelled => "cancelled",
         /// It was never sent (v7, #406): `refused` names why.
         Refused => "refused",
+    }
+}
+
+vocabulary! {
+    /// How the operator answered a shadow's suggestion (v34, #1031).
+    SuggestionOutcome {
+        /// Accepted: its fork fired as the operator's.
+        Accepted => "accepted",
+        /// Rejected.
+        Rejected => "rejected",
+        /// Not answered before the turn moved on or the session ended.
+        Unanswered => "unanswered",
     }
 }
 
@@ -2293,6 +2330,20 @@ pub enum Event {
         /// The ask it would have used: its pinned template's name, or the
         /// router's ask.
         ask: String,
+        /// The question it would have asked (v34, #1031): what a suggestion
+        /// shows the operator. Absent before v34.
+        question: Option<String>,
+    },
+    /// The operator's answer to a shadow's fork offered as a suggestion
+    /// (v34, #1031): accepted, rejected, or left unanswered.
+    Suggestion {
+        /// The `seq` of the `fork.shadowed` line it answers.
+        shadow: u64,
+        /// How it was answered.
+        outcome: SuggestionOutcome,
+        /// Accepted, the `seq` of the operator's fork it fired; otherwise
+        /// absent.
+        fork: Option<u64>,
     },
     Reminded {
         /// The turn whose request carried it.
@@ -3320,6 +3371,59 @@ fn meditation_at(
 }
 
 /// What the whole-log rules of #374's forks (v5) carry from line to line.
+/// The shadows' suggestions a log has answered (v34, #1031).
+#[derive(Default)]
+struct Suggestions {
+    /// Each `fork.shadowed` line's `seq`, and the trunk request it is at.
+    shadows: BTreeMap<u64, u64>,
+    /// Each one a `suggestion` line answered.
+    answered: BTreeSet<u64>,
+    /// Each operator's fork's `seq`, and the trunk request it is at.
+    operator_forks: BTreeMap<u64, u64>,
+}
+
+impl Suggestions {
+    /// A `suggestion` line: it answers an earlier `fork.shadowed` line no
+    /// other answered; accepted, it names an earlier operator's fork at the
+    /// shadow's trunk request, and otherwise none.
+    fn answer(
+        &mut self,
+        shadow: u64,
+        outcome: SuggestionOutcome,
+        fork: Option<u64>,
+    ) -> Result<(), String> {
+        let Some(&shadow_at) = self.shadows.get(&shadow) else {
+            return Err(format!(
+                "a suggestion answering seq {shadow}, which is no earlier `fork.shadowed` line"
+            ));
+        };
+        if !self.answered.insert(shadow) {
+            return Err(format!(
+                "a second suggestion answering the shadow at seq {shadow}"
+            ));
+        }
+        match (outcome, fork) {
+            (SuggestionOutcome::Accepted, Some(fork)) => match self.operator_forks.get(&fork) {
+                Some(&at) if at == shadow_at => Ok(()),
+                Some(&at) => Err(format!(
+                    "an accepted suggestion's fork at seq {at}, where its shadow is at {shadow_at}"
+                )),
+                None => Err(format!(
+                    "an accepted suggestion naming seq {fork}, which is no earlier operator's fork"
+                )),
+            },
+            (SuggestionOutcome::Accepted, None) => {
+                Err("an accepted suggestion naming no fork".to_owned())
+            }
+            (_, Some(_)) => Err(format!(
+                "a suggestion `{}` naming a fork: only an accepted one fired any",
+                outcome.tag()
+            )),
+            (_, None) => Ok(()),
+        }
+    }
+}
+
 #[derive(Default)]
 struct Forks {
     /// The turns settled `final`.
@@ -3938,6 +4042,8 @@ fn check(lines: &[Line]) -> Result<(), LogError> {
     let mut jobs: BTreeMap<String, bool> = BTreeMap::new();
     // Self-capture calls (v7, #609), by id: what a skipped fork cites (#611).
     let mut captured: BTreeSet<String> = BTreeSet::new();
+    // The shadows' suggestions (v34, #1031): what each answers.
+    let mut suggestions = Suggestions::default();
     let mut claimed = false;
     let mut last_t = 0_u64;
     for (index, line) in lines.iter().enumerate() {
@@ -4098,6 +4204,7 @@ fn check(lines: &[Line]) -> Result<(), LogError> {
                     forks.arrival = Some(line.seq);
                 }
                 let checked = if *why == Warrant::Operator {
+                    suggestions.operator_forks.insert(line.seq, *forked_at);
                     forks.operator(line.seq, (*lane, *of_turn, *forked_at), *cut)
                 } else {
                     forks.fork(
@@ -4128,6 +4235,16 @@ fn check(lines: &[Line]) -> Result<(), LogError> {
             Event::Capture { call, .. } => {
                 captured.insert(call.clone());
             }
+            Event::ForkShadowed { at: shadow_at, .. } => {
+                suggestions.shadows.insert(line.seq, *shadow_at);
+            }
+            Event::Suggestion {
+                shadow,
+                outcome,
+                fork,
+            } => suggestions
+                .answer(*shadow, *outcome, *fork)
+                .map_err(|why| at(index, why))?,
             Event::ForkSkipped {
                 call: Some(call), ..
             } if !captured.contains(call) => {
@@ -4791,6 +4908,12 @@ fn from_object(object: &BTreeMap<String, Value>) -> Result<Line, String> {
             why: fields.tag("why", Warrant::from_tag)?,
             trigger: fields.string("trigger")?,
             ask: fields.string("ask")?,
+            question: fields.optional_string("question")?,
+        },
+        Kind::Suggestion => Event::Suggestion {
+            shadow: fields.count("shadow")?,
+            outcome: fields.tag("outcome", SuggestionOutcome::from_tag)?,
+            fork: fields.optional_count("fork")?,
         },
         Kind::Reminded => Event::Reminded {
             turn: fields.turn("turn")?,
@@ -5613,6 +5736,8 @@ pub enum Tags {
     RenderPlacement,
     /// [`BackgroundStatus`] (v7).
     BackgroundStatus,
+    /// [`SuggestionOutcome`] (v34).
+    SuggestionOutcome,
 }
 
 impl Tags {
@@ -5646,6 +5771,7 @@ impl Tags {
         Self::MeditationCarry,
         Self::RenderPlacement,
         Self::BackgroundStatus,
+        Self::SuggestionOutcome,
     ];
 
     /// The Rust type's name, which the bindings name the union after.
@@ -5680,6 +5806,7 @@ impl Tags {
             Self::MeditationCarry => "MeditationCarry",
             Self::RenderPlacement => "RenderPlacement",
             Self::BackgroundStatus => "BackgroundStatus",
+            Self::SuggestionOutcome => "SuggestionOutcome",
         }
     }
 
@@ -5720,6 +5847,7 @@ impl Tags {
             Self::MeditationCarry => of(MeditationCarry::ALL, MeditationCarry::tag),
             Self::RenderPlacement => of(RenderPlacement::ALL, RenderPlacement::tag),
             Self::BackgroundStatus => of(BackgroundStatus::ALL, BackgroundStatus::tag),
+            Self::SuggestionOutcome => of(SuggestionOutcome::ALL, SuggestionOutcome::tag),
         }
     }
 }
@@ -6077,6 +6205,26 @@ const fn may_v9(key: &'static str, holds: Holds) -> Field {
         holds,
         required: false,
         since: 9,
+    }
+}
+
+/// A key that arrived in v34, optional wherever its object is written.
+const fn may_v34(key: &'static str, holds: Holds) -> Field {
+    Field {
+        key,
+        holds,
+        required: false,
+        since: 34,
+    }
+}
+
+/// A key that arrived in v34 with its object, which always writes it.
+const fn must_v34(key: &'static str, holds: Holds) -> Field {
+    Field {
+        key,
+        holds,
+        required: true,
+        since: 34,
     }
 }
 
@@ -6569,6 +6717,7 @@ pub fn introduced(kind: Kind) -> i64 {
         Kind::Grade => 18,
         Kind::MeditationSkipped => 21,
         Kind::ForkShadowed => 32,
+        Kind::Suggestion => 34,
         _ => 0,
     }
 }
@@ -6633,6 +6782,16 @@ pub fn tag_introduced(tags: Tags, tag: &str) -> i64 {
             }));
     if gesture {
         return 32;
+    }
+    // The shadows' suggestions (#1031).
+    if (tags == Tags::Command && Command::from_tag(tag) == Some(Command::Suggestion))
+        || (tags == Tags::Refusal
+            && matches!(
+                Refusal::from_tag(tag),
+                Some(Refusal::NotASuggestion | Refusal::AnsweredAlready)
+            ))
+    {
+        return 34;
     }
     if tags == Tags::Refusal
         && matches!(
@@ -7049,6 +7208,15 @@ pub fn schema(kind: Kind) -> &'static [Field] {
                 must_v32("why", Tag(Tags::Warrant)),
                 must_v32("trigger", Text),
                 must_v32("ask", Text),
+                may_v34("question", Text),
+            ];
+            F
+        }
+        Kind::Suggestion => {
+            const F: &[Field] = &[
+                must_v34("shadow", Count),
+                must_v34("outcome", Tag(Tags::SuggestionOutcome)),
+                may_v34("fork", Count),
             ];
             F
         }
@@ -8419,13 +8587,29 @@ fn to_value(line: &Line) -> Value {
             why,
             trigger,
             ask,
+            question,
         } => {
             put("of_turn", count(u64::from(*of_turn)));
             put("at", count(*at));
             put("why", text(why.tag()));
             put("trigger", text(trigger));
             put("ask", text(ask));
+            if let Some(question) = question {
+                put("question", text(question));
+            }
             Kind::ForkShadowed
+        }
+        Event::Suggestion {
+            shadow,
+            outcome,
+            fork,
+        } => {
+            put("shadow", count(*shadow));
+            put("outcome", text(outcome.tag()));
+            if let Some(fork) = fork {
+                put("fork", count(*fork));
+            }
+            Kind::Suggestion
         }
         Event::Reminded { turn, text: note } => {
             put("turn", count(u64::from(*turn)));
@@ -10197,15 +10381,15 @@ mod tests {
     }
 
     /// #583, #878, #904, #555, #931, #936, #910, #942, #926, #932, #948, #971, #1016, #1021,
-    /// #1022: this module writes v33.
+    /// #1022, #1031: this module writes v34.
     #[test]
-    fn this_module_writes_v33_and_reads_every_version_before_it() {
-        assert_eq!(super::VERSION, 33);
+    fn this_module_writes_v34_and_reads_every_version_before_it() {
+        assert_eq!(super::VERSION, 34);
         assert_eq!(
             super::READS,
             &[
                 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22,
-                23, 24, 25, 26, 27, 28, 29, 30, 31, 32, 33
+                23, 24, 25, 26, 27, 28, 29, 30, 31, 32, 33, 34
             ]
         );
     }
@@ -10629,6 +10813,7 @@ mod tests {
                 why: Warrant::Trouble,
                 trigger: format!("trouble:{request}"),
                 ask: "gotchas".to_owned(),
+                question: Some("What went wrong?".to_owned()),
             },
             Event::ForkSettled {
                 trailer: None,
@@ -10927,6 +11112,84 @@ mod tests {
             timed_out: Some(true),
             check_sha256: "c".repeat(64),
         });
+        // v34 (#1031): the shadow's suggestion, rejected; a second shadow at
+        // the latest answered trunk request, accepted as the operator's fork.
+        let shadow = events
+            .iter()
+            .position(|event| matches!(event, Event::ForkShadowed { .. }))
+            .expect("a shadow") as u64;
+        events.push(Event::Suggestion {
+            shadow,
+            outcome: SuggestionOutcome::Rejected,
+            fork: None,
+        });
+        let answered = events
+            .iter()
+            .filter_map(|event| match event {
+                Event::Response { to_request, .. } => Some(*to_request),
+                _ => None,
+            })
+            .filter(|request| {
+                matches!(
+                    usize::try_from(*request)
+                        .ok()
+                        .and_then(|request| events.get(request)),
+                    Some(Event::Request {
+                        lane: Lane::Trunk,
+                        ..
+                    })
+                )
+            })
+            .max()
+            .expect("an answered trunk request");
+        let accepted = events.len() as u64;
+        events.extend([
+            Event::ForkShadowed {
+                of_turn: 5,
+                at: answered,
+                why: Warrant::Read,
+                trigger: "call:document-read:call-9".to_owned(),
+                ask: "finding".to_owned(),
+                question: Some("What did the read find?".to_owned()),
+            },
+            Event::Fork {
+                after_meditation: None,
+                lane: Lane::Interview,
+                of_turn: 5,
+                at: answered,
+                why: Warrant::Operator,
+                question: "what did the read find".to_owned(),
+                view: None,
+                trigger: Some("operator".to_owned()),
+                role: None,
+                seat: None,
+                ask: Some("finding".to_owned()),
+                hazard: None,
+                cut: None,
+                timing: None,
+                view_overridden: None,
+                prefix_shared: None,
+                reserved: None,
+                chunk: None,
+                offered: None,
+            },
+            Event::ForkSettled {
+                trailer: None,
+                fork: accepted + 1,
+                outcome: ForkOutcome::Decline,
+                prompt_tokens: None,
+                wall_ms: None,
+                refused: None,
+                pool: None,
+                not_run: None,
+                passed_over: Vec::new(),
+            },
+            Event::Suggestion {
+                shadow: accepted,
+                outcome: SuggestionOutcome::Accepted,
+                fork: Some(accepted + 1),
+            },
+        ]);
         events
             .into_iter()
             .enumerate()
@@ -12292,7 +12555,7 @@ mod tests {
             tags(Kind::ALL.iter().map(|it| it.tag()).collect()),
             "session.start ask settlement request refused delta stop.asked response \
              cancelled request.failed turn.settled idle.gap progress tool_call fork \
-             fork.settled patch meditation delivered recalled flag meditation.held patch.refused pruned phase.ruled phase.proposed phase.answered phase.started tangent.open tangent.close capture reminded background.ended notice timeout.near fork.skipped fork.shadowed phase.noted trunk.clamped trunk.waited warrant.gated request.retried grade meditation.skipped"
+             fork.settled patch meditation delivered recalled flag meditation.held patch.refused pruned phase.ruled phase.proposed phase.answered phase.started tangent.open tangent.close capture reminded background.ended notice timeout.near fork.skipped fork.shadowed suggestion phase.noted trunk.clamped trunk.waited warrant.gated request.retried grade meditation.skipped"
         );
         assert_eq!(
             tags(FailReason::ALL.iter().map(|it| it.tag()).collect()),
@@ -12301,7 +12564,7 @@ mod tests {
         assert_eq!(
             tags(Refusal::ALL.iter().map(|it| it.tag()).collect()),
             "in-flight ended nothing-in-flight meditation-not-built nothing-to-meditate no-phase-graph not-a-phase \
-             already-in-phase no-phase-edge stale tangent-open no-tangent bad-tangent not-the-scope nothing-running no-proposal unknown-entry not-live empty meditation-held nothing-held restates not-unilateral already-asked proposal-pending no-vision api-cap not-a-source not-in-source no-working-memory not-on-the-trunk not-a-pinned-ask"
+             already-in-phase no-phase-edge stale tangent-open no-tangent bad-tangent not-the-scope nothing-running no-proposal unknown-entry not-live empty meditation-held nothing-held restates not-unilateral already-asked proposal-pending no-vision api-cap not-a-source not-in-source no-working-memory not-on-the-trunk not-a-pinned-ask not-a-suggestion answered-already"
         );
         assert_eq!(
             tags(SettleReason::ALL.iter().map(|it| it.tag()).collect()),
