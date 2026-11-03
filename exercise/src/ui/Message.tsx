@@ -4,6 +4,7 @@ import type { AssistantNode, Folded, Gate, OffTrunk, SettledNode, SystemNode, To
 import { Block } from './Block.tsx';
 import { tokens, took } from './format.ts';
 import { Copy } from './Copy.tsx';
+import { ForkAction, KeepAction, ShadowMarks } from './Gestures.tsx';
 import { edgeOf, readingOf, warmOf, writingOf, writtenApart } from './flow.ts';
 import { Flowing } from './Flowing.tsx';
 import { FileResults } from './Files.tsx';
@@ -92,7 +93,12 @@ export function UserMessage({ node }: { readonly node: Folded<UserNode> }) {
       ]}
       provenance={node}
       id={node.id}
-      actions={<Copy text={node.text} />}
+      actions={
+        <>
+          <Copy text={node.text} />
+          <KeepAction logged={node.logged} label={`ask ${node.turn}`} />
+        </>
+      }
     >
       <Prose text={node.text} kind="ask" />
       {/* What the operator attached (#372): the screenshot, from its checked bytes, under the words. */}
@@ -213,9 +219,21 @@ export function AssistantMessage({ node, calls = [] }: { readonly node: Folded<A
       ]}
       provenance={node}
       id={node.id}
-      {...(!live && node.text !== '' ? { actions: <Copy text={node.text} /> } : {})}
+      {...(!live && (node.text !== '' || node.logged)
+        ? {
+            actions: (
+              <>
+                {node.text !== '' ? <Copy text={node.text} /> : null}
+                {/* The operator's gestures (#1021): fork at this step, or keep a span of what it said. */}
+                {node.logged ? <ForkAction at={node.logged} label={`step ${node.id}`} /> : null}
+                {node.logged && node.logged.text !== '' ? <KeepAction logged={node.logged} label={`step ${node.id}`} /> : null}
+              </>
+            ),
+          }
+        : {})}
     >
       {bare ? readLine : <AssistantBody node={node} live={live} long={long} showReasoning={showReasoning} thinking={thinking} setThinking={setThinking} streamingInto={streamingInto} />}
+      <ShadowMarks shadowed={node.shadowed} />
     </Block>
   );
 }

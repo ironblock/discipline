@@ -1,0 +1,107 @@
+/* The operator's gestures (#1021): a fork's picker and a keep's raw view, each a modal dialog over the session. */
+.ex-gesture {
+  max-width: min(46rem, calc(100vw - 2rem));
+  max-height: calc(100vh - 4rem);
+  padding: 1rem;
+  border: 1px solid var(--ex-rule, currentColor);
+  border-radius: 6px;
+  background: var(--ex-paper, Canvas);
+  color: inherit;
+}
+
+.ex-gesture::backdrop {
+  background: rgb(0 0 0 / 0.35);
+}
+
+.ex-gesture__title {
+  margin: 0 0 0.5rem;
+  font-size: 1rem;
+}
+
+.ex-gesture__hint {
+  margin: 0 0 0.5rem;
+  opacity: 0.7;
+}
+
+.ex-gesture__asks {
+  display: grid;
+  gap: 0.25rem;
+  margin: 0 0 0.5rem;
+  padding: 0;
+  list-style: none;
+}
+
+.ex-gesture__ask {
+  display: grid;
+  gap: 0.125rem;
+  width: 100%;
+  text-align: start;
+}
+
+.ex-gesture__ask-name {
+  font-family: var(--ex-mono, monospace);
+  font-weight: 600;
+}
+
+.ex-gesture__ask-text {
+  display: -webkit-box;
+  overflow: hidden;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 3;
+  opacity: 0.8;
+  white-space: pre-wrap;
+}
+
+.ex-gesture__more {
+  margin: 0 0 0.5rem;
+}
+
+.ex-gesture__own {
+  display: grid;
+  gap: 0.25rem;
+}
+
+.ex-gesture__own textarea {
+  min-height: 4rem;
+}
+
+.ex-gesture__raw {
+  max-height: 50vh;
+  overflow: auto;
+  margin: 0 0 0.5rem;
+  padding: 0.5rem;
+  border: 1px solid var(--ex-rule, currentColor);
+  font-family: var(--ex-mono, monospace);
+  white-space: pre-wrap;
+  user-select: text;
+}
+
+.ex-gesture__row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.ex-gesture__refusal {
+  opacity: 0.85;
+}
+
+/* Where a shadow warrant would have forked (#1021): quiet, never asked for. */
+.ex-shadow {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.25rem;
+  margin: 0.25rem 0 0;
+  padding: 0;
+  list-style: none;
+  font-family: var(--ex-mono, monospace);
+  font-size: 0.75em;
+  opacity: 0.55;
+}
+
+.ex-shadow__mark {
+  padding: 0 0.25rem;
+  border: 1px dashed currentColor;
+  border-radius: 3px;
+}

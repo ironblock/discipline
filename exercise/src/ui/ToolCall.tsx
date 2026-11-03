@@ -4,6 +4,7 @@ import type { AssistantNode, Folded, ToolNode } from '../session/fold.ts';
 import { Block } from './Block.tsx';
 import { bytes, count, lines, size, took } from './format.ts';
 import { Copy } from './Copy.tsx';
+import { ForkAction, KeepAction } from './Gestures.tsx';
 import { alarmOf, approvalOf, callOf, callOutcomeOf, callRefusalOf, heldOf } from './sets.ts';
 import { usePromptOf } from './Approval.tsx';
 import { JudgedSegments } from './GateSegments.tsx';
@@ -134,6 +135,9 @@ export function ToolBlock({ node, caller, first = false }: { readonly node: Fold
         <>
           <Copy text={call.text} label={call.prompt === '$' ? 'copy command' : 'copy call'} />
           {output !== '' ? <Copy text={output} label="copy output" /> : null}
+          {/* The operator's gestures (#1021): fork at this result, or keep a span of it as the model was shown it. */}
+          {node.logged ? <ForkAction at={node.logged} label={`call ${node.call?.id ?? node.id}`} /> : null}
+          {node.logged && node.logged.text !== '' ? <KeepAction logged={node.logged} label={`call ${node.call?.id ?? node.id}`} /> : null}
         </>
       }
     >
