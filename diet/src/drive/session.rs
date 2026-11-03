@@ -2043,9 +2043,12 @@ struct Routed {
 /// about to do, as the router does; a read under the threshold forks
 /// nothing.
 fn firings(interview: &Interview, log: &[Logged], turn: u32, answer: &str) -> Vec<Firing> {
-    // During the turn (#782), the calls' forks were cut at their steps.
-    let calls = if interview.rules.contains(&log::Warrant::Read) && interview.timing == Timing::Gap
-    {
+    // During the turn (#782), `per_class` and `per_call` cut the calls'
+    // forks at their steps ([`step_firings`]); every other cadence forks on
+    // them here, under either timing (#1015).
+    let cut_at_steps = interview.timing == Timing::DuringTurn
+        && matches!(interview.cadence, Cadence::PerClass | Cadence::PerCall);
+    let calls = if interview.rules.contains(&log::Warrant::Read) && !cut_at_steps {
         routed(log, turn)
     } else {
         Vec::new()
@@ -24101,6 +24104,79 @@ pub(in crate::drive) mod tests {
             }),
         )
         .forking_through(Canned::new(forks))
+    }
+
+    /// The warrants of every fork `log` cut, in order.
+    fn fork_whys(log: &[Logged]) -> Vec<log::Warrant> {
+        log.iter()
+            .filter_map(|logged| match &logged.event {
+                Event::Forked { why, .. } => Some(*why),
+                _ => None,
+            })
+            .collect()
+    }
+
+    /// A session under `during_turn` and the default `gap` cadence, its
+    /// trunk playing `trunk` and its forks `forks`, under `warrants`.
+    fn during_turn_gap_cadence(
+        tree: &Path,
+        (trunk, forks): (Vec<Vec<Step>>, Vec<Vec<Step>>),
+        warrants: &[log::Warrant],
+    ) -> Session<Canned> {
+        std::fs::write(tree.join("notes.md"), "a note\n").expect("a note");
+        Session::open_with(
+            Canned::new(trunk),
+            looping(),
+            None,
+            Some(tools(
+                Confinement::Unconfined,
+                tree,
+                &["cat", "echo"],
+                None,
+                Decider::Decline,
+            )),
+            None,
+            Some(Interview {
+                cadence: Cadence::Gap,
+                timing: Timing::DuringTurn,
+                fork_slots: 1,
+                ..interviewing(warrants)
+            }),
+        )
+        .forking_through(Canned::new(forks))
+    }
+
+    /// #1015: under `during_turn` and the default `gap` cadence, the turn's
+    /// last read forks at the gap, as under `gap` timing: only `per_class`
+    /// and `per_call` cut the calls' forks at their steps, so before this
+    /// neither the steps nor the gap cut it.
+    #[test]
+    fn a_read_forks_at_the_gap_under_during_turn_and_the_gap_cadence() {
+        let tree = scratch("during-turn-gap-read");
+        let session = during_turn_gap_cadence(
+            &tree,
+            (
+                vec![
+                    vec![bash("call-1", "cat notes.md")],
+                    deltas(&["Done. Next, I will write the schema."]),
+                ],
+                vec![deltas(&["LEARNED: notes.md holds a note\n"])],
+            ),
+            &[log::Warrant::Read],
+        );
+        session.ask("look around", None).expect("accepted");
+        let log = wait_until(&session, "the gap's read fork", |log| {
+            !fork_outcomes(log).is_empty()
+        });
+        assert_eq!(fork_whys(&log), [log::Warrant::Read], "{log:#?}");
+        let forked = log
+            .iter()
+            .find_map(|logged| matches!(logged.event, Event::Forked { .. }).then_some(logged.seq))
+            .expect("forked");
+        assert!(
+            turn_settled_at(&log).is_some_and(|settled| settled < forked),
+            "cut at the gap, after the turn settled"
+        );
     }
 
     /// A session whose regimen runs background commands is held by its
