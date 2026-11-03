@@ -1,18 +1,18 @@
 {
   "example": "exercise/src/drive/examples/kitchen-sink.json",
-  "example_sha256": "60de4440e66ba0ece231c93279c5a3852c52d78b490658d0687d7df817ecde23",
+  "example_sha256": "661369e9736e02e1b3d01b632908ab7bcf249074bc6e14f3ab47543aa42c1839",
   "table": {
-    "id": "6e8394f66ec4",
+    "id": "620d3f1ad0b5",
     "patterns": {
-      "path": "scripts/hygiene-admitted-6e8394f66ec4-patterns.tsv",
+      "path": "scripts/hygiene-admitted-620d3f1ad0b5-patterns.tsv",
       "sha256": "938e6be7675e09e848d780415303face2dd31a8ef8564d3cacc39536fbe13179"
     },
     "exceptions": {
-      "path": "scripts/hygiene-admitted-6e8394f66ec4-exceptions.tsv",
-      "sha256": "94b54cdb9e4a00d73eea34dfc90622559d7e3441d7820a95115fe30ed1840ec8"
+      "path": "scripts/hygiene-admitted-620d3f1ad0b5-exceptions.tsv",
+      "sha256": "eb2b4db286f89fc8552151b74a9ff9122d196ee968ab326f5a17831a9c9f08fa"
     },
     "hashes": {
-      "path": "scripts/hygiene-admitted-6e8394f66ec4-hashes.txt",
+      "path": "scripts/hygiene-admitted-620d3f1ad0b5-hashes.txt",
       "sha256": "3d0d8da5e532e11723bf71a5c218812fce29fd6322c126f11386683a5b58bdb3"
     }
   },
@@ -23,7 +23,7 @@
     },
     "exceptions": {
       "path": "scripts/hygiene-exceptions.tsv",
-      "sha256": "94b54cdb9e4a00d73eea34dfc90622559d7e3441d7820a95115fe30ed1840ec8"
+      "sha256": "eb2b4db286f89fc8552151b74a9ff9122d196ee968ab326f5a17831a9c9f08fa"
     },
     "hashes": {
       "path": "scripts/hygiene-hashes.txt",
