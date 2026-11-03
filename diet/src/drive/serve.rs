@@ -912,6 +912,7 @@ impl<S: Streaming + 'static> Serving<S> {
                 (409, body)
             }
             Err(Rejected::NoSuchTurn(_) | Rejected::BadGap(_)) => (400, BTreeMap::new()),
+            Err(Rejected::KeptAlready(_)) => unreachable!("an ask is no keep"),
         }
     }
 
@@ -968,6 +969,7 @@ impl<S: Streaming + 'static> Serving<S> {
             // Not a command the session could refuse, or a gap it could not
             // log: either way nothing was logged, and the request was wrong.
             Rejected::NoSuchTurn(_) | Rejected::BadGap(_) => (400, BTreeMap::new()),
+            Rejected::KeptAlready(entry) => kept_already(entry),
         };
         match command {
             Command::Ask(text, files) => self.asked(&text, &files, gap, (scoping, task)),
@@ -1706,6 +1708,21 @@ fn respond_with(stream: &mut TcpStream, status: u16, headers: &str, body: &Value
     let _ = stream.write_all(reply.as_bytes());
     let _ = stream.flush();
     let _ = stream.shutdown(Shutdown::Write);
+}
+
+/// A keep the operator made before (#1021): refused `restates`, naming the
+/// entry that holds it.
+fn kept_already(entry: String) -> (u16, BTreeMap<String, Value>) {
+    (
+        409,
+        BTreeMap::from([
+            (
+                "refused".to_owned(),
+                Value::String(Refusal::Restates.tag().to_owned()),
+            ),
+            ("entry".to_owned(), Value::String(entry)),
+        ]),
+    )
 }
 
 #[cfg(test)]

@@ -2477,8 +2477,9 @@ pub struct PatchEntry {
     pub category: Option<String>,
     /// Who vouches for it (v31, #1016): `observed`, a self-capture note
     /// whose evidence quote was found in what the model observed that turn,
-    /// or `self-stated`, one whose was not or that gave none; written by
-    /// contract set c3 alone.
+    /// or `self-stated`, one whose was not or that gave none, written by
+    /// contract set c3 alone; or `operator` (v32, #1021), the operator's
+    /// keep -- a new entry, or their endorsement of one already held.
     pub authority: Option<String>,
 }
 
@@ -5975,8 +5976,13 @@ pub const PATCH_ENTRY: &[Field] = &[
     may_v31("authority", Holds::Text),
 ];
 
-/// What a `patch` entry's `authority` may say (v31, #1016).
-pub const AUTHORITIES: &[&str] = &["observed", "self-stated"];
+/// What a `patch` entry's `authority` may say: a self-capture note's (v31,
+/// #1016), or the operator's keep (v32, #1021).
+pub const AUTHORITIES: &[&str] = &["observed", "self-stated", OPERATOR_AUTHORITY];
+
+/// A `patch` entry's `authority` when the operator kept it (v32, #1021): a
+/// new entry, or their endorsement of one the model or a fork wrote.
+pub const OPERATOR_AUTHORITY: &str = "operator";
 
 /// An optional key that arrived in v5.
 const fn may_v5(key: &'static str, holds: Holds) -> Field {

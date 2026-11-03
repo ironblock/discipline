@@ -2535,7 +2535,7 @@ pub struct Admitted {
 }
 
 /// Why a command did not do what it asked.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Rejected {
     /// The session refused it, and logged the refusal (and any gap it
     /// carried, before it).
@@ -2546,6 +2546,9 @@ pub enum Rejected {
     /// The gap it carried cannot be logged, so neither it nor the command
     /// is: the command was not carried out.
     BadGap(GapError),
+    /// A keep of a span the operator already kept (#1021): refused
+    /// [`Refusal::Restates`], and logged, naming the entry that holds it.
+    KeptAlready(String),
 }
 
 /// An event and its place in the log.
@@ -4795,31 +4798,35 @@ impl<S: Streaming + 'static> Session<S> {
     /// [`Refusal::Restates`] for a span working memory already holds.
     pub fn keep(&self, from: u64, span: &str, tag: Option<&str>) -> Result<String, Rejected> {
         let mut state = self.shared.lock();
-        if let Some(because) = keep_refusal(&state, from, span) {
+        if let Err((because, held)) = keep_refusal(&state, from, span) {
             let refused = state.refuse(CommandKind::Keep, because);
             drop(state);
             self.shared.changed.notify_all();
-            return Err(Rejected::Refused(refused));
+            return Err(held.map_or(Rejected::Refused(refused), Rejected::KeptAlready));
         }
         state.admit_within_the_gap();
         let patch = kept_patch(&state, span);
         let Some(interview) = state.interview.as_mut() else {
             unreachable!("working memory was checked above");
         };
-        if interview.object.apply(&patch).is_err() {
-            unreachable!("a new entry no live one holds");
-        }
+        // A new entry, or -- the span restating a live entry the model or a
+        // fork wrote -- the operator's endorsement of it: its provenance
+        // recorded on that entry, which reads as the operator's from here.
+        let Ok(crate::object::Applied::Created(entry) | crate::object::Applied::Deduped(entry)) =
+            interview.object.apply(&patch)
+        else {
+            unreachable!("a keep the refusal admitted applies");
+        };
         let mut line = patched(None, &patch, &interview.object);
-        if let Event::Patched { entry, .. } = &mut line {
-            entry.category = tag.map(str::to_owned);
+        if let Event::Patched { entry: written, .. } = &mut line {
+            entry.as_str().clone_into(&mut written.id);
+            written.category = tag.map(str::to_owned);
+            written.authority = Some(log::OPERATOR_AUTHORITY.to_owned());
         }
         state.push(line);
         drop(state);
         self.shared.changed.notify_all();
-        let Patch::Add { id, .. } = patch else {
-            unreachable!("a keep adds");
-        };
-        Ok(id.as_str().to_owned())
+        Ok(entry.as_str().to_owned())
     }
 
     /// Fork off the trunk as the operator (#1021): at the step or tool
@@ -9469,31 +9476,37 @@ fn kept_patch(state: &State, span: &str) -> Patch {
     }
 }
 
-/// Why a keep of `span` from the line `from` is refused, if it is (#1021).
-fn keep_refusal(state: &State, from: u64, span: &str) -> Option<Refusal> {
+/// Why a keep of `span` from the line `from` is refused, if it is (#1021),
+/// with the entry that already holds it when the operator kept it before.
+fn keep_refusal(state: &State, from: u64, span: &str) -> Result<(), (Refusal, Option<String>)> {
+    let refused = |because: Refusal| Err((because, None));
     match state.settlement {
-        Settlement::Ended => return Some(Refusal::Ended),
-        Settlement::Turn | Settlement::Capture => return Some(Refusal::InFlight),
+        Settlement::Ended => return refused(Refusal::Ended),
+        Settlement::Turn | Settlement::Capture => return refused(Refusal::InFlight),
         Settlement::Awaiting => {}
     }
     let Some(interview) = state.interview.as_ref() else {
-        return Some(Refusal::NoWorkingMemory);
+        return refused(Refusal::NoWorkingMemory);
     };
     if span.trim().is_empty() {
-        return Some(Refusal::Empty);
+        return refused(Refusal::Empty);
     }
     let Some(source) = keep_source(state, from) else {
-        return Some(Refusal::NotASource);
+        return refused(Refusal::NotASource);
     };
     if !source.contains(span) {
-        return Some(Refusal::NotInSource);
+        return refused(Refusal::NotInSource);
     }
-    // A span a live entry already holds would fold into it, and the
-    // operator's authority with it.
+    // A span a live entry already holds is the operator's endorsement of it
+    // -- unless the operator kept it already: then the keep changes nothing.
     let mut trial = interview.object.clone();
     match trial.apply(&kept_patch(state, span)) {
-        Ok(crate::object::Applied::Created(_)) => None,
-        _ => Some(Refusal::Restates),
+        Ok(crate::object::Applied::Created(_)) => Ok(()),
+        Ok(crate::object::Applied::Deduped(held)) if !interview.object.by_operator(&held) => Ok(()),
+        Ok(crate::object::Applied::Deduped(held) | crate::object::Applied::Unchanged(held)) => {
+            Err((Refusal::Restates, Some(held.as_str().to_owned())))
+        }
+        _ => refused(Refusal::Restates),
     }
 }
 
@@ -27584,8 +27597,12 @@ pub(in crate::drive) mod tests {
         assert_eq!(refused(answered, "two Tables"), Some(Refusal::NotInSource));
         assert_eq!(refused(settled_at, "two tables"), Some(Refusal::NotASource));
         assert_eq!(refused(answered, "  "), Some(Refusal::Empty));
-        session.keep(answered, "two tables", None).expect("kept");
-        assert_eq!(refused(answered, "two tables"), Some(Refusal::Restates));
+        let kept = session.keep(answered, "two tables", None).expect("kept");
+        assert_eq!(
+            session.keep(answered, "two tables", None),
+            Err(Rejected::KeptAlready(kept)),
+            "the second keep names the first"
+        );
         assert!(session.events_from(0).iter().any(|logged| matches!(
             &logged.event,
             Event::Refused {
@@ -27601,6 +27618,82 @@ pub(in crate::drive) mod tests {
             bare.keep(answered, "hello", None),
             Err(Rejected::Refused(Refusal::NoWorkingMemory))
         ));
+        reads_whole(&session);
+    }
+
+    /// #1021: a keep of a model note's exact text is the operator's
+    /// endorsement of it: no new entry and no refusal; the note reads as the
+    /// operator's from here, and its `patch` line names it, `authority:
+    /// operator`.
+    #[test]
+    fn a_keep_of_a_model_notes_text_endorses_that_note() {
+        let session = Session::open_with(
+            Canned::new([deltas(&["The schema has two tables."])]),
+            template(),
+            None,
+            None,
+            None,
+            Some(interviewing(&[])),
+        );
+        session.ask("what is the schema?", None).expect("accepted");
+        let log = wait_until(&session, "the turn", settled);
+        let answered = seq_of(&log, |event| matches!(event, Event::Answered { .. }));
+        let note = crate::object::EntryId::new("r3/call-1/note").expect("an id");
+        {
+            let mut state = session.shared.lock();
+            let object = &mut state.interview.as_mut().expect("memory").object;
+            object
+                .apply(&Patch::Add {
+                    id: note.clone(),
+                    content: "two tables".to_owned(),
+                    provenance: crate::object::Provenance {
+                        turn: 1,
+                        lane: "self-capture".to_owned(),
+                        fork: None,
+                        tangent: None,
+                        index: 0,
+                    },
+                })
+                .expect("the model's note");
+        }
+        let entries = |session: &Session<Canned>| {
+            session
+                .shared
+                .lock()
+                .interview
+                .as_ref()
+                .expect("memory")
+                .object
+                .entries()
+                .count()
+        };
+        let before = entries(&session);
+        assert_eq!(
+            session.keep(answered, "two tables", Some("schema")),
+            Ok(note.as_str().to_owned()),
+            "the keep names the note it endorsed"
+        );
+        assert_eq!(entries(&session), before, "no new entry");
+        assert!(
+            session
+                .shared
+                .lock()
+                .interview
+                .as_ref()
+                .expect("memory")
+                .object
+                .by_operator(&note)
+        );
+        let log = session.events_from(0);
+        let Some(entry) = log.iter().rev().find_map(|logged| match &logged.event {
+            Event::Patched { entry, .. } => Some(entry.clone()),
+            _ => None,
+        }) else {
+            panic!("a patch line");
+        };
+        assert_eq!(entry.id, note.as_str());
+        assert_eq!(entry.authority.as_deref(), Some(log::OPERATOR_AUTHORITY));
+        assert_eq!(entry.category.as_deref(), Some("schema"));
         reads_whole(&session);
     }
 
