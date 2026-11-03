@@ -177,10 +177,13 @@ export function KeepAction({ logged, label }: { readonly logged: LoggedText; rea
 
 /**
  * Where the automation would have fired here (#1021): each fork a shadow warrant would have cut at this step, never
- * sent -- quiet, so the operator can see it without its being asked for.
+ * sent -- shown in a replay and the read-only views, to review afterwards against where the operator forked. Never
+ * during a live drive (where the gestures are taken): seen there, a shadow becomes a suggestion, and the operator's
+ * own forks stop being the independent label the automation is scored against. The log keeps them either way.
  */
 export function ShadowMarks({ shadowed }: { readonly shadowed: readonly Shadowed[] | undefined }) {
-  if (!shadowed || shadowed.length === 0) return null;
+  const live = useGestures() !== undefined;
+  if (live || !shadowed || shadowed.length === 0) return null;
   return (
     <ul className="ex-shadow" aria-label="where a shadow warrant would have forked">
       {shadowed.map((shadow, at) => (
