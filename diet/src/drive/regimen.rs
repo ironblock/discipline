@@ -1840,7 +1840,7 @@ mod tests {
             "none"
         );
         // #1031: how the shadows appear while the operator drives.
-        assert_eq!(at(&manual, "interview_shadow_offer"), "hidden");
+        assert_eq!(at(&manual, "interview_shadow_offer"), "chips");
         let offer =
             |text: &str| serve_levers(&regimen::parse(text).expect("a regimen"), (8192, "default"));
         assert_eq!(
