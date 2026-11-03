@@ -995,6 +995,16 @@ impl<S: Streaming + 'static> Serving<S> {
                 Ok(()) => (200, BTreeMap::new()),
                 Err(rejection) => rejected(rejection),
             },
+            // The operator's keep (#1021): the entry it wrote, by id.
+            Command::Keep(from, span, tag) => {
+                match self.session.keep(from, &span, tag.as_deref()) {
+                    Ok(entry) => (
+                        200,
+                        BTreeMap::from([("entry".to_owned(), Value::String(entry))]),
+                    ),
+                    Err(rejection) => rejected(rejection),
+                }
+            }
             // The operator's phase commands (#788).
             Command::StartPhase(phase) => match self.session.start_phase(&phase) {
                 Ok(()) => (200, BTreeMap::new()),
@@ -1069,6 +1079,9 @@ enum Command {
     MovePhase(String, bool),
     /// A scenario runner's grade of the latest turn (#942).
     Grade(crate::drive::session::Grade),
+    /// Keep this span of the logged line with this seq as an operator
+    /// entry, with an optional tag (#1021).
+    Keep(u64, String, Option<String>),
 }
 
 /// A command's word as a client written before #583's rename may send it,
@@ -1153,6 +1166,8 @@ impl Command {
             // #788: the operator's phase commands; none ends an idle gap.
             CommandKind::StartPhase => &["kind", "phase"],
             CommandKind::ProposePhase | CommandKind::MovePhase => &["kind", "to", "meditate"],
+            // #1021: the operator's keep ends no idle gap.
+            CommandKind::Keep => &["kind", "from", "span", "tag"],
             // #942: a runner's grade ends no idle gap.
             CommandKind::Grade => &[
                 "kind",
@@ -1249,6 +1264,21 @@ impl Command {
             }
             CommandKind::RefillAnyway => Some(Self::RefillAnyway),
             CommandKind::Grade => grade_of(object, task.clone()).map(Self::Grade),
+            CommandKind::Keep => {
+                match (object.get("from"), object.get("span"), object.get("tag")) {
+                    (Some(Value::Integer(from)), Some(Value::String(span)), tag) => {
+                        let tag = match tag {
+                            None => None,
+                            Some(Value::String(tag)) => Some(tag.clone()),
+                            Some(_) => return None,
+                        };
+                        u64::try_from(*from)
+                            .ok()
+                            .map(|from| Self::Keep(from, span.clone(), tag))
+                    }
+                    _ => None,
+                }
+            }
         }?;
         Some(Posted {
             command,

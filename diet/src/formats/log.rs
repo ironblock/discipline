@@ -724,6 +724,8 @@ vocabulary! {
         MovePhase => "move-phase",
         /// A scenario runner graded an attempt (v18, #942).
         Grade => "grade",
+        /// The operator kept a span of a logged line (v32, #1021).
+        Keep => "keep",
     }
 }
 
@@ -793,6 +795,12 @@ vocabulary! {
         /// An ask after the session's `max_api_requests` was reached (v12,
         /// #555): nothing more is sent.
         ApiCap => "api-cap",
+        /// A keep naming no line with text to keep from (v32, #1021).
+        NotASource => "not-a-source",
+        /// A keep whose span is not in the line it names (v32, #1021).
+        NotInSource => "not-in-source",
+        /// A keep in a session that keeps no working memory (v32, #1021).
+        NoWorkingMemory => "no-working-memory",
     }
 }
 
@@ -6424,6 +6432,18 @@ pub fn tag_introduced(tags: Tags, tag: &str) -> i64 {
     }
     if tags == Tags::Command && Command::from_tag(tag) == Some(Command::Grade) {
         return 18;
+    }
+    // The operator's gestures (#1021).
+    let gesture = (tags == Tags::Command && Command::from_tag(tag) == Some(Command::Keep))
+        || (tags == Tags::Refusal
+            && Refusal::from_tag(tag).is_some_and(|refusal| {
+                matches!(
+                    refusal,
+                    Refusal::NotASource | Refusal::NotInSource | Refusal::NoWorkingMemory
+                )
+            }));
+    if gesture {
+        return 32;
     }
     if tags == Tags::Refusal
         && matches!(

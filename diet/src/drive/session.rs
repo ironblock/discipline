@@ -124,6 +124,8 @@ vocabulary! {
         MovePhase => "move-phase",
         /// Log a scenario runner's grade of the latest turn (#942).
         Grade => "grade",
+        /// Keep an exact span of a logged line as an operator entry (#1021).
+        Keep => "keep",
     }
 }
 
@@ -196,6 +198,14 @@ vocabulary! {
         /// An ask after the session's `max_api_requests` was reached (#555):
         /// nothing more is sent.
         ApiCap => "api-cap",
+        /// A keep naming no line that holds text to keep from (#1021): not
+        /// an ask, an answer, a step's text or a tool result.
+        NotASource => "not-a-source",
+        /// A keep whose span is not, character for character, in the line
+        /// it names (#1021).
+        NotInSource => "not-in-source",
+        /// A keep in a session that keeps no working memory (#1021).
+        NoWorkingMemory => "no-working-memory",
     }
 }
 
@@ -3115,7 +3125,8 @@ impl State {
                 | CommandKind::StartPhase
                 | CommandKind::ProposePhase
                 | CommandKind::MovePhase
-                | CommandKind::Grade => {
+                | CommandKind::Grade
+                | CommandKind::Keep => {
                     unreachable!("a tangent, background or phase ruling carries no idle gap")
                 }
             };
@@ -4641,6 +4652,50 @@ impl<S: Streaming + 'static> Session<S> {
         drop(state);
         self.shared.changed.notify_all();
         Ok(())
+    }
+
+    /// Keep `span` of the logged line `from` as the operator's entry (#1021):
+    /// an ask, an answer -- the trunk's or a fork's, as it was written,
+    /// trailers and all -- a step's text, or a tool result as the model was
+    /// shown it. The span must be in that line character for character; it
+    /// becomes a working-memory entry of the operator's, no field kind, its
+    /// `tag` on the `patch` line when given, and the render carries it.
+    /// Returns the entry's id.
+    ///
+    /// # Errors
+    ///
+    /// [`Refusal::Ended`]; [`Refusal::InFlight`] while a turn or a capture is
+    /// in flight; [`Refusal::NoWorkingMemory`]; [`Refusal::Empty`] for no
+    /// span; [`Refusal::NotASource`] for a line with no text to keep from;
+    /// [`Refusal::NotInSource`] for a span the line does not hold; and
+    /// [`Refusal::Restates`] for a span working memory already holds.
+    pub fn keep(&self, from: u64, span: &str, tag: Option<&str>) -> Result<String, Rejected> {
+        let mut state = self.shared.lock();
+        if let Some(because) = keep_refusal(&state, from, span) {
+            let refused = state.refuse(CommandKind::Keep, because);
+            drop(state);
+            self.shared.changed.notify_all();
+            return Err(Rejected::Refused(refused));
+        }
+        state.admit_within_the_gap();
+        let patch = kept_patch(&state, span);
+        let Some(interview) = state.interview.as_mut() else {
+            unreachable!("working memory was checked above");
+        };
+        if interview.object.apply(&patch).is_err() {
+            unreachable!("a new entry no live one holds");
+        }
+        let mut line = patched(None, &patch, &interview.object);
+        if let Event::Patched { entry, .. } = &mut line {
+            entry.category = tag.map(str::to_owned);
+        }
+        state.push(line);
+        drop(state);
+        self.shared.changed.notify_all();
+        let Patch::Add { id, .. } = patch else {
+            unreachable!("a keep adds");
+        };
+        Ok(id.as_str().to_owned())
     }
 
     /// Log a scenario runner's grade of the latest turn (#942): a `grade`
@@ -6230,6 +6285,7 @@ fn command_of(command: CommandKind) -> log::Command {
         CommandKind::ProposePhase => log::Command::ProposePhase,
         CommandKind::MovePhase => log::Command::MovePhase,
         CommandKind::Grade => log::Command::Grade,
+        CommandKind::Keep => log::Command::Keep,
     }
 }
 
@@ -6261,6 +6317,9 @@ fn refusal_of(refusal: Refusal) -> log::Refusal {
         Refusal::NotUnilateral => log::Refusal::NotUnilateral,
         Refusal::AlreadyAsked => log::Refusal::AlreadyAsked,
         Refusal::ProposalPending => log::Refusal::ProposalPending,
+        Refusal::NotASource => log::Refusal::NotASource,
+        Refusal::NotInSource => log::Refusal::NotInSource,
+        Refusal::NoWorkingMemory => log::Refusal::NoWorkingMemory,
     }
 }
 
@@ -8996,6 +9055,69 @@ fn restates(state: &State, id: &str, content: &str) -> Option<Refusal> {
         })
         .is_err()
         .then_some(Refusal::Restates)
+}
+
+/// The text of the logged line `from` a keep may keep from (#1021): an
+/// ask, an answer or a step's text as written, or a tool result as shown.
+fn keep_source(state: &State, from: u64) -> Option<&str> {
+    let logged = state.log.iter().find(|logged| logged.seq == from)?;
+    match &logged.event {
+        Event::Asked { text, .. } | Event::Answered { text, .. } | Event::Called { text, .. } => {
+            Some(text.as_str())
+        }
+        Event::ToolCalled(line) => line.shown.as_deref(),
+        _ => None,
+    }
+}
+
+/// The operator's entry a keep of `span` adds (#1021): coined from the
+/// log's position, the operator's lane, no field kind.
+fn kept_patch(state: &State, span: &str) -> Patch {
+    let Ok(id) = crate::object::EntryId::new(&format!("operator-{}", state.log.len())) else {
+        unreachable!("an id this session coins");
+    };
+    Patch::Add {
+        id,
+        content: span.to_owned(),
+        provenance: crate::object::Provenance {
+            turn: state.turns,
+            lane: crate::object::OPERATOR.to_owned(),
+            fork: None,
+            tangent: state
+                .tangent
+                .as_ref()
+                .map(|(tangent, _)| tangent.id().to_owned()),
+            index: 0,
+        },
+    }
+}
+
+/// Why a keep of `span` from the line `from` is refused, if it is (#1021).
+fn keep_refusal(state: &State, from: u64, span: &str) -> Option<Refusal> {
+    match state.settlement {
+        Settlement::Ended => return Some(Refusal::Ended),
+        Settlement::Turn | Settlement::Capture => return Some(Refusal::InFlight),
+        Settlement::Awaiting => {}
+    }
+    let Some(interview) = state.interview.as_ref() else {
+        return Some(Refusal::NoWorkingMemory);
+    };
+    if span.trim().is_empty() {
+        return Some(Refusal::Empty);
+    }
+    let Some(source) = keep_source(state, from) else {
+        return Some(Refusal::NotASource);
+    };
+    if !source.contains(span) {
+        return Some(Refusal::NotInSource);
+    }
+    // A span a live entry already holds would fold into it, and the
+    // operator's authority with it.
+    let mut trial = interview.object.clone();
+    match trial.apply(&kept_patch(state, span)) {
+        Ok(crate::object::Applied::Created(_)) => None,
+        _ => Some(Refusal::Restates),
+    }
 }
 
 /// Why an operator edit or flag of `id` with `text` is refused, if it is.
@@ -26934,6 +27056,132 @@ pub(in crate::drive) mod tests {
             session.open_tangent("t/2"),
             Err(Rejected::Refused(Refusal::TangentOpen))
         ));
+    }
+
+    /// The seq of the first logged line `pick` matches.
+    fn seq_of(log: &[Logged], pick: impl Fn(&Event) -> bool) -> u64 {
+        log.iter()
+            .find(|logged| pick(&logged.event))
+            .map(|logged| logged.seq)
+            .expect("the line")
+    }
+
+    /// #1021: the operator keeps an exact span of a logged answer: it is
+    /// an entry of the operator's, no field kind, the span as written, its
+    /// tag on the `patch` line, and the render carries it.
+    #[test]
+    fn the_operator_keeps_an_exact_span_of_an_answer() {
+        const SAID: &str = "The schema has two tables, users and orders.\nNEXT: migrations";
+        let session = Session::open_with(
+            Canned::new([deltas(&[SAID])]),
+            template(),
+            None,
+            None,
+            None,
+            Some(interviewing(&[])),
+        );
+        session.ask("what is the schema?", None).expect("accepted");
+        let log = wait_until(&session, "the turn", settled);
+        let answered = seq_of(&log, |event| matches!(event, Event::Answered { .. }));
+        let entry = session
+            .keep(answered, "two tables, users and orders", Some("schema"))
+            .expect("kept");
+        let log = session.events_from(0);
+        let Some((lane, patch)) = log.iter().rev().find_map(|logged| match &logged.event {
+            Event::Patched { lane, entry, .. } => Some((lane.clone(), entry.clone())),
+            _ => None,
+        }) else {
+            panic!("a patch line: {log:#?}");
+        };
+        assert_eq!(lane.as_deref(), Some(crate::object::OPERATOR));
+        assert_eq!(patch.id, entry);
+        assert_eq!(patch.text, "two tables, users and orders");
+        assert_eq!(patch.category.as_deref(), Some("schema"));
+        let state = session.shared.lock();
+        let interview = state.interview.as_ref().expect("memory");
+        let rendered = marked_render(&state, interview, None).text;
+        assert!(
+            rendered.contains("two tables, users and orders"),
+            "{rendered}"
+        );
+        drop(state);
+        reads_whole(&session);
+    }
+
+    /// #1021: a keep is refused, and logged, when its span is not in the
+    /// line character for character, when the line holds no text to keep,
+    /// when the span is empty or working memory holds it already, and in a
+    /// session with no working memory.
+    #[test]
+    fn a_keep_is_refused_off_its_source_or_twice() {
+        let session = Session::open_with(
+            Canned::new([deltas(&["The schema has two tables."])]),
+            template(),
+            None,
+            None,
+            None,
+            Some(interviewing(&[])),
+        );
+        session.ask("what is the schema?", None).expect("accepted");
+        let log = wait_until(&session, "the turn", settled);
+        let answered = seq_of(&log, |event| matches!(event, Event::Answered { .. }));
+        let settled_at = seq_of(&log, |event| matches!(event, Event::TurnSettled { .. }));
+        let refused = |from: u64, span: &str| match session.keep(from, span, None) {
+            Err(Rejected::Refused(because)) => Some(because),
+            _ => None,
+        };
+        assert_eq!(refused(answered, "two Tables"), Some(Refusal::NotInSource));
+        assert_eq!(refused(settled_at, "two tables"), Some(Refusal::NotASource));
+        assert_eq!(refused(answered, "  "), Some(Refusal::Empty));
+        session.keep(answered, "two tables", None).expect("kept");
+        assert_eq!(refused(answered, "two tables"), Some(Refusal::Restates));
+        assert!(session.events_from(0).iter().any(|logged| matches!(
+            &logged.event,
+            Event::Refused {
+                command: CommandKind::Keep,
+                ..
+            }
+        )));
+        let bare = Session::open(Canned::new([deltas(&["hello"])]), template());
+        bare.ask("hi", None).expect("accepted");
+        let log = wait_until(&bare, "the turn", settled);
+        let answered = seq_of(&log, |event| matches!(event, Event::Answered { .. }));
+        assert!(matches!(
+            bare.keep(answered, "hello", None),
+            Err(Rejected::Refused(Refusal::NoWorkingMemory))
+        ));
+        reads_whole(&session);
+    }
+
+    /// #1021: a tool result keeps as the model was shown it.
+    #[test]
+    fn a_keep_takes_a_span_of_a_tool_result() {
+        let tree = scratch("keep-tool-result");
+        std::fs::write(tree.join("notes.md"), "port 5182 is free\n").expect("a note");
+        let session = Session::open_with(
+            Canned::new(vec![
+                vec![bash("call-1", "cat notes.md")],
+                deltas(&["Read it."]),
+            ]),
+            looping(),
+            None,
+            Some(tools(
+                Confinement::Unconfined,
+                &tree,
+                &["cat"],
+                None,
+                Decider::Decline,
+            )),
+            None,
+            Some(interviewing(&[])),
+        );
+        session.ask("look", None).expect("accepted");
+        let log = wait_until(&session, "the turn", settled);
+        let called = seq_of(&log, |event| matches!(event, Event::ToolCalled(_)));
+        session
+            .keep(called, "port 5182 is free", None)
+            .expect("kept");
+        tidy(&[&tree]);
     }
 
     /// A session with self-capture on, every `every` silent turns, and the
