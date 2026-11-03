@@ -734,6 +734,9 @@ struct Walk<'a> {
     /// Each call's latest `tool_call` line, by its id: its row and what the
     /// trunk carried as its result (#612).
     calls: BTreeMap<String, (u64, Option<String>)>,
+    /// Each `tool_call` line, by its `seq`: the call's id and what the trunk
+    /// carried as its result -- what an operator's wrap names (#1030).
+    call_lines: BTreeMap<u64, (String, Option<String>)>,
     /// The results the model pruned (#612), in the order it pruned them.
     pruned: Vec<Pruned>,
     /// Each fork's call, by its request's `seq`, and what its responses'
@@ -961,6 +964,7 @@ impl<'a> Walk<'a> {
             side_heads: BTreeMap::new(),
             whole_trunk_forks: BTreeSet::new(),
             calls: BTreeMap::new(),
+            call_lines: BTreeMap::new(),
             pruned: Vec::new(),
             fork_calls: BTreeMap::new(),
             fork_cache: BTreeMap::new(),
@@ -1111,6 +1115,12 @@ impl<'a> Walk<'a> {
             // A prune (v7, #612): applied to the trunk by the meditation that
             // lists its call, as the session applies it.
             Line::Pruned { .. } => self.pruned_line(line),
+            // The operator's wrap (#1030): no row; the trunk it rebuilds the
+            // next head from carries it.
+            Line::Wrapped { .. } => {
+                self.wrapped_line(line);
+                self.no_row(line);
+            }
             Line::Ask {
                 turn, text, files, ..
             } => {
@@ -1210,7 +1220,6 @@ impl<'a> Walk<'a> {
             | Line::ForkSkipped { .. }
             | Line::ForkShadowed { .. }
             | Line::Suggestion { .. }
-            | Line::Wrapped { .. }
             | Line::Capture { .. }
             // The operator's ruling on a phase proposal (#124): a meditation it
             // declares has its own row.
@@ -1433,6 +1442,44 @@ impl<'a> Walk<'a> {
 
     /// A `pruned` line (#612), kept until the meditation that lists its call: the
     /// pruned call's row and what the trunk carried as its result.
+    /// An operator's wrap (#1030): the result it names, replaced by its text
+    /// wherever the rebuilt trunk carries it -- the trunk, a running turn's
+    /// steps, the steps a window meditation compacted -- as the session
+    /// replaced it before the next trunk request.
+    fn wrapped_line(&mut self, line: &log::Line) {
+        let Line::Wrapped { call, text, .. } = &line.event else {
+            return;
+        };
+        let Some((id, Some(shown))) = self.call_lines.get(call).cloned() else {
+            return;
+        };
+        let wrapped = |message: &mut Message| {
+            if message.role == Role::Tool
+                && message.tool_call_id.as_deref() == Some(id.as_str())
+                && message.content == shown
+            {
+                message.content.clone_from(text);
+                message.images.clear();
+            }
+        };
+        self.trunk.iter_mut().for_each(wrapped);
+        for steps in self.steps.values_mut().chain(self.compacted.values_mut()) {
+            for step in steps {
+                for (_, result) in &mut step.calls {
+                    if let Some(result) = result.as_mut() {
+                        wrapped(result);
+                    }
+                }
+            }
+        }
+        if let Some(tangent) = self.tangent_trunk.as_mut() {
+            tangent.iter_mut().for_each(wrapped);
+        }
+        if let Some((_, carried)) = self.calls.get_mut(&id) {
+            *carried = Some(text.clone());
+        }
+    }
+
     fn pruned_line(&mut self, line: &log::Line) {
         let Line::Pruned {
             call,
@@ -2018,6 +2065,8 @@ impl<'a> Walk<'a> {
         }
         if let Line::ToolCall { id, shown, .. } = &line.event {
             self.calls.insert(id.clone(), (line.seq, shown.clone()));
+            self.call_lines
+                .insert(line.seq, (id.clone(), shown.clone()));
         }
         self.step_call(&line.event);
         self.tool_call_line(line.seq, &line.event);

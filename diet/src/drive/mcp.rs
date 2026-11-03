@@ -21,6 +21,7 @@
 //! | `memory` | `GET /memory` (#756) |
 //! | `edit`, `flag` | `POST /commands` `edit-entry`, `flag-entry` |
 //! | `fork`, `keep` | `POST /commands` `fork`, `keep` (#1021) |
+//! | `wrap` | `POST /commands` `wrap` (#1030) |
 //! | `declare_meditation`, `refill_anyway`, `ratify_phase` | `POST /commands` |
 //! | `open_tangent`, `close_tangent` | `POST /commands` |
 //! | `events` | `GET /events`, the log lines after a seq |
@@ -486,6 +487,25 @@ fn later_tools() -> Vec<Value> {
             ),
         ),
         tool(
+            "wrap",
+            "Wrap a tool result on the trunk (the `wrap` command, #1030): an exact span of the \
+             result as shown, or of the answer to the operator's fork cut at it, takes the \
+             result's place from the next trunk request on, and is kept as the operator's entry. \
+             The request in flight stands as sent; everything after the result is prefilled \
+             again. Answers the entry's id.",
+            object(
+                json!({
+                    "call": integer("The seq of the `tool_call` line whose result to wrap."),
+                    "from": integer(
+                        "The seq of the line the span comes from: that `tool_call`, or the \
+                         answer to the operator's fork cut at it."
+                    ),
+                    "span": string("The exact text to keep in the result's place.")
+                }),
+                &["call", "from", "span"],
+            ),
+        ),
+        tool(
             "declare_meditation",
             "Declare a meditation (the `declare-meditation` command), optionally moving to a \
              phase.",
@@ -841,6 +861,12 @@ pub fn call(serve: &Serve, name: &str, arguments: &Map<String, Value>) -> Result
             "note": args.string("note")?
         }))?,
         "fork" | "keep" => serve.command(&gesture(name, &args)?)?,
+        "wrap" => serve.command(&json!({
+            "kind": "wrap",
+            "call": args.optional_count("call")?.ok_or_else(|| "`call` is required".to_owned())?,
+            "from": args.optional_count("from")?.ok_or_else(|| "`from` is required".to_owned())?,
+            "span": args.string("span")?
+        }))?,
         "declare_meditation" => {
             let mut body = json!({"kind": "declare-meditation"});
             if let Some(phase) = args.optional_string("phase")? {
@@ -1506,6 +1532,7 @@ mod tests {
                 "flag",
                 "fork",
                 "keep",
+                "wrap",
                 "declare_meditation",
                 "refill_anyway",
                 "propose_phase",
@@ -1542,7 +1569,14 @@ mod tests {
             r#"{"jsonrpc":"2.0","id":4,"method":"tools/call","params":{"name":"status"}}"#,
         )
         .expect("an answer");
+        assert_eq!(reply["result"]["isError"], true); // #1030: a wrap names its call, the line its span comes from, and the span.
+        let reply = answer_quietly(
+            &mut serve,
+            r#"{"jsonrpc":"2.0","id":5,"method":"tools/call","params":{"name":"wrap","arguments":{"from":6,"span":"x"}}}"#,
+        )
+        .expect("an answer");
         assert_eq!(reply["result"]["isError"], true);
+        assert_eq!(reply["result"]["content"][0]["text"], "`call` is required");
     }
 
     /// A serve that answers `end` with 200 and `/state` with `session`, on

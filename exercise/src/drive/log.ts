@@ -252,6 +252,8 @@ export interface Fork extends At {
   readonly hazard?: string;
   /** Which chunk of a meditation's audit it is (#854), when the audit runs in several at once; absent when it is whole. */
   readonly chunk?: number;
+  /** The `tool_call` line it was cut at (log v32, #1021), when the operator forked at a tool result. */
+  readonly cut?: number;
 }
 
 /** How a fork ended. */
@@ -357,6 +359,8 @@ export type ForkSkipped = V0.ForkSkippedLine;
 export type ForkShadowed = V0.ForkShadowedLine;
 /** The operator's answer to a shadow offered as a suggestion (v34, #1031): accepted, rejected, or let go. */
 export type Suggestion = V0.SuggestionLine;
+/** A tool result the operator wrapped, replaced on the trunk from the next trunk request (v35, #1030). */
+export type Wrapped = V0.WrappedLine;
 /** A step's warrant-gate decision by a classifier, one line per probe, or its fallback (v8, #850). Folded, not yet
  * drawn: the kitchen sink writes them (#862), and the page draws them next. */
 export type WarrantGated = V0.WarrantGatedLine;
@@ -406,6 +410,7 @@ export type LogLine =
   | ForkSkipped
   | ForkShadowed
   | Suggestion
+  | Wrapped
   | RequestRetried
   | Grade
   | MeditationSkipped

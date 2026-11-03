@@ -315,6 +315,22 @@ describe('HttpTransport: commands', () => {
     ]);
   });
 
+  it('posts a wrap as serve takes it (#1030), and reads the entry serve answered', async () => {
+    const posted: Record<string, unknown>[] = [];
+    const { transport } = stand({
+      commands: (body) => {
+        posted.push(body);
+        return body['from'] === 6 ? new Response('{"entry":"operator-22"}', { status: 200 }) : new Response('{"refused":"wrapped-already"}', { status: 409 });
+      },
+    });
+    await expect(transport.dispatch({ kind: 'wrap', call: 6, from: 6, span: 'a note' })).resolves.toEqual({ ok: true, answer: { entry: 'operator-22' } });
+    await expect(transport.dispatch({ kind: 'wrap', call: 6, from: 19, span: 'It holds a note.' })).resolves.toEqual({ ok: false, refused: 'wrapped-already' });
+    expect(posted).toEqual([
+      { kind: 'wrap', call: 6, from: 6, span: 'a note' },
+      { kind: 'wrap', call: 6, from: 19, span: 'It holds a note.' },
+    ]);
+  });
+
   it('posts an end as serve.rs takes it (#289)', async () => {
     const posted: Record<string, unknown>[] = [];
     const { transport } = stand({ commands: (body) => (posted.push(body), new Response('{}', { status: 200 })) });

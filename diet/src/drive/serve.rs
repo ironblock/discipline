@@ -945,6 +945,10 @@ impl<S: Streaming + 'static> Serving<S> {
                 .session
                 .keep(from, &span, tag.as_deref())
                 .map(|entry| BTreeMap::from([("entry".to_owned(), Value::String(entry))])),
+            Command::Wrap(call, from, span) => self
+                .session
+                .wrap(call, from, &span)
+                .map(|entry| BTreeMap::from([("entry".to_owned(), Value::String(entry))])),
             Command::Suggestion(shadow, answer) => {
                 self.session.suggestion(shadow, answer).map(|fork| {
                     fork.map_or_else(BTreeMap::new, |fork| {
@@ -1027,12 +1031,13 @@ impl<S: Streaming + 'static> Serving<S> {
                 Err(rejection) => rejected(rejection),
             },
             // The operator's gestures (#1021).
-            command @ (Command::Fork(..) | Command::Keep(..) | Command::Suggestion(..)) => {
-                match self.gesture(command) {
-                    Ok(body) => (200, body),
-                    Err(rejection) => rejected(rejection),
-                }
-            }
+            command @ (Command::Fork(..)
+            | Command::Keep(..)
+            | Command::Suggestion(..)
+            | Command::Wrap(..)) => match self.gesture(command) {
+                Ok(body) => (200, body),
+                Err(rejection) => rejected(rejection),
+            },
             // The operator's phase commands (#788).
             Command::StartPhase(phase) => match self.session.start_phase(&phase) {
                 Ok(()) => (200, BTreeMap::new()),
@@ -1115,6 +1120,9 @@ enum Command {
     Fork(Option<u64>, crate::drive::session::OperatorAsk),
     /// Answer the shadow at the `fork.shadowed` line with this seq (#1031).
     Suggestion(u64, crate::drive::session::SuggestionAnswer),
+    /// Wrap the result of the `tool_call` line with the first seq, by the
+    /// span from the line with the second (#1030).
+    Wrap(u64, u64, String),
 }
 
 /// A command's word as a client written before #583's rename may send it,
@@ -1205,6 +1213,8 @@ impl Command {
             CommandKind::Fork => &["kind", "at", "ask", "text"],
             // #1031: the answer to a shadow's suggestion ends no idle gap.
             CommandKind::Suggestion => &["kind", "shadow", "answer"],
+            // #1030: the operator's wrap ends no idle gap.
+            CommandKind::Wrap => &["kind", "call", "from", "span"],
             // #942: a runner's grade ends no idle gap.
             CommandKind::Grade => &[
                 "kind",
@@ -1317,6 +1327,19 @@ impl Command {
                     _ => return None,
                 };
                 Some(Self::Fork(at, ask))
+            }
+            CommandKind::Wrap => {
+                match (object.get("call"), object.get("from"), object.get("span")) {
+                    (
+                        Some(Value::Integer(call)),
+                        Some(Value::Integer(from)),
+                        Some(Value::String(span)),
+                    ) => u64::try_from(*call)
+                        .ok()
+                        .zip(u64::try_from(*from).ok())
+                        .map(|(call, from)| Self::Wrap(call, from, span.clone())),
+                    _ => None,
+                }
             }
             CommandKind::Suggestion => {
                 use crate::drive::session::SuggestionAnswer;
@@ -2086,6 +2109,30 @@ mod tests {
             r#"{"kind":"fork","ask":"GOTCHAS","text":"x"}"#,
             r#"{"kind":"fork","at":"9","text":"x"}"#,
             r#"{"kind":"fork","text":"x","idle_gap":{}}"#,
+        ] {
+            assert!(read(refused).is_none(), "{refused}");
+        }
+    }
+
+    /// #1030: a wrap names the `tool_call` line, the line its span comes
+    /// from and the span; anything else, or an idle gap, is no command.
+    #[test]
+    fn a_wrap_reads_its_call_source_and_span_and_nothing_else() {
+        let read = |body: &str| {
+            let object = crate::formats::record::json::line(body).expect("an object");
+            Command::from_object(&object).map(|posted| posted.command)
+        };
+        assert!(matches!(
+            read(r#"{"kind":"wrap","call":6,"from":19,"span":"It holds a note."}"#),
+            Some(Command::Wrap(6, 19, span)) if span == "It holds a note."
+        ));
+        for refused in [
+            r#"{"kind":"wrap","call":6,"span":"x"}"#,
+            r#"{"kind":"wrap","from":6,"span":"x"}"#,
+            r#"{"kind":"wrap","call":6,"from":6}"#,
+            r#"{"kind":"wrap","call":-1,"from":6,"span":"x"}"#,
+            r#"{"kind":"wrap","call":6,"from":6,"span":"x","tag":"y"}"#,
+            r#"{"kind":"wrap","call":6,"from":6,"span":"x","idle_gap":{}}"#,
         ] {
             assert!(read(refused).is_none(), "{refused}");
         }

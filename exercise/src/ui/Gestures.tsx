@@ -180,6 +180,63 @@ export function KeepAction({ logged, label }: { readonly logged: LoggedText; rea
 }
 
 /**
+ * Wrap a tool result (#1030): a span of `from` -- the result as the model was shown it, or the answer to the operator's
+ * fork cut at it -- takes the result's place on the trunk from the next request, and is kept as the operator's entry.
+ * The request in flight stands as sent; everything after the result is prefilled again.
+ */
+export function WrapAction({ call, from, label }: { readonly call: number; readonly from: LoggedText; readonly label: string }) {
+  const act = useGestures();
+  const [open, setOpen] = useState(false);
+  const [refused, setRefused] = useState<string>();
+  const raw = useRef<HTMLPreElement>(null);
+  const close = () => setOpen(false);
+  const dialog = useModal(open, close);
+  useEffect(() => {
+    if (open) raw.current?.focus();
+  }, [open]);
+  if (!act) return null;
+  const submit = async (e: FormEvent) => {
+    e.preventDefault();
+    const selection = window.getSelection();
+    const inside = selection && raw.current && selection.rangeCount > 0 && raw.current.contains(selection.getRangeAt(0).commonAncestorContainer);
+    const span = inside ? selection.toString() : '';
+    if (span.trim() === '') return setRefused('select the span to keep in its place first');
+    const ack = await act({ kind: 'wrap', call, from: from.seq, span });
+    if (ack.ok) {
+      setRefused(undefined);
+      setOpen(false);
+    } else setRefused(refusedOf(ack));
+  };
+  return (
+    <>
+      <button type="button" className="ex-action" aria-label={`Wrap from ${label}`} title="replace the result on the trunk by a span you keep, from the next request on" onClick={() => setOpen(true)}>
+        wrap
+      </button>
+      <dialog ref={dialog} className="ex-gesture" aria-label={`Wrap from ${label}`}>
+        {open ? (
+          <form onSubmit={(e) => void submit(e)}>
+            <h2 className="ex-gesture__title">wrap from {label}</h2>
+            <p className="ex-gesture__hint">select the span the trunk keeps in the result’s place, from the next request on; everything after it is prefilled again</p>
+            <pre ref={raw} className="ex-gesture__raw" tabIndex={0} aria-label={`What ${label} logged, to wrap`}>
+              {from.text}
+            </pre>
+            <div className="ex-gesture__row">
+              <button type="submit" aria-label={`Wrap with the selection from ${label}`}>
+                wrap
+              </button>
+              <button type="button" onClick={close}>
+                cancel
+              </button>
+              {refused ? <span className="ex-gesture__refusal" role="alert">{refused}</span> : null}
+            </div>
+          </form>
+        ) : null}
+      </dialog>
+    </>
+  );
+}
+
+/**
  * Where the automation would have fired here (#1021): each fork a shadow warrant would have cut at this step, never
  * sent -- shown in a replay and the read-only views, to review afterwards against where the operator forked, with how
  * the operator answered each one offered. During a live drive (where the gestures are taken) only a session whose start

@@ -29,6 +29,7 @@ import toolCallRan from '../../../diet/formats/log/fixtures/valid/a-v3-tool-call
 import forks from '../../../diet/formats/log/fixtures/valid/a-v5-scoping-fork-that-patched-and-a-read-fork-that-declined.jsonl?raw';
 import gestures from '../../../diet/formats/log/fixtures/valid/a-v32-operator-keep-fork-and-shadow.jsonl?raw';
 import suggestions from '../../../diet/formats/log/fixtures/valid/a-v34-shadow-suggestions.jsonl?raw';
+import wrapped from '../../../diet/formats/log/fixtures/valid/a-v35-operator-wrap.jsonl?raw';
 import { App, PHASES } from '../App.tsx';
 import { fold } from '../session/fold.ts';
 import { SessionView } from '../ui/SessionView.tsx';
@@ -1180,6 +1181,73 @@ export const ReplayShowsTheShadows: Story = {
     const page = within(canvasElement);
     await expect(await page.findByText('would fork · read → finding')).toBeTruthy();
     await expect(page.queryByRole('button', { name: /^(Fork at|Keep from) / })).toBeNull();
+  },
+};
+
+/** Select TEXT's first `length` characters inside `raw`, as a person would. */
+function select(raw: HTMLElement, length: number) {
+  const range = document.createRange();
+  range.setStart(raw.firstChild!, 0);
+  range.setEnd(raw.firstChild!, length);
+  const selection = window.getSelection()!;
+  selection.removeAllRanges();
+  selection.addRange(range);
+}
+
+/** `?drive` (#1030): the operator wraps a tool result with a span of it as shown, and the view closes. */
+export const ServedWrapFromTheRawText: Story = {
+  name: '?drive: wrap a tool result with a span of it',
+  args: { drive: true, web: posting(gestures) },
+  play: async ({ canvasElement }) => {
+    const page = within(canvasElement.ownerDocument.body);
+    await waitFor(async () => expect(says(canvasElement)).toBe('the session has ended'));
+    const slow = { timeout: 5_000 };
+    await cornerClick(await page.findByRole('button', { name: 'Wrap from call call-1' }));
+    const raw = await page.findByLabelText('What call call-1 logged, to wrap', undefined, slow);
+    await expect(raw.textContent).toBe('a note\n');
+    select(raw, 'a note'.length);
+    posted.length = 0;
+    await userEvent.click(page.getByRole('button', { name: 'Wrap with the selection from call call-1' }));
+    await waitFor(async () => expect(posted).toEqual([{ kind: 'wrap', call: 6, from: 6, span: 'a note' }]), slow);
+    await waitFor(async () => expect(page.queryByLabelText('What call call-1 logged, to wrap')).toBeNull(), slow);
+  },
+};
+
+/** `?drive` (#1030): the operator's fork was cut at a tool result; a span of its answer wraps that result. */
+export const ServedWrapFromAForkAnswer: Story = {
+  name: '?drive: wrap a tool result with a span of your fork’s answer at it',
+  args: { drive: true, web: posting(gestures) },
+  play: async ({ canvasElement }) => {
+    const page = within(canvasElement.ownerDocument.body);
+    await waitFor(async () => expect(says(canvasElement)).toBe('the session has ended'));
+    const slow = { timeout: 5_000 };
+    // The fork's branch, folded shut, opened first.
+    await userEvent.click(await page.findByRole('button', { name: /^▸? *operator$/ }, slow));
+    await cornerClick(await page.findByRole('button', { name: /^Wrap from fork / }, slow));
+    const raw = await page.findByLabelText(/^What fork .* logged, to wrap$/, undefined, slow);
+    await expect(raw.textContent).toBe('It holds a note.\n\nAlso: ports.');
+    select(raw, 'It holds a note.'.length);
+    posted.length = 0;
+    await userEvent.click(page.getByRole('button', { name: /^Wrap with the selection from fork / }));
+    await waitFor(async () => expect(posted).toEqual([{ kind: 'wrap', call: 6, from: 19, span: 'It holds a note.' }]), slow);
+  },
+};
+
+/** A replay of a drive the operator wrapped a result in (#1030): the result says it was wrapped, and how much was
+ * prefilled again; no gesture is offered. */
+export const ReplayShowsTheWrap: Story = {
+  name: 'replay: a wrapped tool result, and what it cost',
+  render: () => (
+    <SessionView
+      session={fold(wrapped.trimEnd().split('\n').map((line) => respelled(JSON.parse(line) as LogLine)))}
+      surface={{ curtain: true, gaps: false }}
+      composer={{ phases: PHASES }}
+    />
+  ),
+  play: async ({ canvasElement }) => {
+    const page = within(canvasElement);
+    await expect(await page.findByText(/^wrapped by you .* from turn 2's request · about 11 tokens prefilled again$/)).toBeTruthy();
+    await expect(page.queryByRole('button', { name: /^Wrap from / })).toBeNull();
   },
 };
 

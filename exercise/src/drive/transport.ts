@@ -68,7 +68,12 @@ export type Command =
   /** The operator keeps an exact span of a logged line (#1021): an operator entry, with an optional tag. */
   | { readonly kind: 'keep'; readonly from: number; readonly span: string; readonly tag?: string }
   /** The operator answers a shadow offered as a suggestion (#1031): by its `fork.shadowed` line, accept or reject. */
-  | { readonly kind: 'suggestion'; readonly shadow: number; readonly answer: 'accept' | 'reject' };
+  | { readonly kind: 'suggestion'; readonly shadow: number; readonly answer: 'accept' | 'reject' }
+  /**
+   * The operator wraps a tool result (#1030): by its `tool_call` line, a span of the line `from` names -- that call, or
+   * the answer to the operator's fork cut at it -- takes the result's place on the trunk from the next trunk request.
+   */
+  | { readonly kind: 'wrap'; readonly call: number; readonly from: number; readonly span: string };
 
 /** How the operator rules on a proposed phase move (#651, #788): `keep` moves without a meditation (v7's `continue`). */
 export type PhaseChoice = 'meditation' | 'keep' | 'stay';
@@ -167,6 +172,8 @@ export type Refusal = Open<
   /** `diet`'s answers to a suggestion's (#1031): no shadow offered at that line; one answered already, or let go. */
   | 'not-a-suggestion'
   | 'answered-already'
+  /** `diet`'s answer to a wrap of a result already wrapped, or waiting to be (#1030). */
+  | 'wrapped-already'
 >;
 
 /**
