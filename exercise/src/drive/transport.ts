@@ -58,7 +58,15 @@ export type Command =
   /** Refill a meditation held for the operator over its unaddressed changes (#150's gate, #698). */
   | { readonly kind: 'refill-anyway' }
   /** The operator's answer to the call waiting on them (#389): `call` is its id as the model streamed it. */
-  | { readonly kind: 'approve'; readonly call: string; readonly scope: Decision };
+  | { readonly kind: 'approve'; readonly call: string; readonly scope: Decision }
+  /**
+   * The operator's fork (#1021): at the step, tool result or trunk answer whose log line `at` names -- the trunk's end
+   * when absent -- asking a pinned fork ask by its template's name, or the operator's own words. It writes nothing to
+   * working memory; its answer is logged and shown, and the operator keeps what they want.
+   */
+  | ({ readonly kind: 'fork'; readonly at?: number } & ({ readonly ask: string } | { readonly text: string }))
+  /** The operator keeps an exact span of a logged line (#1021): an operator entry, with an optional tag. */
+  | { readonly kind: 'keep'; readonly from: number; readonly span: string; readonly tag?: string };
 
 /** How the operator rules on a proposed phase move (#651, #788): `keep` moves without a meditation (v7's `continue`). */
 export type PhaseChoice = 'meditation' | 'keep' | 'stay';
@@ -143,9 +151,26 @@ export type Refusal = Open<
   /** `diet`'s gate (#150, #698): a meditation is held for the operator, so asks wait; a refill-anyway with no meditation held. */
   | 'meditation-held'
   | 'nothing-held'
+  /**
+   * `diet`'s answers to the operator's keep and fork (#1021): a line with no text to keep or fork at; a span not in it
+   * character for character; a session with no working memory; a line a meditation replaced; no such pinned ask; a span
+   * the operator already kept (its entry named).
+   */
+  | 'not-a-source'
+  | 'not-in-source'
+  | 'no-working-memory'
+  | 'not-on-the-trunk'
+  | 'not-a-pinned-ask'
+  | 'restates'
 >;
 
-export type Ack = { readonly ok: true } | { readonly ok: false; readonly refused: Refusal };
+/**
+ * What a command came to. Taken, with what the drive answered when it says anything -- a fork's seq, a keep's entry
+ * (#1021); or refused, with the entry a refusal names when it names one (a keep of a span already kept).
+ */
+export type Ack =
+  | { readonly ok: true; readonly answer?: Readonly<Record<string, unknown>> }
+  | { readonly ok: false; readonly refused: Refusal; readonly entry?: string };
 
 /** What an upload came to: the digest an ask names it by, and its size; or why it was not kept. */
 export type Uploaded = { readonly ok: true; readonly sha256: string; readonly bytes: number } | { readonly ok: false; readonly refused: Refusal };

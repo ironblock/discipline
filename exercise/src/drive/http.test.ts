@@ -273,6 +273,29 @@ describe('HttpTransport: commands', () => {
     ]);
   });
 
+  it('posts the operator\u2019s fork and keep as serve takes them (#1021), and reads what serve answered', async () => {
+    const posted: Record<string, unknown>[] = [];
+    const { transport } = stand({
+      commands: (body) => {
+        posted.push(body);
+        if (body['kind'] === 'fork') return new Response('{"fork":16}', { status: 200 });
+        return body['span'] === 'a note'
+          ? new Response('{"refused":"restates","entry":"operator-14"}', { status: 409 })
+          : new Response('{"entry":"operator-30"}', { status: 200 });
+      },
+    });
+    await expect(transport.dispatch({ kind: 'fork', at: 6, ask: 'GOTCHAS' })).resolves.toEqual({ ok: true, answer: { fork: 16 } });
+    await expect(transport.dispatch({ kind: 'fork', text: 'Why?' })).resolves.toEqual({ ok: true, answer: { fork: 16 } });
+    await expect(transport.dispatch({ kind: 'keep', from: 6, span: 'a fresh note', tag: 'notes' })).resolves.toEqual({ ok: true, answer: { entry: 'operator-30' } });
+    await expect(transport.dispatch({ kind: 'keep', from: 6, span: 'a note' })).resolves.toEqual({ ok: false, refused: 'restates', entry: 'operator-14' });
+    expect(posted).toEqual([
+      { kind: 'fork', at: 6, ask: 'GOTCHAS' },
+      { kind: 'fork', text: 'Why?' },
+      { kind: 'keep', from: 6, span: 'a fresh note', tag: 'notes' },
+      { kind: 'keep', from: 6, span: 'a note' },
+    ]);
+  });
+
   it('posts an end as serve.rs takes it (#289)', async () => {
     const posted: Record<string, unknown>[] = [];
     const { transport } = stand({ commands: (body) => (posted.push(body), new Response('{}', { status: 200 })) });

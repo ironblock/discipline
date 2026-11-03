@@ -29,6 +29,7 @@ import { ClockContext, HotEntriesContext, SurfaceContext, TargetContext } from '
 import type { Room, Surface } from './surface.tsx';
 import { ToolBlock } from './ToolCall.tsx';
 import { ApprovalContext, ApprovalPrompt } from './Approval.tsx';
+import { GestureContext } from './Gestures.tsx';
 import type { Approving } from './Approval.tsx';
 import { FilesContext } from './Files.tsx';
 import type { FileSource } from '../drive/files.ts';
@@ -477,6 +478,8 @@ export function SessionView({ session, link = 'live', linkWhy, surface, onSurfac
     <FilesContext.Provider value={files}>
       <ClockContext.Provider value={now}>
       <TargetContext.Provider value={target}>
+      {/* The operator's fork and keep (#1021): where the drive takes them, as it does the edit and flag. */}
+      <GestureContext.Provider value={composer.tangents && composer.dispatch ? composer.dispatch : undefined}>
       <HotEntriesContext.Provider value={hot.entries}>
       <div
         ref={root}
@@ -692,6 +695,7 @@ export function SessionView({ session, link = 'live', linkWhy, surface, onSurfac
         </div>
       </div>
       </HotEntriesContext.Provider>
+      </GestureContext.Provider>
       </TargetContext.Provider>
       </ClockContext.Provider>
     </FilesContext.Provider>
