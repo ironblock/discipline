@@ -1841,6 +1841,8 @@ mod tests {
         );
         // #1031: how the shadows appear while the operator drives.
         assert_eq!(at(&manual, "interview_shadow_offer"), "chips");
+        // Dedupe off for the manual drive (the maintainer, 2026-11-03).
+        assert_eq!(at(&manual, "note_dedupe"), "off");
         let offer =
             |text: &str| serve_levers(&regimen::parse(text).expect("a regimen"), (8192, "default"));
         assert_eq!(
