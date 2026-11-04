@@ -2,7 +2,7 @@ import storybook from 'eslint-plugin-storybook';
 import tseslint from 'typescript-eslint';
 
 export default tseslint.config(
-  { ignores: ['node_modules/', 'storybook-static/', 'dist/', 'src/gate/wasm/'] },
+  { ignores: ['node_modules/', 'storybook-static/', 'dist/', 'src/gate/wasm/', 'src-tauri/'] },
   ...tseslint.configs.recommended,
   ...storybook.configs['flat/recommended'],
   {

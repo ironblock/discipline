@@ -1,0 +1,7 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "default",
+  "description": "The page's own window: the core defaults, and nothing of the shell's sidecar, which the Rust side alone starts.",
+  "windows": ["main"],
+  "permissions": ["core:default"]
+}

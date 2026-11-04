@@ -1,0 +1,20 @@
+# The native shell (#719): the surface's built bundle in a webview, `serve` as
+# its sidecar. Its own workspace, outside the repository's, so CI's cargo needs
+# no webview libraries; built by hand (README.md).
+[package]
+name = "exercise-shell"
+version = "0.1.0"
+edition = "2024"
+license = "Apache-2.0"
+publish = false
+
+[workspace]
+
+[build-dependencies]
+tauri-build = { version = "=2.7.3", features = [] }
+
+[dependencies]
+tauri = { version = "=2.12.4", features = [] }
+tauri-plugin-shell = "=2.5.0"
+serde_json = "1"
+ctrlc = { version = "=3.5.2", features = ["termination"] }
