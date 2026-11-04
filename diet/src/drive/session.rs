@@ -5665,7 +5665,7 @@ impl<S: Streaming + 'static> Session<S> {
             ("meditation", meditation),
             (
                 "last_seq",
-                number(state.log.last().map_or(0, |logged| logged.seq)),
+                number(last_shown(&state).map_or(0, |logged| logged.seq)),
             ),
             ("idle", Value::Boolean(idle)),
         ];
@@ -5753,6 +5753,56 @@ impl<S: Streaming + 'static> Session<S> {
             sink(logged);
         }
         state.sink = Some(sink);
+    }
+
+    /// The event at sequence number `seq` (#1038), when the log holds it.
+    #[must_use]
+    pub fn logged(&self, seq: u64) -> Option<Logged> {
+        let state = self.shared.lock();
+        usize::try_from(seq)
+            .ok()
+            .and_then(|at| state.log.get(at))
+            .filter(|logged| logged.seq == seq)
+            .cloned()
+    }
+
+    /// Whether the shadows' forks are kept off the live operator's view
+    /// (#1038): the session evaluates shadow warrants and offers none.
+    #[must_use]
+    pub fn shadows_hidden(&self) -> bool {
+        shadows_hidden(&self.shared.lock())
+    }
+
+    /// What the next refill would carry, as `GET /refill-preview` answers
+    /// it (#1038): working memory's render under the regimen's budget, with
+    /// the operator's pending marks; its estimated `tokens`; how many
+    /// entries it `reduced`; whether it `fits` its budget; and the live
+    /// `entries` it holds, by id. A refill that must also fit the window it
+    /// is made in may elide more, and one under a native summary carries
+    /// the summary instead: the preview is the render as it stands. `None`
+    /// for a session with no working memory.
+    #[must_use]
+    pub fn refill_preview(&self) -> Option<Value> {
+        let state = self.shared.lock();
+        let interview = state.interview.as_ref()?;
+        let rendered = marked_render(&state, interview, interview.meditations.render_budget);
+        let (number, text, object) = (status_number, status_text, status_object);
+        Some(object(vec![
+            ("render", text(&rendered.text)),
+            ("tokens", number(rendered.tokens)),
+            ("reduced", number(rendered.reduced)),
+            ("fits", Value::Boolean(rendered.fits)),
+            (
+                "entries",
+                Value::Array(
+                    interview
+                        .object
+                        .live()
+                        .map(|entry| text(entry.id.as_str()))
+                        .collect(),
+                ),
+            ),
+        ]))
     }
 
     /// Every event from sequence number `first` on.
@@ -12146,6 +12196,25 @@ pub fn fork_tail(regimen: &Regimen) -> Option<u32> {
         Some(crate::formats::regimen::Value::Integer(n)) if *n > 0 => u32::try_from(*n).ok(),
         _ => None,
     }
+}
+
+/// Whether `state`'s shadows are kept off the live operator's view
+/// (#1038): it evaluates shadow warrants and offers none.
+fn shadows_hidden(state: &State) -> bool {
+    state.interview.as_ref().is_some_and(|interview| {
+        !interview.shadow.is_empty() && interview.shadow_offer == ShadowOffer::Hidden
+    })
+}
+
+/// The log's last line the live operator sees (#1038): the last, but a
+/// shadow's fork while the shadows are hidden.
+fn last_shown(state: &State) -> Option<&Logged> {
+    let hidden = shadows_hidden(state);
+    state
+        .log
+        .iter()
+        .rev()
+        .find(|logged| !(hidden && matches!(logged.event, Event::Shadowed { .. })))
 }
 
 /// Where the session is, for its status (#1037): its phase, the model's

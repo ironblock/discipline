@@ -25,6 +25,7 @@
 //! | `declare_meditation`, `refill_anyway`, `ratify_phase` | `POST /commands` |
 //! | `open_tangent`, `close_tangent` | `POST /commands` |
 //! | `events` | `GET /events`, the log lines after a seq |
+//! | `line`, `refill_preview` | `GET /line/<seq>`, `GET /refill-preview` (#1038) |
 
 use std::fmt::Write as _;
 use std::io::{BufRead, Read as _, Write};
@@ -174,7 +175,12 @@ impl Serve {
     /// than the quiet spell this once waited for, so `events` read the head
     /// alone and answered nothing, after an early seq only -- a late one has
     /// little to render.
-    fn events(&self, after: Option<u64>, kinds: &[String], limit: u64) -> Result<Value, String> {
+    fn events(
+        &self,
+        after: Option<u64>,
+        (kinds, elide): (&[String], bool),
+        limit: u64,
+    ) -> Result<Value, String> {
         let from = after.map_or(0, |after| after + 1);
         let state = self.get("/state")?;
         let Some(last) = state.body.get("last_seq").and_then(Value::as_u64) else {
@@ -184,7 +190,13 @@ impl Serve {
             return Ok(json!({"status": 200, "events": [], "more": false}));
         }
         let mut stream = self.connect()?;
-        self.send(&mut stream, "GET", &format!("/events?from={from}"), None)?;
+        let elided = if elide { "&elide=confined" } else { "" };
+        self.send(
+            &mut stream,
+            "GET",
+            &format!("/events?from={from}{elided}"),
+            None,
+        )?;
         stream
             .set_read_timeout(Some(QUIET))
             .map_err(|why| why.to_string())?;
@@ -597,10 +609,23 @@ fn last_tools() -> Vec<Value> {
                 json!({
                     "after": integer("Only lines after this seq."),
                     "kinds": {"type": "array", "items": {"type": "string"}, "description": "Only these kinds."},
-                    "limit": integer("At most this many lines; 200 when omitted.")
+                    "limit": integer("At most this many lines; 200 when omitted."),
+                    "elide": string("`confined`: drop each call's confinement argv (#1037).")
                 }),
                 &[],
             ),
+        ),
+        tool(
+            "line",
+            "One logged line whole, by its seq (GET /line/<seq>, #1038).",
+            object(json!({"seq": integer("The line's seq.")}), &["seq"]),
+        ),
+        tool(
+            "refill_preview",
+            "What the next refill would carry (GET /refill-preview, #1038): working memory's \
+             render as it stands, its tokens and the live entries in it, before ruling on a \
+             meditation.",
+            none(),
         ),
     ]
 }
@@ -723,7 +748,7 @@ fn phase_of(lines: &[Value]) -> Value {
 fn status(serve: &Serve) -> Result<Value, String> {
     let state = serve.get("/state")?;
     let kinds: Vec<String> = PHASE_KINDS.iter().map(|kind| (*kind).to_owned()).collect();
-    let lines = serve.events(None, &kinds, u64::MAX)?;
+    let lines = serve.events(None, (&kinds, false), u64::MAX)?;
     let lines = lines["events"].as_array().cloned().unwrap_or_default();
     let mut answered = state.json();
     answered["phase"] = phase_of(&lines);
@@ -762,7 +787,7 @@ fn phase_command(serve: &Serve, name: &str, args: &Args<'_>) -> Result<Answer, S
 /// The call of the model's proposal awaiting the operator's ruling.
 fn pending_model_proposal(serve: &Serve) -> Result<Option<String>, String> {
     let kinds: Vec<String> = PHASE_KINDS.iter().map(|kind| (*kind).to_owned()).collect();
-    let lines = serve.events(None, &kinds, u64::MAX)?;
+    let lines = serve.events(None, (&kinds, false), u64::MAX)?;
     let lines = lines["events"].as_array().cloned().unwrap_or_default();
     let pending = &phase_of(&lines)["pending"];
     Ok((pending.get("by").and_then(Value::as_str) == Some("model"))
@@ -887,12 +912,23 @@ pub fn call(serve: &Serve, name: &str, arguments: &Map<String, Value>) -> Result
             serve.command(&json!({"kind": "close-tangent", "dispositions": dispositions}))?
         }
         "events" => {
+            let elide = match args.optional_string("elide")? {
+                None => false,
+                Some("confined") => true,
+                Some(word) => return Err(format!("`elide` is `confined`, not `{word}`")),
+            };
             return serve.events(
                 args.optional_count("after")?,
-                &args.optional_strings("kinds")?.unwrap_or_default(),
+                (&args.optional_strings("kinds")?.unwrap_or_default(), elide),
                 args.optional_count("limit")?.unwrap_or(EVENTS_LIMIT),
             );
         }
+        "line" => serve.get(&format!(
+            "/line/{}",
+            args.optional_count("seq")?
+                .ok_or_else(|| "`seq` is required".to_owned())?
+        ))?,
+        "refill_preview" => serve.get("/refill-preview")?,
         other => return Err(format!("no tool is named `{other}`")),
     };
     Ok(answer.json())
@@ -1079,7 +1115,7 @@ fn ask_and_wait(
             .unwrap_or("running");
         progress(round, &format!("turn {}: {turn}", asked.body["turn"]));
     };
-    let lines = serve.events(Some(seq.saturating_sub(1)), &[], u64::MAX)?;
+    let lines = serve.events(Some(seq.saturating_sub(1)), (&[], false), u64::MAX)?;
     let lines = lines["events"].as_array().cloned().unwrap_or_default();
     let digest = digest(&lines);
     // The model proposed a phase move, which ends its turn (#788): the turn
@@ -1540,7 +1576,9 @@ mod tests {
                 "rule_phase",
                 "open_tangent",
                 "close_tangent",
-                "events"
+                "events",
+                "line",
+                "refill_preview"
             ]
         );
         assert_eq!(listed["id"], "x");
@@ -1577,6 +1615,14 @@ mod tests {
         .expect("an answer");
         assert_eq!(reply["result"]["isError"], true);
         assert_eq!(reply["result"]["content"][0]["text"], "`call` is required");
+        // #1038: a line is named by its seq.
+        let reply = answer_quietly(
+            &mut serve,
+            r#"{"jsonrpc":"2.0","id":6,"method":"tools/call","params":{"name":"line","arguments":{}}}"#,
+        )
+        .expect("an answer");
+        assert_eq!(reply["result"]["isError"], true);
+        assert_eq!(reply["result"]["content"][0]["text"], "`seq` is required");
     }
 
     /// A serve that answers `end` with 200 and `/state` with `session`, on
