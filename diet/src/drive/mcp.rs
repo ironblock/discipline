@@ -488,14 +488,18 @@ fn later_tools() -> Vec<Value> {
             "Keep an exact span of a logged line as the operator's entry (the `keep` command, \
              #1021): an ask, an answer (the trunk's or a fork's, as written), a step's text or a \
              tool result as shown, named by its seq; the span must appear in it character for \
-             character. Answers the entry's id.",
+             character. Or, in place of `span`, a `start` and an `end` anchor, each found once \
+             in the line: the span runs from the one through the other (#1038). Answers the \
+             entry's id, and a span kept by anchors.",
             object(
                 json!({
                     "from": integer("The seq of the line to keep from."),
                     "span": string("The exact text to keep."),
+                    "start": string("Instead of `span`: where the span starts, found once in the line."),
+                    "end": string("With `start`: where the span ends, found once in the line."),
                     "tag": string("An optional tag for the entry.")
                 }),
-                &["from", "span"],
+                &["from"],
             ),
         ),
         tool(
@@ -810,7 +814,18 @@ fn gesture(name: &str, args: &Args<'_>) -> Result<Value, String> {
             args.optional_count("from")?
                 .ok_or_else(|| "`from` is required".to_owned())?
         );
-        body["span"] = json!(args.string("span")?);
+        match (
+            args.optional_string("span")?,
+            args.optional_string("start")?,
+            args.optional_string("end")?,
+        ) {
+            (Some(span), None, None) => body["span"] = json!(span),
+            (None, Some(start), Some(end)) => {
+                body["start"] = json!(start);
+                body["end"] = json!(end);
+            }
+            _ => return Err("`span`, or `start` and `end`, is required".to_owned()),
+        }
         if let Some(tag) = args.optional_string("tag")? {
             body["tag"] = json!(tag);
         }

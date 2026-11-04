@@ -1010,10 +1010,20 @@ impl<S: Streaming + 'static> Serving<S> {
                     Value::Integer(i64::try_from(fork).unwrap_or(i64::MAX)),
                 )])
             }),
-            Command::Keep(from, span, tag) => self
+            Command::Keep(from, Span::Exact(span), tag) => self
                 .session
                 .keep(from, &span, tag.as_deref())
                 .map(|entry| BTreeMap::from([("entry".to_owned(), Value::String(entry))])),
+            // By anchors (#1038): the span it resolved to rides back.
+            Command::Keep(from, Span::Anchored(start, end), tag) => self
+                .session
+                .keep_anchored(from, (&start, &end), tag.as_deref())
+                .map(|(entry, span)| {
+                    BTreeMap::from([
+                        ("entry".to_owned(), Value::String(entry)),
+                        ("span".to_owned(), Value::String(span)),
+                    ])
+                }),
             Command::Wrap(call, from, span) => self
                 .session
                 .wrap(call, from, &span)
@@ -1157,6 +1167,13 @@ struct Posted {
     note: Option<(String, CommandKind)>,
 }
 
+/// What a keep keeps (#1038): an exact span, or the span from a start
+/// anchor through an end anchor.
+enum Span {
+    Exact(String),
+    Anchored(String, String),
+}
+
 /// A command.
 enum Command {
     /// The words, and the digests of the uploads it attaches (#513).
@@ -1190,7 +1207,7 @@ enum Command {
     Grade(crate::drive::session::Grade),
     /// Keep this span of the logged line with this seq as an operator
     /// entry, with an optional tag (#1021).
-    Keep(u64, String, Option<String>),
+    Keep(u64, Span, Option<String>),
     /// Fork off the trunk at the logged line with this seq, or its end,
     /// asking this (#1021).
     Fork(Option<u64>, crate::drive::session::OperatorAsk),
@@ -1286,7 +1303,7 @@ impl Command {
                 &["kind", "to", "meditate", "note"]
             }
             // #1021: the operator's keep ends no idle gap.
-            CommandKind::Keep => &["kind", "from", "span", "tag", "note"],
+            CommandKind::Keep => &["kind", "from", "span", "start", "end", "tag", "note"],
             // #1021: the operator's fork ends no idle gap.
             CommandKind::Fork => &["kind", "at", "ask", "text", "note"],
             // #1031: the answer to a shadow's suggestion ends no idle gap.
@@ -1434,17 +1451,24 @@ impl Command {
                 }
             }
             CommandKind::Keep => {
-                match (object.get("from"), object.get("span"), object.get("tag")) {
-                    (Some(Value::Integer(from)), Some(Value::String(span)), tag) => {
-                        let tag = match tag {
-                            None => None,
-                            Some(Value::String(tag)) => Some(tag.clone()),
-                            Some(_) => return None,
-                        };
-                        u64::try_from(*from)
-                            .ok()
-                            .map(|from| Self::Keep(from, span.clone(), tag))
+                // An exact span, or a start and an end anchor (#1038): one
+                // or the other, never both.
+                let span = match (object.get("span"), object.get("start"), object.get("end")) {
+                    (Some(Value::String(span)), None, None) => Span::Exact(span.clone()),
+                    (None, Some(Value::String(start)), Some(Value::String(end))) => {
+                        Span::Anchored(start.clone(), end.clone())
                     }
+                    _ => return None,
+                };
+                let tag = match object.get("tag") {
+                    None => None,
+                    Some(Value::String(tag)) => Some(tag.clone()),
+                    Some(_) => return None,
+                };
+                match object.get("from") {
+                    Some(Value::Integer(from)) => u64::try_from(*from)
+                        .ok()
+                        .map(|from| Self::Keep(from, span, tag)),
                     _ => None,
                 }
             }
@@ -2212,12 +2236,24 @@ mod tests {
         };
         assert!(matches!(
             read(r#"{"kind":"keep","from":7,"span":"two tables","tag":"schema"}"#),
-            Some(Command::Keep(7, span, Some(tag))) if span == "two tables" && tag == "schema"
+            Some(Command::Keep(7, Span::Exact(span), Some(tag))) if span == "two tables" && tag == "schema"
         ));
         assert!(matches!(
             read(r#"{"kind":"keep","from":7,"span":"two tables"}"#),
             Some(Command::Keep(7, _, None))
         ));
+        // #1038: by a start and an end anchor, never with a span too.
+        assert!(matches!(
+            read(r#"{"kind":"keep","from":7,"start":"two","end":"tables"}"#),
+            Some(Command::Keep(7, Span::Anchored(start, end), None)) if start == "two" && end == "tables"
+        ));
+        for refused in [
+            r#"{"kind":"keep","from":7,"span":"x","start":"a","end":"b"}"#,
+            r#"{"kind":"keep","from":7,"start":"a"}"#,
+            r#"{"kind":"keep","from":7,"end":"b"}"#,
+        ] {
+            assert!(read(refused).is_none(), "{refused}");
+        }
         assert!(matches!(
             read(r#"{"kind":"fork","at":9,"ask":"GOTCHAS"}"#),
             Some(Command::Fork(Some(9), OperatorAsk::Pinned(name))) if name == "GOTCHAS"
