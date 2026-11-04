@@ -5777,7 +5777,9 @@ impl<S: Streaming + 'static> Session<S> {
     /// it (#1038): working memory's render under the regimen's budget, with
     /// the operator's pending marks; its estimated `tokens`; how many
     /// entries it `reduced`; whether it `fits` its budget; and the live
-    /// `entries` it holds, by id. A refill that must also fit the window it
+    /// `entries`, by id: each is in the render whole, or shortened or elided
+    /// to its id when `reduced` counts it (a refuted note's `was:` line rides
+    /// too). A refill that must also fit the window it
     /// is made in may elide more, and one under a native summary carries
     /// the summary instead: the preview is the render as it stands. `None`
     /// for a session with no working memory.

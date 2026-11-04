@@ -623,8 +623,9 @@ fn last_tools() -> Vec<Value> {
         tool(
             "refill_preview",
             "What the next refill would carry (GET /refill-preview, #1038): working memory's \
-             render as it stands, its tokens and the live entries in it, before ruling on a \
-             meditation.",
+             render as it stands, its tokens, and the live entries by id -- each whole in the \
+             render, or shortened or elided to its id when `reduced` counts it -- before ruling \
+             on a meditation.",
             none(),
         ),
     ]
