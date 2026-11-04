@@ -2294,9 +2294,6 @@ pub enum Event {
         /// The operator entry that holds the span.
         entry: String,
     },
-    /// A tool result the operator wrapped (v35, #1030): replaced on the
-    /// trunk, from the trunk request this names on, by a span the operator
-    /// kept.
     /// The operator's note on a gesture (v36, #1037), logged immediately
     /// before the gesture's outcome.
     OperatorNote {
@@ -2305,6 +2302,9 @@ pub enum Event {
         /// The note, as the operator wrote it.
         note: String,
     },
+    /// A tool result the operator wrapped (v35, #1030): replaced on the
+    /// trunk, from the trunk request this names on, by a span the operator
+    /// kept.
     Wrapped {
         /// The turn whose trunk request first carries the replacement.
         turn: u32,

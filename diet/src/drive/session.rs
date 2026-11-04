@@ -1079,8 +1079,6 @@ pub enum Event {
         /// The question it would have asked (#1031).
         question: String,
     },
-    /// The operator's wrap, accepted (#1030): applied at the next trunk
-    /// request, or never, when the session ends first.
     /// The operator's note on a gesture (#1037), immediately before its
     /// outcome.
     OperatorNote {
@@ -1089,6 +1087,8 @@ pub enum Event {
         /// The note as written.
         note: String,
     },
+    /// The operator's wrap, accepted (#1030): applied at the next trunk
+    /// request, or never, when the session ends first.
     WrapAccepted {
         /// The `tool_call` line whose result it wraps.
         call: u64,
