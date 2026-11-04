@@ -11,6 +11,10 @@
 //!   session's own start time, read from its first event, so a page that
 //!   resumes against a restarted process is told `410` instead of being fed
 //!   another session's events as if they continued its own (D7).
+//! * `GET /line/<seq>` answers one logged line whole, and `GET
+//!   /refill-preview` the render the next refill would carry (#1038).
+//!   While a session's shadows are hidden, `/events` and `/line/<seq>`
+//!   leave their `fork.shadowed` lines out.
 //! * `GET /state` answers what the session is doing now, as one JSON
 //!   object ([`Session::status`], #756); `GET /wait?until=idle|<kind>&
 //!   after=<seq>&timeout=<s>` answers the same once the session is idle or
@@ -442,9 +446,11 @@ type Handler<S> = fn(&Serving<S>, &mut TcpStream, &Request);
 
 /// Every route there is. Anything else, `OPTIONS` included, is `404`. A
 /// path ending in `/` is a prefix: `/files/` answers `/files/<sha256>`.
-fn routes<S: Streaming + 'static>() -> [(&'static str, &'static str, Handler<S>); 8] {
+fn routes<S: Streaming + 'static>() -> [(&'static str, &'static str, Handler<S>); 10] {
     [
         ("GET", "/events", Serving::<S>::events),
+        ("GET", "/line/", Serving::<S>::line),
+        ("GET", "/refill-preview", Serving::<S>::refill_preview),
         ("GET", "/state", Serving::<S>::state),
         ("GET", "/wait", Serving::<S>::wait),
         ("GET", "/memory", Serving::<S>::memory),
@@ -560,6 +566,9 @@ impl<S: Streaming + 'static> Serving<S> {
         let Some((kinds, elide)) = events_filter(&request.query) else {
             return respond(stream, 400, &empty());
         };
+        // While the shadows are hidden (#1038), their forks stay off the live
+        // operator's view, asked for or not; the log keeps them.
+        let hidden = self.session.shadows_hidden();
         let first = match request.header("last-event-id") {
             Some(id) => match resume_after(id, self.opened) {
                 Ok(seq) => match seq.checked_add(1) {
@@ -614,6 +623,9 @@ impl<S: Streaming + 'static> Serving<S> {
             }
             for logged in &batch {
                 next = logged.seq + 1;
+                if hidden && matches!(logged.event, super::session::Event::Shadowed { .. }) {
+                    continue;
+                }
                 if let Some(kinds) = &kinds
                     && !crate::formats::log::kind_of(&super::session::line_of(logged))
                         .is_some_and(|kind| kinds.contains(&kind))
@@ -638,6 +650,42 @@ impl<S: Streaming + 'static> Serving<S> {
             if stream.write_all(out.as_bytes()).is_err() || stream.flush().is_err() {
                 return;
             }
+        }
+    }
+
+    /// `GET /line/<seq>`: one logged line whole (#1038); `404` for a seq
+    /// the log has not reached, or a shadow's fork while the shadows are
+    /// hidden; `400` for no number.
+    fn line(&self, stream: &mut TcpStream, request: &Request) {
+        let Ok(seq) = request
+            .path
+            .strip_prefix("/line/")
+            .unwrap_or_default()
+            .parse::<u64>()
+        else {
+            return respond(stream, 400, &empty());
+        };
+        match self.session.logged(seq) {
+            Some(logged)
+                if !(self.session.shadows_hidden()
+                    && matches!(logged.event, super::session::Event::Shadowed { .. })) =>
+            {
+                respond(
+                    stream,
+                    200,
+                    &Value::Object(super::session::line_value(&logged)),
+                );
+            }
+            _ => respond(stream, 404, &empty()),
+        }
+    }
+
+    /// `GET /refill-preview`: what the next refill would carry (#1038), as
+    /// [`Session::refill_preview`] reads it; `404` with no working memory.
+    fn refill_preview(&self, stream: &mut TcpStream, _request: &Request) {
+        match self.session.refill_preview() {
+            Some(preview) => respond(stream, 200, &preview),
+            None => respond(stream, 404, &empty()),
         }
     }
 
@@ -675,8 +723,13 @@ impl<S: Streaming + 'static> Serving<S> {
         loop {
             let mut matched = None;
             if let Some(kind) = until {
+                let hidden = self.session.shadows_hidden();
                 for logged in self.session.events_from(next) {
                     next = logged.seq + 1;
+                    // A hidden shadow is no line this view waits for (#1038).
+                    if hidden && matches!(logged.event, super::session::Event::Shadowed { .. }) {
+                        continue;
+                    }
                     let line = super::session::line_value(&logged);
                     if line.get("kind") == Some(&Value::String(kind.to_owned())) {
                         matched = Some(line);
@@ -3610,6 +3663,124 @@ mod tests {
         )
         .expect("the server starts");
         (session, server)
+    }
+
+    /// #1038: `GET /line/<seq>` answers one logged line whole; a seq the
+    /// log has not reached is `404`, and one that is no number `400`.
+    #[test]
+    fn a_line_is_read_whole_by_its_seq() {
+        let (session, server) = serve_interviewing(vec![deltas(&["The port is 5182."])], |_| {});
+        session.ask("which port?", None).expect("accepted");
+        wait_until(&session, "the turn", settled);
+        let (code, line) = get_json(&server, "/line/0");
+        assert_eq!(code, 200);
+        assert_eq!(line["kind"], "session.start", "{line}");
+        assert_eq!(line["seq"], 0);
+        let answered = session
+            .events_from(0)
+            .iter()
+            .find(|logged| matches!(logged.event, Event::Answered { .. }))
+            .map(|logged| logged.seq)
+            .expect("an answer");
+        let (code, line) = get_json(&server, &format!("/line/{answered}"));
+        assert_eq!(code, 200);
+        assert_eq!(line["text"], "The port is 5182.", "{line}");
+        assert_eq!(get_json(&server, "/line/999999").0, 404);
+        assert_eq!(get_json(&server, "/line/x").0, 400);
+    }
+
+    /// #1038: `GET /refill-preview` answers the render the next refill
+    /// would carry, its tokens and the entries in it, before the operator
+    /// rules on a meditation; a session with no working memory has none.
+    #[test]
+    fn a_refill_preview_shows_what_the_next_refill_would_carry() {
+        let (session, server) = serve_interviewing(vec![deltas(&["The port is 5182."])], |_| {});
+        session.ask("which port?", None).expect("accepted");
+        let log = wait_until(&session, "the turn", settled);
+        let answered = log
+            .iter()
+            .find(|logged| matches!(logged.event, Event::Answered { .. }))
+            .map(|logged| logged.seq)
+            .expect("an answer");
+        let entry = session.keep(answered, "port is 5182", None).expect("kept");
+        let (code, preview) = get_json(&server, "/refill-preview");
+        assert_eq!(code, 200, "{preview}");
+        assert!(
+            preview["render"]
+                .as_str()
+                .is_some_and(|render| render.contains("port is 5182")),
+            "{preview}"
+        );
+        assert!(
+            preview["tokens"].as_u64().is_some_and(|tokens| tokens > 0),
+            "{preview}"
+        );
+        assert_eq!(preview["entries"], serde_json::json!([entry]));
+        let (_bare, plain) = serve(Canned::new([]), quick());
+        assert_eq!(get_json(&plain, "/refill-preview").0, 404);
+    }
+
+    /// #1038: while the shadows are hidden, `/events` and `/line/<seq>`
+    /// leave `fork.shadowed` out of the live operator's view; the log keeps
+    /// it.
+    #[test]
+    fn hidden_shadows_stay_off_events_and_line() {
+        use crate::drive::session::tests::{bash, interviewing, looping, tools};
+        use crate::drive::tool_loop::Decider;
+        use crate::drive::tool_loop::tests::scratch;
+        use crate::isolation::Confinement;
+        let tree = scratch("serve-hidden-shadows");
+        let mut interview = interviewing(&[]);
+        interview.shadow = vec![crate::formats::log::Warrant::Trouble];
+        interview.shadow_step = crate::drive::warrants::StepWarrants {
+            trouble: true,
+            ..crate::drive::warrants::StepWarrants::DEFAULTS
+        };
+        let listener = TcpListener::bind("127.0.0.1:0").expect("loopback");
+        let session = Arc::new(Session::open_with(
+            Canned::new([
+                vec![bash("call-1", "cat missing.md")],
+                deltas(&["It is missing."]),
+            ]),
+            looping(),
+            None,
+            Some(tools(
+                Confinement::Unconfined,
+                &tree,
+                &["cat"],
+                None,
+                Decider::Decline,
+            )),
+            None,
+            Some(interview),
+        ));
+        let server = Server::start(listener, Arc::clone(&session), quick(), render)
+            .expect("the server starts");
+        session.ask("look", None).expect("accepted");
+        let log = wait_until(&session, "the turn", settled);
+        let shadow = log
+            .iter()
+            .find(|logged| matches!(logged.event, Event::Shadowed { .. }))
+            .map(|logged| logged.seq)
+            .expect("the log keeps the shadow");
+        let mut reader = Client::send(&server, &events_request(&server, "?from=0", ""));
+        reader.read_until(Duration::from_secs(5), |read| read.contains("TurnSettled"));
+        assert!(
+            !reader.data().iter().any(|data| data.contains("Shadowed")),
+            "{:?}",
+            reader.data()
+        );
+        let mut asked = Client::send(
+            &server,
+            &events_request(&server, "?from=0&kinds=fork.shadowed", ""),
+        );
+        asked.read_until(Duration::from_secs(2), |read| read.contains("Shadowed"));
+        assert!(
+            !asked.data().iter().any(|data| data.contains("Shadowed")),
+            "not even asked for"
+        );
+        assert_eq!(get_json(&server, &format!("/line/{shadow}")).0, 404);
+        let _ = std::fs::remove_dir_all(&tree);
     }
 
     /// #756: a fresh session is idle at once -- `/state` says so, and a

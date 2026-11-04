@@ -5128,7 +5128,7 @@ fn an_mcp_client_drives_a_served_session_to_a_held_meditation_and_refills_anyway
     let listed = mcp.request("tools/list", serde_json::json!({}));
     assert_eq!(
         listed["tools"].as_array().map(Vec::len),
-        Some(23),
+        Some(25),
         "{listed}"
     );
 
