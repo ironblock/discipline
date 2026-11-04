@@ -54,7 +54,9 @@
 //! finding 1). So every request's `Host` must be one this server answers to,
 //! an `Origin`, when present, must be on the allowed list, and a post must be
 //! `application/json` -- which a page on another site can only send after a
-//! preflight, and the preflight has no route (D17). `/files` takes
+//! preflight, and the preflight is answered only for an origin on the
+//! allowed list (D17; #719, for the native shell's webview), every answer to
+//! one saying the origin is allowed. `/files` takes
 //! `image/png`, which is no form encoding either, so the same holds. What this does not stop
 //! is another program on the same machine, or another host once the server
 //! listens off loopback; that is Basic auth's job (I7, D10). With a
@@ -542,6 +544,19 @@ impl<S: Streaming + 'static> Serving<S> {
         if !host_allowed || !origin_allowed {
             return respond(&mut stream, 403, &empty());
         }
+        // A page on another origin this server admits (#719): every answer
+        // tells its browser so, and its preflight is answered here, before
+        // any credential, as a browser sends none on a preflight.
+        let admitted = request.header("origin").filter(|origin| {
+            self.config
+                .allowed_origins
+                .iter()
+                .any(|allowed| allowed == origin)
+        });
+        let _cors = Cors::set(admitted);
+        if request.method == "OPTIONS" && admitted.is_some() {
+            return respond_preflight(&mut stream);
+        }
         if let Some(credential) = &self.config.credential
             && !credential.admits(request.header("authorization"))
         {
@@ -582,8 +597,11 @@ impl<S: Streaming + 'static> Serving<S> {
                 None => return respond(stream, 400, &empty()),
             },
         };
-        let head = "HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\n\
-                    Cache-Control: no-cache\r\nConnection: close\r\n\r\n";
+        let head = format!(
+            "HTTP/1.1 200 OK\r\n{}Content-Type: text/event-stream\r\n\
+             Cache-Control: no-cache\r\nConnection: close\r\n\r\n",
+            Cors::headers()
+        );
         if stream.write_all(head.as_bytes()).is_err() {
             return;
         }
@@ -1830,7 +1848,11 @@ fn respond(stream: &mut TcpStream, status: u16, body: &Value) {
 /// The same, with `headers` -- each line ending in CRLF -- added.
 /// `204 No Content`: a reply with no body at all.
 fn respond_no_content(stream: &mut TcpStream) {
-    let _ = stream.write_all(b"HTTP/1.1 204 No Content\r\nConnection: close\r\n\r\n");
+    let head = format!(
+        "HTTP/1.1 204 No Content\r\n{}Connection: close\r\n\r\n",
+        Cors::headers()
+    );
+    let _ = stream.write_all(head.as_bytes());
     let _ = stream.flush();
     let _ = stream.shutdown(Shutdown::Write);
 }
@@ -1881,13 +1903,65 @@ fn page(stream: &mut TcpStream, ui: &std::path::Path, path: &str) {
     respond_bytes(stream, media_type, &bytes);
 }
 
+/// The CORS headers this connection's answers carry (#719): set at its
+/// start for a page on another origin the server admits, and cleared when
+/// its guard drops. A connection is served on a thread of its own, so the
+/// headers are that thread's.
+struct Cors;
+
+thread_local! {
+    static CORS: std::cell::RefCell<String> = const { std::cell::RefCell::new(String::new()) };
+}
+
+impl Cors {
+    /// This connection's CORS headers: those of `origin`, or none. Cleared
+    /// when the guard drops.
+    fn set(origin: Option<&str>) -> Cors {
+        CORS.with(|cors| {
+            *cors.borrow_mut() = origin.map_or_else(String::new, |origin| {
+                format!(
+                    "Access-Control-Allow-Origin: {origin}\r\n\
+                     Access-Control-Allow-Credentials: true\r\nVary: Origin\r\n"
+                )
+            });
+        });
+        Cors
+    }
+
+    /// The header lines, each ending in CRLF; empty for none.
+    fn headers() -> String {
+        CORS.with(|cors| cors.borrow().clone())
+    }
+}
+
+impl Drop for Cors {
+    fn drop(&mut self) {
+        CORS.with(|cors| cors.borrow_mut().clear());
+    }
+}
+
+/// `204` to an admitted origin's preflight (#719): the methods and headers
+/// this server's routes take, beside the origin's CORS headers.
+fn respond_preflight(stream: &mut TcpStream) {
+    let head = format!(
+        "HTTP/1.1 204 No Content\r\n{}Access-Control-Allow-Methods: GET, POST\r\n\
+         Access-Control-Allow-Headers: content-type, authorization, last-event-id\r\n\
+         Access-Control-Max-Age: 600\r\nConnection: close\r\n\r\n",
+        Cors::headers()
+    );
+    let _ = stream.write_all(head.as_bytes());
+    let _ = stream.flush();
+    let _ = stream.shutdown(Shutdown::Write);
+}
+
 /// `200` with `bytes` as `media_type`.
 fn respond_bytes(stream: &mut TcpStream, media_type: &str, bytes: &[u8]) {
     let head = format!(
-        "HTTP/1.1 200 OK\r\nContent-Type: {media_type}\r\nContent-Length: {}\r\n\
+        "HTTP/1.1 200 OK\r\n{}Content-Type: {media_type}\r\nContent-Length: {}\r\n\
          Cache-Control: no-cache\r\nX-Content-Type-Options: nosniff\r\n\
          X-Frame-Options: DENY\r\nContent-Security-Policy: frame-ancestors 'none'\r\n\
          Connection: close\r\n\r\n",
+        Cors::headers(),
         bytes.len()
     );
     let _ = stream.write_all(head.as_bytes());
@@ -1904,8 +1978,9 @@ fn respond_with(stream: &mut TcpStream, status: u16, headers: &str, body: &Value
     let mut text = String::new();
     json::render(body, &mut text);
     let reply = format!(
-        "HTTP/1.1 {status} {reason}\r\n{headers}Content-Type: application/json\r\n\
+        "HTTP/1.1 {status} {reason}\r\n{}{headers}Content-Type: application/json\r\n\
          Content-Length: {}\r\nConnection: close\r\n\r\n{text}",
+        Cors::headers(),
         text.len()
     );
     let _ = stream.write_all(reply.as_bytes());
@@ -2854,6 +2929,99 @@ mod tests {
         assert!(
             !hostless.contains("data: "),
             "a request with no host read the log"
+        );
+    }
+
+    /// #719: a page on another origin the server admits -- the native
+    /// shell's webview -- may drive it across origins: its preflight is
+    /// answered, before any credential, as a browser sends none on one; and
+    /// every answer to it says the origin is allowed. A foreign origin's
+    /// preflight is `403`, and a request with no `Origin` carries no CORS
+    /// header.
+    #[test]
+    fn an_admitted_origin_drives_the_session_across_origins() {
+        const SHELL: &str = "tauri://localhost";
+        let config = Config {
+            allowed_origins: vec![SHELL.to_owned()],
+            credential: Credential::basic("author:s3cret"),
+            ..quick()
+        };
+        let (session, server) = serve(Canned::new([deltas(&["x"])]), config);
+        let preflight = |origin: &str| {
+            Client::send(
+                &server,
+                &format!(
+                    "OPTIONS /commands HTTP/1.1\r\nHost: {}\r\nOrigin: {origin}\r\n\
+                     Access-Control-Request-Method: POST\r\n\
+                     Access-Control-Request-Headers: content-type, authorization\r\n\r\n",
+                    host(&server)
+                ),
+            )
+            .reply()
+        };
+        let answered = preflight(SHELL);
+        assert_eq!(status(&answered), 204, "{answered}");
+        let head = answered.to_ascii_lowercase();
+        assert!(
+            head.contains(&format!("access-control-allow-origin: {SHELL}")),
+            "{answered}"
+        );
+        assert!(
+            head.contains("access-control-allow-methods: get, post"),
+            "{answered}"
+        );
+        assert!(head.contains("content-type"), "{answered}");
+        assert!(head.contains("authorization"), "{answered}");
+        assert!(
+            head.contains("access-control-allow-credentials: true"),
+            "{answered}"
+        );
+        assert_eq!(status(&preflight("http://elsewhere.example")), 403);
+        let json = r#"{"kind":"ask","text":"hi"}"#;
+        let reply = post(
+            &server,
+            json,
+            &format!("Origin: {SHELL}\r\nAuthorization: Basic YXV0aG9yOnMzY3JldA==\r\n"),
+        );
+        assert_eq!(status(&reply), 200, "{reply}");
+        assert!(
+            reply
+                .to_ascii_lowercase()
+                .contains(&format!("access-control-allow-origin: {SHELL}")),
+            "{reply}"
+        );
+        assert!(
+            reply.to_ascii_lowercase().contains("vary: origin"),
+            "{reply}"
+        );
+        assert_eq!(asked(&session), 1);
+        let mut events = Client::send(
+            &server,
+            &events_request(
+                &server,
+                "?from=0",
+                &format!("Origin: {SHELL}\r\nAuthorization: Basic YXV0aG9yOnMzY3JldA==\r\n"),
+            ),
+        );
+        events.read_until(Duration::from_secs(5), |read| read.contains("data: "));
+        assert!(
+            events
+                .read
+                .to_ascii_lowercase()
+                .contains(&format!("access-control-allow-origin: {SHELL}")),
+            "{}",
+            events.read
+        );
+        let plain = post(
+            &server,
+            json,
+            "Authorization: Basic YXV0aG9yOnMzY3JldA==\r\n",
+        );
+        assert!(
+            !plain
+                .to_ascii_lowercase()
+                .contains("access-control-allow-origin"),
+            "{plain}"
         );
     }
 
