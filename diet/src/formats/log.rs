@@ -268,6 +268,17 @@
 //! log that declares 28 or less and carries it is refused. For a reader of
 //! earlier logs, the migration is nothing: no session declared one.
 //!
+//! v36 (#1037) carries the operator's reasons, and what the operator-entry
+//! guard refused. An `operator.note` line holds the note the operator gave
+//! a gesture -- `fork`, `keep`, `wrap`, `suggestion`, `edit-entry`,
+//! `ratify-phase`, `start-phase`, `propose-phase` or `move-phase` -- logged
+//! immediately before that gesture's outcome, as an idle gap is: its
+//! `command`, and its `note`. A refused gesture's note is not logged. And a
+//! `fork.settled` line's `passed_over` may say `guarded`: a field whose
+//! patch the operator-entry guard refused, its text as written. Each is
+//! refused in a log that declares 35 or less. For a reader of earlier logs,
+//! the migration is nothing: no session wrote them.
+//!
 //! v35 (#1030) carries the operator's wrap, the one rewrite of the trunk
 //! between meditations (#553's exception, for the operator alone). The
 //! command `wrap` names a tool result on the trunk and a span the operator
@@ -425,12 +436,12 @@ use super::record::vocabulary;
 struct LogParser;
 
 /// The version this module writes, as `session.start` states it.
-pub const VERSION: i64 = 35;
+pub const VERSION: i64 = 36;
 
 /// Every version this module reads.
 pub const READS: &[i64] = &[
     0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25,
-    26, 27, 28, 29, 30, 31, 32, 33, 34, 35,
+    26, 27, 28, 29, 30, 31, 32, 33, 34, 35, 36,
 ];
 
 /// How recent an input event must be, at the moment a turn settles, for the
@@ -502,6 +513,9 @@ vocabulary! {
         /// The operator's wrap of a tool result, accepted, applied at the
         /// next trunk request (v35, #1030).
         WrapAccepted => "wrap.accepted",
+        /// The operator's note on a gesture, before its outcome (v36,
+        /// #1037).
+        OperatorNote => "operator.note",
         /// The operator's ruling on the model's phase proposal (v7, #124).
         PhaseRuled => "phase.ruled",
         /// A phase move proposed, by the model or the operator, with the
@@ -1345,7 +1359,11 @@ pub struct PassedOver {
 }
 
 /// What a [`PassedOver`] region's `why` may say (v33, #1022).
-pub const PASSED_OVER_WHYS: &[&str] = &["untagged", "declined", "no-value", "refused"];
+pub const PASSED_OVER_WHYS: &[&str] = &["untagged", "declined", "no-value", "refused", "guarded"];
+
+/// The [`PASSED_OVER_WHYS`] word that arrived in v36 (#1037): a field whose
+/// patch the operator-entry guard refused.
+pub const PASSED_OVER_GUARDED: &str = "guarded";
 
 /// One item a recall carried (v7, #566): its archive key, the digest of its
 /// text, and its score -- under `literal`, how many of the ask's anchors it
@@ -2279,6 +2297,14 @@ pub enum Event {
     /// A tool result the operator wrapped (v35, #1030): replaced on the
     /// trunk, from the trunk request this names on, by a span the operator
     /// kept.
+    /// The operator's note on a gesture (v36, #1037), logged immediately
+    /// before the gesture's outcome.
+    OperatorNote {
+        /// The gesture it is the reason for.
+        command: Command,
+        /// The note, as the operator wrote it.
+        note: String,
+    },
     Wrapped {
         /// The turn whose trunk request first carries the replacement.
         turn: u32,
@@ -4301,9 +4327,30 @@ fn check(lines: &[Line]) -> Result<(), LogError> {
                 };
                 checked.map_err(|why| at(index, why))?;
             }
-            Event::ForkSettled { fork, outcome, .. } => forks
-                .settle(*fork, *outcome)
-                .map_err(|why| at(index, why))?,
+            Event::ForkSettled {
+                fork,
+                outcome,
+                passed_over,
+                ..
+            } => {
+                // What the guard refused, recorded as written (v36, #1037).
+                if declared < 36
+                    && passed_over
+                        .iter()
+                        .any(|region| region.why == PASSED_OVER_GUARDED)
+                {
+                    return Err(at(
+                        index,
+                        format!(
+                            "a `passed_over` region `{PASSED_OVER_GUARDED}`, which arrived in v36, \
+                             in a log that declares v{declared}"
+                        ),
+                    ));
+                }
+                forks
+                    .settle(*fork, *outcome)
+                    .map_err(|why| at(index, why))?;
+            }
             // The trunk's own patch (#609) answers to no fork.
             Event::Patch {
                 fork: Some(fork), ..
@@ -5322,6 +5369,10 @@ fn from_object(object: &BTreeMap<String, Value>) -> Result<Line, String> {
             from: fields.optional_string("from")?,
             to: fields.string("to")?,
             phase_document: fields.optional_phase_document("phase_document")?,
+        },
+        Kind::OperatorNote => Event::OperatorNote {
+            command: fields.tag("command", Command::from_tag)?,
+            note: fields.string("note")?,
         },
         Kind::WrapAccepted => Event::WrapAccepted {
             call: fields.count("call")?,
@@ -6463,6 +6514,16 @@ const fn may_v9(key: &'static str, holds: Holds) -> Field {
     }
 }
 
+/// A key that arrived in v36 with its object, which always writes it.
+const fn must_v36(key: &'static str, holds: Holds) -> Field {
+    Field {
+        key,
+        holds,
+        required: true,
+        since: 36,
+    }
+}
+
 /// A key that arrived in v35 with its object, which always writes it.
 const fn must_v35(key: &'static str, holds: Holds) -> Field {
     Field {
@@ -6984,6 +7045,7 @@ pub fn introduced(kind: Kind) -> i64 {
         Kind::ForkShadowed => 32,
         Kind::Suggestion => 34,
         Kind::Wrapped | Kind::WrapAccepted => 35,
+        Kind::OperatorNote => 36,
         _ => 0,
     }
 }
@@ -7481,6 +7543,13 @@ pub fn schema(kind: Kind) -> &'static [Field] {
                 must_v32("trigger", Text),
                 must_v32("ask", Text),
                 may_v34("question", Text),
+            ];
+            F
+        }
+        Kind::OperatorNote => {
+            const F: &[Field] = &[
+                must_v36("command", Tag(Tags::Command)),
+                must_v36("note", Text),
             ];
             F
         }
@@ -8893,6 +8962,11 @@ fn to_value(line: &Line) -> Value {
                 put("question", text(question));
             }
             Kind::ForkShadowed
+        }
+        Event::OperatorNote { command, note } => {
+            put("command", text(command.tag()));
+            put("note", text(note));
+            Kind::OperatorNote
         }
         Event::WrapAccepted { call, from, entry } => {
             put("call", count(*call));
@@ -10706,15 +10780,15 @@ mod tests {
     }
 
     /// #583, #878, #904, #555, #931, #936, #910, #942, #926, #932, #948, #971, #1016, #1021,
-    /// #1022, #1031, #1030: this module writes v35.
+    /// #1022, #1031, #1030, #1037: this module writes v36.
     #[test]
-    fn this_module_writes_v35_and_reads_every_version_before_it() {
-        assert_eq!(super::VERSION, 35);
+    fn this_module_writes_v36_and_reads_every_version_before_it() {
+        assert_eq!(super::VERSION, 36);
         assert_eq!(
             super::READS,
             &[
                 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22,
-                23, 24, 25, 26, 27, 28, 29, 30, 31, 32, 33, 34, 35
+                23, 24, 25, 26, 27, 28, 29, 30, 31, 32, 33, 34, 35, 36
             ]
         );
     }
@@ -11149,11 +11223,19 @@ mod tests {
                 refused: None,
                 pool: None,
                 not_run: Some(1),
-                passed_over: vec![PassedOver {
-                    why: "untagged".to_owned(),
-                    tag: None,
-                    text: "DECISION (confirmed): two tables".to_owned(),
-                }],
+                passed_over: vec![
+                    PassedOver {
+                        why: "untagged".to_owned(),
+                        tag: None,
+                        text: "DECISION (confirmed): two tables".to_owned(),
+                    },
+                    // v36 (#1037): a field the operator-entry guard refused.
+                    PassedOver {
+                        why: PASSED_OVER_GUARDED.to_owned(),
+                        tag: Some("DECISION:".to_owned()),
+                        text: "one table".to_owned(),
+                    },
+                ],
             },
             Event::Patch {
                 fork: Some(fork),
@@ -11589,6 +11671,11 @@ mod tests {
                 reason: None,
                 merged: None,
                 refuted: None,
+            },
+            // v36 (#1037): the operator's reason for the wrap, before it.
+            Event::OperatorNote {
+                command: Command::Wrap,
+                note: "the full listing is noise".to_owned(),
             },
             Event::WrapAccepted {
                 call: ran,
@@ -12973,7 +13060,7 @@ mod tests {
             tags(Kind::ALL.iter().map(|it| it.tag()).collect()),
             "session.start ask settlement request refused delta stop.asked response \
              cancelled request.failed turn.settled idle.gap progress tool_call fork \
-             fork.settled patch meditation delivered recalled flag meditation.held patch.refused pruned wrapped wrap.accepted phase.ruled phase.proposed phase.answered phase.started tangent.open tangent.close capture reminded background.ended notice timeout.near fork.skipped fork.shadowed suggestion phase.noted trunk.clamped trunk.waited warrant.gated request.retried grade meditation.skipped"
+             fork.settled patch meditation delivered recalled flag meditation.held patch.refused pruned wrapped wrap.accepted operator.note phase.ruled phase.proposed phase.answered phase.started tangent.open tangent.close capture reminded background.ended notice timeout.near fork.skipped fork.shadowed suggestion phase.noted trunk.clamped trunk.waited warrant.gated request.retried grade meditation.skipped"
         );
         assert_eq!(
             tags(FailReason::ALL.iter().map(|it| it.tag()).collect()),

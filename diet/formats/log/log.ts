@@ -4,8 +4,8 @@
 // i64, and a JavaScript number is exact only to 2^53. A `timings`
 // millisecond may carry a fraction, written as the server wrote it.
 
-export const VERSION = 35;
-export const READS = [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32, 33, 34, 35] as const;
+export const VERSION = 36;
+export const READS = [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32, 33, 34, 35, 36] as const;
 export const PRESENCE_WINDOW_MS = 2000;
 
 export type Kind =
@@ -35,6 +35,7 @@ export type Kind =
   | "pruned"
   | "wrapped"
   | "wrap.accepted"
+  | "operator.note"
   | "phase.ruled"
   | "phase.proposed"
   | "phase.answered"
@@ -457,7 +458,7 @@ export type SessionStartLine = {
   seq: number;
   t: number;
   kind: "session.start";
-  version: 0 | 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9 | 10 | 11 | 12 | 13 | 14 | 15 | 16 | 17 | 18 | 19 | 20 | 21 | 22 | 23 | 24 | 25 | 26 | 27 | 28 | 29 | 30 | 31 | 32 | 33 | 34 | 35;
+  version: 0 | 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9 | 10 | 11 | 12 | 13 | 14 | 15 | 16 | 17 | 18 | 19 | 20 | 21 | 22 | 23 | 24 | 25 | 26 | 27 | 28 | 29 | 30 | 31 | 32 | 33 | 34 | 35 | 36;
   opened: number;
   model: string;
   head: HeadMessage[];
@@ -843,6 +844,14 @@ export type WrapAcceptedLine = {
   entry: string;
 };
 
+export type OperatorNoteLine = {
+  seq: number;
+  t: number;
+  kind: "operator.note";
+  command: Command;
+  note: string;
+};
+
 export type PhaseRuledLine = {
   seq: number;
   t: number;
@@ -1102,6 +1111,7 @@ export type LogLine =
   | PrunedLine
   | WrappedLine
   | WrapAcceptedLine
+  | OperatorNoteLine
   | PhaseRuledLine
   | PhaseProposedLine
   | PhaseAnsweredLine

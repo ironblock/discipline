@@ -994,7 +994,12 @@ impl<S: Streaming + 'static> Serving<S> {
             gap,
             scoping,
             task,
+            note,
         } = command;
+        // Logged before the gesture's outcome, dropped if it is refused.
+        if let Some((note, kind)) = note {
+            self.session.carry_note(&note, kind);
+        }
         let rejected = |rejection: Rejected| match rejection {
             Rejected::Refused(because) => refused(because),
             // Not a command the session could refuse, or a gap it could not
@@ -1095,6 +1100,8 @@ struct Posted {
     scoping: bool,
     /// For an ask, the task it asks or answers the grade of (#942).
     task: Option<String>,
+    /// For an operator's gesture, the operator's note on it (#1037).
+    note: Option<(String, CommandKind)>,
 }
 
 /// A command.
@@ -1215,22 +1222,24 @@ impl Command {
             CommandKind::Background | CommandKind::RefillAnyway => &["kind"],
             // #124: the proposal's call and the operator's choice; a ruling
             // ends no idle gap.
-            CommandKind::RatifyPhase => &["kind", "call", "choice"],
+            CommandKind::RatifyPhase => &["kind", "call", "choice", "note"],
             // #150: the entry and the operator's text; an edit or a flag
             // ends no idle gap.
-            CommandKind::EditEntry => &["kind", "id", "content"],
+            CommandKind::EditEntry => &["kind", "id", "content", "note"],
             CommandKind::FlagEntry => &["kind", "id", "note"],
             // #788: the operator's phase commands; none ends an idle gap.
-            CommandKind::StartPhase => &["kind", "phase"],
-            CommandKind::ProposePhase | CommandKind::MovePhase => &["kind", "to", "meditate"],
+            CommandKind::StartPhase => &["kind", "phase", "note"],
+            CommandKind::ProposePhase | CommandKind::MovePhase => {
+                &["kind", "to", "meditate", "note"]
+            }
             // #1021: the operator's keep ends no idle gap.
-            CommandKind::Keep => &["kind", "from", "span", "tag"],
+            CommandKind::Keep => &["kind", "from", "span", "tag", "note"],
             // #1021: the operator's fork ends no idle gap.
-            CommandKind::Fork => &["kind", "at", "ask", "text"],
+            CommandKind::Fork => &["kind", "at", "ask", "text", "note"],
             // #1031: the answer to a shadow's suggestion ends no idle gap.
-            CommandKind::Suggestion => &["kind", "shadow", "answer"],
+            CommandKind::Suggestion => &["kind", "shadow", "answer", "note"],
             // #1030: the operator's wrap ends no idle gap.
-            CommandKind::Wrap => &["kind", "call", "from", "span"],
+            CommandKind::Wrap => &["kind", "call", "from", "span", "note"],
             // #942: a runner's grade ends no idle gap.
             CommandKind::Grade => &[
                 "kind",
@@ -1387,11 +1396,19 @@ impl Command {
                 }
             }
         }?;
+        // The operator's note on a gesture (#1037): text, never blank; the
+        // kinds that take one are those whose `takes` names it.
+        let note = match object.get("note") {
+            None => None,
+            Some(Value::String(note)) if !note.trim().is_empty() => Some((note.clone(), kind)),
+            Some(_) => return None,
+        };
         Some(Posted {
             command,
             gap,
             scoping,
             task,
+            note,
         })
     }
 }
@@ -2165,6 +2182,66 @@ mod tests {
             r#"{"kind":"fork","text":"x","idle_gap":{}}"#,
         ] {
             assert!(read(refused).is_none(), "{refused}");
+        }
+    }
+
+    /// #1037: every operator's gesture takes an optional `note`, text and
+    /// never blank, carried with its kind; a command that is no gesture, or
+    /// a blank note, is no command.
+    #[test]
+    fn a_gestures_note_is_read_with_its_kind_and_nothing_else_takes_one() {
+        let read = |body: &str| {
+            let object = crate::formats::record::json::line(body).expect("an object");
+            Command::from_object(&object).map(|posted| posted.note)
+        };
+        for (body, kind) in [
+            (
+                r#"{"kind":"keep","from":7,"span":"x","note":"why"}"#,
+                CommandKind::Keep,
+            ),
+            (
+                r#"{"kind":"fork","text":"x","note":"why"}"#,
+                CommandKind::Fork,
+            ),
+            (
+                r#"{"kind":"wrap","call":6,"from":6,"span":"x","note":"why"}"#,
+                CommandKind::Wrap,
+            ),
+            (
+                r#"{"kind":"suggestion","shadow":12,"answer":"reject","note":"why"}"#,
+                CommandKind::Suggestion,
+            ),
+            (
+                r#"{"kind":"edit-entry","id":"d1","content":"x","note":"why"}"#,
+                CommandKind::EditEntry,
+            ),
+            (
+                r#"{"kind":"ratify-phase","call":"c","choice":"keep","note":"why"}"#,
+                CommandKind::RatifyPhase,
+            ),
+            (
+                r#"{"kind":"start-phase","phase":"plan","note":"why"}"#,
+                CommandKind::StartPhase,
+            ),
+            (
+                r#"{"kind":"propose-phase","to":"build","note":"why"}"#,
+                CommandKind::ProposePhase,
+            ),
+            (
+                r#"{"kind":"move-phase","to":"build","note":"why"}"#,
+                CommandKind::MovePhase,
+            ),
+        ] {
+            assert_eq!(read(body), Some(Some(("why".to_owned(), kind))), "{body}");
+        }
+        assert_eq!(read(r#"{"kind":"keep","from":7,"span":"x"}"#), Some(None));
+        for refused in [
+            r#"{"kind":"keep","from":7,"span":"x","note":" "}"#,
+            r#"{"kind":"keep","from":7,"span":"x","note":3}"#,
+            r#"{"kind":"ask","text":"x","note":"why"}"#,
+            r#"{"kind":"end","note":"why"}"#,
+        ] {
+            assert_eq!(read(refused), None, "{refused}");
         }
     }
 
