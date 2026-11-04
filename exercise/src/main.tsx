@@ -3,6 +3,7 @@ import { createRoot } from 'react-dom/client';
 
 import { App } from './App.tsx';
 import { driveBase } from './drive/base.ts';
+import { credentialedWeb, shellAuthorization } from './drive/credential.ts';
 import { SESSIONS } from './drive/sessions.ts';
 import type { SessionName } from './drive/sessions.ts';
 import './theme/tokens.css';
@@ -28,10 +29,15 @@ const overrides = Object.fromEntries(Object.keys(PREFS).map((name) => [name, par
 const root = document.getElementById('root');
 if (!root) throw new Error('index.html has no #root');
 
+// The native shell holds the drive's credential and hands it over here, never in a URL (#719, `drive/credential.ts`);
+// in a browser there is none, and Vite's proxy presents it.
+const authorization = drive ? await shellAuthorization() : undefined;
+const web = authorization ? credentialedWeb(authorization) : undefined;
+
 createRoot(root).render(
   <StrictMode>
     <Preferred overrides={overrides}>
-      <App speed={speed} drive={drive} base={base} {...(recording ? { recording } : {})} />
+      <App speed={speed} drive={drive} base={base} {...(web ? { web } : {})} {...(recording ? { recording } : {})} />
     </Preferred>
   </StrictMode>,
 );
