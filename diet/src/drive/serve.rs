@@ -2175,7 +2175,7 @@ mod tests {
         for refused in [
             r#"{"kind":"keep","span":"x"}"#,
             r#"{"kind":"keep","from":-1,"span":"x"}"#,
-            r#"{"kind":"keep","from":7,"span":"x","note":"y"}"#,
+            r#"{"kind":"keep","from":7,"span":"x","reason":"y"}"#,
             r#"{"kind":"fork"}"#,
             r#"{"kind":"fork","ask":"GOTCHAS","text":"x"}"#,
             r#"{"kind":"fork","at":"9","text":"x"}"#,
