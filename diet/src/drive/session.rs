@@ -1081,6 +1081,14 @@ pub enum Event {
     },
     /// The operator's wrap, accepted (#1030): applied at the next trunk
     /// request, or never, when the session ends first.
+    /// The operator's note on a gesture (#1037), immediately before its
+    /// outcome.
+    OperatorNote {
+        /// The gesture it is the reason for.
+        command: CommandKind,
+        /// The note as written.
+        note: String,
+    },
     WrapAccepted {
         /// The `tool_call` line whose result it wraps.
         call: u64,
@@ -2867,6 +2875,10 @@ struct State {
     /// The operator's wraps (#1030), by the `tool_call` line each replaces:
     /// waiting for the next trunk request, or applied there.
     wraps: BTreeMap<u64, Wrap>,
+    /// The note the operator gave the gesture about to run (#1037): logged
+    /// immediately before its outcome when it is admitted, dropped when it
+    /// is refused -- as an idle gap is carried.
+    carried_note: Option<(String, CommandKind)>,
     /// The forks the step warrants fired this turn that run in its gap
     /// (#783): every step's under the gap timing, the final answer's under
     /// either.
@@ -3059,6 +3071,7 @@ impl State {
             shadow_counters: crate::drive::warrants::Counters::default(),
             suggestions: Suggestions::default(),
             wraps: BTreeMap::new(),
+            carried_note: None,
             gap_firings: Vec::new(),
             // As far past the cooldown as `trouble`'s counter starts (#783).
             refute_steps: (99, 99),
@@ -3405,6 +3418,10 @@ impl State {
     /// within the gap, so the gap stays open for the ask that ends it.
     fn admit_within_the_gap(&mut self) {
         self.carried = None;
+        // The gesture's note, before its outcome (#1037).
+        if let Some((note, command)) = self.carried_note.take() {
+            self.push(Event::OperatorNote { command, note });
+        }
     }
 
     /// Now, on the log's clock: milliseconds since the session opened.
@@ -3546,6 +3563,8 @@ impl State {
         // admitted command that follows carries the gap -- its `blocked`
         // running from this refusal.
         self.carried = None;
+        // Nor is its note (#1037).
+        self.carried_note = None;
         let during = self.settlement;
         // Once ended, nothing more is logged: `ended` is the log's last line,
         // so a reader that waits for it has the whole session (#291). The
@@ -4920,7 +4939,8 @@ impl<S: Streaming + 'static> Session<S> {
     /// Keep `span` of the logged line `from` as the operator's entry (#1021):
     /// an ask, an answer -- the trunk's or a fork's, as it was written,
     /// trailers and all -- a step's text, or a tool result as the model was
-    /// shown it. The span must be in that line character for character; it
+    /// shown it -- or an answer's or a step's reasoning (#1037). The span
+    /// must be in that line character for character, line breaks and all; it
     /// becomes a working-memory entry of the operator's, no field kind, its
     /// `tag` on the `patch` line when given, and the render carries it.
     /// Returns the entry's id.
@@ -4945,6 +4965,15 @@ impl<S: Streaming + 'static> Session<S> {
         drop(state);
         self.shared.changed.notify_all();
         Ok(entry)
+    }
+
+    /// Carry the operator's `note` on the gesture `command` about to run
+    /// (#1037): an `operator.note` line immediately before the gesture's
+    /// outcome when it is admitted, nothing when it is refused. Serve calls
+    /// it just before the gesture, as a command's idle gap is carried: two
+    /// gestures posted at once may trade notes, as they would trade gaps.
+    pub fn carry_note(&self, note: &str, command: CommandKind) {
+        self.shared.lock().carried_note = Some((note.to_owned(), command));
     }
 
     /// Wrap the tool result of the `tool_call` line `call` (#1030): the
@@ -6433,6 +6462,10 @@ pub fn line_of(logged: &Logged) -> log::Line {
             trigger: trigger.clone(),
             ask: ask.clone(),
             question: Some(question.clone()),
+        },
+        Event::OperatorNote { command, note } => log::Event::OperatorNote {
+            command: command_of(*command),
+            note: note.clone(),
         },
         Event::WrapAccepted { call, from, entry } => log::Event::WrapAccepted {
             call: *call,
@@ -9812,15 +9845,26 @@ fn operator_fork(log: &[Logged], fork: u64) -> bool {
     })
 }
 
-/// The text of the logged line `from` a keep may keep from (#1021): an
-/// ask, an answer or a step's text as written, or a tool result as shown.
-fn keep_source(state: &State, from: u64) -> Option<&str> {
+/// The texts of the logged line `from` a keep may keep from (#1021): an
+/// ask, an answer or a step's text as written, with an answer's or a step's
+/// reasoning (#1037), or a tool result as shown.
+fn keep_source(state: &State, from: u64) -> Option<Vec<&str>> {
     let logged = state.log.iter().find(|logged| logged.seq == from)?;
     match &logged.event {
-        Event::Asked { text, .. } | Event::Answered { text, .. } | Event::Called { text, .. } => {
-            Some(text.as_str())
+        Event::Asked { text, .. } => Some(vec![text.as_str()]),
+        // A step's or an answer's words, and its reasoning (#1037): a fork's
+        // right answer may be only in what it reasoned.
+        Event::Answered {
+            text, reasoning, ..
         }
-        Event::ToolCalled(line) => line.shown.as_deref(),
+        | Event::Called {
+            text, reasoning, ..
+        } => Some(
+            std::iter::once(text.as_str())
+                .chain(reasoning.as_deref())
+                .collect(),
+        ),
+        Event::ToolCalled(line) => line.shown.as_deref().map(|shown| vec![shown]),
         _ => None,
     }
 }
@@ -10034,10 +10078,10 @@ fn keep_refusal(state: &State, from: u64, span: &str) -> Result<(), (Refusal, Op
     if span.trim().is_empty() {
         return refused(Refusal::Empty);
     }
-    let Some(source) = keep_source(state, from) else {
+    let Some(sources) = keep_source(state, from) else {
         return refused(Refusal::NotASource);
     };
-    if !source.contains(span) {
+    if !sources.iter().any(|source| source.contains(span)) {
         return refused(Refusal::NotInSource);
     }
     // A span a live entry already holds is the operator's endorsement of it
@@ -10233,16 +10277,8 @@ fn guarded(
     let mut kept = Vec::new();
     let mut refused = Vec::new();
     for patch in patches {
-        let (op, target) = match patch {
-            Patch::Add { .. } => (log::PatchOp::Add, None),
-            Patch::Supersede { voids, .. } => (log::PatchOp::Supersede, Some(voids)),
-            Patch::Resolve { target, .. } => (log::PatchOp::Resolve, Some(target)),
-            Patch::Retire { target, .. } => (log::PatchOp::Retire, Some(target)),
-            Patch::Park { target, .. } => (log::PatchOp::Park, Some(target)),
-        };
-        let theirs = patch.provenance().lane != crate::object::OPERATOR;
-        match target {
-            Some(target) if theirs && object.by_operator(target) => {
+        match guard_refuses(patch, object) {
+            Some((op, target)) => {
                 refused.push(Event::PatchRefused {
                     fork,
                     lane: fork.is_none().then(|| patch.provenance().lane.clone()),
@@ -10250,10 +10286,28 @@ fn guarded(
                     entry: target.as_str().to_owned(),
                 });
             }
-            _ => kept.push(patch.clone()),
+            None => kept.push(patch.clone()),
         }
     }
     (kept, refused)
+}
+
+/// The op and the operator's entry `patch` would change, when the guard
+/// refuses it (#150): a patch not the operator's own, on an entry the
+/// operator wrote.
+fn guard_refuses<'a>(
+    patch: &'a Patch,
+    object: &WorkingObject,
+) -> Option<(log::PatchOp, &'a crate::object::EntryId)> {
+    let (op, target) = match patch {
+        Patch::Add { .. } => return None,
+        Patch::Supersede { voids, .. } => (log::PatchOp::Supersede, voids),
+        Patch::Resolve { target, .. } => (log::PatchOp::Resolve, target),
+        Patch::Retire { target, .. } => (log::PatchOp::Retire, target),
+        Patch::Park { target, .. } => (log::PatchOp::Park, target),
+    };
+    let theirs = patch.provenance().lane != crate::object::OPERATOR;
+    (theirs && object.by_operator(target)).then_some((op, target))
 }
 
 /// A meditation `reason` fired (#504): refilled now; or, when the regimen asks
@@ -12094,7 +12148,6 @@ pub fn fork_tail(regimen: &Regimen) -> Option<u32> {
     }
 }
 
-/// A count as `GET /state` writes it (#756).
 /// Where the session is, for its status (#1037): its phase, the model's
 /// proposal awaiting a ruling, and the latest request's prompt as sized,
 /// each absent when there is none.
@@ -12121,6 +12174,7 @@ fn where_it_is(state: &State) -> [(&'static str, Option<Value>); 3] {
     [("phase", phase), ("proposal", proposal), ("sized", sized)]
 }
 
+/// A count as `GET /state` writes it (#756).
 fn status_number(n: u64) -> Value {
     Value::Integer(i64::try_from(n).unwrap_or(i64::MAX))
 }
@@ -14745,7 +14799,9 @@ fn settle_fork<S>(
                     trailer = after;
                     // What wrote nothing is recorded as written (#1022).
                     passed_over = passed_over_of(&fields);
-                    let (outcome, lines) = folded(state, &fields, turn, fork);
+                    let (outcome, lines, guarded) = folded(state, &fields, turn, fork);
+                    // And what the operator-entry guard refused (#1037).
+                    passed_over.extend(guarded_regions(&fields, &guarded));
                     patches = lines;
                     Some(outcome)
                 };
@@ -15059,17 +15115,17 @@ fn passed_over_of(text: &str) -> Vec<log::PassedOver> {
 /// to the working object: `value` and one [`Event::Patched`] per patch;
 /// `decline` when it recorded nothing; `unparseable` when the grammar, or
 /// the object, refused it.
-fn folded(state: &mut State, text: &str, turn: u32, fork: u64) -> (log::ForkOutcome, Vec<Event>) {
+fn folded(state: &mut State, text: &str, turn: u32, fork: u64) -> Folded {
     let Ok((patches, _census)) =
         super::fold(text, turn, super::INTERVIEW, Some(&format!("f/{fork}")))
     else {
-        return (log::ForkOutcome::Unparseable, Vec::new());
+        return (log::ForkOutcome::Unparseable, Vec::new(), Vec::new());
     };
     if patches.is_empty() {
-        return (log::ForkOutcome::Decline, Vec::new());
+        return (log::ForkOutcome::Decline, Vec::new(), Vec::new());
     }
     let Some(interview) = state.interview.as_ref() else {
-        return (log::ForkOutcome::Unparseable, Vec::new());
+        return (log::ForkOutcome::Unparseable, Vec::new(), Vec::new());
     };
     let patches = unclashed(patches, &interview.object, (turn, fork));
     let Cited { patches, reasons } = cited(patches, &interview.object);
@@ -15092,6 +15148,25 @@ fn folded(state: &mut State, text: &str, turn: u32, fork: u64) -> (log::ForkOutc
             })
             .collect(),
     };
+    // What the guard will refuse, for its fields to be logged as written
+    // (#1037).
+    let guarded: Vec<(u32, String)> = state.interview.as_ref().map_or_else(Vec::new, |interview| {
+        patches
+            .iter()
+            .filter(|patch| guard_refuses(patch, &interview.object).is_some())
+            .map(|patch| {
+                let content = match patch {
+                    Patch::Add { content, .. } | Patch::Supersede { content, .. } => {
+                        content.clone()
+                    }
+                    Patch::Resolve { .. } | Patch::Retire { .. } | Patch::Park { .. } => {
+                        String::new()
+                    }
+                };
+                (patch.provenance().index, content)
+            })
+            .collect()
+    });
     let (outcome, mut lines) = applied(state, &patches, fork);
     // Each reasoned pair's reason, on the line that voided or retired the
     // entry it cited (#812).
@@ -15112,7 +15187,43 @@ fn folded(state: &mut State, text: &str, turn: u32, fork: u64) -> (log::ForkOutc
             *reason = cited.and_then(|cited| reasons.get(cited)).cloned();
         }
     }
-    (outcome, lines)
+    (outcome, lines, guarded)
+}
+
+/// What [`folded`] made of a fork's answer: its outcome, its lines, and the
+/// position and content of each patch the operator-entry guard refused
+/// (#1037).
+type Folded = (log::ForkOutcome, Vec<Event>, Vec<(u32, String)>);
+
+/// Each field of a fields-route answer `text` whose patch the guard
+/// refused, as written (#1037): the field at a refused patch's position,
+/// or the one whose content the refused patch carries -- a DECISION made
+/// the supersede of a reasoned pair keeps its own.
+fn guarded_regions(text: &str, guarded: &[(u32, String)]) -> Vec<log::PassedOver> {
+    use crate::formats::interview::Outcome;
+    let Ok(answer) = crate::formats::interview::parse(text) else {
+        return Vec::new();
+    };
+    answer
+        .fields
+        .iter()
+        .enumerate()
+        .filter_map(|(position, field)| match (&field.tag, &field.outcome) {
+            (Some(tag), Outcome::Value(content))
+                if guarded.iter().any(|(index, refused)| {
+                    u32::try_from(position).is_ok_and(|position| position == *index)
+                        || *refused == format!("{}: {content}", tag.kind.canonical_tag())
+                }) =>
+            {
+                Some(log::PassedOver {
+                    why: log::PASSED_OVER_GUARDED.to_owned(),
+                    tag: Some(tag.as_written.clone()),
+                    text: field.raw.clone(),
+                })
+            }
+            _ => None,
+        })
+        .collect()
 }
 
 /// The pointer a refutation fork's corrections carry (#878): where its
@@ -16622,6 +16733,67 @@ pub(in crate::drive) mod tests {
         assert_eq!((kept.as_ref(), none), ("DECISION: first\nsecond\n", None));
     }
 
+    /// #1037: a fork's DECISION that would supersede the operator's entry
+    /// -- its SUPERSEDE citing that entry with a reason -- is refused by the
+    /// guard, and the DECISION's text is logged as written on the fork's
+    /// settle, `passed_over` as `guarded`; the guard and the entry stand.
+    #[test]
+    fn a_decision_the_guard_refuses_is_logged_as_passed_over() {
+        let mut interview = interviewing(&[log::Warrant::Scoping]);
+        interview.asks = &crate::dogma::asks::V4;
+        let session = Session::open_with(
+            Canned::new([
+                deltas(&["The schema has one table."]),
+                deltas(&["We settled on two tables."]),
+            ]),
+            template(),
+            None,
+            None,
+            None,
+            Some(interview),
+        );
+        session.ask("what is the schema?", None).expect("accepted");
+        let log = wait_until(&session, "the first turn", settled);
+        let answered = seq_of(&log, |event| matches!(event, Event::Answered { .. }));
+        let kept = session
+            .keep(answered, "The schema has one table.", None)
+            .expect("kept");
+        let answer = format!(
+            "DECISION: two tables, users and orders\nSUPERSEDE: {kept} — one table no longer holds\n"
+        );
+        let session = session.forking_through(Canned::new([deltas(&[&answer])]));
+        session
+            .ask_marked("so what is it now?", None, true)
+            .expect("accepted");
+        let log = wait_until(&session, "the fork to settle", |log| {
+            settled(log) && !fork_outcomes(log).is_empty()
+        });
+        assert!(
+            log.iter().any(|logged| matches!(
+                &logged.event,
+                Event::PatchRefused { entry, .. } if *entry == kept
+            )),
+            "the guard refused it"
+        );
+        let passed: Vec<log::PassedOver> = log
+            .iter()
+            .filter_map(|logged| match &logged.event {
+                Event::ForkSettled { passed_over, .. } => Some(passed_over.clone()),
+                _ => None,
+            })
+            .flatten()
+            .collect();
+        assert_eq!(
+            passed,
+            vec![log::PassedOver {
+                why: log::PASSED_OVER_GUARDED.to_owned(),
+                tag: Some("DECISION:".to_owned()),
+                text: "two tables, users and orders".to_owned(),
+            }],
+        );
+        reads_whole(&session);
+    }
+
     /// Levers run A, served: the fork's sign-off is on its `fork.settled`
     /// line and in no entry; the log reads back.
     #[test]
@@ -17480,7 +17652,7 @@ pub(in crate::drive) mod tests {
                 })
                 .collect()
         };
-        let (_, first) = folded(
+        let (_, first, _) = folded(
             &mut state,
             "GOTCHA: the pnpm lockfile is stale: run pnpm install before tests in packages/core\n",
             1,
@@ -17496,7 +17668,7 @@ pub(in crate::drive) mod tests {
         else {
             panic!("the first gotcha is its own entry");
         };
-        let (outcome, second) = folded(
+        let (outcome, second, _) = folded(
             &mut state,
             "GOTCHA: stale pnpm lockfile in packages/core -- run pnpm install first\n",
             2,
@@ -17542,7 +17714,7 @@ pub(in crate::drive) mod tests {
             provenance: from_fork(0),
         };
         assert_eq!(applied(&mut state, &[seed], 1).0, log::ForkOutcome::Value);
-        let (outcome, lines) = folded(
+        let (outcome, lines, _) = folded(
             &mut state,
             "DECISION: report broken links as JSON Lines\n\
              PLAN: NONE\n\
@@ -19087,6 +19259,11 @@ pub(in crate::drive) mod tests {
             outcome: log::SuggestionOutcome::Rejected,
             fork: None,
         });
+        // #1037: the operator's note on a keep.
+        events.push(Event::OperatorNote {
+            command: CommandKind::Keep,
+            note: "the dev server needs it".to_owned(),
+        });
         // #1030: a wrap, accepted and applied.
         events.push(Event::WrapAccepted {
             call: 9,
@@ -19163,9 +19340,10 @@ pub(in crate::drive) mod tests {
                 Event::Suggestion { .. } => 52,
                 Event::Wrapped { .. } => 53,
                 Event::WrapAccepted { .. } => 54,
+                Event::OperatorNote { .. } => 55,
             });
         }
-        assert_eq!(kinds.len(), 55, "a variant has no sample");
+        assert_eq!(kinds.len(), 56, "a variant has no sample");
         events
             .into_iter()
             .enumerate()
@@ -19748,6 +19926,10 @@ pub(in crate::drive) mod tests {
                 shadow: 53,
                 outcome: log::SuggestionOutcome::Rejected,
                 fork: None,
+            },
+            log::Event::OperatorNote {
+                command: log::Command::Keep,
+                note: "the dev server needs it".to_owned(),
             },
             log::Event::WrapAccepted {
                 call: 9,
@@ -28204,6 +28386,89 @@ pub(in crate::drive) mod tests {
             .find(|logged| pick(&logged.event))
             .map(|logged| logged.seq)
             .expect("the line")
+    }
+
+    /// #1037: the operator's note on a gesture is logged immediately before
+    /// the gesture's outcome; a refused gesture's note is dropped, and the
+    /// next gesture carries none of it.
+    #[test]
+    fn an_operators_note_is_logged_before_its_gesture_and_dropped_when_refused() {
+        let session = Session::open_with(
+            Canned::new([deltas(&["The port is 5182."])]),
+            template(),
+            None,
+            None,
+            None,
+            Some(interviewing(&[])),
+        );
+        session.ask("which port?", None).expect("accepted");
+        let log = wait_until(&session, "the turn", settled);
+        let answered = seq_of(&log, |event| matches!(event, Event::Answered { .. }));
+        session.carry_note("the dev server needs it", CommandKind::Keep);
+        session.keep(answered, "5182", None).expect("kept");
+        let log = session.events_from(0);
+        let at = log
+            .iter()
+            .position(|logged| matches!(logged.event, Event::OperatorNote { .. }))
+            .expect("the note is logged");
+        assert_eq!(
+            log[at].event,
+            Event::OperatorNote {
+                command: CommandKind::Keep,
+                note: "the dev server needs it".to_owned(),
+            }
+        );
+        assert!(
+            matches!(log[at + 1].event, Event::Patched { .. }),
+            "immediately before the keep's patch: {:?}",
+            log[at + 1].event
+        );
+        session.carry_note("never kept", CommandKind::Keep);
+        assert!(session.keep(answered, "port 9999", None).is_err());
+        session.keep(answered, "The port", None).expect("kept");
+        let notes = session
+            .events_from(0)
+            .iter()
+            .filter(|logged| matches!(logged.event, Event::OperatorNote { .. }))
+            .count();
+        assert_eq!(
+            notes, 1,
+            "the refused keep's note is dropped, and carried by nothing after"
+        );
+        reads_whole(&session);
+    }
+
+    /// #1037: an answer's reasoning is a keep source, checked verbatim as
+    /// its text is; a span crossing a line break within one logged line is
+    /// kept as written; a span in neither the text nor the reasoning is
+    /// refused.
+    #[test]
+    fn the_operator_keeps_a_span_of_the_reasoning_or_across_a_line_break() {
+        let session = Session::open_with(
+            Canned::new([vec![
+                Step::Reasoning("The port is 5182, because 5173 is taken.".to_owned()),
+                Step::Delta("Use the dev server.\nIt runs on the fixed port.".to_owned()),
+            ]]),
+            template(),
+            None,
+            None,
+            None,
+            Some(interviewing(&[])),
+        );
+        session.ask("which port?", None).expect("accepted");
+        let log = wait_until(&session, "the turn", settled);
+        let answered = seq_of(&log, |event| matches!(event, Event::Answered { .. }));
+        let entry = session
+            .keep(answered, "5182, because 5173 is taken", Some("decisions"))
+            .expect("kept from the reasoning");
+        assert!(entry.starts_with("operator-"));
+        session
+            .keep(answered, "dev server.\nIt runs", None)
+            .expect("kept across the line break");
+        assert!(matches!(
+            session.keep(answered, "port 9999", None),
+            Err(Rejected::Refused(Refusal::NotInSource))
+        ));
     }
 
     /// #1021: the operator keeps an exact span of a logged answer: it is

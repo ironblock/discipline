@@ -1073,6 +1073,7 @@ impl<'a> Walk<'a> {
             Line::Suggestion { .. } => log::Kind::Suggestion,
             Line::Wrapped { .. } => log::Kind::Wrapped,
             Line::WrapAccepted { .. } => log::Kind::WrapAccepted,
+            Line::OperatorNote { .. } => log::Kind::OperatorNote,
             Line::Flag { .. } => log::Kind::Flag,
             Line::MeditationHeld { .. } => log::Kind::MeditationHeld,
             Line::MeditationSkipped { .. } => log::Kind::MeditationSkipped,
@@ -1224,6 +1225,9 @@ impl<'a> Walk<'a> {
             // An operator's wrap, accepted (#1030): its `wrapped` line, when
             // applied, changes the trunk.
             | Line::WrapAccepted { .. }
+            // The operator's note on a gesture (#1037): no row; the gesture has
+            // its own.
+            | Line::OperatorNote { .. }
             | Line::Capture { .. }
             // The operator's ruling on a phase proposal (#124): a meditation it
             // declares has its own row.

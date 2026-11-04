@@ -1056,6 +1056,9 @@ export function fold(written: readonly LogLine[]): Session {
       case 'wrapped':
         wraps.set(e.call, e);
         break;
+      // The operator's note on a gesture (#1037): the page draws it later; the API comes first.
+      case 'operator.note':
+        break;
       // The operator's wrap, accepted (#1030): waiting until its `wrapped` line.
       case 'wrap.accepted':
         wrapsAccepted.add(e.call);

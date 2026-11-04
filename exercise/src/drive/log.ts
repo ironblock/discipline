@@ -363,6 +363,8 @@ export type Suggestion = V0.SuggestionLine;
 export type Wrapped = V0.WrappedLine;
 /** The operator's wrap, accepted (v35, #1030): applied at the next trunk request, or never if the session ends first. */
 export type WrapAccepted = V0.WrapAcceptedLine;
+/** The operator's note on a gesture, before its outcome (v36, #1037). Folded, not yet drawn. */
+export type OperatorNote = V0.OperatorNoteLine;
 /** A step's warrant-gate decision by a classifier, one line per probe, or its fallback (v8, #850). Folded, not yet
  * drawn: the kitchen sink writes them (#862), and the page draws them next. */
 export type WarrantGated = V0.WarrantGatedLine;
@@ -414,6 +416,7 @@ export type LogLine =
   | Suggestion
   | Wrapped
   | WrapAccepted
+  | OperatorNote
   | RequestRetried
   | Grade
   | MeditationSkipped
