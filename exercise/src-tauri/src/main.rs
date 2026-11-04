@@ -12,13 +12,24 @@
 //! - `settings.json` in the app's config directory: `{"drive": "<url>"}` or
 //!   `{"profile": "<name>"}`, exactly one of them.
 //!
+//! A drive that asks for a credential (`serve --auth-file`, which a regimen
+//! that runs commands requires) is given one by the auth file the shell is
+//! started with: `EXERCISE_AUTH_FILE`, or settings.json's `auth_file`. The
+//! sidecar is started with it, and the page asks for the `Authorization` value
+//! over IPC (`drive_authorization`, granted to the `main` window alone), never
+//! in its URL (`src/drive/credential.ts`). The page renders model output, so its
+//! CSP (`tauri.conf.json`) runs no script but the bundle's own.
+//!
 //! The sidecar admits the webview's origin (`--allow-origin`), which `serve`
 //! answers across origins (#719's CORS), and it is killed when the app exits,
 //! by a quit or by a termination signal.
 
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
+use std::path::PathBuf;
 use std::sync::Mutex;
+
+use base64::Engine as _;
 
 use tauri::{AppHandle, Manager, RunEvent, Url, WebviewUrl, WebviewWindowBuilder};
 use tauri_plugin_shell::ShellExt;
@@ -38,30 +49,33 @@ enum Drive {
 /// The sidecar, held so it is killed when the app exits.
 struct Sidecar(Mutex<Option<CommandChild>>);
 
+/// The `Authorization` value for the drive, when it asks for one.
+struct Credential(Option<String>);
+
+/// The drive's `Authorization` value, for the page's own window alone.
+#[tauri::command]
+#[allow(clippy::needless_pass_by_value)] // a command takes its state by value
+fn drive_authorization(credential: tauri::State<'_, Credential>) -> Option<String> {
+    credential.0.clone()
+}
+
 fn main() {
     let app = tauri::Builder::default()
         .plugin(tauri_plugin_shell::init())
         .manage(Sidecar(Mutex::new(None)))
+        .invoke_handler(tauri::generate_handler![drive_authorization])
         .setup(|app| {
-            let handle = app.handle().clone();
-            // A SIGTERM, SIGINT or SIGHUP exits as a quit does, so the
-            // sidecar is killed then too; only a SIGKILL leaves it running.
-            let quit = handle.clone();
-            ctrlc::set_handler(move || quit.exit(0)).map_err(|why| why.to_string())?;
-            let drive = match setting(&handle)? {
-                Drive::Remote(url) => url,
-                Drive::Profile(profile) => {
-                    let (url, child) = sidecar(&handle, &profile)?;
-                    if let Ok(mut held) = handle.state::<Sidecar>().0.lock() {
-                        *held = Some(child);
-                    }
-                    url
+            // A start that cannot drive says why and exits, as a refused
+            // flag does, rather than panicking; a sidecar it started goes too.
+            if let Err(why) = start(app) {
+                if let Ok(mut held) = app.state::<Sidecar>().0.lock()
+                    && let Some(child) = held.take()
+                {
+                    let _ = child.kill();
                 }
-            };
-            WebviewWindowBuilder::new(app, "main", WebviewUrl::App(page(&drive)?.into()))
-                .title("exercise")
-                .inner_size(1280.0, 860.0)
-                .build()?;
+                eprintln!("exercise: {why}");
+                std::process::exit(1);
+            }
             Ok(())
         })
         .build(tauri::generate_context!())
@@ -79,34 +93,73 @@ fn main() {
     });
 }
 
+/// The drive found, its credential held, the sidecar started when it is one,
+/// and the page's window opened on it.
+fn start(app: &mut tauri::App) -> Result<(), String> {
+    let handle = app.handle().clone();
+    // A SIGTERM, SIGINT or SIGHUP exits as a quit does, so the sidecar is
+    // killed then too; only a SIGKILL leaves it running.
+    let quit = handle.clone();
+    ctrlc::set_handler(move || quit.exit(0)).map_err(|why| why.to_string())?;
+    let settings = settings(&handle)?;
+    let auth_file = auth_file(settings.as_ref());
+    let credential = auth_file.as_deref().map(authorization).transpose()?;
+    app.manage(Credential(credential));
+    let drive = match setting(settings.as_ref())? {
+        Drive::Remote(url) => url,
+        Drive::Profile(profile) => {
+            let (url, child) = sidecar(&handle, &profile, auth_file.as_deref())?;
+            if let Ok(mut held) = handle.state::<Sidecar>().0.lock() {
+                *held = Some(child);
+            }
+            url
+        }
+    };
+    WebviewWindowBuilder::new(app, "main", WebviewUrl::App(page(&drive)?.into()))
+        .title("exercise")
+        .inner_size(1280.0, 860.0)
+        .build()
+        .map_err(|why| why.to_string())?;
+    Ok(())
+}
+
+/// settings.json in the app's config directory, when there is one.
+fn settings(app: &AppHandle) -> Result<Option<(PathBuf, serde_json::Value)>, String> {
+    let path = app
+        .path()
+        .app_config_dir()
+        .map_err(|why| why.to_string())?
+        .join("settings.json");
+    let text = match std::fs::read_to_string(&path) {
+        Ok(text) => text,
+        Err(why) if why.kind() == std::io::ErrorKind::NotFound => return Ok(None),
+        Err(why) => return Err(format!("{}: {why}", path.display())),
+    };
+    let value = serde_json::from_str(&text).map_err(|why| format!("{}: {why}", path.display()))?;
+    Ok(Some((path, value)))
+}
+
+/// A string setting from settings.json.
+fn named(settings: Option<&(PathBuf, serde_json::Value)>, key: &str) -> Option<String> {
+    settings?
+        .1
+        .get(key)
+        .and_then(serde_json::Value::as_str)
+        .map(str::to_owned)
+}
+
 /// Where the drive is, as the module's doc orders the places it is named.
-fn setting(app: &AppHandle) -> Result<Drive, String> {
+fn setting(settings: Option<&(PathBuf, serde_json::Value)>) -> Result<Drive, String> {
     if let Ok(url) = std::env::var("EXERCISE_DRIVE") {
         return remote(url);
     }
     if let Ok(profile) = std::env::var("EXERCISE_PROFILE") {
         return Ok(Drive::Profile(profile));
     }
-    let path = app
-        .path()
-        .app_config_dir()
-        .map_err(|why| why.to_string())?
-        .join("settings.json");
-    let text = std::fs::read_to_string(&path).map_err(|why| {
-        format!(
-            "{}: {why}; name a `drive` URL or a serve `profile` there, or set EXERCISE_DRIVE or EXERCISE_PROFILE",
-            path.display()
-        )
-    })?;
-    let value: serde_json::Value =
-        serde_json::from_str(&text).map_err(|why| format!("{}: {why}", path.display()))?;
-    let named = |key: &str| {
-        value
-            .get(key)
-            .and_then(serde_json::Value::as_str)
-            .map(str::to_owned)
+    let Some((path, _)) = settings else {
+        return Err("no settings.json in the app's config directory; name a `drive` URL or a serve `profile` there, or set EXERCISE_DRIVE or EXERCISE_PROFILE".to_owned());
     };
-    match (named("drive"), named("profile")) {
+    match (named(settings, "drive"), named(settings, "profile")) {
         (Some(url), None) => remote(url),
         (None, Some(profile)) => Ok(Drive::Profile(profile)),
         _ => Err(format!(
@@ -116,22 +169,75 @@ fn setting(app: &AppHandle) -> Result<Drive, String> {
     }
 }
 
-/// A remote drive's URL, an absolute http(s) one, as the page takes it.
+/// The auth file the drive's credential is read from, when one is named.
+fn auth_file(settings: Option<&(PathBuf, serde_json::Value)>) -> Option<String> {
+    std::env::var("EXERCISE_AUTH_FILE")
+        .ok()
+        .or_else(|| named(settings, "auth_file"))
+}
+
+/// The `Authorization` value for an auth file, `user:password`, read as
+/// `serve --auth-file` reads it: one trailing line break is the file's.
+fn authorization(path: &str) -> Result<String, String> {
+    let written =
+        std::fs::read_to_string(path).map_err(|why| format!("{path} cannot be read: {why}"))?;
+    basic(&written)
+        .ok_or_else(|| format!("{path}: expected user:password, as serve --auth-file reads it"))
+}
+
+/// `Basic <base64>` for an auth file's text, or none when serve would refuse it.
+fn basic(written: &str) -> Option<String> {
+    let pair = written
+        .strip_suffix("\r\n")
+        .or_else(|| written.strip_suffix('\n'))
+        .unwrap_or(written);
+    let usable = pair
+        .split_once(':')
+        .is_some_and(|(user, _)| !user.is_empty())
+        && !pair.chars().any(char::is_control);
+    usable.then(|| {
+        format!(
+            "Basic {}",
+            base64::engine::general_purpose::STANDARD.encode(pair)
+        )
+    })
+}
+
+/// A remote drive's URL, as the page takes it: https, or http on loopback.
+/// The page sends the credential to it, so plain http leaves this machine
+/// only refused; the CSP's `connect-src` admits the same.
 fn remote(url: String) -> Result<Drive, String> {
     match Url::parse(&url) {
-        Ok(parsed) if matches!(parsed.scheme(), "http" | "https") => Ok(Drive::Remote(url)),
-        _ => Err(format!("`{url}` is no http(s) URL")),
+        Ok(parsed) if parsed.scheme() == "https" => Ok(Drive::Remote(url)),
+        Ok(parsed)
+            if parsed.scheme() == "http"
+                && matches!(parsed.host_str(), Some("127.0.0.1" | "localhost")) =>
+        {
+            Ok(Drive::Remote(url))
+        }
+        _ => Err(format!(
+            "`{url}` is no https URL, nor an http one on 127.0.0.1 or localhost"
+        )),
     }
 }
 
 /// `serve --profile <profile>` as the sidecar, admitting the webview's
-/// origin; its URL, from the first line it prints, and the process.
-fn sidecar(app: &AppHandle, profile: &str) -> Result<(String, CommandChild), String> {
+/// origin, with the shell's auth file when it has one; its URL, from the
+/// first line it prints, and the process.
+fn sidecar(
+    app: &AppHandle,
+    profile: &str,
+    auth_file: Option<&str>,
+) -> Result<(String, CommandChild), String> {
+    let mut args = vec!["serve", "--profile", profile, "--allow-origin", ORIGIN];
+    if let Some(file) = auth_file {
+        args.extend(["--auth-file", file]);
+    }
     let (mut events, child) = app
         .shell()
         .sidecar("diet-drive")
         .map_err(|why| why.to_string())?
-        .args(["serve", "--profile", profile, "--allow-origin", ORIGIN])
+        .args(args)
         .spawn()
         .map_err(|why| why.to_string())?;
     while let Some(event) = events.blocking_recv() {
@@ -172,4 +278,43 @@ fn page(drive: &str) -> Result<String, String> {
     let mut url = Url::parse("tauri://localhost/index.html").map_err(|why| why.to_string())?;
     url.query_pairs_mut().append_pair("drive", drive);
     Ok(format!("index.html?{}", url.query().unwrap_or_default()))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{Drive, basic, remote};
+
+    #[test]
+    fn an_auth_file_is_read_as_serve_reads_it() {
+        // `user:pass`, base64: what a page's Basic header carries.
+        let header = Some("Basic dXNlcjpwYXNz".to_owned());
+        assert_eq!(basic("user:pass"), header);
+        assert_eq!(basic("user:pass\n"), header);
+        assert_eq!(basic("user:pass\r\n"), header);
+        // Whitespace other than one trailing break is the credential's.
+        assert_eq!(
+            basic("user:pass \n"),
+            Some("Basic dXNlcjpwYXNzIA==".to_owned())
+        );
+        for refused in ["", "\n", "nocolon", ":pass", "user:pa\nss", "user:pass\n\n"] {
+            assert_eq!(basic(refused), None, "{refused:?}");
+        }
+    }
+
+    #[test]
+    fn a_remote_drive_is_https_or_loopback_http() {
+        for admitted in [
+            "https://drive.example/",
+            "http://127.0.0.1:7801/",
+            "http://localhost:7801/",
+        ] {
+            assert!(
+                matches!(remote(admitted.to_owned()), Ok(Drive::Remote(_))),
+                "{admitted}"
+            );
+        }
+        for refused in ["http://drive.example/", "file:///x", "drive"] {
+            assert!(remote(refused.to_owned()).is_err(), "{refused}");
+        }
+    }
 }
