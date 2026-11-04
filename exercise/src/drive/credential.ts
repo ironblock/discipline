@@ -86,7 +86,7 @@ export class StreamedSource implements EventSourceLike {
             event = { type: '', data: [] };
             continue;
           }
-          if (line.startsWith(':')) continue;
+          // A comment (`: ...`) names no field, and so does nothing.
           const colon = line.indexOf(':');
           const field = colon === -1 ? line : line.slice(0, colon);
           const raw = colon === -1 ? '' : line.slice(colon + 1);

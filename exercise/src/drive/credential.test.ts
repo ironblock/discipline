@@ -70,7 +70,8 @@ describe('StreamedSource: server-sent events over a fetch', () => {
   });
 
   it('is closed, with an error, when the drive answers anything but 200', async () => {
-    const { fetch } = fetching(() => new Response(null, { status: 401 }));
+    // A refusal has a body too (serve's says why): the status alone decides.
+    const { fetch } = fetching(() => new Response('unauthorized', { status: 401 }));
     const source = new StreamedSource('events?from=0', {}, fetch);
     const seen: string[] = [];
     source.onopen = () => seen.push('open');
@@ -150,6 +151,7 @@ describe('shellAuthorization: the credential the native shell holds', () => {
     });
     expect(await shellAuthorization(shell(AUTH))).toBe(AUTH);
     expect(await shellAuthorization(shell(null))).toBeUndefined();
-    expect(asked).toEqual(['drive_authorization', 'drive_authorization']);
+    expect(await shellAuthorization(shell(''))).toBeUndefined();
+    expect(asked).toEqual(['drive_authorization', 'drive_authorization', 'drive_authorization']);
   });
 });
