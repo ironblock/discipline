@@ -226,6 +226,9 @@ vocabulary! {
         /// A wrap of a tool result already wrapped, or waiting to be at the
         /// next trunk request (#1030).
         WrappedAlready => "wrapped-already",
+        /// A keep by anchors whose start or end anchor is in its line more
+        /// than once (#1038).
+        AnchorNotUnique => "anchor-not-unique",
     }
 }
 
@@ -657,6 +660,9 @@ pub enum Event {
     /// asked after the turn settled `final`, under the regimen's warrant.
     /// Its call is the next [`Event::Requested`], on [`Lane::Interview`].
     Forked {
+        /// Whether it asks the operator's own words (#1038): logged `ask:
+        /// operator-text`.
+        own_words: bool,
         /// The settled turn it follows.
         of_turn: u32,
         /// The sequence number of that turn's answered trunk request.
@@ -2228,6 +2234,9 @@ struct Firing {
     trigger: String,
     /// The live notes a refutation fork offers, by id (#878).
     offered: Option<Vec<String>>,
+    /// Whether it asks the operator's own words (#1038), logged `ask:
+    /// operator-text`.
+    own_words: bool,
 }
 
 /// A fork's trigger at a turn's end.
@@ -2362,6 +2371,7 @@ fn firings_over(
             question,
             trigger: TURN_END.to_owned(),
             offered: None,
+            own_words: false,
         }
     };
     let marked = judge
@@ -2384,6 +2394,7 @@ fn firings_over(
             question,
             trigger: format!("call:{}:{}", call.class.tag(), call.id),
             offered: None,
+            own_words: false,
         }
     };
     let mut out: Vec<Firing> = match interview.cadence {
@@ -4967,6 +4978,42 @@ impl<S: Streaming + 'static> Session<S> {
         Ok(entry)
     }
 
+    /// Keep, as [`Self::keep`] does, the span of the logged line `from`
+    /// that runs from the `start` anchor through the `end` anchor (#1038):
+    /// each found exactly once in one of the line's texts, `end` at or after
+    /// `start`. A keep sent by anchors survives the dashes and quotes an
+    /// exact span breaks on. Returns the entry's id and the span kept.
+    ///
+    /// # Errors
+    ///
+    /// [`Refusal::AnchorNotUnique`] for an anchor found more than once;
+    /// [`Refusal::NotInSource`] for one not found, or an end before its
+    /// start; and [`Self::keep`]'s refusals.
+    pub fn keep_anchored(
+        &self,
+        from: u64,
+        (start, end): (&str, &str),
+        tag: Option<&str>,
+    ) -> Result<(String, String), Rejected> {
+        let resolved = {
+            let mut state = self.shared.lock();
+            let resolved = keep_source(&state, from)
+                .ok_or(Refusal::NotASource)
+                .and_then(|sources| anchored(&sources, start, end));
+            match resolved {
+                Ok(span) => span,
+                Err(because) => {
+                    let refused = state.refuse(CommandKind::Keep, because);
+                    drop(state);
+                    self.shared.changed.notify_all();
+                    return Err(Rejected::Refused(refused));
+                }
+            }
+        };
+        self.keep(from, &resolved, tag)
+            .map(|entry| (entry, resolved))
+    }
+
     /// Carry the operator's `note` on the gesture `command` about to run
     /// (#1037): an `operator.note` line immediately before the gesture's
     /// outcome when it is admitted, nothing when it is refused. Serve calls
@@ -5777,7 +5824,9 @@ impl<S: Streaming + 'static> Session<S> {
     /// it (#1038): working memory's render under the regimen's budget, with
     /// the operator's pending marks; its estimated `tokens`; how many
     /// entries it `reduced`; whether it `fits` its budget; and the live
-    /// `entries` it holds, by id. A refill that must also fit the window it
+    /// `entries`, by id: each is in the render whole, or shortened or elided
+    /// to its id when `reduced` counts it (a refuted note's `was:` line rides
+    /// too). A refill that must also fit the window it
     /// is made in may elide more, and one under a native summary carries
     /// the summary instead: the preview is the render as it stands. `None`
     /// for a session with no working memory.
@@ -6274,6 +6323,7 @@ pub fn line_of(logged: &Logged) -> log::Line {
             reason: settle_reason_in_the_log(*reason),
         },
         Event::Forked {
+            own_words,
             of_turn,
             at,
             why,
@@ -6313,7 +6363,12 @@ pub fn line_of(logged: &Logged) -> log::Line {
             seat: seat.clone(),
             // A pinned template by its dogma name, lower case, as an
             // audit's is (#783).
-            ask: Some(pinned.map_or_else(|| ask.tag().to_owned(), |t| t.name().to_lowercase())),
+            // The operator's own words as `operator-text` (#1038).
+            ask: Some(if *own_words {
+                OPERATOR_TEXT_ASK.to_owned()
+            } else {
+                pinned.map_or_else(|| ask.tag().to_owned(), |t| t.name().to_lowercase())
+            }),
             hazard: displaces.then(|| DISPLACES_TRUNK_CACHE.to_owned()),
             chunk: None,
         },
@@ -6971,6 +7026,7 @@ fn refusal_of(refusal: Refusal) -> log::Refusal {
         Refusal::NotASuggestion => log::Refusal::NotASuggestion,
         Refusal::AnsweredAlready => log::Refusal::AnsweredAlready,
         Refusal::WrappedAlready => log::Refusal::WrappedAlready,
+        Refusal::AnchorNotUnique => log::Refusal::AnchorNotUnique,
     }
 }
 
@@ -9761,6 +9817,9 @@ pub enum SuggestionAnswer {
     Reject,
 }
 
+/// What a fork in the operator's own words logs as its `ask` (#1038).
+pub const OPERATOR_TEXT_ASK: &str = "operator-text";
+
 /// The firing the operator's `ask` makes (#1021), or why it is refused.
 fn operator_firing(ask: &OperatorAsk) -> Result<Firing, Refusal> {
     use crate::dogma::{Site, Template};
@@ -9778,6 +9837,8 @@ fn operator_firing(ask: &OperatorAsk) -> Result<Firing, Refusal> {
     Ok(Firing {
         why: log::Warrant::Operator,
         ask: AskKind::Generic,
+        // The operator's own words, no template (#1038).
+        own_words: pinned.is_none(),
         pinned,
         question,
         trigger: "operator".to_owned(),
@@ -9917,6 +9978,33 @@ fn keep_source(state: &State, from: u64) -> Option<Vec<&str>> {
         Event::ToolCalled(line) => line.shown.as_deref().map(|shown| vec![shown]),
         _ => None,
     }
+}
+
+/// The span of one of `sources` from the `start` anchor through the `end`
+/// anchor (#1038): the first source holding both, each exactly once there,
+/// `end` beginning at or after `start` does.
+fn anchored(sources: &[&str], start: &str, end: &str) -> Result<String, Refusal> {
+    if start.is_empty() || end.is_empty() {
+        return Err(Refusal::Empty);
+    }
+    let Some(source) = sources
+        .iter()
+        .find(|source| source.contains(start) && source.contains(end))
+    else {
+        return Err(Refusal::NotInSource);
+    };
+    let once = |anchor: &str| {
+        let mut found = source.match_indices(anchor).map(|(at, _)| at);
+        match (found.next(), found.next()) {
+            (Some(at), None) => Ok(at),
+            _ => Err(Refusal::AnchorNotUnique),
+        }
+    };
+    let (from, to) = (once(start)?, once(end)?);
+    if to < from {
+        return Err(Refusal::NotInSource);
+    }
+    Ok(source[from..to + end.len()].to_owned())
 }
 
 /// The operator's entry of `span` (#1021), written and logged: a new entry,
@@ -10117,10 +10205,10 @@ fn kept_patch(state: &State, span: &str) -> Patch {
 /// with the entry that already holds it when the operator kept it before.
 fn keep_refusal(state: &State, from: u64, span: &str) -> Result<(), (Refusal, Option<String>)> {
     let refused = |because: Refusal| Err((because, None));
-    match state.settlement {
-        Settlement::Ended => return refused(Refusal::Ended),
-        Settlement::Turn | Settlement::Capture => return refused(Refusal::InFlight),
-        Settlement::Awaiting => {}
+    // Admitted while a turn or a capture runs too (#1038): a keep writes
+    // working memory only, and nothing in flight reads it.
+    if state.settlement == Settlement::Ended {
+        return refused(Refusal::Ended);
     }
     let Some(interview) = state.interview.as_ref() else {
         return refused(Refusal::NoWorkingMemory);
@@ -13113,6 +13201,7 @@ fn fire_on<S>(
         question,
         trigger,
         offered,
+        own_words,
     } = firing;
     let role = state
         .interview
@@ -13161,6 +13250,7 @@ fn fire_on<S>(
         refused,
     } = state.fork_fit(&shape, seat.is_some(), ceiling);
     let fork = state.push(Event::Forked {
+        own_words,
         of_turn: turn,
         at,
         why,
@@ -13938,6 +14028,7 @@ fn refutation_asked(state: &State, due: &RefuteDue, candidates: u64) -> Option<F
                 .map(|entry| entry.id.as_str().to_owned())
                 .collect(),
         ),
+        own_words: false,
     })
 }
 
@@ -13977,6 +14068,7 @@ fn pinned_firings(fired: Vec<crate::drive::warrants::Gate>, request: u64) -> Vec
             question,
             trigger,
             offered: None,
+            own_words: false,
         };
     let mut out = Vec::new();
     for gate in fired {
@@ -14501,11 +14593,13 @@ fn fire_cut<S>(shared: &Shared<S>, state: &mut State, cut: Cut) -> Launched {
                 question,
                 trigger,
                 offered,
+                own_words,
             },
         epoch,
         ..
     } = cut;
     let fork = state.push(Event::Forked {
+        own_words,
         of_turn: turn,
         at,
         why,
@@ -19028,6 +19122,7 @@ pub(in crate::drive) mod tests {
                 failed: false,
             })),
             Event::Forked {
+                own_words: false,
                 of_turn: 1,
                 at: 3,
                 why: log::Warrant::Scoping,
@@ -20489,7 +20584,7 @@ pub(in crate::drive) mod tests {
         assert_eq!(
             tags(&Refusal::ALL.iter().map(|it| it.tag()).collect::<Vec<_>>()),
             "in-flight ended nothing-in-flight nothing-to-meditate no-phase-graph not-a-phase \
-             already-in-phase no-phase-edge stale tangent-open no-tangent bad-tangent not-the-scope nothing-running no-proposal unknown-entry not-live empty meditation-held nothing-held restates not-unilateral already-asked proposal-pending no-vision api-cap not-a-source not-in-source no-working-memory not-on-the-trunk not-a-pinned-ask not-a-suggestion answered-already wrapped-already"
+             already-in-phase no-phase-edge stale tangent-open no-tangent bad-tangent not-the-scope nothing-running no-proposal unknown-entry not-live empty meditation-held nothing-held restates not-unilateral already-asked proposal-pending no-vision api-cap not-a-source not-in-source no-working-memory not-on-the-trunk not-a-pinned-ask not-a-suggestion answered-already wrapped-already anchor-not-unique"
         );
         assert_eq!(
             tags(
@@ -28823,6 +28918,38 @@ pub(in crate::drive) mod tests {
         reads_whole(&session);
     }
 
+    /// #1038: the operator's fork in their own words is logged `ask:
+    /// operator-text`, so a reader can tell it from an automatic fork's
+    /// generic ask.
+    #[test]
+    fn the_operators_own_words_are_logged_as_operator_text() {
+        let session = Session::open_with(
+            Canned::new([deltas(&["The schema has two tables."])]),
+            template(),
+            None,
+            None,
+            None,
+            Some(interviewing(&[])),
+        )
+        .forking_through(Canned::new([deltas(&["Because orders change."])]));
+        session.ask("what is the schema?", None).expect("accepted");
+        wait_until(&session, "the turn", settled);
+        session
+            .fork(None, &OperatorAsk::Text("Why two tables?".to_owned()))
+            .expect("forked");
+        operator_forked(&session);
+        let asks: Vec<Option<String>> = session
+            .events_from(0)
+            .iter()
+            .filter_map(|logged| match line_of(logged).event {
+                log::Event::Fork { ask, .. } => Some(ask),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(asks, vec![Some("operator-text".to_owned())]);
+        reads_whole(&session);
+    }
+
     /// #1021: forked at a tool result, the fork is born of the trunk up to
     /// that result and cut at its `tool_call`; a pinned ask is its
     /// template's text; a name no holeless fork template has is refused.
@@ -29065,6 +29192,84 @@ pub(in crate::drive) mod tests {
         assert!(wrapped_lines(&log).is_empty(), "never applied");
         reads_whole(&session);
         tidy(&[&tree]);
+    }
+
+    /// #1038: a keep is admitted while a turn runs -- it writes working
+    /// memory only, and the request in flight is untouched.
+    #[test]
+    fn a_keep_is_admitted_while_a_turn_runs() {
+        let tree = scratch("keep-mid-turn");
+        let gate = Gate::new();
+        let session = wrapping(
+            &tree,
+            vec![
+                vec![bash("call-1", "cat notes.md")],
+                vec![Step::Hold(gate.clone()), Step::Delta("Read it.".to_owned())],
+            ],
+            Vec::new(),
+        );
+        session.ask("look", None).expect("accepted");
+        assert!(
+            gate.wait_for_a_waiter(Duration::from_secs(10)),
+            "the step never reached the gate"
+        );
+        let log = session.events_from(0);
+        let called = seq_of(&log, |event| matches!(event, Event::ToolCalled(_)));
+        let entry = session
+            .keep(called, "port 5182 is free", None)
+            .expect("kept while the turn runs");
+        gate.open();
+        let log = wait_until(&session, "the turn", settled);
+        assert!(log.iter().any(|logged| matches!(
+            &logged.event,
+            Event::Patched { entry: written, .. } if written.id == entry
+        )));
+        assert_eq!(
+            session.shared.transport.sent().len(),
+            2,
+            "nothing was sent again"
+        );
+        reads_whole(&session);
+        tidy(&[&tree]);
+    }
+
+    /// #1038: a keep by anchors resolves to the span from the start anchor
+    /// through the end anchor, each found exactly once in the line; an
+    /// anchor found twice, or not at all, or an end before its start, is
+    /// refused.
+    #[test]
+    fn a_keep_by_anchors_resolves_its_span_and_refuses_an_anchor_found_twice() {
+        let session = Session::open_with(
+            Canned::new([deltas(&[
+                "Ports: 5173 is taken — so 5182 is ours. Ports end.",
+            ])]),
+            template(),
+            None,
+            None,
+            None,
+            Some(interviewing(&[])),
+        );
+        session.ask("which port?", None).expect("accepted");
+        let log = wait_until(&session, "the turn", settled);
+        let answered = seq_of(&log, |event| matches!(event, Event::Answered { .. }));
+        let (entry, span) = session
+            .keep_anchored(answered, ("5173", "ours."), Some("decisions"))
+            .expect("kept by anchors");
+        assert_eq!(span, "5173 is taken — so 5182 is ours.");
+        assert!(entry.starts_with("operator-"));
+        assert_eq!(
+            session.keep_anchored(answered, ("Ports", "ours."), None),
+            Err(Rejected::Refused(Refusal::AnchorNotUnique))
+        );
+        assert_eq!(
+            session.keep_anchored(answered, ("9999", "ours."), None),
+            Err(Rejected::Refused(Refusal::NotInSource))
+        );
+        assert_eq!(
+            session.keep_anchored(answered, ("ours.", "5173"), None),
+            Err(Rejected::Refused(Refusal::NotInSource))
+        );
+        reads_whole(&session);
     }
 
     /// #1030: wrapped while the turn's next request is decoding, the result

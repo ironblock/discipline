@@ -268,6 +268,13 @@
 //! log that declares 28 or less and carries it is refused. For a reader of
 //! earlier logs, the migration is nothing: no session declared one.
 //!
+//! v37 (#1038) carries the operator's keep by anchors: its refusal
+//! `anchor-not-unique`, a start or end anchor found more than once in the
+//! line it names. It is refused in a log that declares 36 or less. And a
+//! fork in the operator's own words now writes `ask: operator-text`, where
+//! it wrote `generic`: `ask` is text, so no reader changes. For a reader
+//! of earlier logs, the migration is nothing.
+//!
 //! v36 (#1037) carries the operator's reasons, and what the operator-entry
 //! guard refused. An `operator.note` line holds the note the operator gave
 //! a gesture -- `fork`, `keep`, `wrap`, `suggestion`, `edit-entry`,
@@ -436,12 +443,12 @@ use super::record::vocabulary;
 struct LogParser;
 
 /// The version this module writes, as `session.start` states it.
-pub const VERSION: i64 = 36;
+pub const VERSION: i64 = 37;
 
 /// Every version this module reads.
 pub const READS: &[i64] = &[
     0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25,
-    26, 27, 28, 29, 30, 31, 32, 33, 34, 35, 36,
+    26, 27, 28, 29, 30, 31, 32, 33, 34, 35, 36, 37,
 ];
 
 /// How recent an input event must be, at the moment a turn settles, for the
@@ -907,6 +914,9 @@ vocabulary! {
         /// A wrap of a tool result already wrapped, or waiting to be (v35,
         /// #1030).
         WrappedAlready => "wrapped-already",
+        /// A keep by anchors whose start or end anchor is in its line more
+        /// than once (v37, #1038).
+        AnchorNotUnique => "anchor-not-unique",
     }
 }
 
@@ -1897,7 +1907,9 @@ pub enum Event {
         /// Where its call ran (v7, #570): an offboard seat's substrate and
         /// model, together; absent is the trunk's own server, warm.
         seat: Option<ForkSeat>,
-        /// Which ask of its set it sent (v7, #595): the router kind's tag.
+        /// Which ask of its set it sent (v7, #595): the router kind's tag;
+        /// a pinned template's name, lower case (#783); or, from v37,
+        /// `operator-text` for the operator's own words (#1038).
         ask: Option<String>,
         /// What its call may do to the trunk's server (v7, #406):
         /// `may-displace-trunk-cache` when it is sent to the trunk's own
@@ -7111,6 +7123,10 @@ pub fn tag_introduced(tags: Tags, tag: &str) -> i64 {
     if gesture {
         return 32;
     }
+    // The operator's keep by anchors (#1038).
+    if tags == Tags::Refusal && Refusal::from_tag(tag) == Some(Refusal::AnchorNotUnique) {
+        return 37;
+    }
     // The operator's wrap (#1030).
     if (tags == Tags::Command && Command::from_tag(tag) == Some(Command::Wrap))
         || (tags == Tags::Refusal && Refusal::from_tag(tag) == Some(Refusal::WrappedAlready))
@@ -10780,15 +10796,15 @@ mod tests {
     }
 
     /// #583, #878, #904, #555, #931, #936, #910, #942, #926, #932, #948, #971, #1016, #1021,
-    /// #1022, #1031, #1030, #1037: this module writes v36.
+    /// #1022, #1031, #1030, #1037, #1038: this module writes v37.
     #[test]
-    fn this_module_writes_v36_and_reads_every_version_before_it() {
-        assert_eq!(super::VERSION, 36);
+    fn this_module_writes_v37_and_reads_every_version_before_it() {
+        assert_eq!(super::VERSION, 37);
         assert_eq!(
             super::READS,
             &[
                 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22,
-                23, 24, 25, 26, 27, 28, 29, 30, 31, 32, 33, 34, 35, 36
+                23, 24, 25, 26, 27, 28, 29, 30, 31, 32, 33, 34, 35, 36, 37
             ]
         );
     }
@@ -13069,7 +13085,7 @@ mod tests {
         assert_eq!(
             tags(Refusal::ALL.iter().map(|it| it.tag()).collect()),
             "in-flight ended nothing-in-flight meditation-not-built nothing-to-meditate no-phase-graph not-a-phase \
-             already-in-phase no-phase-edge stale tangent-open no-tangent bad-tangent not-the-scope nothing-running no-proposal unknown-entry not-live empty meditation-held nothing-held restates not-unilateral already-asked proposal-pending no-vision api-cap not-a-source not-in-source no-working-memory not-on-the-trunk not-a-pinned-ask not-a-suggestion answered-already wrapped-already"
+             already-in-phase no-phase-edge stale tangent-open no-tangent bad-tangent not-the-scope nothing-running no-proposal unknown-entry not-live empty meditation-held nothing-held restates not-unilateral already-asked proposal-pending no-vision api-cap not-a-source not-in-source no-working-memory not-on-the-trunk not-a-pinned-ask not-a-suggestion answered-already wrapped-already anchor-not-unique"
         );
         assert_eq!(
             tags(SettleReason::ALL.iter().map(|it| it.tag()).collect()),

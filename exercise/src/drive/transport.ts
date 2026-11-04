@@ -174,6 +174,8 @@ export type Refusal = Open<
   | 'answered-already'
   /** `diet`'s answer to a wrap of a result already wrapped, or waiting to be (#1030). */
   | 'wrapped-already'
+  /** `diet`'s answer to a keep by anchors whose start or end anchor is in its line more than once (#1038). */
+  | 'anchor-not-unique'
 >;
 
 /**

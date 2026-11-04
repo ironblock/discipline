@@ -254,4 +254,5 @@ export const refusalOf = registry<Refusal>({
   'answered-already': { label: 'not taken: that suggestion was already answered, or let go', level: 'quiet' },
   // The operator's wrap (#1030).
   'wrapped-already': { label: 'not taken: that result is wrapped already, or waits for the next request', level: 'quiet' },
+  'anchor-not-unique': { label: 'not taken: an anchor is in that line more than once', level: 'warn' },
 });
