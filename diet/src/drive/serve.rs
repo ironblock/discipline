@@ -1396,10 +1396,11 @@ impl Command {
                 }
             }
         }?;
-        // The operator's note on a gesture (#1037): text, never blank; the
-        // kinds that take one are those whose `takes` names it.
+        // The operator's note on a gesture (#1037): text, never blank. A
+        // flag's `note` is the flag itself, never a reason carried beside it.
         let note = match object.get("note") {
             None => None,
+            _ if kind == CommandKind::FlagEntry => None,
             Some(Value::String(note)) if !note.trim().is_empty() => Some((note.clone(), kind)),
             Some(_) => return None,
         };
@@ -2235,6 +2236,11 @@ mod tests {
             assert_eq!(read(body), Some(Some(("why".to_owned(), kind))), "{body}");
         }
         assert_eq!(read(r#"{"kind":"keep","from":7,"span":"x"}"#), Some(None));
+        // A flag's `note` is the flag, not a reason beside it.
+        assert_eq!(
+            read(r#"{"kind":"flag-entry","id":"d1","note":"still true?"}"#),
+            Some(None)
+        );
         for refused in [
             r#"{"kind":"keep","from":7,"span":"x","note":" "}"#,
             r#"{"kind":"keep","from":7,"span":"x","note":3}"#,
