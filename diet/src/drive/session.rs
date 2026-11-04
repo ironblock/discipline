@@ -12148,7 +12148,6 @@ pub fn fork_tail(regimen: &Regimen) -> Option<u32> {
     }
 }
 
-/// A count as `GET /state` writes it (#756).
 /// Where the session is, for its status (#1037): its phase, the model's
 /// proposal awaiting a ruling, and the latest request's prompt as sized,
 /// each absent when there is none.
@@ -12175,6 +12174,7 @@ fn where_it_is(state: &State) -> [(&'static str, Option<Value>); 3] {
     [("phase", phase), ("proposal", proposal), ("sized", sized)]
 }
 
+/// A count as `GET /state` writes it (#756).
 fn status_number(n: u64) -> Value {
     Value::Integer(i64::try_from(n).unwrap_or(i64::MAX))
 }
