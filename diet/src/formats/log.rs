@@ -3323,6 +3323,18 @@ fn parse_complete(text: &str) -> Result<Vec<Line>, LogError> {
     Ok(lines)
 }
 
+/// The kind `line` is written as (#1037), without rendering it to text.
+#[must_use]
+pub fn kind_of(line: &Line) -> Option<String> {
+    match to_value(line) {
+        Value::Object(fields) => match fields.get("kind") {
+            Some(Value::String(kind)) => Some(kind.clone()),
+            _ => None,
+        },
+        _ => None,
+    }
+}
+
 /// Write one line: sorted keys, no raw line break, so one event is one line.
 #[must_use]
 pub fn render(line: &Line) -> String {

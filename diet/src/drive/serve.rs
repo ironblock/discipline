@@ -4,7 +4,9 @@
 //!
 //! These routes, and nothing else answers:
 //!
-//! * `GET /events` replays the log from a sequence number and then tails it.
+//! * `GET /events` replays the log from a sequence number and then tails it,
+//!   every line or, with `kinds=<kind>,<kind>`, only those kinds; with
+//!   `elide=confined` each call's confinement argv is dropped (#1037).
 //!   Each event is `id: <opened>-<seq>` and one `data:` line; `opened` is the
 //!   session's own start time, read from its first event, so a page that
 //!   resumes against a restarted process is told `410` instead of being fed
@@ -68,7 +70,7 @@
 //! -- and nothing here reads an event's kind but `/wait`, which reads the
 //! log's own line for it (`session::line_value`), whatever `Render` is.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::fmt::{self, Write as _};
 use std::io::{self, Read as _, Write as _};
 use std::net::{Shutdown, SocketAddr, TcpListener, TcpStream};
@@ -554,6 +556,10 @@ impl<S: Streaming + 'static> Serving<S> {
 
     /// `GET /events`: replay from a sequence number, then tail.
     fn events(&self, stream: &mut TcpStream, request: &Request) {
+        // Which lines, and whether to drop a call's confinement argv (#1037).
+        let Some((kinds, elide)) = events_filter(&request.query) else {
+            return respond(stream, 400, &empty());
+        };
         let first = match request.header("last-event-id") {
             Some(id) => match resume_after(id, self.opened) {
                 Ok(seq) => match seq.checked_add(1) {
@@ -607,13 +613,23 @@ impl<S: Streaming + 'static> Serving<S> {
                 out.push_str(":\n\n");
             }
             for logged in &batch {
-                let data = (self.render)(logged);
+                next = logged.seq + 1;
+                if let Some(kinds) = &kinds
+                    && !crate::formats::log::kind_of(&super::session::line_of(logged))
+                        .is_some_and(|kind| kinds.contains(&kind))
+                {
+                    continue;
+                }
+                let data = if elide {
+                    (self.render)(&elided(logged))
+                } else {
+                    (self.render)(logged)
+                };
                 debug_assert!(
                     !data.contains(['\n', '\r']),
                     "a renderer broke an event across lines: {data:?}"
                 );
                 let _ = write!(out, "id: {}-{}\ndata: {data}\n\n", self.opened, logged.seq);
-                next = logged.seq + 1;
             }
             if let Some(waiting) = prompt.as_ref().filter(|_| fresh) {
                 let _ = write!(out, "event: waiting\ndata: {}\n\n", waiting.render());
@@ -1556,6 +1572,44 @@ fn wait_query(query: &str) -> Option<(Option<&'static str>, Option<u64>, Duratio
     Some((until?, after, patience))
 }
 
+/// `/events`'s filter (#1037): `kinds=` a comma-separated list of the
+/// log's kinds, the only lines sent; `elide=confined`, each call's
+/// confinement argv dropped. `None` for an empty or unknown kind, or any
+/// other elision.
+fn events_filter(query: &str) -> Option<(Option<BTreeSet<String>>, bool)> {
+    let mut kinds = None;
+    let mut elide = false;
+    for pair in query.split('&') {
+        if let Some(listed) = pair.strip_prefix("kinds=") {
+            let known = |kind: &&str| {
+                crate::formats::log::Kind::ALL
+                    .iter()
+                    .any(|candidate| candidate.tag() == *kind)
+            };
+            let listed: Vec<&str> = listed.split(',').collect();
+            if listed.iter().any(|kind| kind.is_empty() || !known(kind)) {
+                return None;
+            }
+            kinds = Some(listed.into_iter().map(str::to_owned).collect());
+        } else if let Some(what) = pair.strip_prefix("elide=") {
+            if what != "confined" {
+                return None;
+            }
+            elide = true;
+        }
+    }
+    Some((kinds, elide))
+}
+
+/// `logged` with a call's confinement argv dropped (#1037).
+fn elided(logged: &Logged) -> Logged {
+    let mut logged = logged.clone();
+    if let super::session::Event::ToolCalled(line) = &mut logged.event {
+        line.confined = None;
+    }
+    logged
+}
+
 fn from_query(query: &str) -> Option<u64> {
     let named = query.split('&').find_map(|pair| pair.strip_prefix("from="));
     named.map_or(Some(0), |from| from.parse().ok())
@@ -2215,6 +2269,69 @@ mod tests {
         for piece in [r#"text: "Hel""#, r#"text: "lo""#, r#"text: "Hello""#] {
             assert!(data.contains(piece), "{piece} is not in {data}");
         }
+    }
+
+    /// #1037: `/events?kinds=` sends only those kinds of line, and
+    /// `elide=confined` drops a call's confinement argv; an unknown kind or
+    /// elision is `400`.
+    #[test]
+    fn a_reader_filters_events_by_kind_and_elides_the_confinement_argv() {
+        use crate::drive::session::tests::{bash, looping, tools};
+        use crate::drive::tool_loop::Decider;
+        use crate::drive::tool_loop::tests::scratch;
+        use crate::isolation::Confinement;
+        let tree = scratch("serve-events-filter");
+        let listener = TcpListener::bind("127.0.0.1:0").expect("loopback");
+        let session = Arc::new(Session::open_looping(
+            Canned::new([vec![bash("call-1", "touch a")], deltas(&["ok"])]),
+            looping(),
+            None,
+            tools(
+                Confinement::Unconfined,
+                &tree,
+                &["touch"],
+                None,
+                Decider::Decline,
+            ),
+        ));
+        let server = Server::start(listener, Arc::clone(&session), quick(), render)
+            .expect("the server starts");
+        session.ask("go", None).expect("accepted");
+        wait_until(&session, "the turn", settled);
+        let read = |query: &str| {
+            let mut reader = Client::send(&server, &events_request(&server, query, ""));
+            reader.read_until(Duration::from_secs(5), |read| read.contains("TurnSettled"));
+            reader.data()
+        };
+        let all = read("?from=0");
+        assert!(
+            all.iter()
+                .any(|data| data.contains("ToolCalled") && data.contains("confined: Some")),
+            "{all:?}"
+        );
+        let few = read("?from=0&kinds=tool_call,turn.settled");
+        assert!(!few.is_empty());
+        assert!(
+            few.iter()
+                .all(|data| data.contains("ToolCalled") || data.contains("TurnSettled")),
+            "{few:?}"
+        );
+        let elided = read("?from=0&kinds=tool_call,turn.settled&elide=confined");
+        assert!(
+            elided
+                .iter()
+                .any(|data| data.contains("ToolCalled") && data.contains("confined: None")),
+            "{elided:?}"
+        );
+        for bad in [
+            "?from=0&kinds=nonsense",
+            "?from=0&kinds=",
+            "?from=0&elide=argv",
+        ] {
+            let reply = Client::send(&server, &events_request(&server, bad, "")).reply();
+            assert_eq!(status(&reply), 400, "{bad}: {reply}");
+        }
+        let _ = std::fs::remove_dir_all(&tree);
     }
 
     #[test]

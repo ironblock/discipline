@@ -5544,8 +5544,13 @@ impl<S: Streaming + 'static> Session<S> {
     /// `unaddressed`; the prompt waiting on the operator, in `waiting`'s
     /// shape; the last refusal, its `seq`, `command` and `because`; the
     /// last `seq`; and whether it is `idle`: no turn running, nothing in
-    /// flight, nothing queued and no prompt waiting. `turn`, `approval` and
-    /// `refusal` are absent when there is none, as the log leaves a key out.
+    /// flight, nothing queued and no prompt waiting. And where the session
+    /// is (#1037): its `phase`, the model's `proposal` awaiting a ruling --
+    /// its `call`, `from` and `to` -- and the latest request's prompt as
+    /// `sized`: its `prompt` tokens, its `output_cap` and the `window` it
+    /// was sized against. `turn`, `approval`, `refusal`, `phase`,
+    /// `proposal` and `sized` are absent when there is none, as the log
+    /// leaves a key out.
     #[must_use]
     pub fn status(&self) -> Value {
         let state = self.shared.lock();
@@ -5635,7 +5640,10 @@ impl<S: Streaming + 'static> Session<S> {
             ),
             ("idle", Value::Boolean(idle)),
         ];
-        for (key, value) in [("turn", turn), ("approval", prompt), ("refusal", refusal)] {
+        for (key, value) in [("turn", turn), ("approval", prompt), ("refusal", refusal)]
+            .into_iter()
+            .chain(where_it_is(&state))
+        {
             if let Some(value) = value {
                 status.push((key, value));
             }
@@ -12087,6 +12095,32 @@ pub fn fork_tail(regimen: &Regimen) -> Option<u32> {
 }
 
 /// A count as `GET /state` writes it (#756).
+/// Where the session is, for its status (#1037): its phase, the model's
+/// proposal awaiting a ruling, and the latest request's prompt as sized,
+/// each absent when there is none.
+fn where_it_is(state: &State) -> [(&'static str, Option<Value>); 3] {
+    let (number, text, object) = (status_number, status_text, status_object);
+    let phase = state.phase.as_deref().map(text);
+    let proposal = state.proposal.as_ref().map(|proposal| {
+        let mut fields = vec![("call", text(&proposal.call)), ("to", text(&proposal.to))];
+        if let Some(from) = &proposal.from {
+            fields.push(("from", text(from)));
+        }
+        object(fields)
+    });
+    let sized = state.last_sized.map(|(prompt, cap, window)| {
+        let mut fields = vec![
+            ("prompt", number(prompt)),
+            ("output_cap", number(u64::from(cap))),
+        ];
+        if let Some(window) = window {
+            fields.push(("window", number(window)));
+        }
+        object(fields)
+    });
+    [("phase", phase), ("proposal", proposal), ("sized", sized)]
+}
+
 fn status_number(n: u64) -> Value {
     Value::Integer(i64::try_from(n).unwrap_or(i64::MAX))
 }
@@ -31737,6 +31771,60 @@ pub(in crate::drive) mod tests {
         ));
         assert_eq!(nonce_of(&nonced).as_deref(), Some("2222222222222222"));
         assert_eq!(nonce_of(&carried("you are the trunk")), None);
+    }
+
+    /// #1037: the status says where the session is -- its phase, the model's
+    /// proposal awaiting a ruling with its call, and the latest request's
+    /// prompt as sized against the window it was sized for -- so an
+    /// operator rules without reading the log.
+    #[test]
+    fn the_status_says_the_phase_the_pending_proposal_and_the_sized_prompt() {
+        let fields = |status: Value| match status {
+            Value::Object(fields) => fields,
+            _ => unreachable!("the status is an object"),
+        };
+        let text = |value: Option<&Value>| match value {
+            Some(Value::String(text)) => text.clone(),
+            other => unreachable!("a string: {other:?}"),
+        };
+        let session = two_keys(
+            vec![vec![
+                Step::Delta("The plan is settled.".to_owned()),
+                propose(
+                    "call-p",
+                    &serde_json::json!({"to": "build", "reason": "the plan is settled"}),
+                ),
+            ]],
+            true,
+        );
+        let before = fields(session.status());
+        assert_eq!(text(before.get("phase")), "plan");
+        assert!(!before.contains_key("proposal"), "{before:?}");
+        assert!(
+            !before.contains_key("sized"),
+            "nothing sent yet: {before:?}"
+        );
+        session.ask("plan it", None).expect("accepted");
+        wait_until(&session, "the turn", settled);
+        let status = fields(session.status());
+        assert_eq!(text(status.get("phase")), "plan");
+        let Some(Value::Object(proposal)) = status.get("proposal") else {
+            unreachable!("a pending proposal: {status:?}");
+        };
+        assert_eq!(text(proposal.get("call")), "call-p");
+        assert_eq!(text(proposal.get("from")), "plan");
+        assert_eq!(text(proposal.get("to")), "build");
+        let Some(Value::Object(sized)) = status.get("sized") else {
+            unreachable!("the latest request's sizing: {status:?}");
+        };
+        assert!(
+            matches!(sized.get("prompt"), Some(Value::Integer(n)) if *n > 0),
+            "{sized:?}"
+        );
+        assert!(
+            matches!(sized.get("output_cap"), Some(Value::Integer(n)) if *n > 0),
+            "{sized:?}"
+        );
     }
 
     /// #788: the model's proposal ends its turn -- one trunk request, the
