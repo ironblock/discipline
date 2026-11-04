@@ -11,7 +11,9 @@
 #   chip off of a particular node... giving me the opportunity to accept or reject it." Shown, a shadow is no longer
 #   independent of the operator's own forks: the acceptance is the measure, and the start row says chips;
 # - self-capture under contract set c3 (#1016): a note in the model's own words, always kept, observed or
-#   self-stated.
+#   self-stated;
+# - `note_dedupe = "off"`: the maintainer's ruling of 2026-11-03, on a judged sample of merges on one model line
+#   that found most wrong at tfidf 0.40 (2026-11-03).
 # Everything else is that draft's, and its header's notes hold here too.
 arm = "t1-session-one-flashnext-manual"
 dogma_version = 0
@@ -71,8 +73,8 @@ render_budget_tokens = 40000
 render_over_budget = "tier"
 archive_recall = "literal"
 
-# Write-time dedupe (#872): TF-IDF against live notes of the same kind, merged through alias and provenance.
-note_dedupe = "on"
+# Write-time dedupe (#872): off for this drive, by the maintainer's ruling of 2026-11-03 (header).
+note_dedupe = "off"
 
 [reasoning]
 effort = "xhigh"
