@@ -2899,6 +2899,33 @@ mod tests {
             .unwrap_or_else(|why| panic!("the floor head carries a timestamp: {why}"));
     }
 
+    /// #1050: T1's head is the floor's answer rules under T1's own first line
+    /// -- the floor's names a Rust and TypeScript repository, which T1's is
+    /// not -- then the two dev-server lines a T1 run carries; the floor's head
+    /// is unchanged.
+    #[test]
+    fn t1s_head_is_the_floors_rules_under_its_own_first_line() {
+        let floor = include_str!("../../drive/heads/floor.md");
+        let t1 = include_str!("../../drive/heads/t1.md");
+        let (floor_first, rules) = floor.split_once('\n').expect("a first line");
+        assert!(floor_first.ends_with("on a repository written in Rust and TypeScript."));
+        assert_eq!(
+            t1,
+            format!(
+                "You are a coding assistant working with a person.\n{rules}\nA running command cannot be cancelled, so start long-lived servers (like the dev server) in the background.\nThe dev server uses port 5182 (ports 5173, 5180 and 5181 are taken).\n\n"
+            )
+        );
+        let sending = RequestShape {
+            messages: vec![
+                Message::new(Role::System, t1),
+                Message::new(Role::User, "the turn"),
+            ],
+            ..shape()
+        };
+        linted_head(&sending, 1, MAIN)
+            .unwrap_or_else(|why| panic!("the T1 head carries a timestamp: {why}"));
+    }
+
     /// The lint fires BEFORE the call, and the drive stops.
     ///
     /// The meditation's render is the system prompt, so whatever it carries
