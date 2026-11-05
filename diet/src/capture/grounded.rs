@@ -48,10 +48,14 @@ pub struct ContractInput<'a> {
     pub source: &'a str,
     /// What the lane could see but was not told to work from.
     pub session_prefix: &'a str,
-    /// Of `source`, what came from outside the model (#1016): the turn's ask
-    /// and its tool output, the model's own prose left out. What grounds an
-    /// `update_record`'s `evidence` quote under a contract that asks for one.
+    /// Of `source`, the turn's tool output (#1016): what grounds an
+    /// `update_record`'s `evidence` quote as `observed` under a contract that
+    /// asks for one. The model's own prose is left out, and since #1050 the
+    /// user's ask is apart, in `user_words`.
     pub observed: &'a str,
+    /// Of `source`, the user's ask that turn (#1050): a quote found here
+    /// and not in `observed` is `user-stated`.
+    pub user_words: &'a str,
 }
 
 /// How an entry relates to the contract input.
@@ -640,6 +644,7 @@ mod tests {
             source: SOURCE,
             session_prefix: PREFIX,
             observed: SOURCE,
+            user_words: "",
         }
     }
 

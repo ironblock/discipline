@@ -268,6 +268,13 @@
 //! log that declares 28 or less and carries it is refused. For a reader of
 //! earlier logs, the migration is nothing: no session declared one.
 //!
+//! v39 (#1050) carries where working memory's words came from: a
+//! `patch` entry's `authority` may be `user-stated`, a note whose quote was
+//! found in the user's ask and not the turn's tool output; and an operator's
+//! keep names what it kept from in its entry's `kept_from` -- `ask`,
+//! `tool-result` or `answer`. Both are refused in a log that declares 38 or
+//! less. For a reader of earlier logs, the migration is nothing.
+//!
 //! v38 (#1050) changes no line: it marks what a session sent the model in
 //! a phase. The phase tool's `to` is an enum of `session.start`'s `phases`,
 //! with `to` and `reason` described, and a refill's ground rules close with
@@ -450,12 +457,12 @@ use super::record::vocabulary;
 struct LogParser;
 
 /// The version this module writes, as `session.start` states it.
-pub const VERSION: i64 = 38;
+pub const VERSION: i64 = 39;
 
 /// Every version this module reads.
 pub const READS: &[i64] = &[
     0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25,
-    26, 27, 28, 29, 30, 31, 32, 33, 34, 35, 36, 37, 38,
+    26, 27, 28, 29, 30, 31, 32, 33, 34, 35, 36, 37, 38, 39,
 ];
 
 /// How recent an input event must be, at the moment a turn settles, for the
@@ -2679,8 +2686,14 @@ pub struct PatchEntry {
     /// whose evidence quote was found in what the model observed that turn,
     /// or `self-stated`, one whose was not or that gave none, written by
     /// contract set c3 alone; or `operator` (v32, #1021), the operator's
-    /// keep -- a new entry, or their endorsement of one already held.
+    /// keep -- a new entry, or their endorsement of one already held; or
+    /// `user-stated` (v39, #1050), a note whose quote was found in the user's
+    /// ask and not in the turn's tool output.
     pub authority: Option<String>,
+    /// What the operator's keep kept from (v39, #1050): `ask`,
+    /// `tool-result` or `answer` -- a trunk's or a fork's. Only on the keep's
+    /// own patch line.
+    pub kept_from: Option<String>,
 }
 
 /// An `add` merged into a live entry of its kind for its likeness (v8, the
@@ -4065,6 +4078,17 @@ fn beyond(line: &Line, declared: i64) -> Option<String> {
     if kind == Kind::PhaseRuled
         && object.get("choice") == Some(&Value::String("keep".to_owned()))
         && let Some(why) = arrived(8, "`phase.ruled`'s `choice` is `keep`".to_owned())
+    {
+        return Some(why);
+    }
+    // A note the user's words vouch for (#1050).
+    if kind == Kind::Patch
+        && let Some(Value::Object(entry)) = object.get("entry")
+        && entry.get("authority") == Some(&Value::String(USER_STATED.to_owned()))
+        && let Some(why) = arrived(
+            39,
+            "`patch`'s `entry.authority` is `user-stated`".to_owned(),
+        )
     {
         return Some(why);
     }
@@ -6474,11 +6498,26 @@ pub const PATCH_ENTRY: &[Field] = &[
     must_v5("text", Holds::Text),
     may_v5("category", Holds::Text),
     may_v31("authority", Holds::Text),
+    // What a keep kept from (#1050).
+    Field {
+        key: "kept_from",
+        holds: Holds::Text,
+        required: false,
+        since: 39,
+    },
 ];
 
 /// What a `patch` entry's `authority` may say: a self-capture note's (v31,
-/// #1016), or the operator's keep (v32, #1021).
-pub const AUTHORITIES: &[&str] = &["observed", "self-stated", OPERATOR_AUTHORITY];
+/// #1016; `user-stated` from v39, #1050), or the operator's keep (v32,
+/// #1021).
+pub const AUTHORITIES: &[&str] = &["observed", "self-stated", OPERATOR_AUTHORITY, USER_STATED];
+
+/// A self-capture note's `authority` when its quote was found in the user's
+/// ask and not in the turn's tool output (v39, #1050).
+pub const USER_STATED: &str = "user-stated";
+
+/// What a `patch` entry's `kept_from` may say (v39, #1050).
+pub const KEPT_FROM: &[&str] = &["ask", "tool-result", "answer"];
 
 /// A `patch` entry's `authority` when the operator kept it (v32, #1021): a
 /// new entry, or their endorsement of one the model or a fork wrote.
@@ -8900,6 +8939,9 @@ fn to_value(line: &Line) -> Value {
             if let Some(authority) = &entry.authority {
                 object.insert("authority".to_owned(), text(authority));
             }
+            if let Some(kept_from) = &entry.kept_from {
+                object.insert("kept_from".to_owned(), text(kept_from));
+            }
             put("entry", Value::Object(object));
             if let Some(replaced) = supersedes {
                 put("supersedes", text(replaced));
@@ -10251,6 +10293,14 @@ impl Fields<'_> {
                 }
                 said => said,
             },
+            kept_from: match inner.optional_string("kept_from").map_err(within)? {
+                Some(said) if !KEPT_FROM.contains(&said.as_str()) => {
+                    return Err(within(format!(
+                        "`kept_from` is `{said}`, not one of {KEPT_FROM:?}"
+                    )));
+                }
+                said => said,
+            },
         })
     }
 
@@ -10803,15 +10853,15 @@ mod tests {
     }
 
     /// #583, #878, #904, #555, #931, #936, #910, #942, #926, #932, #948, #971, #1016, #1021,
-    /// #1022, #1031, #1030, #1037, #1038, #1050: this module writes v38.
+    /// #1022, #1031, #1030, #1037, #1038, #1050: this module writes v39.
     #[test]
-    fn this_module_writes_v38_and_reads_every_version_before_it() {
-        assert_eq!(super::VERSION, 38);
+    fn this_module_writes_v39_and_reads_every_version_before_it() {
+        assert_eq!(super::VERSION, 39);
         assert_eq!(
             super::READS,
             &[
                 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22,
-                23, 24, 25, 26, 27, 28, 29, 30, 31, 32, 33, 34, 35, 36, 37, 38
+                23, 24, 25, 26, 27, 28, 29, 30, 31, 32, 33, 34, 35, 36, 37, 38, 39
             ]
         );
     }
@@ -11269,6 +11319,7 @@ mod tests {
                     text: "a tracker".to_owned(),
                     category: None,
                     authority: None,
+                    kept_from: None,
                 },
                 supersedes: None,
                 tangent: Some("t/1".to_owned()),
@@ -11287,6 +11338,7 @@ mod tests {
                     text: "gotcha: a tracker, one per team".to_owned(),
                     category: None,
                     authority: None,
+                    kept_from: None,
                 },
                 supersedes: None,
                 tangent: None,
@@ -11307,6 +11359,7 @@ mod tests {
                     text: "a tracker for one team".to_owned(),
                     category: Some("scope".to_owned()),
                     authority: Some("observed".to_owned()),
+                    kept_from: None,
                 },
                 supersedes: Some("d1".to_owned()),
                 tangent: None,
@@ -11688,6 +11741,7 @@ mod tests {
                     text: "port 5182 is free".to_owned(),
                     category: None,
                     authority: Some(OPERATOR_AUTHORITY.to_owned()),
+                    kept_from: None,
                 },
                 supersedes: None,
                 tangent: None,

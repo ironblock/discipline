@@ -278,8 +278,10 @@ export interface Entry {
   /** Working memory's own id for the entry. */
   readonly id: string;
   readonly category?: string;
-  /** Who vouches for a self-capture note (log v31, contract set c3): `observed` or `self-stated`. */
-  readonly authority?: 'observed' | 'self-stated';
+  /** Who vouches for a self-capture note (log v31, contract set c3): `observed` or `self-stated`; or `user-stated` (log v39, #1050). */
+  readonly authority?: 'observed' | 'user-stated' | 'self-stated';
+  /** What an operator's keep kept from (log v39, #1050). */
+  readonly kept_from?: 'ask' | 'tool-result' | 'answer';
   readonly text: string;
 }
 
