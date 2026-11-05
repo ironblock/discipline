@@ -264,6 +264,86 @@ pub struct Entry {
     pub provenances: Vec<Provenance>,
     /// What showed it wrong, when a refutation voided it (#878).
     pub refuted: Option<Refutation>,
+    /// Where its words came from, beyond its lane (#1050): what the
+    /// render's source column says of it. Absent where the lane says enough.
+    pub origin: Option<Origin>,
+}
+
+/// Where an entry's words came from, beyond its lane (#1050).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Origin {
+    /// The operator kept it from a logged line: what that line was, and the
+    /// keep's tag.
+    Kept {
+        /// What it was kept from.
+        from: KeptFrom,
+        /// The keep's tag, when it named one.
+        tag: Option<String>,
+    },
+    /// A note in the model's own words, and what vouches for it.
+    Noted(Vouched),
+}
+
+/// What an operator's keep kept from (#1050).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum KeptFrom {
+    /// The user's ask.
+    Ask,
+    /// A tool result, as shown.
+    ToolResult,
+    /// An answer or a step's words: the trunk's or a fork's.
+    Answer,
+}
+
+impl KeptFrom {
+    /// The log's and the dump's word for it.
+    #[must_use]
+    pub fn word(self) -> &'static str {
+        match self {
+            Self::Ask => "ask",
+            Self::ToolResult => "tool-result",
+            Self::Answer => "answer",
+        }
+    }
+
+    /// The one named `word`.
+    #[must_use]
+    pub fn from_word(word: &str) -> Option<Self> {
+        [Self::Ask, Self::ToolResult, Self::Answer]
+            .into_iter()
+            .find(|from| from.word() == word)
+    }
+}
+
+/// What vouches for a note in the model's own words (#1016, #1050).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Vouched {
+    /// Its quote was found in the turn's tool output.
+    Observed,
+    /// Its quote was found in the user's ask, and not the tool output.
+    UserStated,
+    /// Nothing: no quote, or one found in neither.
+    SelfStated,
+}
+
+impl Vouched {
+    /// The log's and the dump's word for it.
+    #[must_use]
+    pub fn word(self) -> &'static str {
+        match self {
+            Self::Observed => "observed",
+            Self::UserStated => "user-stated",
+            Self::SelfStated => "self-stated",
+        }
+    }
+
+    /// The one named `word`.
+    #[must_use]
+    pub fn from_word(word: &str) -> Option<Self> {
+        [Self::Observed, Self::UserStated, Self::SelfStated]
+            .into_iter()
+            .find(|vouched| vouched.word() == word)
+    }
 }
 
 /// How firmly a refuted claim was held then (#878): an integer from 1,
@@ -677,6 +757,22 @@ impl WorkingObject {
         })
     }
 
+    /// Say where entry `id`'s words came from (#1050), replacing what was
+    /// said: an operator's keep that restates a model's note is the keep's,
+    /// the user's endorsement being the authority that counts.
+    ///
+    /// # Errors
+    ///
+    /// When the object holds no entry `id`.
+    pub fn originate(&mut self, id: &EntryId, origin: Origin) -> Result<(), ObjectError> {
+        let entry = self
+            .entries
+            .get_mut(id)
+            .ok_or_else(|| ObjectError::UnknownTarget(id.clone()))?;
+        entry.origin = Some(origin);
+        Ok(())
+    }
+
     /// Apply one patch.
     ///
     /// Deterministic: the same object and the same patch give the same result
@@ -874,6 +970,7 @@ impl WorkingObject {
                 supersedes: None,
                 provenances: vec![provenance.clone()],
                 refuted: None,
+                origin: None,
             },
         );
         self.by_content.insert(key, id.clone());
@@ -1148,6 +1245,7 @@ impl WorkingObject {
                 }
                 Some(_) => return Err(wrong("`aliases` is not a list")),
             }
+            let origin = origin_of(&line).map_err(|why| wrong(&why))?;
             let content = text("content")?;
             let key = normalise(&content);
             let live = state.is_live();
@@ -1168,6 +1266,7 @@ impl WorkingObject {
                     supersedes,
                     provenances,
                     refuted,
+                    origin,
                 },
             );
         }
@@ -1217,6 +1316,28 @@ pub fn changed_between(
 }
 
 /// One entry as the record's value space.
+/// An entry's origin as the dump writes it (#1050): `kept_from` and its
+/// `tag`, or a note's `authority`, or neither.
+fn origin_of(line: &BTreeMap<String, Value>) -> Result<Option<Origin>, String> {
+    let optional = |key: &str| match line.get(key) {
+        None => Ok(None),
+        Some(Value::String(text)) => Ok(Some(text.clone())),
+        Some(_) => Err(format!("`{key}` is not text")),
+    };
+    Ok(match (optional("kept_from")?, optional("authority")?) {
+        (Some(from), None) => Some(Origin::Kept {
+            from: KeptFrom::from_word(&from)
+                .ok_or_else(|| format!("an unknown `kept_from` `{from}`"))?,
+            tag: optional("tag")?,
+        }),
+        (None, Some(said)) => Some(Origin::Noted(
+            Vouched::from_word(&said).ok_or_else(|| format!("an unknown `authority` `{said}`"))?,
+        )),
+        (None, None) => None,
+        (Some(_), Some(_)) => return Err("both `kept_from` and `authority`".to_owned()),
+    })
+}
+
 fn entry_value(entry: &Entry, aliases: &[&EntryId]) -> Value {
     let mut members = BTreeMap::from([
         ("id".to_owned(), Value::String(entry.id.0.clone())),
@@ -1253,6 +1374,25 @@ fn entry_value(entry: &Entry, aliases: &[&EntryId]) -> Value {
                 ("pointer".to_owned(), Value::String(pointer.clone())),
             ])),
         );
+    }
+    // Where its words came from (#1050).
+    match &entry.origin {
+        Some(Origin::Kept { from, tag }) => {
+            members.insert(
+                "kept_from".to_owned(),
+                Value::String(from.word().to_owned()),
+            );
+            if let Some(tag) = tag {
+                members.insert("tag".to_owned(), Value::String(tag.clone()));
+            }
+        }
+        Some(Origin::Noted(vouched)) => {
+            members.insert(
+                "authority".to_owned(),
+                Value::String(vouched.word().to_owned()),
+            );
+        }
+        None => {}
     }
     if !aliases.is_empty() {
         members.insert(

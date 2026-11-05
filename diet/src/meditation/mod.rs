@@ -730,6 +730,8 @@ mod tests {
     /// follows the working set; tier keeps a cut first line, elide the id.
     #[test]
     fn past_its_budget_the_oldest_entries_are_reduced_first_and_the_brief_never_is() {
+        // An interview's entries: each line's source (#1050).
+        const SAID: &str = "you said, when asked";
         let long = |id: &str| format!("{id}: {LONG}");
         let object = holding(&[
             ("old", &long("old")),
@@ -738,7 +740,7 @@ mod tests {
             ("new", &long("new")),
         ]);
         let plain = render::render(&object, None);
-        let line = |id: &str| format!("{id}\t{}\n", long(id).replace('\n', "\\n"));
+        let line = |id: &str| format!("{id}\t{SAID}\t{}\n", long(id).replace('\n', "\\n"));
         let cut = |id: &str| {
             long(id)
                 .chars()
@@ -750,22 +752,30 @@ mod tests {
         let expected = format!(
             "{}2 older entries shortened\n",
             plain
-                .replace(&line("old"), &format!("old\t{}…\n", cut("old")))
-                .replace(&line("mid"), &format!("mid\t{}…\n", cut("mid")))
+                .replace(&line("old"), &format!("old\t{SAID}\t{}…\n", cut("old")))
+                .replace(&line("mid"), &format!("mid\t{SAID}\t{}…\n", cut("mid")))
         );
         let room = (expected.chars().count() as u64).div_ceil(4);
         let tiered = render::rendered(&object, None, Some(budget(room, render::OverBudget::Tier)));
         assert_eq!(tiered.reduced, 2, "{}", tiered.text);
         assert!(tiered.fits);
         assert!(tiered.text.contains(&line("new")), "the newest stays whole");
-        assert!(tiered.text.contains("rule\tconstraint: no login\n"));
         assert!(
-            tiered.text.contains(&format!("old\t{}…\n", cut("old"))),
+            tiered
+                .text
+                .contains("rule\tyou said, when asked\tconstraint: no login\n")
+        );
+        assert!(
+            tiered
+                .text
+                .contains(&format!("old\t{SAID}\t{}…\n", cut("old"))),
             "{}",
             tiered.text
         );
         assert!(
-            tiered.text.contains(&format!("mid\t{}…\n", cut("mid"))),
+            tiered
+                .text
+                .contains(&format!("mid\t{SAID}\t{}…\n", cut("mid"))),
             "{}",
             tiered.text
         );
@@ -794,7 +804,11 @@ mod tests {
             elided.text
         );
         assert!(elided.text.contains(&line("new")));
-        assert!(elided.text.contains("rule\tconstraint: no login\n"));
+        assert!(
+            elided
+                .text
+                .contains("rule\tyou said, when asked\tconstraint: no login\n")
+        );
         assert!(
             elided.text.ends_with("2 older entries elided\n"),
             "{}",
@@ -803,7 +817,11 @@ mod tests {
         // A budget the brief alone passes still renders the brief whole,
         // and says it does not fit.
         let tight = render::rendered(&object, None, Some(budget(1, render::OverBudget::Elide)));
-        assert!(tight.text.contains("rule\tconstraint: no login\n"));
+        assert!(
+            tight
+                .text
+                .contains("rule\tyou said, when asked\tconstraint: no login\n")
+        );
         assert_eq!(tight.reduced, 3);
         assert!(!tight.fits);
     }
@@ -852,7 +870,11 @@ mod tests {
         );
         assert!(tiered.fits);
         assert_eq!(tiered.reduced, 2, "{}", tiered.text);
-        assert!(tiered.text.contains("interview-t2-2\tsupersede: NONE\n"));
+        assert!(
+            tiered
+                .text
+                .contains("interview-t2-2\tyou said, when asked\tsupersede: NONE\n")
+        );
         // One token less and nothing is left to reduce: it says so.
         let short = render::rendered(
             &object,
@@ -1510,15 +1532,15 @@ mod tests {
     #[test]
     fn the_render_names_the_frame_it_was_built_with() {
         // The frame is prompt text and prompt text is judgment-as-data, so it
-        // belongs to the maintainer. Until it is authored, a drive under this
-        // one has to be distinguishable from a drive under that one, or the
-        // two get compared as though they were the same regime.
+        // belongs to the maintainer. Renders under one frame have to be told
+        // from renders under another, or the two get compared as though they
+        // were the same regime: frame 1 (#1050) carries each entry's source.
         let object = three_facts();
         assert!(
-            render::render(&object, None).contains("frame_version: placeholder"),
+            render::render(&object, None).contains("frame_version: 1\n"),
             "the prompt says which frame built it"
         );
-        assert_eq!(render::FRAME_VERSION, "placeholder");
+        assert_eq!(render::FRAME_VERSION, "1");
 
         let mut object = object;
         let mut controller = Controller::open(
@@ -1532,7 +1554,7 @@ mod tests {
             .expect("nothing folds")
             .expect("a meditation");
         assert_eq!(
-            meditation.frame_version, "placeholder",
+            meditation.frame_version, "1",
             "and so does the record of it"
         );
     }
@@ -1764,8 +1786,9 @@ mod tests {
             render::render(&one, None),
             "two objects, two prompts"
         );
+        let source = render::source(one.live().next().expect("one entry"));
         assert!(
-            render::render(&one, None).contains("a\tx\\nb\\ty\n"),
+            render::render(&one, None).contains(&format!("a\t{source}\tx\\nb\\ty\n")),
             "and the forged row is one escaped row: {}",
             render::render(&one, None)
         );

@@ -4982,7 +4982,7 @@ impl<S: Streaming + 'static> Session<S> {
             return Err(held.map_or(Rejected::Refused(refused), Rejected::KeptAlready));
         }
         state.admit_within_the_gap();
-        let entry = operator_entry(&mut state, span, tag);
+        let entry = operator_entry(&mut state, (span, from), tag);
         drop(state);
         self.shared.changed.notify_all();
         Ok(entry)
@@ -5064,7 +5064,7 @@ impl<S: Streaming + 'static> Session<S> {
             }
         };
         state.admit_within_the_gap();
-        let entry = held.unwrap_or_else(|| operator_entry(&mut state, span, None));
+        let entry = held.unwrap_or_else(|| operator_entry(&mut state, (span, from), None));
         // Accepted: the operator's label, kept though no request carries it.
         state.push(Event::WrapAccepted {
             call,
@@ -7966,7 +7966,7 @@ fn capture_call<S>(
         moved = Some((from, to));
     }
     let shown = capture_shown(outcome, (why.as_deref(), entries.first()), vouched);
-    vouch(&mut lines, vouched);
+    vouch(&mut state, &mut lines, vouched);
     state.push(Event::Captured {
         request,
         call: call.id.clone(),
@@ -8208,14 +8208,26 @@ fn capture_outcome(
 
 /// What the model saw by turn `turn`, as the groundedness gate reads it
 /// (#609): that turn's ask, trunk prose and non-capture tool output as the
-/// source, every earlier turn's as the session prefix, and the source less
-/// the model's prose as what it observed (#1016) -- from the log, as
-/// `capture::tools::Seen::of_turn` reads a record.
+/// source, every earlier turn's as the session prefix; of the source, its
+/// tool output as what it observed (#1016) and its ask apart, as the user's
+/// words (#1050) -- from the log, as `capture::tools::Seen::of_turn` reads a
+/// record.
 fn seen_by(log: &[Logged], turn: u32) -> crate::capture::tools::Seen {
     use crate::capture::tools::CaptureTool;
+    /// Where a text of the turn is filed beside the source.
+    #[derive(Clone, Copy)]
+    enum Outside {
+        /// The model's own prose: the source alone.
+        Not,
+        /// Tool output: what it observed.
+        Observed,
+        /// The user's ask.
+        UserWords,
+    }
     let mut trunk_turn = BTreeMap::new();
-    let (mut source, mut prefix, mut observed) = (String::new(), String::new(), String::new());
-    let mut file = |at: u32, text: &str, outside: bool| {
+    let (mut source, mut prefix) = (String::new(), String::new());
+    let (mut observed, mut user_words) = (String::new(), String::new());
+    let mut file = |at: u32, text: &str, outside: Outside| {
         let bucket = match at.cmp(&turn) {
             std::cmp::Ordering::Equal => &mut source,
             std::cmp::Ordering::Less => &mut prefix,
@@ -8223,15 +8235,20 @@ fn seen_by(log: &[Logged], turn: u32) -> crate::capture::tools::Seen {
         };
         bucket.push_str(text);
         bucket.push('\n');
-        if outside && at == turn {
-            observed.push_str(text);
-            observed.push('\n');
+        if at == turn {
+            let beside = match outside {
+                Outside::Not => return,
+                Outside::Observed => &mut observed,
+                Outside::UserWords => &mut user_words,
+            };
+            beside.push_str(text);
+            beside.push('\n');
         }
     };
     for logged in log {
         match &logged.event {
             // The operator's ask: the model saw it (#609, run 3).
-            Event::Asked { turn: at, text, .. } => file(*at, text, true),
+            Event::Asked { turn: at, text, .. } => file(*at, text, Outside::UserWords),
             Event::Requested {
                 turn: at,
                 lane: Lane::Trunk,
@@ -8241,18 +8258,18 @@ fn seen_by(log: &[Logged], turn: u32) -> crate::capture::tools::Seen {
             }
             Event::Answered { request, text, .. } | Event::Called { request, text, .. } => {
                 if let Some(at) = trunk_turn.get(request) {
-                    file(*at, text, false);
+                    file(*at, text, Outside::Not);
                 }
             }
             Event::ToolCalled(line) if CaptureTool::from_tag(&line.name).is_none() => {
                 if let Some(shown) = &line.shown {
-                    file(line.turn, shown, true);
+                    file(line.turn, shown, Outside::Observed);
                 }
             }
             _ => {}
         }
     }
-    crate::capture::tools::Seen::from_parts(source, prefix, observed)
+    crate::capture::tools::Seen::from_parts(source, prefix, (observed, user_words))
 }
 
 fn standard_call(
@@ -10021,7 +10038,8 @@ fn anchored(sources: &[&str], start: &str, end: &str) -> Result<String, Refusal>
 /// or -- the span restating a live entry the model or a fork wrote -- the
 /// operator's endorsement of it, its provenance recorded on that entry,
 /// which reads as the operator's from here. Its id.
-fn operator_entry(state: &mut State, span: &str, tag: Option<&str>) -> String {
+fn operator_entry(state: &mut State, (span, from): (&str, u64), tag: Option<&str>) -> String {
+    let kept_from = kept_from(state, from);
     let patch = kept_patch(state, span);
     let Some(interview) = state.interview.as_mut() else {
         unreachable!("working memory was checked before");
@@ -10031,14 +10049,39 @@ fn operator_entry(state: &mut State, span: &str, tag: Option<&str>) -> String {
     else {
         unreachable!("an entry the refusal admitted applies");
     };
+    // Where its words came from (#1050): the keep's own source, which wins
+    // over a model's note it restates.
+    if let Some(from) = kept_from {
+        let _ = interview.object.originate(
+            &entry,
+            crate::object::Origin::Kept {
+                from,
+                tag: tag.map(str::to_owned),
+            },
+        );
+    }
     let mut line = patched(None, &patch, &interview.object);
     if let Event::Patched { entry: written, .. } = &mut line {
         entry.as_str().clone_into(&mut written.id);
         written.category = tag.map(str::to_owned);
         written.authority = Some(log::OPERATOR_AUTHORITY.to_owned());
+        written.kept_from = kept_from.map(|from| from.word().to_owned());
     }
     state.push(line);
     entry.as_str().to_owned()
+}
+
+/// What the logged line `from` is, as a keep from it keeps (#1050): an
+/// ask, a tool result as shown, or an answer or a step's words -- the
+/// trunk's or a fork's.
+fn kept_from(state: &State, from: u64) -> Option<crate::object::KeptFrom> {
+    use crate::object::KeptFrom;
+    match &state.log.iter().find(|logged| logged.seq == from)?.event {
+        Event::Asked { .. } => Some(KeptFrom::Ask),
+        Event::ToolCalled(_) => Some(KeptFrom::ToolResult),
+        Event::Answered { .. } | Event::Called { .. } => Some(KeptFrom::Answer),
+        _ => None,
+    }
 }
 
 /// Why a wrap of the result at `call` by `span` from the line `from` is
@@ -10290,14 +10333,35 @@ fn capture_shown(
 }
 
 /// `lines`' `patch` lines, each its note's `authority` when one vouches
-/// (#1016).
-fn vouch(lines: &mut [Event], vouched: Option<crate::capture::tools::Authority>) {
+/// (#1016), and its entry in `object` saying so (#1050).
+fn vouch(
+    state: &mut State,
+    lines: &mut [Event],
+    vouched: Option<crate::capture::tools::Authority>,
+) {
+    use crate::capture::tools::Authority;
+    use crate::object::Vouched;
     let Some(authority) = vouched else {
         return;
     };
+    let as_object = match authority {
+        Authority::Observed => Vouched::Observed,
+        Authority::UserStated => Vouched::UserStated,
+        Authority::SelfStated => Vouched::SelfStated,
+    };
+    let mut object = state
+        .interview
+        .as_mut()
+        .map(|interview| &mut interview.object);
     for line in lines {
         if let Event::Patched { entry, .. } = line {
             entry.authority = Some(authority.tag().to_owned());
+            if let (Some(object), Ok(id)) = (
+                object.as_deref_mut(),
+                crate::object::EntryId::new(&entry.id),
+            ) {
+                let _ = object.originate(&id, crate::object::Origin::Noted(as_object));
+            }
         }
     }
 }
@@ -15234,7 +15298,7 @@ fn captured_in(
                 }
             }
         };
-        vouch(&mut patched, vouched);
+        vouch(state, &mut patched, vouched);
         let (outcome, entries, why) = if refuting(call) {
             refute_outcome(refused, entries, &items)
         } else {
@@ -16017,6 +16081,7 @@ fn patched(fork: Option<u64>, patch: &Patch, object: &WorkingObject) -> Event {
             text,
             category: None,
             authority: None,
+            kept_from: None,
         },
         supersedes,
         tangent: patch.provenance().tangent.clone(),
@@ -19267,6 +19332,7 @@ pub(in crate::drive) mod tests {
                     text: "decision: keep it".to_owned(),
                     category: None,
                     authority: None,
+                    kept_from: None,
                 },
                 supersedes: None,
                 tangent: Some("t/1".to_owned()),
@@ -19917,6 +19983,7 @@ pub(in crate::drive) mod tests {
                     text: "decision: keep it".to_owned(),
                     category: None,
                     authority: None,
+                    kept_from: None,
                 },
                 supersedes: None,
                 tangent: Some("t/1".to_owned()),
@@ -24856,7 +24923,7 @@ pub(in crate::drive) mod tests {
         // The refill marks the changes the meditation carried.
         let refill = refill_of(session);
         let edited_line = format!(
-            "{operator}\tdecision: for the one team that files bugs [edited by the operator]\n"
+            "{operator}\tuser said\tdecision: for the one team that files bugs [edited by the operator]\n"
         );
         assert!(refill.contains(&edited_line), "{refill}");
         assert!(
@@ -25004,6 +25071,7 @@ pub(in crate::drive) mod tests {
                 text: "a note".to_owned(),
                 category: None,
                 authority: None,
+                kept_from: None,
             },
             supersedes: None,
             tangent: None,
@@ -28529,8 +28597,8 @@ pub(in crate::drive) mod tests {
         let object = &held.interview.as_ref().expect("interviewing").object;
         let render = crate::meditation::render::render(object, None);
         for kept in [
-            "interview-t2-0\tdecision: one",
-            "interview-t2-3\tdecision: four",
+            "interview-t2-0\tyou said, when asked\tdecision: one",
+            "interview-t2-3\tyou said, when asked\tdecision: four",
         ] {
             assert!(render.contains(kept), "{render}");
         }
@@ -28761,11 +28829,47 @@ pub(in crate::drive) mod tests {
         assert_eq!(patch.id, entry);
         assert_eq!(patch.text, "two tables, users and orders");
         assert_eq!(patch.category.as_deref(), Some("schema"));
+        // What it kept from (#1050), on its line and in the render.
+        assert_eq!(patch.kept_from.as_deref(), Some("answer"));
         let state = session.shared.lock();
         let interview = state.interview.as_ref().expect("memory");
         let rendered = marked_render(&state, interview, None).text;
         assert!(
-            rendered.contains("two tables, users and orders"),
+            rendered.contains(&format!(
+                "{entry}\tuser kept, from your answer [schema]\ttwo tables, users and orders\n"
+            )),
+            "{rendered}"
+        );
+        drop(state);
+        reads_whole(&session);
+    }
+
+    /// #1050: a keep from the user's ask is what the user said.
+    #[test]
+    fn a_keep_from_the_ask_renders_as_what_the_user_said() {
+        let session = Session::open_with(
+            Canned::new([deltas(&["Two tables."])]),
+            template(),
+            None,
+            None,
+            None,
+            Some(interviewing(&[])),
+        );
+        session
+            .ask("keep the schema to two tables", None)
+            .expect("accepted");
+        let log = wait_until(&session, "the turn", settled);
+        let asked = seq_of(&log, |event| matches!(event, Event::Asked { .. }));
+        let entry = session
+            .keep(asked, "keep the schema to two tables", None)
+            .expect("kept");
+        let state = session.shared.lock();
+        let interview = state.interview.as_ref().expect("memory");
+        let rendered = marked_render(&state, interview, None).text;
+        assert!(
+            rendered.contains(&format!(
+                "{entry}\tuser said\tkeep the schema to two tables\n"
+            )),
             "{rendered}"
         );
         drop(state);
@@ -28894,6 +28998,16 @@ pub(in crate::drive) mod tests {
         assert_eq!(entry.id, note.as_str());
         assert_eq!(entry.authority.as_deref(), Some(log::OPERATOR_AUTHORITY));
         assert_eq!(entry.category.as_deref(), Some("schema"));
+        // The keep's source wins over the model's (#1050): the user's
+        // endorsement is the authority that counts.
+        let state = session.shared.lock();
+        let interview = state.interview.as_ref().expect("memory");
+        let rendered = marked_render(&state, interview, None).text;
+        assert!(
+            rendered.contains("r3/call-1/note\tuser kept, from your answer [schema]\ttwo tables\n"),
+            "{rendered}"
+        );
+        drop(state);
         reads_whole(&session);
     }
 
@@ -28922,9 +29036,27 @@ pub(in crate::drive) mod tests {
         session.ask("look", None).expect("accepted");
         let log = wait_until(&session, "the turn", settled);
         let called = seq_of(&log, |event| matches!(event, Event::ToolCalled(_)));
-        session
+        let entry = session
             .keep(called, "port 5182 is free", None)
             .expect("kept");
+        // What it kept from (#1050).
+        let log = session.events_from(0);
+        assert!(log.iter().any(|logged| matches!(
+            &logged.event,
+            Event::Patched { entry: written, .. }
+                if written.id == entry && written.kept_from.as_deref() == Some("tool-result")
+        )));
+        let state = session.shared.lock();
+        let interview = state.interview.as_ref().expect("memory");
+        let rendered = marked_render(&state, interview, None).text;
+        assert!(
+            rendered.contains(&format!(
+                "{entry}\tuser kept, from tool output\tport 5182 is free\n"
+            )),
+            "{rendered}"
+        );
+        drop(state);
+        reads_whole(&session);
         tidy(&[&tree]);
     }
 
@@ -31554,8 +31686,9 @@ pub(in crate::drive) mod tests {
 
     /// #1016: under contract set c3 a note is always kept, and the model is
     /// shown who vouches for it: `observed` when its quote is a run of one
-    /// line of the ask or a tool result, `self-stated` when only its own
-    /// reply holds the quote; each `patch` line names its authority.
+    /// line of a tool result, `user-stated` when of the ask and not a tool
+    /// result (#1050), `self-stated` when only its own reply holds the quote;
+    /// each `patch` line names its authority.
     #[test]
     fn a_c3_note_is_kept_and_its_result_names_who_vouches_for_it() {
         const ASK: &str = "the schema has two tables, users and orders";
@@ -31617,7 +31750,8 @@ pub(in crate::drive) mod tests {
         assert_eq!(
             shown,
             [
-                format!("recorded: r{}/call-1/note (observed)", requests[0]),
+                // The quote is the ask's: the user's words vouch (#1050).
+                format!("recorded: r{}/call-1/note (user-stated)", requests[0]),
                 format!("recorded: r{}/call-2/note (self-stated)", requests[1]),
             ],
             "{log:#?}"
@@ -31631,7 +31765,10 @@ pub(in crate::drive) mod tests {
             .collect();
         assert_eq!(
             vouched,
-            [Some("observed".to_owned()), Some("self-stated".to_owned())]
+            [
+                Some("user-stated".to_owned()),
+                Some("self-stated".to_owned())
+            ]
         );
         reads_whole(&session);
     }
@@ -31724,6 +31861,7 @@ pub(in crate::drive) mod tests {
                     text: "The parser drops blank lines before it tokenizes.".to_owned(),
                     category: None,
                     authority: None,
+                    kept_from: None,
                 }
             )]
         );

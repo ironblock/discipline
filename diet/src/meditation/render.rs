@@ -20,17 +20,15 @@ use std::fmt::Write as _;
 use crate::client::shape::{Message, Role};
 use crate::object::WorkingObject;
 
-/// Which frame this module renders with.
+/// Which frame this module renders with, named in the render itself and
+/// logged as each meditation's `frame`, so renders from before and after a
+/// change to the frame are told apart.
 ///
-/// **A placeholder, and it says so in the render itself.** The frame is
-/// prompt text the model reads, and prompt text in this program is
-/// judgment-as-data: it is authored by the maintainer, pinned, and
-/// byte-guarded like every other template. This one is not. Naming it in the
-/// prompt means a drive under the placeholder is distinguishable from a drive
-/// under the authored frame -- which matters because they are different
-/// regimes, and a comparison across them that could not tell would be the
-/// incomparable-regime class again.
-pub const FRAME_VERSION: &str = "placeholder";
+/// `1` (#1050): each entry's line carries its source -- who wrote it, and
+/// from what -- between its id and its text, and a keep's tag after the
+/// source. Every render before it said `placeholder`, the frame no one had
+/// authored, with the id and the text alone.
+pub const FRAME_VERSION: &str = "1";
 
 /// What the render does past its budget (#565).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -141,12 +139,13 @@ pub fn rendered_marked(
 ) -> Rendered {
     let head = head(object, phase);
     let mark = |id: &crate::object::EntryId| marks.get(id).map_or("", String::as_str);
-    let line = |id: &crate::object::EntryId, content: &str| {
+    let line = |entry: &crate::object::Entry, content: &str| {
         format!(
-            "{}\t{}{}\n",
-            one_line(id.as_str()),
+            "{}\t{}\t{}{}\n",
+            one_line(entry.id.as_str()),
+            source(entry),
             one_line(content),
-            mark(id)
+            mark(&entry.id)
         )
     };
     let over = budget.map_or(OverBudget::Tier, |budget| budget.over);
@@ -156,7 +155,7 @@ pub fn rendered_marked(
         let mut count = 0_u64;
         for entry in shown(object) {
             if !reduced.contains(&entry.id) {
-                out.push_str(&line(&entry.id, &said(entry)));
+                out.push_str(&line(entry, &said(entry)));
                 continue;
             }
             match over {
@@ -169,7 +168,7 @@ pub fn rendered_marked(
                         cut.push('…');
                         count += 1;
                     }
-                    out.push_str(&line(&entry.id, &cut));
+                    out.push_str(&line(entry, &cut));
                 }
                 OverBudget::Elide => {
                     out.push_str(&one_line(entry.id.as_str()));
@@ -222,11 +221,11 @@ pub fn rendered_marked(
     let mut spent = chars(&head)
         + shown(object)
             .filter(|entry| brief(entry))
-            .map(|entry| chars(&line(&entry.id, &said(entry))))
+            .map(|entry| chars(&line(entry, &said(entry))))
             .sum::<u64>();
     let mut whole = 0;
     for entry in &rest {
-        let cost = chars(&line(&entry.id, &said(entry)));
+        let cost = chars(&line(entry, &said(entry)));
         if (spent + cost).div_ceil(4) > budget.tokens {
             break;
         }
@@ -282,9 +281,10 @@ fn head(object: &WorkingObject, phase: Option<&str>) -> String {
     out
 }
 
-/// The working record's live entries, one `<id>\t<content>` line each, as
-/// the render's working set writes them: what an ask that shows the record
-/// carries (#595).
+/// The working record's live entries, one `<id>\t<content>` line each:
+/// what an ask that shows the record carries (#595), in the two columns its
+/// pinned words describe -- the render's own lines carry the source between
+/// them since frame 1 (#1050).
 #[must_use]
 pub fn entries(object: &WorkingObject) -> String {
     let mut lines = String::new();
@@ -630,10 +630,50 @@ pub fn working_set_bytes(object: &WorkingObject) -> u64 {
         // that decides a trigger.
         total = total
             .saturating_add(one_line(entry.id.as_str()).len() as u64)
+            .saturating_add(source(entry).len() as u64)
             .saturating_add(one_line(&entry.content).len() as u64)
-            .saturating_add(2);
+            .saturating_add(3);
     }
     total
+}
+
+/// What an entry's line says of where its words came from (#1050), in the
+/// maintainer's phrases: an operator's keep by what it kept from, its tag in
+/// brackets after; else by the lane that wrote it first -- the operator's own
+/// words, a note in the model's and what vouches for it, a fork's answer, or
+/// the harness's.
+#[must_use]
+pub fn source(entry: &crate::object::Entry) -> String {
+    use crate::object::{KeptFrom, Origin, Vouched};
+    if let Some(Origin::Kept { from, tag }) = &entry.origin {
+        let said = match from {
+            KeptFrom::Ask => "user said",
+            KeptFrom::ToolResult => "user kept, from tool output",
+            KeptFrom::Answer => "user kept, from your answer",
+        };
+        return match tag {
+            Some(tag) => format!("{said} [{}]", one_line(tag)),
+            None => said.to_owned(),
+        };
+    }
+    let lane = entry
+        .provenances
+        .first()
+        .map_or("", |provenance| provenance.lane.as_str());
+    let said = match lane {
+        crate::object::OPERATOR => "user said",
+        crate::capture::tools::LANE => match &entry.origin {
+            Some(Origin::Noted(Vouched::Observed)) => "you noted, from tool output",
+            Some(Origin::Noted(Vouched::UserStated)) => "you noted, from the user's words",
+            _ => "you noted",
+        },
+        "interview" | "audit" | "trunk" => "you said, when asked",
+        crate::capture::mechanical::LANE => "the harness noted, from your commands",
+        // A lane no served session writes -- the scripted drive's, or an old
+        // log's: the weakest claim, as a field-kind note's.
+        _ => "you noted",
+    };
+    said.to_owned()
 }
 
 /// Where the working set begins in a render.
@@ -919,7 +959,7 @@ mod refutation_tests {
         object
     }
 
-    const WAS: &str = "e1\twas: decision: the loader reads ./config.toml (held at 9/10), \
+    const WAS: &str = "e1\tyou said, when asked\twas: decision: the loader reads ./config.toml (held at 9/10), \
                        wrong because cat config.toml failed [call call-c]\n";
 
     /// #878: a refuted claim stays in the refill, as what was believed, how
@@ -929,7 +969,9 @@ mod refutation_tests {
         let text = rendered(&object(), None, None).text;
         assert!(text.contains(WAS), "{text}");
         assert!(
-            text.contains("e3\tdecision: the settings path is not known yet\n"),
+            text.contains(
+                "e3\tyou said, when asked\tdecision: the settings path is not known yet\n"
+            ),
             "{text}"
         );
     }
@@ -941,5 +983,173 @@ mod refutation_tests {
             let text = rendered(&object(), None, Some(Budget { tokens: 1, over })).text;
             assert!(text.contains(WAS), "{over:?}: {text}");
         }
+    }
+}
+
+#[cfg(test)]
+mod source_tests {
+    use super::{render, source};
+    use crate::object::{EntryId, KeptFrom, Origin, Patch, Provenance, Vouched, WorkingObject};
+
+    fn regime() -> crate::formats::record::Regime {
+        let start = r#"{"source":{"kind":"live"},"record":"start","regime":{"arm":"baseline","dogma_version":0,"substrates":[{"id":"local","engine":{"name":"a-runtime","version_or_digest":"1.0"},"weights":{"kind":"digest","sha256":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"},"hardware_fingerprint":"aaa9402664f1a41f40ebbc52c9993eb66aeb366602958fdfaa283b71e64db123","sampler_card":{"seed":0},"reasoning":"on"}]}}"#;
+        crate::formats::record::parse(start)
+            .expect("a record")
+            .regime()
+            .clone()
+    }
+
+    /// An object of one entry per source #1050 names, each written by its
+    /// lane, with the origin a keep or a note's authority gives it.
+    fn every_source() -> WorkingObject {
+        let mut object = WorkingObject::open(regime());
+        let entries: &[(&str, &str, Option<Origin>)] = &[
+            (
+                "a-kept-ask",
+                "operator",
+                Some(Origin::Kept {
+                    from: KeptFrom::Ask,
+                    tag: None,
+                }),
+            ),
+            (
+                "b-kept-tool",
+                "operator",
+                Some(Origin::Kept {
+                    from: KeptFrom::ToolResult,
+                    tag: Some("port".to_owned()),
+                }),
+            ),
+            (
+                "c-kept-answer",
+                "operator",
+                Some(Origin::Kept {
+                    from: KeptFrom::Answer,
+                    tag: None,
+                }),
+            ),
+            (
+                "d-observed",
+                "self-capture",
+                Some(Origin::Noted(Vouched::Observed)),
+            ),
+            (
+                "e-user-stated",
+                "self-capture",
+                Some(Origin::Noted(Vouched::UserStated)),
+            ),
+            (
+                "f-self-stated",
+                "self-capture",
+                Some(Origin::Noted(Vouched::SelfStated)),
+            ),
+            ("g-field-kind", "self-capture", None),
+            ("h-interview", "interview", None),
+            ("i-audit", "audit", None),
+            ("j-refutation", "trunk", None),
+            ("k-mechanical", "mechanical", None),
+            ("l-edited", "operator", None),
+        ];
+        for (index, (id, lane, origin)) in entries.iter().enumerate() {
+            let id = EntryId::new(id).expect("an id");
+            object
+                .apply(&Patch::Add {
+                    id: id.clone(),
+                    content: format!("entry {index}"),
+                    provenance: Provenance {
+                        turn: 1,
+                        lane: (*lane).to_owned(),
+                        fork: None,
+                        tangent: None,
+                        index: u32::try_from(index).expect("few"),
+                    },
+                })
+                .expect("it applies");
+            if let Some(origin) = origin {
+                object.originate(&id, origin.clone()).expect("it is held");
+            }
+        }
+        object
+    }
+
+    /// #1050: each entry's line is its id, its source in the maintainer's
+    /// phrase -- a keep's tag in brackets after -- and its text; the header
+    /// names frame 1.
+    #[test]
+    fn each_entry_renders_its_source_between_its_id_and_its_text() {
+        let text = render(&every_source(), None);
+        assert!(text.contains("frame_version: 1\n"), "{text}");
+        for line in [
+            "a-kept-ask\tuser said\tentry 0\n",
+            "b-kept-tool\tuser kept, from tool output [port]\tentry 1\n",
+            "c-kept-answer\tuser kept, from your answer\tentry 2\n",
+            "d-observed\tyou noted, from tool output\tentry 3\n",
+            "e-user-stated\tyou noted, from the user's words\tentry 4\n",
+            "f-self-stated\tyou noted\tentry 5\n",
+            "g-field-kind\tyou noted\tentry 6\n",
+            "h-interview\tyou said, when asked\tentry 7\n",
+            "i-audit\tyou said, when asked\tentry 8\n",
+            "j-refutation\tyou said, when asked\tentry 9\n",
+            "k-mechanical\tthe harness noted, from your commands\tentry 10\n",
+            "l-edited\tuser said\tentry 11\n",
+        ] {
+            assert!(text.contains(line), "{line:?} in\n{text}");
+        }
+    }
+
+    /// #1050: a keep that restates a model's note is the keep's -- the
+    /// user's endorsement is the authority that counts -- and an entry two
+    /// lanes wrote is its first writer's.
+    #[test]
+    fn a_keep_wins_and_otherwise_the_first_writer_does() {
+        let mut object = every_source();
+        let interview = EntryId::new("h-interview").expect("an id");
+        let entry = |object: &WorkingObject| {
+            object
+                .entries()
+                .find(|entry| entry.id == interview)
+                .cloned()
+                .expect("held")
+        };
+        assert_eq!(source(&entry(&object)), "you said, when asked");
+        // A second lane writes the same words: deduped onto the first's.
+        object
+            .apply(&Patch::Add {
+                id: EntryId::new("z-again").expect("an id"),
+                content: "entry 7".to_owned(),
+                provenance: Provenance {
+                    turn: 2,
+                    lane: "self-capture".to_owned(),
+                    fork: None,
+                    tangent: None,
+                    index: 0,
+                },
+            })
+            .expect("it dedupes");
+        assert_eq!(entry(&object).provenances.len(), 2, "both writers");
+        assert_eq!(
+            source(&entry(&object)),
+            "you said, when asked",
+            "the first's"
+        );
+        object
+            .originate(
+                &interview,
+                Origin::Kept {
+                    from: KeptFrom::Answer,
+                    tag: Some("why".to_owned()),
+                },
+            )
+            .expect("it is held");
+        assert_eq!(source(&entry(&object)), "user kept, from your answer [why]");
+    }
+
+    /// #1050: an entry's origin crosses a dump, as everything else of it does.
+    #[test]
+    fn an_origin_crosses_a_dump() {
+        let object = every_source();
+        let read = WorkingObject::from_dump(regime(), &object.dump()).expect("it reads");
+        assert_eq!(read.dump(), object.dump());
+        assert_eq!(render(&read, None), render(&object, None));
     }
 }

@@ -685,9 +685,12 @@ pub struct Effect {
 /// takes no field kind (#1016, contract set c3).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Authority {
-    /// Its evidence quote was found verbatim in what the model observed
-    /// that turn: the ask and the tool output, never its own prose.
+    /// Its evidence quote was found verbatim in that turn's tool output,
+    /// never in the model's own prose.
     Observed,
+    /// Its evidence quote was found verbatim in the user's ask that turn,
+    /// and not in its tool output (#1050).
+    UserStated,
     /// It gave no quote, or one that was not found there.
     SelfStated,
 }
@@ -698,6 +701,7 @@ impl Authority {
     pub fn tag(self) -> &'static str {
         match self {
             Self::Observed => "observed",
+            Self::UserStated => "user-stated",
             Self::SelfStated => "self-stated",
         }
     }
@@ -823,8 +827,11 @@ impl Error for ToolError {}
 pub struct Seen {
     source: String,
     session_prefix: String,
-    /// This turn's source less the model's own prose (#1016).
+    /// This turn's tool output (#1016): its source less the model's prose
+    /// and, since #1050, less the user's ask.
     observed: String,
+    /// This turn's ask (#1050), apart from its tool output.
+    user_words: String,
 }
 
 impl Seen {
@@ -887,17 +894,23 @@ impl Seen {
     }
 
     /// What the model saw, from its parts (#609): `source`, this turn's
-    /// tool output and prose, `session_prefix`, everything earlier, and
-    /// `observed`, the source less the model's own prose (#1016). A served
+    /// tool output and prose, `session_prefix`, everything earlier,
+    /// `observed`, the turn's tool output (#1016), and `user_words`, its ask
+    /// (#1050). A served
     /// session assembles them from its own log, as [`Seen::of_turn`] does
     /// from a record, and with the same exclusions: no capture tool's
     /// output, and no call's arguments.
     #[must_use]
-    pub fn from_parts(source: String, session_prefix: String, observed: String) -> Self {
+    pub fn from_parts(
+        source: String,
+        session_prefix: String,
+        (observed, user_words): (String, String),
+    ) -> Self {
         Self {
             source,
             session_prefix,
             observed,
+            user_words,
         }
     }
 
@@ -908,6 +921,7 @@ impl Seen {
             source: &self.source,
             session_prefix: &self.session_prefix,
             observed: &self.observed,
+            user_words: &self.user_words,
         }
     }
 }
@@ -1146,9 +1160,9 @@ const FIELD: &str = "field";
 ///
 /// Under a contract whose `update_record` takes no [`FIELD`] (#1016, set
 /// c3), it is a note in the model's own words: always kept, `observed` when
-/// its [`EVIDENCE`] quote is found in what the model observed this turn --
-/// the ask and the tool output, never its own prose -- and `self-stated`
-/// otherwise. Under any other contract, the content itself is grounded, as
+/// its [`EVIDENCE`] quote is found in this turn's tool output, `user-stated`
+/// when it is found in the user's ask and not there (#1050), and
+/// `self-stated` otherwise -- never by its own prose. Under any other contract, the content itself is grounded, as
 /// before.
 fn update_record(
     spec: &ToolSpec,
@@ -1159,11 +1173,14 @@ fn update_record(
     let content = text_argument(args, "content");
     if spec.parameter(FIELD).is_none() {
         let id = EntryId::new(&format!("{call}/note")).map_err(ToolError::BadEntry)?;
-        let authority = if args
-            .get(EVIDENCE)
-            .is_some_and(|quote| grounded::present(saw.observed, quote))
-        {
+        let found = |text: &str| {
+            args.get(EVIDENCE)
+                .is_some_and(|quote| grounded::present(text, quote))
+        };
+        let authority = if found(saw.observed) {
             Authority::Observed
+        } else if found(saw.user_words) {
+            Authority::UserStated
         } else {
             Authority::SelfStated
         };
@@ -1512,6 +1529,7 @@ mod tests {
             source: SOURCE,
             session_prefix: PREFIX,
             observed: SOURCE,
+            user_words: "",
         }
     }
 
@@ -1554,16 +1572,17 @@ mod tests {
     // a note and its evidence: contract set c3 (#1016)
     // -----------------------------------------------------------------
 
-    /// The model's prose this turn, and what it observed: the ask and the
-    /// tool output.
+    /// The model's prose this turn, what it observed -- the tool output --
+    /// and the user's ask (#1050).
     const PROSE: &str = "I think supersede voids the old entry and links the pair.";
+    const ASKED: &str = "Keep the schema to two tables, please.";
     const OBSERVED: &str = "diet/src/object.rs:412: fn supersede\n\
                             It voids the old entry and links the pair.";
 
     /// A c3 `update_record` of `pairs`, seen against this turn's prose and
     /// what it observed.
     fn note(pairs: &[(&str, &str)]) -> Result<Effect, ToolError> {
-        let source = format!("{OBSERVED}\n{PROSE}");
+        let source = format!("{ASKED}\n{OBSERVED}\n{PROSE}");
         let args: BTreeMap<String, Value> = pairs
             .iter()
             .map(|(key, value)| ((*key).to_owned(), Value::String((*value).to_owned())))
@@ -1577,6 +1596,7 @@ mod tests {
                 source: &source,
                 session_prefix: PREFIX,
                 observed: OBSERVED,
+                user_words: ASKED,
             },
         )
     }
@@ -1621,6 +1641,25 @@ mod tests {
         )
         .expect("a well-formed call");
         assert!(effect.patches.is_empty(), "c2 grounds the claim itself");
+    }
+
+    /// #1050: a quote found in the user's ask and not in the tool output is
+    /// `user-stated`; one in both is `observed`.
+    #[test]
+    fn a_quote_of_the_users_ask_is_kept_user_stated() {
+        let effect = note(&[
+            ("content", "the user wants two tables"),
+            (super::EVIDENCE, "Keep the schema to two tables, please."),
+        ])
+        .expect("a well-formed call");
+        assert_eq!(
+            kept(&effect),
+            (
+                "the user wants two tables".to_owned(),
+                Some(super::Authority::UserStated)
+            )
+        );
+        assert_eq!(super::Authority::UserStated.tag(), "user-stated");
     }
 
     /// #1016: a quote only the model's own reply holds is not evidence: the
