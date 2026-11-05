@@ -151,6 +151,13 @@
   color: var(--ink-faint);
 }
 
+/* A correction of the operator's entry waiting beside its turn (#1050): a link to its chip. */
+.ex-memory__waiting {
+  grid-column: 2;
+  color: var(--warn);
+  font: var(--size-chrome) / 1.4 var(--font-chrome);
+}
+
 /* The notes merged into an entry as similar (#872): under its text, quiet, one a line. */
 .ex-memory__merges {
   grid-column: 2;

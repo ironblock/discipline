@@ -29,6 +29,7 @@ import toolCallRan from '../../../diet/formats/log/fixtures/valid/a-v3-tool-call
 import forks from '../../../diet/formats/log/fixtures/valid/a-v5-scoping-fork-that-patched-and-a-read-fork-that-declined.jsonl?raw';
 import gestures from '../../../diet/formats/log/fixtures/valid/a-v32-operator-keep-fork-and-shadow.jsonl?raw';
 import suggestions from '../../../diet/formats/log/fixtures/valid/a-v34-shadow-suggestions.jsonl?raw';
+import corrections from '../../../diet/formats/log/fixtures/valid/a-v41-a-refused-change-accepted-and-one-left-open.jsonl?raw';
 import wrapped from '../../../diet/formats/log/fixtures/valid/a-v35-operator-wrap.jsonl?raw';
 import { App, PHASES } from '../App.tsx';
 import { fold } from '../session/fold.ts';
@@ -1163,6 +1164,60 @@ export const ServedShadowSuggestions: Story = {
     posted.length = 0;
     await userEvent.click(page.getByRole('button', { name: 'Reject: What went wrong?' }));
     await waitFor(async () => expect(posted).toEqual([{ kind: 'suggestion', shadow: 14, answer: 'reject' }]), slow);
+  },
+};
+
+/** The v41 fixture's session before either refused change was answered (#1050). */
+const correcting = corrections
+  .trimEnd()
+  .split('\n')
+  .filter((line) => (JSON.parse(line) as { seq: number }).seq <= 15)
+  .join('\n');
+
+/** `?drive` (#1050): the fork's refused change to the operator's entry is a chip beside the turn it was cut at -- what
+ * it would have written -- which the operator accepts or rejects; the entry in working memory says a correction waits,
+ * linking to it, and offers the operator's retire of their own entry. Each answer is posted. */
+export const ServedCorrectionChips: Story = {
+  name: '?drive: a refused change to your entry, offered as a chip',
+  args: { drive: true, web: posting(correcting) },
+  play: async ({ canvasElement }) => {
+    const page = within(canvasElement.ownerDocument.body);
+    const slow = { timeout: 5_000 };
+    await waitFor(async () => expect(page.getByText('The model would replace your entry with:')).toBeTruthy(), slow);
+    await expect(page.getByText('a tracker for the team')).toBeTruthy();
+    // The trunk capture's retire, too: with no reason, the change alone.
+    await expect(page.getByText('The model would retire your entry')).toBeTruthy();
+    await expect(canvasElement.ownerDocument.getElementById('correction-14')).not.toBeNull();
+    const entry = canvasElement.querySelector<HTMLElement>('[id="memory/d2"]');
+    const marker = entry?.querySelector<HTMLAnchorElement>('.ex-memory__waiting');
+    await expect(marker?.textContent).toBe('a correction is waiting');
+    await expect(marker?.getAttribute('href')).toBe('#correction-14');
+    posted.length = 0;
+    await userEvent.click(page.getByRole('button', { name: 'Accept: The model would replace your entry with: d2' }));
+    await waitFor(async () => expect(posted).toEqual([{ kind: 'correction', refused: 15, answer: 'accept' }]), slow);
+    posted.length = 0;
+    await userEvent.click(page.getByRole('button', { name: 'Retire d2' }));
+    await waitFor(async () => expect(posted).toEqual([{ kind: 'retire-entry', id: 'd2' }]), slow);
+  },
+};
+
+/** A replay (#1050): each refused change shows on its turn as what it came to, and no chip is offered. */
+export const ReplayShowsTheCorrections: Story = {
+  name: 'replay: a refused change to your entry, and what it came to',
+  render: () => (
+    <SessionView
+      session={fold(corrections.trimEnd().split('\n').map((line) => respelled(JSON.parse(line) as LogLine)))}
+      surface={{ curtain: true, gaps: false }}
+      composer={{ phases: PHASES }}
+    />
+  ),
+  play: async ({ canvasElement }) => {
+    const page = within(canvasElement);
+    await expect(await page.findByText('The model would replace your entry with: a tracker for the team · accepted')).toBeTruthy();
+    await expect(page.getByText('The model would retire your entry · unanswered')).toBeTruthy();
+    // Both answered, the entry waits on nothing.
+    await expect(canvasElement.querySelector('.ex-memory__waiting')).toBeNull();
+    await expect(page.queryByRole('button', { name: /^Accept: The model would/ })).toBeNull();
   },
 };
 

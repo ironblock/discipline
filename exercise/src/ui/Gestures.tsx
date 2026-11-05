@@ -3,7 +3,7 @@ import type { FormEvent, KeyboardEvent } from 'react';
 
 import type { ForkAsk } from '../../../diet/dogma/fork-asks.ts';
 import type { Ack, Command } from '../drive/transport.ts';
-import type { LoggedText, Shadowed } from '../session/fold.ts';
+import type { Correction, LoggedText, Shadowed } from '../session/fold.ts';
 import { pickerAsks } from './forkAsks.ts';
 import { refusalOf } from './sets.ts';
 import './gestures.css';
@@ -301,6 +301,65 @@ function SuggestionChip({ shadow, act }: { readonly shadow: Shadowed; readonly a
         Accept
       </button>
       <button type="button" disabled={busy} aria-label={`Reject: ${question}`} onClick={() => void answer('reject')}>
+        Reject
+      </button>
+      {refused ? <span role="alert">{refused}</span> : null}
+    </li>
+  );
+}
+
+/** What a refused change would have done to the operator's entry (#1050), as its chip says it. */
+function changeOf(correction: Correction): string {
+  const verb = correction.op === 'supersede' ? 'replace' : correction.op;
+  const head = `The model would ${verb} your entry`;
+  if (correction.op === 'supersede' && correction.text !== undefined) return `${head} with:`;
+  return correction.why !== undefined ? `${head}: ${correction.why}` : head;
+}
+
+/**
+ * The model's changes to the operator's entries that the guard refused at this step (#1050), beside the turn that made
+ * them: while driving, each a chip to accept -- the change applies as the operator's ruling -- or reject. Either answer
+ * is logged, and so is one never given. Read-only views show what each came to.
+ */
+export function CorrectionChips({ corrections }: { readonly corrections: readonly Correction[] | undefined }) {
+  const act = useGestures();
+  if (!corrections || corrections.length === 0) return null;
+  return (
+    <ul className="ex-shadow ex-shadow--offered" aria-label="the model's refused changes to your entries">
+      {corrections.map((correction) => (
+        <CorrectionChip key={correction.seq} correction={correction} act={act} />
+      ))}
+    </ul>
+  );
+}
+
+function CorrectionChip({ correction, act }: { readonly correction: Correction; readonly act: ((command: Command) => Promise<Ack>) | undefined }) {
+  const [busy, setBusy] = useState(false);
+  const [refused, setRefused] = useState<string>();
+  const said = changeOf(correction);
+  if (correction.answer || !act) {
+    return (
+      <li id={`correction-${correction.seq}`} className="ex-shadow__mark" title={`#${correction.entry}`}>
+        {said}
+        {correction.op === 'supersede' && correction.text !== undefined ? ` ${correction.text}` : ''}
+        {correction.answer ? ` · ${correction.answer}` : ''}
+      </li>
+    );
+  }
+  const answer = async (word: 'accept' | 'reject') => {
+    setBusy(true);
+    const ack = await act({ kind: 'correction', refused: correction.seq, answer: word });
+    setBusy(false);
+    setRefused(ack.ok ? undefined : refusedOf(ack));
+  };
+  return (
+    <li id={`correction-${correction.seq}`} className="ex-shadow__chip" title={`#${correction.entry}`}>
+      <span className="ex-shadow__said">{said}</span>
+      {correction.op === 'supersede' && correction.text !== undefined ? <q className="ex-shadow__question">{correction.text}</q> : null}
+      <button type="button" disabled={busy} aria-label={`Accept: ${said} ${correction.entry}`} onClick={() => void answer('accept')}>
+        Accept
+      </button>
+      <button type="button" disabled={busy} aria-label={`Reject: ${said} ${correction.entry}`} onClick={() => void answer('reject')}>
         Reject
       </button>
       {refused ? <span role="alert">{refused}</span> : null}
