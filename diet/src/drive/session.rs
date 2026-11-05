@@ -33034,6 +33034,34 @@ pub(in crate::drive) mod tests {
         assert!(!unverified(&lines).is_empty(), "declared v37, the old forms do not match");
     }
 
+    /// #1050: a log before v38 is rebuilt in the forms it sent -- the fixed
+    /// phase tool, and a refill's ground rules with no moves. The fixture is
+    /// `diet/scenarios/two-phases.jsonl` as develop logged it at v37, before
+    /// this change: every request's head is rebuilt.
+    #[test]
+    fn a_v37_phase_sessions_heads_are_rebuilt_in_the_old_forms() {
+        let fixture = include_str!("../../drive/fixtures/a-v37-two-phase-session.jsonl");
+        let lines = log::parse(fixture).expect("the fixture is a log the format reads");
+        assert!(matches!(
+            &lines[0].event,
+            log::Event::SessionStart { version: 37, tools: Some(tools), .. }
+                if tools.iter().any(|tool| tool == PHASE_TOOL)
+        ));
+        assert!(lines.iter().any(|line| matches!(
+            &line.event,
+            log::Event::Meditation { phase_document: Some(_), .. }
+        )));
+        let projected =
+            crate::drive::projection::project(&lines, &regime(), None).expect("projected");
+        let unrebuilt: Vec<&str> = projected
+            .unspellable
+            .iter()
+            .filter(|u| u.why.contains("could not be rebuilt"))
+            .map(|u| u.why.as_str())
+            .collect();
+        assert_eq!(unrebuilt, Vec::<&str>::new());
+    }
+
     /// #1050: the three graph refusals name where the session is and the
     /// moves open from there, in the maintainer's words.
     #[test]
