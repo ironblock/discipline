@@ -25,6 +25,11 @@
 //! in its URL (`src/drive/credential.ts`). The page renders model output, so its
 //! CSP (`tauri.conf.json`) runs no script but the bundle's own.
 //!
+//! The page tells the shell when the session begins to wait on the operator
+//! (`src/drive/notices.ts`, #1049): `notify`, granted to the `main` window
+//! alone, sends a system notification while that window is not focused, and
+//! a click on one brings the window forward.
+//!
 //! The sidecar admits the webview's origin (`--allow-origin`), which `serve`
 //! answers across origins (#719's CORS), and it is killed when the app exits,
 //! by a quit or by a termination signal.
@@ -37,6 +42,7 @@ use std::sync::Mutex;
 use base64::Engine as _;
 
 use tauri::{AppHandle, Manager, RunEvent, Url, WebviewUrl, WebviewWindowBuilder};
+use tauri_plugin_notification::NotificationExt;
 use tauri_plugin_shell::ShellExt;
 use tauri_plugin_shell::process::{CommandChild, CommandEvent};
 
@@ -75,11 +81,43 @@ fn drive_authorization(credential: tauri::State<'_, Credential>) -> Option<Strin
     credential.0.clone()
 }
 
+/// A system notification of `title` and `body`, from the page's own window
+/// while it is not focused; a focused window is already in front of the
+/// operator, and is told nothing.
+#[tauri::command]
+#[allow(clippy::needless_pass_by_value)] // a command takes its arguments by value
+fn notify(
+    app: AppHandle,
+    window: tauri::Window,
+    title: String,
+    body: String,
+) -> Result<(), String> {
+    if window.label() != "main" || window.is_focused().unwrap_or(false) {
+        return Ok(());
+    }
+    app.notification()
+        .builder()
+        .title(title)
+        .body(body)
+        .show()
+        .map_err(|why| why.to_string())
+}
+
+/// The page's window, brought in front of the operator.
+fn bring_forward(app: &AppHandle) {
+    if let Some(window) = app.get_webview_window("main") {
+        let _ = window.unminimize();
+        let _ = window.show();
+        let _ = window.set_focus();
+    }
+}
+
 fn main() {
     let app = tauri::Builder::default()
         .plugin(tauri_plugin_shell::init())
+        .plugin(tauri_plugin_notification::init())
         .manage(Sidecar(Mutex::new(None)))
-        .invoke_handler(tauri::generate_handler![drive_authorization])
+        .invoke_handler(tauri::generate_handler![drive_authorization, notify])
         .setup(|app| {
             // A start that cannot drive says why and exits, as a refused
             // flag does, rather than panicking; a sidecar it started goes too.
@@ -117,6 +155,12 @@ fn start(app: &mut tauri::App) -> Result<(), String> {
     // killed then too; only a SIGKILL leaves it running.
     let quit = handle.clone();
     ctrlc::set_handler(move || quit.exit(0)).map_err(|why| why.to_string())?;
+    // A click on a notification (#1049) brings the page's window forward.
+    let clicked = handle.clone();
+    handle
+        .notification()
+        .on_action(move |_| bring_forward(&clicked))
+        .map_err(|why| why.to_string())?;
     let settings = settings(&handle)?;
     let drive = setting(settings.as_ref())?;
     // The credential's text, `user:password`, and how the sidecar is given it.
