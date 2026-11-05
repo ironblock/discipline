@@ -17742,6 +17742,62 @@ pub(in crate::drive) mod tests {
         )
     }
 
+    /// #1052: a refutation fork fires a pinned ask but answers through its
+    /// own tool: its prose is never read, even a line the fields grammar
+    /// would take.
+    #[test]
+    fn a_refutation_forks_prose_is_never_read() {
+        let tree = scratch("refute-prose");
+        let mut interview = interviewing(&[]);
+        interview.refutation = Some((3, 3, 8));
+        let mut shape = looping();
+        declare_self_capture(&mut shape, Some(&interview));
+        let refute =
+            |id: &str| Step::call(0, id, crate::dogma::refutation::NAME, r#"{"refuted":[]}"#);
+        let session = Session::open_with(
+            Canned::new([
+                vec![refute("r-arrival")],
+                vec![bash("call-1", "false")],
+                deltas(&["it failed"]),
+                vec![
+                    Step::Delta("DECISION: a prose decision\n".to_owned()),
+                    refute("r-gap"),
+                ],
+            ]),
+            shape,
+            None,
+            Some(tools(
+                Confinement::Unconfined,
+                &tree,
+                &["false"],
+                None,
+                Decider::Decline,
+            )),
+            None,
+            Some(interview),
+        );
+        session.ask("Run the loader.", None).expect("accepted");
+        let log = wait_until(&session, "the turn and its gap", |log| {
+            turns_settled(log) == 1 && settled(log)
+        });
+        assert!(log.iter().any(|logged| matches!(
+            &logged.event,
+            Event::Answered { text, .. } if text.contains("a prose decision")
+        )));
+        let held: Vec<String> = live_entries(&session)
+            .into_iter()
+            .map(|(_, content)| content)
+            .collect();
+        assert!(
+            !held
+                .iter()
+                .any(|content| content.contains("a prose decision")),
+            "{held:?}"
+        );
+        reads_whole(&session);
+        tidy(&[&tree]);
+    }
+
     /// #904: the operator's message forks its refutation interview when it
     /// arrives -- the turn's first request, before the trunk's, its prefix
     /// the trunk and the message, no step of the turn in it -- and a failed
