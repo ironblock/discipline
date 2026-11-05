@@ -367,6 +367,9 @@ export type Wrapped = V0.WrappedLine;
 export type WrapAccepted = V0.WrapAcceptedLine;
 /** The operator's note on a gesture, before its outcome (v36, #1037). Folded, not yet drawn. */
 export type OperatorNote = V0.OperatorNoteLine;
+/** The operator's answer to a model's refused change to their entry, offered as a chip (v41, #1050). Folded, not yet
+ * drawn: the page draws the chips next. */
+export type Correction = V0.CorrectionLine;
 /** A step's warrant-gate decision by a classifier, one line per probe, or its fallback (v8, #850). Folded, not yet
  * drawn: the kitchen sink writes them (#862), and the page draws them next. */
 export type WarrantGated = V0.WarrantGatedLine;
@@ -419,6 +422,7 @@ export type LogLine =
   | Wrapped
   | WrapAccepted
   | OperatorNote
+  | Correction
   | RequestRetried
   | Grade
   | MeditationSkipped
