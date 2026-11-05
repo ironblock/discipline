@@ -142,7 +142,8 @@ fn carry_usage(out: &mut String) {
 fn serve_usage() -> String {
     let mut out = String::from(
         "usage: diet-drive serve --endpoint URL --model NAME --head FILE [--key-file FILE]\n\
-         \x20                       [--listen IP] [--port N] [--auth-file FILE] [--regimen FILE]\n\
+         \x20                       [--listen IP] [--port N] [--auth-file FILE | --auth-stdin]\n\
+         \x20                       [--regimen FILE]\n\
          \x20                       [--log FILE] [--record FILE]\n\
          \x20                       [--allow-origin URL]... [--max-output-tokens N]\n\
          \x20                       [--worktree DIR] [--sandbox-unix-socket PATH]...\n\
@@ -211,7 +212,7 @@ fn serve_usage() -> String {
     out.push_str("that runs commands (it declares `allowed_commands`, the pre-seeded set) needs\n");
     out.push_str("it. Each command runs under the regimen's confinement, opened at start;\n");
     out.push_str("`isolation = \"vm\"` is refused, and `isolation = \"none\"` needs\n");
-    out.push_str("`max_steps`, and --auth-file is required: every route then asks for\n");
+    out.push_str("`max_steps`; --auth-file or --auth-stdin is required: every route asks for\n");
     out.push_str("it, and the file joins the session's secrets: under a sandbox no command\n");
     out.push_str("reads it, so none answers its own prompt. Under `isolation = \"none\"` a\n");
     out.push_str("command can read it, and nothing stops that (#436). A command no approval\n");
@@ -248,6 +249,9 @@ struct ServeArgs {
     head: String,
     key_file: Option<String>,
     auth_file: Option<String>,
+    /// The credential read from standard input at start (#1047), in place
+    /// of `auth_file`: no file holds it.
+    auth_stdin: bool,
     regimen_file: Option<String>,
     log_file: Option<String>,
     record_file: Option<String>,
@@ -433,8 +437,14 @@ fn serve_args(args: &[String]) -> Option<ServeArgs> {
     let mut phase_tool_description = None;
     let mut answer_tools = Vec::new();
     let mut carried_roots = Vec::new();
+    let mut auth_stdin = false;
     let mut given = args.iter();
     while let Some(flag) = given.next() {
+        // The one flag with no value (#1047).
+        if flag == "--auth-stdin" {
+            auth_stdin = true;
+            continue;
+        }
         let value = given.next()?;
         let parsed = if flag == "--endpoint" {
             endpoint = Some(value.clone());
@@ -552,6 +562,7 @@ fn serve_args(args: &[String]) -> Option<ServeArgs> {
         head: head?,
         key_file,
         auth_file,
+        auth_stdin,
         regimen_file,
         log_file,
         record_file,
@@ -592,6 +603,7 @@ fn serve(args: &[String]) -> ExitCode {
         head,
         key_file,
         auth_file,
+        auth_stdin,
         regimen_file,
         log_file,
         record_file,
@@ -927,7 +939,7 @@ fn serve(args: &[String]) -> ExitCode {
             worktree.as_deref(),
             (&sandbox_unix_sockets, &sandbox_secrets, &operator_secrets),
         ),
-        (key_file.as_deref(), auth_file.as_deref()),
+        (key_file.as_deref(), auth_file.as_deref(), auth_stdin),
     ) {
         Ok(tools) => tools,
         Err((code, why)) => return fail(code, &why),
@@ -994,7 +1006,18 @@ fn serve(args: &[String]) -> ExitCode {
     if let Some(tools) = tools.as_mut() {
         tools.shown_roots = shown.clone();
     }
-    let credential = match auth_file.as_deref().map(credential_from).transpose() {
+    let credential = match (auth_file.as_deref(), auth_stdin) {
+        (Some(_), true) => {
+            return fail(
+                EXIT_USAGE,
+                "--auth-file and --auth-stdin each name the credential: give one",
+            );
+        }
+        (Some(path), false) => credential_from(path).map(Some),
+        (None, true) => credential_from_stdin().map(Some),
+        (None, false) => Ok(None),
+    };
+    let credential = match credential {
         Ok(credential) => credential,
         Err(why) => return fail(EXIT_INPUT, &why),
     };
@@ -2023,7 +2046,7 @@ fn operator_deny(
 fn serving_tools(
     regimen: Option<&str>,
     (worktree, (sockets, secrets, operator)): (Option<&str>, RunConfinement<'_>),
-    (key_file, auth_file): (Option<&str>, Option<&str>),
+    (key_file, auth_file, auth_stdin): (Option<&str>, Option<&str>, bool),
 ) -> Result<Option<Tools>, (u8, String)> {
     let no_commands = |path: &str| {
         Err((
@@ -2112,28 +2135,37 @@ fn serving_tools(
     // does, and could answer its own prompts: so the session demands a
     // credential on every route, and the credential is a secret no command
     // reads (#298 review round 1, finding 1).
-    let Some(auth_file) = auth_file else {
-        return Err((
-            EXIT_USAGE,
-            format!(
-                "{path} runs commands, and serve needs --auth-file FILE for them: a command \
-                 can reach this server, and without a credential it could answer its own \
-                 prompts"
-            ),
-        ));
-    };
-    isolation::declared::add_credential(&mut policy, std::path::Path::new(auth_file)).map_err(
-        |path| {
-            (
-                EXIT_INPUT,
+    // One read from standard input is a credential no file holds, so none
+    // joins the secrets (#1047).
+    let auth_file = match (auth_file, auth_stdin) {
+        (Some(file), _) => Some(file),
+        (None, true) => None,
+        (None, false) => {
+            return Err((
+                EXIT_USAGE,
                 format!(
-                    "--auth-file {auth_file} lies in `{}`, which the regimen declares readable \
-                     or writable: a command could read the credential and answer its own prompts",
-                    path.display()
+                    "{path} runs commands, and serve needs --auth-file FILE or --auth-stdin \
+                     for them: a command can reach this server, and without a credential it \
+                     could answer its own prompts"
                 ),
-            )
-        },
-    )?;
+            ));
+        }
+    };
+    if let Some(auth_file) = auth_file {
+        isolation::declared::add_credential(&mut policy, std::path::Path::new(auth_file)).map_err(
+            |path| {
+                (
+                    EXIT_INPUT,
+                    format!(
+                        "--auth-file {auth_file} lies in `{}`, which the regimen declares \
+                         readable or writable: a command could read the credential and answer \
+                         its own prompts",
+                        path.display()
+                    ),
+                )
+            },
+        )?;
+    }
     if let Some(key_file) = key_file {
         isolation::declared::add_credential(&mut policy, std::path::Path::new(key_file)).map_err(
             |path| {
@@ -2981,13 +3013,36 @@ fn bearer_from(path: &str) -> Result<Bearer, String> {
 fn credential_from(path: &str) -> Result<Credential, String> {
     let written =
         std::fs::read_to_string(path).map_err(|why| format!("{path} cannot be read: {why}"))?;
+    credential_of(&written).ok_or_else(|| {
+        format!("{path} holds no usable credential: user:password, with no control character")
+    })
+}
+
+/// The credential on standard input's first line (#1047), read once at
+/// start by [`credential_from`]'s rule; what follows it is never read, and
+/// no command serve runs inherits the stream.
+fn credential_from_stdin() -> Result<Credential, String> {
+    use std::io::BufRead as _;
+    let mut line = String::new();
+    std::io::stdin()
+        .lock()
+        .read_line(&mut line)
+        .map_err(|why| format!("--auth-stdin: standard input cannot be read: {why}"))?;
+    credential_of(&line).ok_or_else(|| {
+        "--auth-stdin read no usable credential: user:password on one line, with no control \
+         character"
+            .to_owned()
+    })
+}
+
+/// A credential's text as an auth file or `--auth-stdin` holds it: one
+/// trailing line break is the file's, the rest is `user:password`.
+fn credential_of(written: &str) -> Option<Credential> {
     let pair = written
         .strip_suffix("\r\n")
         .or_else(|| written.strip_suffix('\n'))
-        .unwrap_or(&written);
-    Credential::basic(pair).ok_or_else(|| {
-        format!("{path} holds no usable credential: user:password, with no control character")
-    })
+        .unwrap_or(written);
+    Credential::basic(pair)
 }
 
 /// An origin as a browser sends it: a scheme, `://`, a host and port, and

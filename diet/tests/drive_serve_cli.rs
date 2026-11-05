@@ -62,6 +62,8 @@ struct Served {
     page: Option<String>,
     /// Every later line it writes on stdout.
     said: std::sync::mpsc::Receiver<String>,
+    /// Its stdin, held open, when it was started fed (#1047).
+    stdin: Option<std::process::ChildStdin>,
     _head: HeadFile,
 }
 
@@ -98,18 +100,38 @@ fn start_as(model: &str, endpoint: &str, extra: &[&str]) -> Served {
 
 /// [`start_with`], its requests sent as `model`.
 fn start_as_with(model: &str, endpoint: &str, extra: &[&str], env: &[(&str, &str)]) -> Served {
+    start_fed(model, endpoint, extra, env, None)
+}
+
+/// [`start_as_with`], `fed` written to its stdin first and the pipe held
+/// open, as the shell's is (#1047).
+fn start_fed(
+    model: &str,
+    endpoint: &str,
+    extra: &[&str],
+    env: &[(&str, &str)],
+    fed: Option<&str>,
+) -> Served {
     let head = file_holding("head", HEAD);
     // The operator's deny list (#1014) is the machine's, never the test's.
-    let mut child = Command::new(DRIVE)
+    let mut command = Command::new(DRIVE);
+    command
         .env_remove("ANTHROPIC_API_KEY")
         .env_remove("DIET_SANDBOX_SECRETS")
         .envs(env.iter().copied())
         .args(["serve", "--endpoint", endpoint, "--model", model, "--head"])
         .arg(&head.0)
         .args(extra)
-        .stdout(Stdio::piped())
-        .spawn()
-        .expect("diet-drive starts");
+        .stdout(Stdio::piped());
+    if fed.is_some() {
+        command.stdin(Stdio::piped());
+    }
+    let mut child = command.spawn().expect("diet-drive starts");
+    let stdin = fed.map(|text| {
+        let mut stdin = child.stdin.take().expect("stdin is piped");
+        stdin.write_all(text.as_bytes()).expect("stdin is written");
+        stdin
+    });
     // The first line, with a deadline: a binary that exits or hangs before
     // announcing must fail this test, not hang it -- and not leave a server
     // running after it.
@@ -151,6 +173,7 @@ fn start_as_with(model: &str, endpoint: &str, extra: &[&str], env: &[(&str, &str
             .zip(announced["record_truncated"].as_bool())
             .map(|(path, truncated)| (path.to_owned(), truncated)),
         said: lines,
+        stdin,
         child,
         _head: head,
     }
@@ -2570,6 +2593,17 @@ struct Drove {
     /// The regimen it ran under, and the sidecar serve wrote.
     regimen: HeadFile,
     sidecar: String,
+    /// `GET /state`'s body, read before the end.
+    state: serde_json::Value,
+}
+
+/// How a T1-shaped session is given its credential (#1047).
+enum Given<'a> {
+    /// `--auth-file`.
+    File(&'a HeadFile),
+    /// `--auth-stdin`: `line` on stdin before serve starts, then `leftover`
+    /// on the same pipe, held open, once it listens.
+    Stdin { line: &'a str, leftover: &'a str },
 }
 
 /// T1's path through the binary: `serve` with a regimen that runs
@@ -2595,11 +2629,30 @@ fn drive_t1(
 }
 
 /// [`drive_t1`], with `env` set in serve's environment.
-#[allow(clippy::too_many_lines)]
 fn drive_t1_with(
     first: Act,
     (top, isolation_line): (&str, &str),
     (tree, state, auth): (&Dir, &Dir, &HeadFile),
+    scope: &str,
+    before_the_answer: impl FnOnce(&str),
+    env: &[(&str, &str)],
+) -> Drove {
+    drive_t1_given(
+        first,
+        (top, isolation_line),
+        (tree, state, &Given::File(auth)),
+        scope,
+        before_the_answer,
+        env,
+    )
+}
+
+/// [`drive_t1_with`], the credential `given` either way.
+#[allow(clippy::too_many_lines)]
+fn drive_t1_given(
+    first: Act,
+    (top, isolation_line): (&str, &str),
+    (tree, state, given): (&Dir, &Dir, &Given),
     scope: &str,
     before_the_answer: impl FnOnce(&str),
     env: &[(&str, &str)],
@@ -2611,28 +2664,43 @@ fn drive_t1_with(
     .expect("loopback");
     let regimen = commands_regimen(top, isolation_line, "[limits]\nmax_steps = 4\n");
     let path = regimen.0.to_string_lossy().into_owned();
-    let auth_path = auth.0.to_string_lossy().into_owned();
+    let (credential, fed, leftover) = match given {
+        Given::File(auth) => (
+            vec![
+                "--auth-file".to_owned(),
+                auth.0.to_string_lossy().into_owned(),
+            ],
+            None,
+            None,
+        ),
+        Given::Stdin { line, leftover } => (
+            vec!["--auth-stdin".to_owned()],
+            Some(*line),
+            Some(*leftover),
+        ),
+    };
     let log = file_holding("log", "");
     let log_path = log.0.to_string_lossy().into_owned();
     let record = file_holding("record", "");
     let record_path = record.0.to_string_lossy().into_owned();
     let state_path = state.path();
-    let served = start_with(
+    let tree_path = tree.path();
+    let mut args = vec!["--regimen", &path, "--worktree", &tree_path];
+    args.extend(credential.iter().map(String::as_str));
+    args.extend(["--log", &log_path, "--record", &record_path]);
+    let mut served = start_fed(
+        "a-model",
         &stub.url(),
-        &[
-            "--regimen",
-            &path,
-            "--worktree",
-            &tree.path(),
-            "--auth-file",
-            &auth_path,
-            "--log",
-            &log_path,
-            "--record",
-            &record_path,
-        ],
+        &args,
         &[&[("XDG_STATE_HOME", state_path.as_str())], env].concat(),
+        fed,
     );
+    if let (Some(stdin), Some(leftover)) = (served.stdin.as_mut(), leftover) {
+        stdin
+            .write_all(leftover.as_bytes())
+            .expect("the leftover is written");
+        stdin.flush().expect("the leftover is sent");
+    }
     let address = served.listening.clone();
     before_the_answer(&address);
     let unauthed = post(&address, &address, r#"{"kind":"ask","text":"hi"}"#);
@@ -2657,6 +2725,13 @@ fn drive_t1_with(
     let reply = post_authed(&address, "/approve", &approve);
     assert_eq!(status(&reply), 204, "{reply}");
     events_authed(&address, |read| read.contains(r#""reason":"final""#));
+    let reply = exchange(
+        &address,
+        &format!("GET /state HTTP/1.1\r\nHost: {address}\r\n{AUTHOR}\r\n"),
+        |_| false,
+    );
+    assert_eq!(status(&reply), 200, "{reply}");
+    let state = log_line_object(reply.split("\r\n\r\n").nth(1).unwrap_or_default());
     let reply = post_authed(&address, "/commands", r#"{"kind":"end"}"#);
     assert_eq!(status(&reply), 200, "{reply}");
     let recorded = log_line_object(
@@ -2708,7 +2783,116 @@ fn drive_t1_with(
         record,
         regimen,
         sidecar,
+        state,
     }
+}
+
+/// A streamed reply making one `bash` call, `call-1`, of `command` in the
+/// background (#614).
+fn a_background_call(command: &str) -> Act {
+    let arguments = serde_json::json!({ "command": command, "is_background": true }).to_string();
+    let call = serde_json::json!({"choices": [{"index": 0, "finish_reason": null, "delta": {
+        "tool_calls": [{"index": 0, "id": "call-1", "type": "function",
+            "function": {"name": "bash", "arguments": arguments}}]}}]});
+    let done =
+        serde_json::json!({"choices": [{"index": 0, "delta": {}, "finish_reason": "tool_calls"}]});
+    Act::Answer(format!("data: {call}\n\ndata: {done}\n\ndata: [DONE]\n\n"))
+}
+
+/// #1047: the credential on stdin. After serve reads its line, the pipe
+/// stays open with more on it, as a shell's may; no command, run in the
+/// foreground or the background, reads it, since every one is given a null
+/// stdin. And the credential is in nothing the session leaves: the log (its
+/// start row and all), the record, the receipt, the sidecar, `/state`.
+#[test]
+fn a_credential_on_stdin_leaves_no_command_the_pipe_and_nothing_the_credential() {
+    let top = "allowed_commands = []\nenv_passthrough = [\"XDG_STATE_HOME\"]\n\
+               approval_policy = \"approve what stays in the worktree\"\n";
+    let given = Given::Stdin {
+        line: "author:s3cret\n",
+        leftover: "LEFTOVER-STDIN\n",
+    };
+    let tree = Dir::new("stdin-tree");
+    let state = Dir::new("stdin-state");
+    let drove = drive_t1_given(
+        a_call("read -r line; echo \"got=[$line]\""),
+        (top, "isolation = \"none\""),
+        (&tree, &state, &given),
+        "once",
+        |_| {},
+        &[],
+    );
+    assert_eq!(drove.call["outcome"], "ran", "{}", drove.call);
+    let stdout = drove.call["stdout"].as_str().unwrap_or_default();
+    assert!(
+        stdout.contains("got=[]") && !stdout.contains("LEFTOVER"),
+        "a command read serve's stdin: {stdout}"
+    );
+    let log = std::fs::read_to_string(&drove.log.0).expect("the log");
+    let record = std::fs::read_to_string(&drove.record.0).expect("the record");
+    assert!(log.contains("\"session.start\""), "{log}");
+    for (what, text) in [
+        ("the log", log),
+        ("the record", record),
+        ("the receipt", drove.receipt.to_string()),
+        ("the sidecar", drove.sidecar.clone()),
+        ("/state", drove.state.to_string()),
+    ] {
+        assert!(
+            !text.contains("s3cret") && !text.contains("YXV0aG9yOnMzY3JldA"),
+            "{what} holds the credential: {text}"
+        );
+    }
+
+    let tree = Dir::new("stdin-background-tree");
+    let state = Dir::new("stdin-background-state");
+    let drove = drive_t1_given(
+        a_background_call("read -r line; echo \"got=[$line]\" > read.txt"),
+        (top, "isolation = \"none\""),
+        (&tree, &state, &given),
+        "once",
+        |_| {},
+        &[],
+    );
+    assert!(drove.call["background"].is_string(), "{}", drove.call);
+    let written = tree.0.join("read.txt");
+    let give_up = Instant::now() + Duration::from_secs(10);
+    while !written.exists() && Instant::now() < give_up {
+        std::thread::sleep(Duration::from_millis(50));
+    }
+    let read = std::fs::read_to_string(&written).unwrap_or_default();
+    assert_eq!(read, "got=[]\n", "a background job read serve's stdin");
+}
+
+/// #1047: `--auth-stdin` and `--auth-file` each name the credential; both
+/// is a usage error, before anything reaches the server.
+#[test]
+fn a_drive_server_given_both_credentials_refuses() {
+    let tree = Dir::new("both-credentials");
+    let stub = Stub::serving(Vec::new()).expect("loopback");
+    let regimen = commands_regimen(
+        "allowed_commands = []\n",
+        "isolation = \"none\"",
+        "[limits]\nmax_steps = 4\n",
+    );
+    let path = regimen.0.to_string_lossy().into_owned();
+    let auth = file_holding("auth", "author:s3cret\n");
+    let auth_path = auth.0.to_string_lossy().into_owned();
+    let (code, said) = run_briefly(
+        &stub.url(),
+        &[
+            "--regimen",
+            &path,
+            "--worktree",
+            &tree.path(),
+            "--auth-file",
+            &auth_path,
+            "--auth-stdin",
+        ],
+    );
+    assert_eq!(code, Some(2), "{said}");
+    assert!(said.contains("give one"), "{said}");
+    assert!(stub.received().is_empty(), "no request reached the server");
 }
 
 /// A git checkout, as the regimen's reference is.
