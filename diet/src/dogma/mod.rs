@@ -152,7 +152,7 @@ pub mod vocabulary;
 /// * 16, 2026-11-05: fork ask sets `v5` and `t3` joined (#1050, item 4):
 ///   `v4` and `t2`, each with its route's imperative -- "No tool can run
 ///   here: answer in text, from what you have already read." on the fields
-///   route, "No tool runs here except update_record and resolve_entry,
+///   route, "No tool runs here except `update_record` and `resolve_entry`,
 ///   which are how you answer." on the tools route -- and under them a fork
 ///   the operator fires, in their own words or a pinned ask, is sent with it
 ///   first. The maintainer's wording approved on 2026-11-04 (relayed by
