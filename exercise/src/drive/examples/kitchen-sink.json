@@ -15,7 +15,7 @@
     {
       "approvals_off": true,
       "bash_timeout_ms": 120000,
-      "build_commit": "a124d6b9d0c0be84740bb422363d1fc8d5038af7",
+      "build_commit": "ce30ce794c46476200bccc35224a7fd70d4e97ca",
       "build_dirty": false,
       "compaction_persists": true,
       "fork_asks": "v4",
@@ -92,7 +92,7 @@
       },
       "model": "scenario",
       "notes_in_the_ask": true,
-      "opened": 1793881580224,
+      "opened": 1793892668129,
       "opening_phase": "plan",
       "phase_document": {
         "digest": "c3c3afe17657994b1403ed749e7352bdf4ad1eb47c688b6e60bb0e122db95e8e",
@@ -184,7 +184,7 @@
         "propose_phase_transition",
         "refute_beliefs"
       ],
-      "version": 40
+      "version": 41
     },
     {
       "kind": "phase.started",
