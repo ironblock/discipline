@@ -2277,7 +2277,7 @@ fn firings(interview: &Interview, log: &[Logged], turn: u32, answer: &str) -> Ve
         Vec::new()
     };
     firings_over(
-        (interview, &interview.rules),
+        (interview, &interview.rules, interview.asks),
         log,
         (turn, answer),
         &calls,
@@ -2305,7 +2305,7 @@ fn step_firings(
         .filter(|call| ids.contains(&call.id))
         .collect();
     firings_over(
-        (interview, &interview.rules),
+        (interview, &interview.rules, interview.asks),
         log,
         (turn, said),
         &calls,
@@ -2325,8 +2325,18 @@ fn shadow_firings(interview: &Interview, log: &[Logged], turn: u32, answer: &str
     } else {
         Vec::new()
     };
+    // Offered as chips, a shadow is shown as the operator's fork it would
+    // fire (#1050): read as text, so in the fields counterpart of a tools
+    // set; hidden, as the warrant would have asked.
+    let asks = match interview.shadow_offer {
+        ShadowOffer::Chips => interview
+            .asks
+            .fields_counterpart()
+            .unwrap_or(interview.asks),
+        ShadowOffer::Hidden => interview.asks,
+    };
     firings_over(
-        (interview, &interview.shadow),
+        (interview, &interview.shadow, asks),
         log,
         (turn, answer),
         &calls,
@@ -2337,7 +2347,7 @@ fn shadow_firings(interview: &Interview, log: &[Logged], turn: u32, answer: &str
 /// [`firings`] over `calls`, the judgment ask on a marked turn only when
 /// `judge`, under `rules`: the session's, or its shadow's (#1021).
 fn firings_over(
-    (interview, rules): (&Interview, &[log::Warrant]),
+    (interview, rules, asks): (&Interview, &[log::Warrant], &crate::dogma::asks::AskSet),
     log: &[Logged],
     (turn, answer): (u32, &str),
     calls: &[Routed],
@@ -2352,7 +2362,7 @@ fn firings_over(
             intent: intent.clone(),
         }
         .render_in(
-            interview.asks,
+            asks,
             &Facts {
                 cwd: None,
                 last_edited: None,
@@ -13299,7 +13309,19 @@ fn fire_on<S>(
     };
     shape.messages =
         prefix.unwrap_or_else(|| viewed(&state.trunk, shared.template.messages.len(), view));
-    shape.messages.push(Message::new(role, question.clone()));
+    // A fork the operator fires -- their own words, or a pinned ask -- is
+    // sent with the fields route's imperative first on either route, since
+    // its answer is read as text (#1050); its line logs the question alone,
+    // and `session.start` names the set.
+    let imperative = state
+        .interview
+        .as_ref()
+        .and_then(|interview| interview.asks.operator_imperative())
+        .filter(|_| why == log::Warrant::Operator && (own_words || pinned.is_some()));
+    shape.messages.push(Message::new(
+        role,
+        imperative.map_or_else(|| question.clone(), |line| format!("{line}\n{question}")),
+    ));
     let seat = shared.seat.get().map(|seat| {
         shape.model.clone_from(&seat.model);
         shape.limits.context_window = seat.context_window;
@@ -29023,6 +29045,78 @@ pub(in crate::drive) mod tests {
         reads_whole(&session);
     }
 
+    /// #1050: under a set from v5 on, a fork the operator fires -- their own
+    /// words or a pinned ask -- is sent with the route's imperative as its
+    /// first line, and its line logs the question alone; under an earlier
+    /// set it is sent bare.
+    #[test]
+    fn the_operators_forks_are_sent_with_the_sets_imperative_from_v5() {
+        const NO_TOOL: &str = "Answer from this turn alone. No tool can run here: answer in text, from what you have already read.";
+        let gotchas = crate::dogma::Template::Gotchas.fill(&[]).expect("holeless");
+        for (asks, ask, question, sent) in [
+            (
+                &crate::dogma::asks::V5,
+                OperatorAsk::Text("Why two tables?".to_owned()),
+                "Why two tables?".to_owned(),
+                format!("{NO_TOOL}\nWhy two tables?"),
+            ),
+            (
+                &crate::dogma::asks::V5,
+                OperatorAsk::Pinned("GOTCHAS".to_owned()),
+                gotchas.clone(),
+                format!("{NO_TOOL}\n{gotchas}"),
+            ),
+            // The tools route's own forks answer through the record tools; an
+            // operator fork's answer is read as text, so the fields line.
+            (
+                &crate::dogma::asks::T3,
+                OperatorAsk::Text("Why two tables?".to_owned()),
+                "Why two tables?".to_owned(),
+                format!("{NO_TOOL}\nWhy two tables?"),
+            ),
+            (
+                &crate::dogma::asks::V4,
+                OperatorAsk::Text("Why two tables?".to_owned()),
+                "Why two tables?".to_owned(),
+                "Why two tables?".to_owned(),
+            ),
+        ] {
+            let mut interview = interviewing(&[]);
+            interview.asks = asks;
+            let session = Session::open_with(
+                Canned::new([deltas(&["The schema has two tables."])]),
+                template(),
+                None,
+                None,
+                None,
+                Some(interview),
+            )
+            .forking_through(Canned::new([deltas(&["Because orders change."])]));
+            session.ask("what is the schema?", None).expect("accepted");
+            wait_until(&session, "the turn", settled);
+            session.fork(None, &ask).expect("forked");
+            let (forked, messages, _) = operator_forked(&session);
+            let Event::Forked {
+                question: logged, ..
+            } = forked
+            else {
+                unreachable!("a fork line");
+            };
+            assert_eq!(
+                logged, question,
+                "{}: the line logs the question alone",
+                asks.name
+            );
+            assert_eq!(
+                messages.last().map(|message| message.content.as_str()),
+                Some(sent.as_str()),
+                "{}",
+                asks.name
+            );
+            reads_whole(&session);
+        }
+    }
+
     /// #1021: forked at a tool result, the fork is born of the trunk up to
     /// that result and cut at its `tool_call`; a pinned ask is its
     /// template's text; a name no holeless fork template has is refused.
@@ -29632,6 +29726,75 @@ pub(in crate::drive) mod tests {
                 _ => None,
             })
             .collect()
+    }
+
+    /// #1050: an accepted chip is the operator's fork, read as text. Under
+    /// `t3` a read shadow's chip is asked in `v5`'s words -- the fields line
+    /// first, no record tool named, no `<interview>` tags -- and the chip
+    /// shows the question it fires.
+    #[test]
+    fn an_accepted_chip_under_t3_fires_v5s_text_shaped_ask() {
+        let tree = scratch("chip-t3");
+        std::fs::write(tree.join("notes.md"), "a note\n").expect("a note");
+        let mut interview = interviewing(&[]);
+        interview.asks = &crate::dogma::asks::T3;
+        interview.capture = crate::dogma::asks::Modality::Tools;
+        interview.shadow = vec![log::Warrant::Read];
+        interview.shadow_offer = ShadowOffer::Chips;
+        let session = Session::open_with(
+            Canned::new(vec![
+                vec![bash("call-1", "cat notes.md")],
+                deltas(&["Read it. Next, I will write the schema."]),
+            ]),
+            looping(),
+            None,
+            Some(tools(
+                Confinement::Unconfined,
+                &tree,
+                &["cat"],
+                None,
+                Decider::Decline,
+            )),
+            None,
+            Some(interview),
+        )
+        .forking_through(Canned::new(vec![deltas(&["It holds a note."])]));
+        session.ask("look around", None).expect("accepted");
+        let log = wait_until(&session, "the turn and its gap", settled);
+        let (shadow, shown) = log
+            .iter()
+            .find_map(|logged| match &logged.event {
+                Event::Shadowed {
+                    why: log::Warrant::Read,
+                    question,
+                    ..
+                } => Some((logged.seq, question.clone())),
+                _ => None,
+            })
+            .expect("a read shadow");
+        session
+            .suggestion(shadow, SuggestionAnswer::Accept)
+            .expect("accepted")
+            .expect("a fork");
+        let (forked, messages, _) = operator_forked(&session);
+        let Event::Forked { question, .. } = forked else {
+            unreachable!("a fork line");
+        };
+        let sent = messages.last().expect("the ask").content.clone();
+        assert_eq!(question, shown, "the chip shows the question it fires");
+        assert_eq!(sent, shown, "nothing is prepended to a set kind");
+        assert!(
+            sent.starts_with(
+                "Answer from this turn alone. No tool can run here: answer in text, from what you have already read.\n"
+            ),
+            "{sent}"
+        );
+        assert!(
+            !sent.contains("update_record") && !sent.contains("<interview>"),
+            "{sent}"
+        );
+        reads_whole(&session);
+        tidy(&[&tree]);
     }
 
     /// #1031: offered as chips, each shadow is a suggestion the operator

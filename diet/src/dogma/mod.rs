@@ -149,7 +149,15 @@ pub mod vocabulary;
 ///   phases, and `reason`, described, the maintainer's wording approved on
 ///   2026-11-04 (relayed by Dispatch). No template and no set already pinned
 ///   changed.
-pub const VERSION: u32 = 15;
+/// * 16, 2026-11-05: fork ask sets `v5` and `t3` joined (#1050, item 4):
+///   `v4` and `t2`, each with its route's imperative -- "No tool can run
+///   here: answer in text, from what you have already read." on the fields
+///   route, "No tool runs here except update_record and resolve_entry,
+///   which are how you answer." on the tools route -- and under them a fork
+///   the operator fires, in their own words or a pinned ask, is sent with it
+///   first. The maintainer's wording approved on 2026-11-04 (relayed by
+///   Dispatch). No template and no set already pinned changed.
+pub const VERSION: u32 = 16;
 
 /// The digest of `diet/dogma/MANIFEST.tsv` that [`VERSION`] was declared
 /// against.
@@ -159,7 +167,7 @@ pub const VERSION: u32 = 15;
 /// that recomputes it fails until both lines are edited together. Without it
 /// the manifest could be regenerated after an edit and the version left at
 /// what it was, which is a bump that never happened.
-pub const MANIFEST_DIGEST: &str = "5e78b61b90f03a8f";
+pub const MANIFEST_DIGEST: &str = "b4b8cc3fa7aaaf6f";
 
 /// The per-model operating points, as TOML text, exactly as pinned.
 ///

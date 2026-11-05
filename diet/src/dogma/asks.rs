@@ -45,6 +45,11 @@ pub struct AskSet {
     pub modality: Modality,
     /// Each file's stem and text, in manifest order.
     files: &'static [(&'static str, &'static str)],
+    /// Whether a fork the operator fires -- in their own words, or a pinned
+    /// ask by name -- is sent with the fields route's imperative as its first
+    /// line (#1050): from `v5` and `t3`; no set before them. Its answer is
+    /// read as text on either route, so it is told no tool can run.
+    operator_imperative: bool,
 }
 
 macro_rules! set_files {
@@ -59,6 +64,7 @@ pub const V3: AskSet = AskSet {
     modality: Modality::Fields,
     files: set_files!("v3": "api_surface", "change", "finding", "generic", "imperative",
         "judgment", "outcome", "reminder"),
+    operator_imperative: false,
 };
 
 /// v3, with the judgment ask showing the working record and asking for
@@ -68,6 +74,7 @@ pub const V4: AskSet = AskSet {
     modality: Modality::Fields,
     files: set_files!("v4": "api_surface", "change", "finding", "generic", "imperative",
         "judgment", "outcome", "reminder"),
+    operator_imperative: false,
 };
 
 /// v4's asks answered through the self-capture tools (#610): each answer
@@ -79,6 +86,7 @@ pub const T1: AskSet = AskSet {
     modality: Modality::Tools,
     files: set_files!("t1": "api_surface", "change", "finding", "generic", "imperative",
         "judgment", "outcome", "reminder"),
+    operator_imperative: false,
 };
 
 /// t1's asks, each wrapped in `<interview>` tags, with the priming paragraph
@@ -89,10 +97,33 @@ pub const T2: AskSet = AskSet {
     modality: Modality::Tools,
     files: set_files!("t2": "api_surface", "change", "finding", "generic", "imperative",
         "judgment", "outcome", "priming", "reminder"),
+    operator_imperative: false,
+};
+
+/// v4 with the fields route's imperative (#1050): no tool can run in a
+/// fork, so it answers in text; the operator's forks are sent with it too.
+/// The maintainer's wording, approved 2026-11-04.
+pub const V5: AskSet = AskSet {
+    name: "v5",
+    modality: Modality::Fields,
+    files: set_files!("v5": "api_surface", "change", "finding", "generic", "imperative",
+        "judgment", "outcome", "reminder"),
+    operator_imperative: true,
+};
+
+/// t2 with the tools route's imperative (#1050): no tool runs in a fork but
+/// the record tools it answers through. The operator's forks, read as text,
+/// are sent with v5's instead. The maintainer's wording, approved 2026-11-04.
+pub const T3: AskSet = AskSet {
+    name: "t3",
+    modality: Modality::Tools,
+    files: set_files!("t3": "api_surface", "change", "finding", "generic", "imperative",
+        "judgment", "outcome", "priming", "reminder"),
+    operator_imperative: true,
 };
 
 /// Every set, in the order they were added.
-pub const SETS: &[&AskSet] = &[&V3, &V4, &T1, &T2];
+pub const SETS: &[&AskSet] = &[&V3, &V4, &T1, &T2, &V5, &T3];
 
 /// The set a served regimen that names none runs: v3, today's asks, by the
 /// maintainer's decision (2026-10-09); v4 is selectable beside it.
@@ -119,6 +150,27 @@ impl AskSet {
     #[must_use]
     pub fn files(&self) -> &'static [(&'static str, &'static str)] {
         self.files
+    }
+
+    /// The imperative a fork the operator fires is sent with as its first
+    /// line, its own words or a pinned ask after it (#1050): the fields
+    /// route's -- `v5`'s -- under `v5` and `t3`, since an operator fork's
+    /// answer is read as text on both routes; none before them.
+    #[must_use]
+    pub fn operator_imperative(&self) -> Option<&'static str> {
+        self.operator_imperative
+            .then(|| V5.text("imperative"))
+            .flatten()
+            .map(str::trim)
+    }
+
+    /// The fields-route set an operator fork's set kind is rendered in when
+    /// this set's route answers through tools (#1050): `t3`'s is `v5`. An
+    /// accepted chip is the operator's fork, read as text, so it is asked in
+    /// the text-shaped form.
+    #[must_use]
+    pub fn fields_counterpart(&self) -> Option<&'static AskSet> {
+        (self.name == T3.name).then_some(&V5)
     }
 
     /// The priming paragraph the system prompt carries from the session's
@@ -153,7 +205,7 @@ impl AskSet {
 
 #[cfg(test)]
 mod tests {
-    use super::{DEFAULT, Modality, SETS, T1, T2, V3, V4, set};
+    use super::{DEFAULT, Modality, SETS, T1, T2, T3, V3, V4, V5, set};
     use crate::dogma::MANIFEST;
     use std::collections::BTreeSet;
     use std::path::Path;
@@ -244,6 +296,56 @@ mod tests {
             assert_ne!(t1, *text, "{file}");
             assert!(t1.contains("update_record"), "{file}: {t1}");
             assert!(!t1.contains("Answer with the fields"), "{file}: {t1}");
+        }
+    }
+
+    /// #1050: v5 is v4 and t3 is t2, each with its route's imperative in the
+    /// maintainer's words; both send the operator's forks with the fields
+    /// line, and no earlier set does.
+    #[test]
+    fn v5_and_t3_carry_their_routes_imperative_and_send_the_operators_forks_with_the_fields_line() {
+        for (new, old, imperative) in [
+            (
+                &V5,
+                &V4,
+                "Answer from this turn alone. No tool can run here: answer in text, from what you have already read.",
+            ),
+            (
+                &T3,
+                &T2,
+                "Answer from this turn alone. No tool runs here except update_record and resolve_entry, which are how you answer.",
+            ),
+        ] {
+            assert_eq!(set(new.name), Some(new));
+            assert_eq!(new.modality, old.modality);
+            assert_eq!(new.files().len(), old.files().len());
+            for (file, text) in old.files() {
+                let changed = new.text(file) != Some(*text);
+                assert_eq!(changed, *file == "imperative", "{}: {file}", new.name);
+            }
+            assert_eq!(
+                new.text("imperative"),
+                Some(format!("{imperative}\n").as_str())
+            );
+        }
+        // An operator fork is read as text on both routes: the fields line.
+        for new in [&V5, &T3] {
+            assert_eq!(
+                new.operator_imperative(),
+                Some(
+                    "Answer from this turn alone. No tool can run here: answer in text, from what you have already read."
+                ),
+                "{}",
+                new.name
+            );
+        }
+        for old in [&V3, &V4, &T1, &T2] {
+            assert_eq!(old.operator_imperative(), None, "{}", old.name);
+        }
+        // A chip under t3 is asked in v5's words; no other set has a counterpart.
+        assert_eq!(T3.fields_counterpart(), Some(&V5));
+        for other in [&V3, &V4, &T1, &T2, &V5] {
+            assert_eq!(other.fields_counterpart(), None, "{}", other.name);
         }
     }
 

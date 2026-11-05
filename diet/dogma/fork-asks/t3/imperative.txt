@@ -1,0 +1,1 @@
+Answer from this turn alone. No tool runs here except update_record and resolve_entry, which are how you answer.
