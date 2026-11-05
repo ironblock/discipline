@@ -32993,6 +32993,47 @@ pub(in crate::drive) mod tests {
         );
     }
 
+    /// #1050: a v38 phase session's requests -- its enum'd phase tool, and
+    /// the refill whose ground rules close with the moves -- are rebuilt and
+    /// verified; the same lines declared v37 are rebuilt in the old forms,
+    /// and do not verify.
+    #[test]
+    fn a_phase_sessions_heads_are_rebuilt_in_the_form_its_version_sent() {
+        let (session, _) =
+            proposing_in(in_the_starter_library(), "build", vec![deltas(&["built"])]);
+        session
+            .ratify_phase("call-p", PhaseChoice::Meditation)
+            .expect("ruled");
+        wait_until(&session, "the meditation", |log| {
+            log.iter().any(|l| matches!(l.event, Event::Meditated { .. }))
+        });
+        session.ask("build it", None).expect("accepted");
+        let log = wait_until(&session, "the turn after the refill", |log| {
+            settled(log)
+                && log
+                    .iter()
+                    .filter(|l| matches!(l.event, Event::Asked { .. }))
+                    .count()
+                    == 2
+        });
+        let unverified = |lines: &[log::Line]| -> Vec<String> {
+            crate::drive::projection::project(lines, &regime(), None)
+                .expect("projected")
+                .unspellable
+                .iter()
+                .filter(|u| u.kind == "request")
+                .map(|u| u.why.clone())
+                .collect()
+        };
+        let mut lines: Vec<log::Line> = log.iter().map(line_of).collect();
+        assert_eq!(unverified(&lines), Vec::<String>::new(), "v38, as sent");
+        let log::Event::SessionStart { version, .. } = &mut lines[0].event else {
+            panic!("the log opens with its session");
+        };
+        *version = 37;
+        assert!(!unverified(&lines).is_empty(), "declared v37, the old forms do not match");
+    }
+
     /// #1050: the three graph refusals name where the session is and the
     /// moves open from there, in the maintainer's words.
     #[test]
