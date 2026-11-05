@@ -268,6 +268,15 @@
 //! log that declares 28 or less and carries it is refused. For a reader of
 //! earlier logs, the migration is nothing: no session declared one.
 //!
+//! v41 (#1050) carries the operator's corrections: a `patch.refused` line
+//! may name what a refused supersede would have written (`text`) and the
+//! model's reason (`why`), for the chip that offers it; a `correction` line
+//! answers that chip -- `accepted`, naming the entry the change wrote or
+//! ruled on, `rejected` or `unanswered`; and the commands `correction` and
+//! `retire-entry`, with the refusal `not-the-operators`, arrive. Each is
+//! refused in a log that declares 40 or less. For a reader of earlier logs,
+//! the migration is nothing.
+//!
 //! v40 (#1050) carries a wrap that keeps nothing: `wrap.accepted` and
 //! `wrapped` may name no `entry`, the trunk carrying Qwen Code's
 //! `[Old tool result content cleared]` in the result's place. A line with no
@@ -463,12 +472,12 @@ use super::record::vocabulary;
 struct LogParser;
 
 /// The version this module writes, as `session.start` states it.
-pub const VERSION: i64 = 40;
+pub const VERSION: i64 = 41;
 
 /// Every version this module reads.
 pub const READS: &[i64] = &[
     0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25,
-    26, 27, 28, 29, 30, 31, 32, 33, 34, 35, 36, 37, 38, 39, 40,
+    26, 27, 28, 29, 30, 31, 32, 33, 34, 35, 36, 37, 38, 39, 40, 41,
 ];
 
 /// How recent an input event must be, at the moment a turn settles, for the
@@ -578,6 +587,9 @@ vocabulary! {
         /// The operator's answer to a shadow's fork offered as a suggestion
         /// (v34, #1031).
         Suggestion => "suggestion",
+        /// The operator's answer to a model's refused change to their entry,
+        /// offered as a chip (v41, #1050).
+        Correction => "correction",
         /// A phase's ground rules, as a note on an ask (v8, #787).
         PhaseNoted => "phase.noted",
         /// A trunk request's output cap cut below what the window alone
@@ -845,6 +857,10 @@ vocabulary! {
         Suggestion => "suggestion",
         /// The operator wrapped a tool result (v35, #1030).
         Wrap => "wrap",
+        /// The operator answered a correction's chip (v41, #1050).
+        Correction => "correction",
+        /// The operator retired an entry of their own (v41, #1050).
+        RetireEntry => "retire-entry",
     }
 }
 
@@ -929,8 +945,10 @@ vocabulary! {
         /// (v34, #1031).
         NotASuggestion => "not-a-suggestion",
         /// A suggestion's answer to a shadow already answered, or logged
-        /// unanswered (v34, #1031).
+        /// unanswered (v34, #1031); or a correction's (v41, #1050).
         AnsweredAlready => "answered-already",
+        /// A retire of an entry the operator did not write (v41, #1050).
+        NotTheOperators => "not-the-operators",
         /// A wrap of a tool result already wrapped, or waiting to be (v35,
         /// #1030).
         WrappedAlready => "wrapped-already",
@@ -2110,6 +2128,11 @@ pub enum Event {
         entry: String,
         /// Why: `operator-entry`.
         reason: String,
+        /// What a refused supersede would have written (v41, #1050): what its
+        /// correction's chip shows.
+        text: Option<String>,
+        /// The model's reason for the change, when it gave one (v41, #1050).
+        why: Option<String>,
     },
     /// Archived items recalled (v7, #566): one note after turn `turn`'s
     /// ask, at the tail of its first request, which stays on the trunk.
@@ -2477,6 +2500,18 @@ pub enum Event {
         /// Accepted, the `seq` of the operator's fork it fired; otherwise
         /// absent.
         fork: Option<u64>,
+    },
+    /// The operator's answer to a model's refused change to their entry,
+    /// offered as a chip (v41, #1050): accepted, rejected, or left
+    /// unanswered.
+    Correction {
+        /// The `seq` of the `patch.refused` line it answers.
+        refused: u64,
+        /// How it was answered.
+        outcome: SuggestionOutcome,
+        /// Accepted, the entry the change wrote -- a supersede's -- or ruled
+        /// on; otherwise absent.
+        entry: Option<String>,
     },
     Reminded {
         /// The turn whose request carried it.
@@ -3575,6 +3610,47 @@ impl Suggestions {
     }
 }
 
+/// The corrections a log has answered (v41, #1050).
+#[derive(Default)]
+struct Corrections {
+    /// Each `patch.refused` line's `seq`.
+    refused: BTreeSet<u64>,
+    /// Each one a `correction` line answered.
+    answered: BTreeSet<u64>,
+}
+
+impl Corrections {
+    /// A `correction` line: it answers an earlier `patch.refused` line no
+    /// other answered; accepted, it names an entry, and otherwise none.
+    fn answer(
+        &mut self,
+        refused: u64,
+        outcome: SuggestionOutcome,
+        entry: Option<&str>,
+    ) -> Result<(), String> {
+        if !self.refused.contains(&refused) {
+            return Err(format!(
+                "a correction answering seq {refused}, which is no earlier `patch.refused` line"
+            ));
+        }
+        if !self.answered.insert(refused) {
+            return Err(format!(
+                "a second correction answering the refusal at seq {refused}"
+            ));
+        }
+        match (outcome, entry) {
+            (SuggestionOutcome::Accepted, None) => {
+                Err("an accepted correction naming no entry".to_owned())
+            }
+            (SuggestionOutcome::Accepted, Some(_)) | (_, None) => Ok(()),
+            (_, Some(_)) => Err(format!(
+                "a correction `{}` naming an entry: only an accepted one changed any",
+                outcome.tag()
+            )),
+        }
+    }
+}
+
 #[derive(Default)]
 struct Forks {
     /// The turns settled `final`.
@@ -4219,6 +4295,7 @@ fn check(lines: &[Line]) -> Result<(), LogError> {
     let mut captured: BTreeSet<String> = BTreeSet::new();
     // The shadows' suggestions (v34, #1031): what each answers.
     let mut suggestions = Suggestions::default();
+    let mut corrections = Corrections::default();
     let mut claimed = false;
     let mut last_t = 0_u64;
     for (index, line) in lines.iter().enumerate() {
@@ -4440,6 +4517,16 @@ fn check(lines: &[Line]) -> Result<(), LogError> {
                 fork,
             } => suggestions
                 .answer(*shadow, *outcome, *fork)
+                .map_err(|why| at(index, why))?,
+            Event::PatchRefused { .. } => {
+                corrections.refused.insert(line.seq);
+            }
+            Event::Correction {
+                refused,
+                outcome,
+                entry,
+            } => corrections
+                .answer(*refused, *outcome, entry.as_deref())
                 .map_err(|why| at(index, why))?,
             Event::ForkSkipped {
                 call: Some(call), ..
@@ -5290,6 +5377,11 @@ fn from_object(object: &BTreeMap<String, Value>) -> Result<Line, String> {
             outcome: fields.tag("outcome", SuggestionOutcome::from_tag)?,
             fork: fields.optional_count("fork")?,
         },
+        Kind::Correction => Event::Correction {
+            refused: fields.count("refused")?,
+            outcome: fields.tag("outcome", SuggestionOutcome::from_tag)?,
+            entry: fields.optional_string("entry")?,
+        },
         Kind::Reminded => Event::Reminded {
             turn: fields.turn("turn")?,
             text: fields.string("text")?,
@@ -5543,6 +5635,8 @@ fn from_object(object: &BTreeMap<String, Value>) -> Result<Line, String> {
             op: fields.tag("op", PatchOp::from_tag)?,
             entry: fields.string("entry")?,
             reason: fields.string("reason")?,
+            text: fields.optional_string("text")?,
+            why: fields.optional_string("why")?,
         },
         Kind::Recalled => Event::Recalled {
             turn: fields.turn("turn")?,
@@ -7151,6 +7245,7 @@ pub fn introduced(kind: Kind) -> i64 {
         Kind::Suggestion => 34,
         Kind::Wrapped | Kind::WrapAccepted => 35,
         Kind::OperatorNote => 36,
+        Kind::Correction => 41,
         _ => 0,
     }
 }
@@ -7225,6 +7320,16 @@ pub fn tag_introduced(tags: Tags, tag: &str) -> i64 {
         || (tags == Tags::Refusal && Refusal::from_tag(tag) == Some(Refusal::WrappedAlready))
     {
         return 35;
+    }
+    // The operator's corrections and retires (#1050).
+    if (tags == Tags::Command
+        && matches!(
+            Command::from_tag(tag),
+            Some(Command::Correction | Command::RetireEntry)
+        ))
+        || (tags == Tags::Refusal && Refusal::from_tag(tag) == Some(Refusal::NotTheOperators))
+    {
+        return 41;
     }
     // The shadows' suggestions (#1031).
     if (tags == Tags::Command && Command::from_tag(tag) == Some(Command::Suggestion))
@@ -7705,6 +7810,29 @@ pub fn schema(kind: Kind) -> &'static [Field] {
             ];
             F
         }
+        Kind::Correction => {
+            const F: &[Field] = &[
+                Field {
+                    key: "refused",
+                    holds: Count,
+                    required: true,
+                    since: 41,
+                },
+                Field {
+                    key: "outcome",
+                    holds: Tag(Tags::SuggestionOutcome),
+                    required: true,
+                    since: 41,
+                },
+                Field {
+                    key: "entry",
+                    holds: Text,
+                    required: false,
+                    since: 41,
+                },
+            ];
+            F
+        }
         Kind::Reminded | Kind::Notice => {
             const F: &[Field] = &[must_v7("turn", Count), must_v7("text", Text)];
             F
@@ -7947,6 +8075,19 @@ pub fn schema(kind: Kind) -> &'static [Field] {
                 must_v7("op", Tag(Tags::PatchOp)),
                 must_v7("entry", Text),
                 must_v7("reason", Text),
+                // What its chip shows (#1050).
+                Field {
+                    key: "text",
+                    holds: Text,
+                    required: false,
+                    since: 41,
+                },
+                Field {
+                    key: "why",
+                    holds: Text,
+                    required: false,
+                    since: 41,
+                },
             ];
             F
         }
@@ -9490,6 +9631,8 @@ fn to_value(line: &Line) -> Value {
             op,
             entry,
             reason,
+            text: changed,
+            why,
         } => {
             if let Some(fork) = fork {
                 put("fork", count(*fork));
@@ -9500,7 +9643,25 @@ fn to_value(line: &Line) -> Value {
             put("op", text(op.tag()));
             put("entry", text(entry));
             put("reason", text(reason));
+            if let Some(changed) = changed {
+                put("text", text(changed));
+            }
+            if let Some(why) = why {
+                put("why", text(why));
+            }
             Kind::PatchRefused
+        }
+        Event::Correction {
+            refused,
+            outcome,
+            entry,
+        } => {
+            put("refused", count(*refused));
+            put("outcome", text(outcome.tag()));
+            if let Some(entry) = entry {
+                put("entry", text(entry));
+            }
+            Kind::Correction
         }
         Event::PhaseProposed {
             by,
@@ -10916,15 +11077,15 @@ mod tests {
     }
 
     /// #583, #878, #904, #555, #931, #936, #910, #942, #926, #932, #948, #971, #1016, #1021,
-    /// #1022, #1031, #1030, #1037, #1038, #1050: this module writes v40.
+    /// #1022, #1031, #1030, #1037, #1038, #1050: this module writes v41.
     #[test]
-    fn this_module_writes_v40_and_reads_every_version_before_it() {
-        assert_eq!(super::VERSION, 40);
+    fn this_module_writes_v41_and_reads_every_version_before_it() {
+        assert_eq!(super::VERSION, 41);
         assert_eq!(
             super::READS,
             &[
                 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22,
-                23, 24, 25, 26, 27, 28, 29, 30, 31, 32, 33, 34, 35, 36, 37, 38, 39, 40
+                23, 24, 25, 26, 27, 28, 29, 30, 31, 32, 33, 34, 35, 36, 37, 38, 39, 40, 41
             ]
         );
     }
@@ -13227,7 +13388,7 @@ mod tests {
             tags(Kind::ALL.iter().map(|it| it.tag()).collect()),
             "session.start ask settlement request refused delta stop.asked response \
              cancelled request.failed turn.settled idle.gap progress tool_call fork \
-             fork.settled patch meditation delivered recalled flag meditation.held patch.refused pruned wrapped wrap.accepted operator.note phase.ruled phase.proposed phase.answered phase.started tangent.open tangent.close capture reminded background.ended notice timeout.near fork.skipped fork.shadowed suggestion phase.noted trunk.clamped trunk.waited warrant.gated request.retried grade meditation.skipped"
+             fork.settled patch meditation delivered recalled flag meditation.held patch.refused pruned wrapped wrap.accepted operator.note phase.ruled phase.proposed phase.answered phase.started tangent.open tangent.close capture reminded background.ended notice timeout.near fork.skipped fork.shadowed suggestion correction phase.noted trunk.clamped trunk.waited warrant.gated request.retried grade meditation.skipped"
         );
         assert_eq!(
             tags(FailReason::ALL.iter().map(|it| it.tag()).collect()),
@@ -13236,7 +13397,7 @@ mod tests {
         assert_eq!(
             tags(Refusal::ALL.iter().map(|it| it.tag()).collect()),
             "in-flight ended nothing-in-flight meditation-not-built nothing-to-meditate no-phase-graph not-a-phase \
-             already-in-phase no-phase-edge stale tangent-open no-tangent bad-tangent not-the-scope nothing-running no-proposal unknown-entry not-live empty meditation-held nothing-held restates not-unilateral already-asked proposal-pending no-vision api-cap not-a-source not-in-source no-working-memory not-on-the-trunk not-a-pinned-ask not-a-suggestion answered-already wrapped-already anchor-not-unique"
+             already-in-phase no-phase-edge stale tangent-open no-tangent bad-tangent not-the-scope nothing-running no-proposal unknown-entry not-live empty meditation-held nothing-held restates not-unilateral already-asked proposal-pending no-vision api-cap not-a-source not-in-source no-working-memory not-on-the-trunk not-a-pinned-ask not-a-suggestion answered-already not-the-operators wrapped-already anchor-not-unique"
         );
         assert_eq!(
             tags(SettleReason::ALL.iter().map(|it| it.tag()).collect()),

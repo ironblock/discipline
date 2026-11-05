@@ -132,6 +132,11 @@ vocabulary! {
         Suggestion => "suggestion",
         /// Wrap a tool result on the trunk: a kept span in its place (#1030).
         Wrap => "wrap",
+        /// Answer a correction's chip: accept or reject the model's refused
+        /// change to the operator's entry (#1050).
+        Correction => "correction",
+        /// Retire an entry of the operator's own (#1050).
+        RetireEntry => "retire-entry",
     }
 }
 
@@ -223,6 +228,8 @@ vocabulary! {
         /// An answer to a suggestion already answered, or logged unanswered
         /// (#1031).
         AnsweredAlready => "answered-already",
+        /// A retire of an entry the operator did not write (#1050).
+        NotTheOperators => "not-the-operators",
         /// A wrap of a tool result already wrapped, or waiting to be at the
         /// next trunk request (#1030).
         WrappedAlready => "wrapped-already",
@@ -894,6 +901,23 @@ pub enum Event {
         op: log::PatchOp,
         /// The entry it targeted.
         entry: String,
+        /// What a refused supersede would have written (#1050).
+        text: Option<String>,
+        /// The model's reason for the change, when it gave one (#1050).
+        why: Option<String>,
+        /// The change itself, offered to the operator as a chip (#1050):
+        /// never logged beyond `text` and `why`.
+        change: Box<Patch>,
+    },
+    /// The operator's answer to a correction's chip (#1050): accepted,
+    /// rejected, or left unanswered.
+    Correction {
+        /// The `patch.refused` line it answers.
+        refused: u64,
+        /// How it was answered.
+        outcome: log::SuggestionOutcome,
+        /// Accepted, the entry the change wrote or ruled on.
+        entry: Option<String>,
     },
     /// Archived items recalled after an ask (#566): one note, which stays
     /// on the trunk.
@@ -2896,6 +2920,9 @@ struct State {
     shadow_counters: crate::drive::warrants::Counters,
     /// The shadows offered as suggestions (#1031).
     suggestions: Suggestions,
+    /// The model's refused changes to the operator's entries, each offered
+    /// as a chip (#1050), by its `patch.refused` line.
+    corrections: Corrections,
     /// The operator's wraps (#1030), by the `tool_call` line each replaces:
     /// waiting for the next trunk request, or applied there.
     wraps: BTreeMap<u64, Wrap>,
@@ -3094,6 +3121,7 @@ impl State {
             step_counters: crate::drive::warrants::Counters::default(),
             shadow_counters: crate::drive::warrants::Counters::default(),
             suggestions: Suggestions::default(),
+            corrections: Corrections::default(),
             wraps: BTreeMap::new(),
             carried_note: None,
             gap_firings: Vec::new(),
@@ -3243,7 +3271,17 @@ impl State {
             self.gap_open = None;
             self.append(Event::IdleGap(gap));
         }
-        self.append(event)
+        // A model's refused change to the operator's entry is a chip the
+        // operator answers (#1050).
+        let change = match &event {
+            Event::PatchRefused { change, .. } => Some(change.as_ref().clone()),
+            _ => None,
+        };
+        let seq = self.append(event);
+        if let Some(change) = change {
+            self.corrections.offered.insert(seq, change);
+        }
+        seq
     }
 
     fn append(&mut self, event: Event) -> u64 {
@@ -3409,7 +3447,9 @@ impl State {
                 | CommandKind::Keep
                 | CommandKind::Fork
                 | CommandKind::Suggestion
-                | CommandKind::Wrap => {
+                | CommandKind::Wrap
+                | CommandKind::Correction
+                | CommandKind::RetireEntry => {
                     unreachable!("a tangent, background or phase ruling carries no idle gap")
                 }
             };
@@ -3513,7 +3553,8 @@ impl State {
         self.push(Event::Settled { from, to });
     }
 
-    /// Each suggestion not yet answered, logged `unanswered` (#1031).
+    /// Each suggestion (#1031) and correction (#1050) not yet answered,
+    /// logged `unanswered`.
     fn unanswered(&mut self) {
         for shadow in std::mem::take(&mut self.suggestions.offered).into_keys() {
             self.suggestions.answered.insert(shadow);
@@ -3521,6 +3562,14 @@ impl State {
                 shadow,
                 outcome: log::SuggestionOutcome::Unanswered,
                 fork: None,
+            });
+        }
+        for refused in std::mem::take(&mut self.corrections.offered).into_keys() {
+            self.corrections.answered.insert(refused);
+            self.push(Event::Correction {
+                refused,
+                outcome: log::SuggestionOutcome::Unanswered,
+                entry: None,
             });
         }
     }
@@ -4910,6 +4959,139 @@ impl<S: Streaming + 'static> Session<S> {
             kind: "edit",
             note: None,
         });
+        drop(state);
+        self.shared.changed.notify_all();
+        Ok(())
+    }
+
+    /// Answer the correction at the `patch.refused` line `refused` (#1050):
+    /// the model's change to the operator's entry the guard refused, offered
+    /// as a chip. Rejected, a `correction` line says so. Accepted, the change
+    /// applies as the operator's ruling -- a supersede's words as a new
+    /// entry of theirs, which renders "you corrected, user accepted", or a
+    /// resolve, retire or park of the entry -- and the line names the entry.
+    /// Returns that entry's id when accepted.
+    ///
+    /// # Errors
+    ///
+    /// [`Refusal::Ended`]; [`Refusal::AnsweredAlready`] for one answered or
+    /// logged unanswered; [`Refusal::NotASuggestion`] for no correction
+    /// offered there; and [`Refusal::NotLive`] for an entry no longer live.
+    pub fn correction(
+        &self,
+        refused: u64,
+        answer: SuggestionAnswer,
+    ) -> Result<Option<String>, Rejected> {
+        let mut state = self.shared.lock();
+        let because = if state.settlement == Settlement::Ended {
+            Some(Refusal::Ended)
+        } else if state.corrections.answered.contains(&refused) {
+            Some(Refusal::AnsweredAlready)
+        } else if !state.corrections.offered.contains_key(&refused) {
+            Some(Refusal::NotASuggestion)
+        } else {
+            None
+        };
+        let refusal = |state: &mut State, because| {
+            let refused = state.refuse(CommandKind::Correction, because);
+            Err(Rejected::Refused(refused))
+        };
+        if let Some(because) = because {
+            let refused = refusal(&mut state, because);
+            drop(state);
+            self.shared.changed.notify_all();
+            return refused;
+        }
+        let entry = if answer == SuggestionAnswer::Accept {
+            let Some(change) = state.corrections.offered.get(&refused).cloned() else {
+                unreachable!("offered, as checked");
+            };
+            let Some(patch) = ruled(&state, &change) else {
+                let refused = refusal(&mut state, Refusal::NotLive);
+                drop(state);
+                self.shared.changed.notify_all();
+                return refused;
+            };
+            Some(patch)
+        } else {
+            None
+        };
+        state.admit_within_the_gap();
+        state.corrections.offered.remove(&refused);
+        state.corrections.answered.insert(refused);
+        let written = entry.map(|patch| {
+            let Some(interview) = state.interview.as_mut() else {
+                unreachable!("a chip is offered only with working memory");
+            };
+            let target = match &patch {
+                Patch::Supersede { id, .. } | Patch::Add { id, .. } => id.clone(),
+                Patch::Resolve { target, .. }
+                | Patch::Retire { target, .. }
+                | Patch::Park { target, .. } => target.clone(),
+            };
+            let _ = interview.object.apply(&patch);
+            if matches!(patch, Patch::Supersede { .. }) {
+                let _ = interview
+                    .object
+                    .originate(&target, crate::object::Origin::Corrected);
+            }
+            let line = patched(None, &patch, &interview.object);
+            state.push(line);
+            target.as_str().to_owned()
+        });
+        state.push(Event::Correction {
+            refused,
+            outcome: if written.is_some() {
+                log::SuggestionOutcome::Accepted
+            } else {
+                log::SuggestionOutcome::Rejected
+            },
+            entry: written.clone(),
+        });
+        drop(state);
+        self.shared.changed.notify_all();
+        Ok(written)
+    }
+
+    /// Retire working-memory entry `id`, one of the operator's own (#1050):
+    /// it stops mattering, and is kept; a `patch` line says so.
+    ///
+    /// # Errors
+    ///
+    /// [`Refusal::Ended`]; [`Refusal::InFlight`] while a turn or a capture is
+    /// in flight; [`Refusal::UnknownEntry`] for an entry working memory does
+    /// not hold; [`Refusal::NotLive`] for one no longer live; and
+    /// [`Refusal::NotTheOperators`] for one the operator did not write.
+    pub fn retire_entry(&self, id: &str) -> Result<(), Rejected> {
+        let mut state = self.shared.lock();
+        let entry = crate::object::EntryId::new(id).ok();
+        let because = operator_refusal(&state, id, "a retire").or_else(|| {
+            let object = &state.interview.as_ref()?.object;
+            let entry = entry.as_ref()?;
+            (!object.by_operator(entry)).then_some(Refusal::NotTheOperators)
+        });
+        if let Some(because) = because {
+            let refused = state.refuse(CommandKind::RetireEntry, because);
+            drop(state);
+            self.shared.changed.notify_all();
+            return Err(Rejected::Refused(refused));
+        }
+        state.admit_within_the_gap();
+        let Some(target) = entry else {
+            unreachable!("an id the object holds, as checked");
+        };
+        let patch = Patch::Retire {
+            target,
+            provenance: operator_provenance(&state),
+        };
+        let Some(interview) = state.interview.as_mut() else {
+            unreachable!("a live entry was checked above");
+        };
+        if interview.object.apply(&patch).is_err() {
+            unreachable!("a live entry of the operator's retired");
+        }
+        let line = patched(None, &patch, &interview.object);
+        state.push(line);
         drop(state);
         self.shared.changed.notify_all();
         Ok(())
@@ -6891,12 +7073,26 @@ pub fn line_of(logged: &Logged) -> log::Line {
             lane,
             op,
             entry,
+            text,
+            why,
+            ..
         } => log::Event::PatchRefused {
             fork: *fork,
             lane: lane.clone(),
             op: *op,
             entry: entry.clone(),
             reason: OPERATOR_ENTRY.to_owned(),
+            text: text.clone(),
+            why: why.clone(),
+        },
+        Event::Correction {
+            refused,
+            outcome,
+            entry,
+        } => log::Event::Correction {
+            refused: *refused,
+            outcome: *outcome,
+            entry: entry.clone(),
         },
         Event::Pruned {
             turn,
@@ -7044,6 +7240,8 @@ fn command_of(command: CommandKind) -> log::Command {
         CommandKind::Fork => log::Command::Fork,
         CommandKind::Suggestion => log::Command::Suggestion,
         CommandKind::Wrap => log::Command::Wrap,
+        CommandKind::Correction => log::Command::Correction,
+        CommandKind::RetireEntry => log::Command::RetireEntry,
     }
 }
 
@@ -7082,6 +7280,7 @@ fn refusal_of(refusal: Refusal) -> log::Refusal {
         Refusal::NotAPinnedAsk => log::Refusal::NotAPinnedAsk,
         Refusal::NotASuggestion => log::Refusal::NotASuggestion,
         Refusal::AnsweredAlready => log::Refusal::AnsweredAlready,
+        Refusal::NotTheOperators => log::Refusal::NotTheOperators,
         Refusal::WrappedAlready => log::Refusal::WrappedAlready,
         Refusal::AnchorNotUnique => log::Refusal::AnchorNotUnique,
     }
@@ -9884,6 +10083,79 @@ struct Suggestions {
     answered: BTreeSet<u64>,
 }
 
+/// A provenance of the operator's, at the session's turn and tangent.
+fn operator_provenance(state: &State) -> crate::object::Provenance {
+    crate::object::Provenance {
+        turn: state.turns,
+        lane: crate::object::OPERATOR.to_owned(),
+        fork: None,
+        tangent: state
+            .tangent
+            .as_ref()
+            .map(|(tangent, _)| tangent.id().to_owned()),
+        index: 0,
+    }
+}
+
+/// The operator's ruling that accepts `change`, a model's refused change to
+/// their entry (#1050): the same change, the operator's -- a supersede's
+/// words as a new entry of theirs, coined from the log's position -- or none
+/// when the entry it names is no longer live.
+fn ruled(state: &State, change: &Patch) -> Option<Patch> {
+    let object = &state.interview.as_ref()?.object;
+    let target = match change {
+        Patch::Supersede { voids, .. } => voids,
+        Patch::Resolve { target, .. }
+        | Patch::Retire { target, .. }
+        | Patch::Park { target, .. } => target,
+        Patch::Add { .. } => return None,
+    };
+    if !object
+        .entries()
+        .any(|entry| entry.id == *target && entry.state.is_live())
+    {
+        return None;
+    }
+    let provenance = operator_provenance(state);
+    Some(match change {
+        Patch::Supersede {
+            content,
+            voids,
+            refuted,
+            ..
+        } => Patch::Supersede {
+            id: crate::object::EntryId::new(&format!("operator-{}", state.log.len())).ok()?,
+            content: content.clone(),
+            voids: voids.clone(),
+            provenance,
+            refuted: refuted.clone(),
+        },
+        Patch::Resolve { target, .. } => Patch::Resolve {
+            target: target.clone(),
+            provenance,
+        },
+        Patch::Retire { target, .. } => Patch::Retire {
+            target: target.clone(),
+            provenance,
+        },
+        Patch::Park { target, .. } => Patch::Park {
+            target: target.clone(),
+            provenance,
+        },
+        Patch::Add { .. } => return None,
+    })
+}
+
+/// The model's refused changes to the operator's entries, offered as chips
+/// (#1050).
+#[derive(Debug, Default)]
+struct Corrections {
+    /// Each not yet answered, by its `patch.refused` line: the change.
+    offered: BTreeMap<u64, Patch>,
+    /// Each a `correction` line answered.
+    answered: BTreeSet<u64>,
+}
+
 /// The operator's answer to a shadow's suggestion (#1031).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SuggestionAnswer {
@@ -10571,11 +10843,25 @@ fn guarded(
     for patch in patches {
         match guard_refuses(patch, object) {
             Some((op, target)) => {
+                // What its chip shows (#1050): a supersede's words, and the
+                // model's reason when the change carries one.
+                let (text, why) = match patch {
+                    Patch::Supersede {
+                        content, refuted, ..
+                    } => (
+                        Some(content.clone()),
+                        refuted.as_ref().map(|refuted| refuted.because.clone()),
+                    ),
+                    _ => (None, None),
+                };
                 refused.push(Event::PatchRefused {
                     fork,
                     lane: fork.is_none().then(|| patch.provenance().lane.clone()),
                     op,
                     entry: target.as_str().to_owned(),
+                    text,
+                    why,
+                    change: Box::new(patch.clone()),
                 });
             }
             None => kept.push(patch.clone()),
@@ -19550,6 +19836,21 @@ pub(in crate::drive) mod tests {
                 lane: None,
                 op: log::PatchOp::Supersede,
                 entry: "operator-9".to_owned(),
+                text: Some("a tracker for one team".to_owned()),
+                why: None,
+                change: Box::new(Patch::Supersede {
+                    id: crate::object::EntryId::new("interview-t2-0").expect("an id"),
+                    content: "a tracker for one team".to_owned(),
+                    voids: crate::object::EntryId::new("operator-9").expect("an id"),
+                    provenance: crate::object::Provenance {
+                        turn: 2,
+                        lane: "interview".to_owned(),
+                        fork: Some("f/20".to_owned()),
+                        tangent: None,
+                        index: 0,
+                    },
+                    refuted: None,
+                }),
             },
             Event::PhaseRuled {
                 call: Some("call-p".to_owned()),
@@ -19687,6 +19988,16 @@ pub(in crate::drive) mod tests {
             prefix_after: "b".repeat(64),
             tail_tokens: 3,
         });
+        // #1050: the refused change above, its chip rejected.
+        let refused = events
+            .iter()
+            .position(|event| matches!(event, Event::PatchRefused { .. }))
+            .expect("a refused change") as u64;
+        events.push(Event::Correction {
+            refused,
+            outcome: log::SuggestionOutcome::Rejected,
+            entry: None,
+        });
         let mut kinds = std::collections::BTreeSet::new();
         for event in &events {
             kinds.insert(match event {
@@ -19746,9 +20057,10 @@ pub(in crate::drive) mod tests {
                 Event::Wrapped { .. } => 53,
                 Event::WrapAccepted { .. } => 54,
                 Event::OperatorNote { .. } => 55,
+                Event::Correction { .. } => 56,
             });
         }
-        assert_eq!(kinds.len(), 56, "a variant has no sample");
+        assert_eq!(kinds.len(), 57, "a variant has no sample");
         events
             .into_iter()
             .enumerate()
@@ -19764,7 +20076,7 @@ pub(in crate::drive) mod tests {
     /// A table, one entry per variant, so its length is its content.
     #[allow(clippy::too_many_lines)]
     fn the_lines_of_every_event() -> Vec<log::Event> {
-        vec![
+        let mut lines = vec![
             log::Event::SessionStart {
                 phase_document: None,
                 bash_timeout_ms: None,
@@ -20221,6 +20533,8 @@ pub(in crate::drive) mod tests {
                 op: log::PatchOp::Supersede,
                 entry: "operator-9".to_owned(),
                 reason: "operator-entry".to_owned(),
+                text: Some("a tracker for one team".to_owned()),
+                why: None,
             },
             log::Event::PhaseRuled {
                 call: Some("call-p".to_owned()),
@@ -20354,7 +20668,18 @@ pub(in crate::drive) mod tests {
                 prefix_after: "b".repeat(64),
                 tail_tokens: 3,
             },
-        ]
+        ];
+        // #1050: the refused change's chip, rejected.
+        let refused = lines
+            .iter()
+            .position(|line| matches!(line, log::Event::PatchRefused { .. }))
+            .expect("a refused change") as u64;
+        lines.push(log::Event::Correction {
+            refused,
+            outcome: log::SuggestionOutcome::Rejected,
+            entry: None,
+        });
+        lines
     }
 
     #[test]
@@ -20821,12 +21146,12 @@ pub(in crate::drive) mod tests {
             ),
             "ask cancel declare-meditation end open-tangent close-tangent background ratify-phase \
              edit-entry flag-entry refill-anyway start-phase propose-phase move-phase grade keep fork \
-             suggestion wrap"
+             suggestion wrap correction retire-entry"
         );
         assert_eq!(
             tags(&Refusal::ALL.iter().map(|it| it.tag()).collect::<Vec<_>>()),
             "in-flight ended nothing-in-flight nothing-to-meditate no-phase-graph not-a-phase \
-             already-in-phase no-phase-edge stale tangent-open no-tangent bad-tangent not-the-scope nothing-running no-proposal unknown-entry not-live empty meditation-held nothing-held restates not-unilateral already-asked proposal-pending no-vision api-cap not-a-source not-in-source no-working-memory not-on-the-trunk not-a-pinned-ask not-a-suggestion answered-already wrapped-already anchor-not-unique"
+             already-in-phase no-phase-edge stale tangent-open no-tangent bad-tangent not-the-scope nothing-running no-proposal unknown-entry not-live empty meditation-held nothing-held restates not-unilateral already-asked proposal-pending no-vision api-cap not-a-source not-in-source no-working-memory not-on-the-trunk not-a-pinned-ask not-a-suggestion answered-already not-the-operators wrapped-already anchor-not-unique"
         );
         assert_eq!(
             tags(
@@ -31839,6 +32164,216 @@ pub(in crate::drive) mod tests {
             "update_record",
             &serde_json::json!({ "field": field, "content": content }).to_string(),
         )
+    }
+
+    /// #1050: a model's change to the operator's entry that the guard
+    /// refuses is a chip. Accepted, it applies as the operator's ruling -- a
+    /// supersede's words as a new entry of theirs, rendered "you corrected,
+    /// user accepted" -- rejected, nothing changes; one left open is logged
+    /// unanswered at the next ask. And the operator retires their own
+    /// entries, and only theirs.
+    #[test]
+    #[allow(clippy::too_many_lines)] // one session, its chips, then the retires
+    fn a_refused_change_is_a_chip_and_the_operator_retires_their_own() {
+        use log::SuggestionOutcome::{Accepted, Rejected as Declined, Unanswered};
+        let call = |index: u64, id: &str, name: &str, args: serde_json::Value| {
+            Step::call(index, id, name, &args.to_string())
+        };
+        let mut interview = interviewing(&[]);
+        interview.self_capture = Some(crate::capture::tools::Cadence::DEFAULT);
+        interview.capture_contract = &crate::dogma::capture::C3;
+        let mut shape = template();
+        declare_self_capture(&mut shape, Some(&interview));
+        let session = Session::open_with(
+            Canned::new(vec![
+                vec![
+                    call(
+                        0,
+                        "call-1",
+                        "update_record",
+                        serde_json::json!({"content": "port 5180 is taken"}),
+                    ),
+                    call(
+                        1,
+                        "call-2",
+                        "update_record",
+                        serde_json::json!({"content": "the dev server is on port 5182", "supersedes": "op-1"}),
+                    ),
+                    call(
+                        2,
+                        "call-3",
+                        "resolve_entry",
+                        serde_json::json!({"entry": "op-2", "verdict": "done"}),
+                    ),
+                    call(
+                        3,
+                        "call-4",
+                        "resolve_entry",
+                        serde_json::json!({"entry": "op-3", "verdict": "done"}),
+                    ),
+                ],
+                deltas(&["noted"]),
+                deltas(&["again"]),
+            ]),
+            shape,
+            None,
+            None,
+            None,
+            Some(interview),
+        );
+        {
+            let mut state = session.shared.lock();
+            let object = &mut state.interview.as_mut().expect("memory").object;
+            for (id, content) in [
+                ("op-1", "the dev server is on port 5180"),
+                ("op-2", "the schema has two tables"),
+                ("op-3", "login is out of scope"),
+            ] {
+                object
+                    .apply(&Patch::Add {
+                        id: crate::object::EntryId::new(id).expect("an id"),
+                        content: content.to_owned(),
+                        provenance: crate::object::Provenance {
+                            turn: 0,
+                            lane: crate::object::OPERATOR.to_owned(),
+                            fork: None,
+                            tangent: None,
+                            index: 0,
+                        },
+                    })
+                    .expect("the operator's");
+            }
+        }
+        session
+            .ask("where is the dev server?", None)
+            .expect("accepted");
+        let log = wait_until(&session, "the turn", settled);
+        let refused: Vec<(u64, log::PatchOp, String, Option<String>)> = log
+            .iter()
+            .filter_map(|logged| match &logged.event {
+                Event::PatchRefused {
+                    op, entry, text, ..
+                } => Some((logged.seq, *op, entry.clone(), text.clone())),
+                _ => None,
+            })
+            .collect();
+        let [
+            (supersede, log::PatchOp::Supersede, op1, Some(words)),
+            (resolve, log::PatchOp::Resolve, op2, None),
+            (left, log::PatchOp::Resolve, op3, None),
+        ] = &refused[..]
+        else {
+            panic!(
+                "three refused changes: {refused:?}\n{:#?}",
+                log.iter()
+                    .filter(|l| matches!(
+                        l.event,
+                        Event::ToolCalled(_) | Event::Captured { .. } | Event::Patched { .. }
+                    ))
+                    .collect::<Vec<_>>()
+            );
+        };
+        assert_eq!(
+            (op1.as_str(), op2.as_str(), op3.as_str()),
+            ("op-1", "op-2", "op-3")
+        );
+        assert_eq!(
+            words, "the dev server is on port 5182",
+            "the chip shows the change"
+        );
+        // Accepted: the change, as the operator's.
+        let corrected = session
+            .correction(*supersede, SuggestionAnswer::Accept)
+            .expect("accepted")
+            .expect("an entry");
+        assert_eq!(
+            session.correction(*supersede, SuggestionAnswer::Accept),
+            Err(Rejected::Refused(Refusal::AnsweredAlready))
+        );
+        assert_eq!(
+            session.correction(9_999, SuggestionAnswer::Accept),
+            Err(Rejected::Refused(Refusal::NotASuggestion))
+        );
+        // Rejected: nothing changes.
+        assert_eq!(
+            session.correction(*resolve, SuggestionAnswer::Reject),
+            Ok(None)
+        );
+        let rendered = {
+            let state = session.shared.lock();
+            crate::meditation::render::render(
+                &state.interview.as_ref().expect("memory").object,
+                None,
+            )
+        };
+        assert!(
+            rendered.contains(&format!(
+                "{corrected}\tyou corrected, user accepted\tthe dev server is on port 5182\n"
+            )),
+            "{rendered}"
+        );
+        assert!(
+            !rendered.contains("\tthe dev server is on port 5180\n"),
+            "voided: {rendered}"
+        );
+        assert!(
+            rendered.contains("op-2\tuser said\tthe schema has two tables\n"),
+            "{rendered}"
+        );
+        // The third chip is left open, and the next ask logs it unanswered.
+        session.ask("go on", None).expect("accepted");
+        let log = wait_until(&session, "the second turn", two_settled);
+        let answers: Vec<(u64, log::SuggestionOutcome, Option<String>)> = log
+            .iter()
+            .filter_map(|logged| match &logged.event {
+                Event::Correction {
+                    refused,
+                    outcome,
+                    entry,
+                } => Some((*refused, *outcome, entry.clone())),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(
+            answers,
+            vec![
+                (*supersede, Accepted, Some(corrected.clone())),
+                (*resolve, Declined, None),
+                (*left, Unanswered, None),
+            ]
+        );
+        // The operator retires their own entry, and only theirs.
+        let note = log
+            .iter()
+            .find_map(|logged| match &logged.event {
+                Event::Patched { entry, .. } if entry.text == "port 5180 is taken" => {
+                    Some(entry.id.clone())
+                }
+                _ => None,
+            })
+            .expect("the model's note");
+        assert_eq!(
+            session.retire_entry(&note),
+            Err(Rejected::Refused(Refusal::NotTheOperators))
+        );
+        assert_eq!(
+            session.retire_entry("nowhere"),
+            Err(Rejected::Refused(Refusal::UnknownEntry))
+        );
+        session.retire_entry("op-2").expect("retired");
+        assert_eq!(
+            session.retire_entry("op-2"),
+            Err(Rejected::Refused(Refusal::NotLive))
+        );
+        let rendered = {
+            let state = session.shared.lock();
+            crate::meditation::render::render(
+                &state.interview.as_ref().expect("memory").object,
+                None,
+            )
+        };
+        assert!(!rendered.contains("op-2\t"), "retired: {rendered}");
+        reads_whole(&session);
     }
 
     /// #1016: under contract set c3 a note is always kept, and the model is

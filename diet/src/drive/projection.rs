@@ -1087,6 +1087,7 @@ impl<'a> Walk<'a> {
             Line::ForkSkipped { .. } => log::Kind::ForkSkipped,
             Line::ForkShadowed { .. } => log::Kind::ForkShadowed,
             Line::Suggestion { .. } => log::Kind::Suggestion,
+            Line::Correction { .. } => log::Kind::Correction,
             Line::Wrapped { .. } => log::Kind::Wrapped,
             Line::WrapAccepted { .. } => log::Kind::WrapAccepted,
             Line::OperatorNote { .. } => log::Kind::OperatorNote,
@@ -1238,6 +1239,7 @@ impl<'a> Walk<'a> {
             | Line::ForkSkipped { .. }
             | Line::ForkShadowed { .. }
             | Line::Suggestion { .. }
+            | Line::Correction { .. }
             // An operator's wrap, accepted (#1030): its `wrapped` line, when
             // applied, changes the trunk.
             | Line::WrapAccepted { .. }

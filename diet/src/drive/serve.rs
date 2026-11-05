@@ -1061,10 +1061,20 @@ impl<S: Streaming + 'static> Serving<S> {
                     })
                 })
             }
+            // #1050: accepted, the entry the change wrote or ruled on.
+            Command::Correction(refused, answer) => {
+                self.session.correction(refused, answer).map(|entry| {
+                    entry.map_or_else(BTreeMap::new, |entry| {
+                        BTreeMap::from([("entry".to_owned(), Value::String(entry))])
+                    })
+                })
+            }
+            Command::RetireEntry(id) => self.session.retire_entry(&id).map(|()| BTreeMap::new()),
             _ => unreachable!("only the operator's gestures"),
         }
     }
 
+    #[allow(clippy::too_many_lines)] // one arm per command
     fn run(&self, command: Posted) -> (u16, BTreeMap<String, Value>) {
         let refused = |because: Refusal| {
             (
@@ -1141,7 +1151,9 @@ impl<S: Streaming + 'static> Serving<S> {
             command @ (Command::Fork(..)
             | Command::Keep(..)
             | Command::Suggestion(..)
-            | Command::Wrap(..)) => match self.gesture(command) {
+            | Command::Wrap(..)
+            | Command::Correction(..)
+            | Command::RetireEntry(..)) => match self.gesture(command) {
                 Ok(body) => (200, body),
                 Err(rejection) => rejected(rejection),
             },
@@ -1239,6 +1251,11 @@ enum Command {
     /// Wrap the result of the `tool_call` line with the first seq, by the
     /// span from the line with the second (#1030).
     Wrap(u64, u64, Option<String>),
+    /// Answer the correction at the `patch.refused` line with this seq
+    /// (#1050).
+    Correction(u64, crate::drive::session::SuggestionAnswer),
+    /// Retire this entry of the operator's own (#1050).
+    RetireEntry(String),
 }
 
 /// A command's word as a client written before #583's rename may send it,
@@ -1319,7 +1336,8 @@ impl Command {
             // #150: the entry and the operator's text; an edit or a flag
             // ends no idle gap.
             CommandKind::EditEntry => &["kind", "id", "content", "note"],
-            CommandKind::FlagEntry => &["kind", "id", "note"],
+            // #1050: so does the operator's retire of their own entry.
+            CommandKind::FlagEntry | CommandKind::RetireEntry => &["kind", "id", "note"],
             // #788: the operator's phase commands; none ends an idle gap.
             CommandKind::StartPhase => &["kind", "phase", "note"],
             CommandKind::ProposePhase | CommandKind::MovePhase => {
@@ -1333,6 +1351,8 @@ impl Command {
             CommandKind::Suggestion => &["kind", "shadow", "answer", "note"],
             // #1030: the operator's wrap ends no idle gap.
             CommandKind::Wrap => &["kind", "call", "from", "span", "note"],
+            // #1050: a correction's answer and a retire end no idle gap.
+            CommandKind::Correction => &["kind", "refused", "answer", "note"],
             // #942: a runner's grade ends no idle gap.
             CommandKind::Grade => &[
                 "kind",
@@ -1485,6 +1505,24 @@ impl Command {
                     _ => None,
                 }
             }
+            CommandKind::Correction => {
+                use crate::drive::session::SuggestionAnswer;
+                let answer = match object.get("answer") {
+                    Some(Value::String(word)) if word == "accept" => SuggestionAnswer::Accept,
+                    Some(Value::String(word)) if word == "reject" => SuggestionAnswer::Reject,
+                    _ => return None,
+                };
+                match object.get("refused") {
+                    Some(Value::Integer(refused)) => u64::try_from(*refused)
+                        .ok()
+                        .map(|refused| Self::Correction(refused, answer)),
+                    _ => None,
+                }
+            }
+            CommandKind::RetireEntry => match object.get("id") {
+                Some(Value::String(id)) if !id.is_empty() => Some(Self::RetireEntry(id.clone())),
+                _ => None,
+            },
             CommandKind::Keep => {
                 // An exact span, or a start and an end anchor (#1038): one
                 // or the other, never both.
@@ -2434,6 +2472,40 @@ mod tests {
 
     /// #1030: a wrap names the `tool_call` line, the line its span comes
     /// from and the span; anything else, or an idle gap, is no command.
+    /// #1050: a correction reads its refused line and its answer; a retire
+    /// its entry; each nothing else.
+    #[test]
+    fn a_correction_and_a_retire_read_what_they_name_and_nothing_else() {
+        use crate::drive::session::SuggestionAnswer;
+        let read = |body: &str| {
+            let object = crate::formats::record::json::line(body).expect("an object");
+            Command::from_object(&object).map(|posted| posted.command)
+        };
+        assert!(matches!(
+            read(r#"{"kind":"correction","refused":14,"answer":"accept"}"#),
+            Some(Command::Correction(14, SuggestionAnswer::Accept))
+        ));
+        assert!(matches!(
+            read(r#"{"kind":"correction","refused":14,"answer":"reject","note":"no"}"#),
+            Some(Command::Correction(14, SuggestionAnswer::Reject))
+        ));
+        assert!(matches!(
+            read(r#"{"kind":"retire-entry","id":"operator-9"}"#),
+            Some(Command::RetireEntry(id)) if id == "operator-9"
+        ));
+        for refused in [
+            r#"{"kind":"correction","refused":14}"#,
+            r#"{"kind":"correction","answer":"accept"}"#,
+            r#"{"kind":"correction","refused":14,"answer":"maybe"}"#,
+            r#"{"kind":"correction","refused":-1,"answer":"accept"}"#,
+            r#"{"kind":"retire-entry"}"#,
+            r#"{"kind":"retire-entry","id":""}"#,
+            r#"{"kind":"retire-entry","id":"x","content":"y"}"#,
+        ] {
+            assert!(read(refused).is_none(), "{refused}");
+        }
+    }
+
     #[test]
     fn a_wrap_reads_its_call_source_and_span_and_nothing_else() {
         let read = |body: &str| {

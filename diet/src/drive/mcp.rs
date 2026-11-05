@@ -356,6 +356,7 @@ pub fn tools() -> Value {
     all.extend(first_tools());
     all.extend(later_tools());
     all.extend(phase_tools());
+    all.extend(correction_tools());
     all.extend(last_tools());
     Value::Array(all)
 }
@@ -537,6 +538,34 @@ fn later_tools() -> Vec<Value> {
     ]
 }
 
+/// The operator's answer to a model's refused change, and their retire of
+/// their own entry (#1050).
+fn correction_tools() -> Vec<Value> {
+    vec![
+        tool(
+            "retire_entry",
+            "Retire one of the operator's own live entries (the `retire-entry` command, #1050): \
+             it stops mattering, and is kept.",
+            object(json!({"id": string("The entry's id.")}), &["id"]),
+        ),
+        tool(
+            "correction",
+            "Answer a correction (the `correction` command, #1050): a model's change to the \
+             operator's entry that the guard refused, offered as a chip by its `patch.refused` \
+             line. Accepted, the change applies as the operator's ruling and answers the entry \
+             it wrote or ruled on; rejected, nothing changes. One left open is logged \
+             unanswered at the next ask.",
+            object(
+                json!({
+                    "refused": integer("The seq of the `patch.refused` line."),
+                    "answer": {"type": "string", "enum": ["accept", "reject"]}
+                }),
+                &["refused", "answer"],
+            ),
+        ),
+    ]
+}
+
 /// A phase's two keys (#788, #790): the operator's proposal, the operator's
 /// move alone, and a ruling on the model's.
 fn phase_tools() -> Vec<Value> {
@@ -651,6 +680,19 @@ fn wrap_body(args: &Args<'_>) -> Result<Value, String> {
             "span": span
         }),
         None => json!({"kind": "wrap", "call": call}),
+    })
+}
+
+/// The `retire-entry` and `correction` commands' bodies (#1050).
+fn correction_body(name: &str, args: &Args<'_>) -> Result<Value, String> {
+    Ok(if name == "retire_entry" {
+        json!({"kind": "retire-entry", "id": args.string("id")?})
+    } else {
+        json!({
+            "kind": "correction",
+            "refused": args.optional_count("refused")?.ok_or_else(|| "`refused` is required".to_owned())?,
+            "answer": args.string("answer")?
+        })
     })
 }
 
@@ -915,6 +957,7 @@ pub fn call(serve: &Serve, name: &str, arguments: &Map<String, Value>) -> Result
             "id": args.string("id")?,
             "content": args.string("content")?
         }))?,
+        "retire_entry" | "correction" => serve.command(&correction_body(name, &args)?)?,
         "flag" => serve.command(&json!({
             "kind": "flag-entry",
             "id": args.string("id")?,
@@ -1604,6 +1647,8 @@ mod tests {
                 "propose_phase",
                 "move_phase",
                 "rule_phase",
+                "retire_entry",
+                "correction",
                 "open_tangent",
                 "close_tangent",
                 "events",
