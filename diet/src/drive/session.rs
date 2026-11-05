@@ -10289,6 +10289,21 @@ fn operator_fork_over(state: &mut State) {
     }
 }
 
+/// Whether the fork at the logged line `fork` fired a pinned template by
+/// name (#783): its ask asks for text, on either route (#1052).
+fn pinned_fork(log: &[Logged], fork: u64) -> bool {
+    log.iter().any(|logged| {
+        logged.seq == fork
+            && matches!(
+                &logged.event,
+                Event::Forked {
+                    pinned: Some(_),
+                    ..
+                }
+            )
+    })
+}
+
 /// Whether the fork at `fork` is the operator's (#1021): its answer is
 /// logged and shown, and folded into nothing.
 fn operator_fork(log: &[Logged], fork: u64) -> bool {
@@ -15493,13 +15508,15 @@ fn settle_fork<S>(
                 // The operator's fork writes nothing (#1021): its answer is
                 // logged and shown, and the operator keeps what they want.
                 log::ForkOutcome::Value
-            } else if tools {
+            } else if tools && (refuting || !pinned_fork(&state.log, fork)) {
                 let (outcome, lines) = captured(state, &calls, (turn, request), fork);
                 patches = lines;
                 outcome
             } else {
                 // The fields route reads the prose and folds any record
-                // tool's call beside it (#806).
+                // tool's call beside it (#806); so, on the tools route, does
+                // a fork that fired a pinned ask, which asks for text
+                // (#1052).
                 let recorded = calls.iter().any(record_tool);
                 let prose = if text.trim().is_empty() && (recorded || not_run.is_some()) {
                     None
@@ -26731,6 +26748,63 @@ pub(in crate::drive) mod tests {
             !verdict_gates(&warrants, &mut counters, &step, &Verdict::Dropped(true))
                 .contains(&Gate::Open)
         }));
+    }
+
+    /// #1052: on the tools route, an automatic fork that fired a pinned,
+    /// text-shaped ask -- the trouble warrant's after a failed command -- has
+    /// its text answer read by the fields grammar, as the fields route reads
+    /// it; before, only record-tool calls were read and the text was lost.
+    #[test]
+    fn a_pinned_automatic_fork_on_the_tools_route_has_its_text_read() {
+        const SAID: &str =
+            "GOTCHA: missing.md does not exist — IMPLICATION: create it before reading";
+        let tree = scratch("tools-route-pinned");
+        let mut interview = Interview {
+            step: crate::drive::warrants::StepWarrants {
+                trouble: true,
+                ..crate::drive::warrants::StepWarrants::DEFAULTS
+            },
+            ..interviewing(&[log::Warrant::Trouble])
+        };
+        interview.capture = crate::dogma::asks::Modality::Tools;
+        interview.asks = &crate::dogma::asks::T2;
+        let session = Session::open_with(
+            Canned::new(vec![
+                vec![bash("call-1", "cat missing.md")],
+                deltas(&["done"]),
+            ]),
+            looping(),
+            None,
+            Some(tools(
+                Confinement::Unconfined,
+                &tree,
+                &["cat"],
+                None,
+                Decider::Decline,
+            )),
+            None,
+            Some(interview),
+        )
+        .forking_through(Canned::new(vec![deltas(&[SAID]); 8]));
+        session.ask("look", None).expect("accepted");
+        let log = wait_until(&session, "the turn and its forks", |log| {
+            settled(log) && !fork_outcomes(log).is_empty()
+        });
+        assert!(
+            !trouble_asks(&log).is_empty(),
+            "a pinned trouble fork fired"
+        );
+        let held: Vec<String> = live_entries(&session)
+            .into_iter()
+            .map(|(_, content)| content)
+            .collect();
+        assert!(
+            held.iter()
+                .any(|content| content.contains("missing.md does not exist")),
+            "the fork's text answer was read: {held:?}"
+        );
+        reads_whole(&session);
+        tidy(&[&tree]);
     }
 
     /// The templates the trouble forks asked, in order.
