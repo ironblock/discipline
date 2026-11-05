@@ -33005,7 +33005,8 @@ pub(in crate::drive) mod tests {
             .ratify_phase("call-p", PhaseChoice::Meditation)
             .expect("ruled");
         wait_until(&session, "the meditation", |log| {
-            log.iter().any(|l| matches!(l.event, Event::Meditated { .. }))
+            log.iter()
+                .any(|l| matches!(l.event, Event::Meditated { .. }))
         });
         session.ask("build it", None).expect("accepted");
         let log = wait_until(&session, "the turn after the refill", |log| {
@@ -33031,7 +33032,10 @@ pub(in crate::drive) mod tests {
             panic!("the log opens with its session");
         };
         *version = 37;
-        assert!(!unverified(&lines).is_empty(), "declared v37, the old forms do not match");
+        assert!(
+            !unverified(&lines).is_empty(),
+            "declared v37, the old forms do not match"
+        );
     }
 
     /// #1050: a log before v38 is rebuilt in the forms it sent -- the fixed
@@ -33049,7 +33053,10 @@ pub(in crate::drive) mod tests {
         ));
         assert!(lines.iter().any(|line| matches!(
             &line.event,
-            log::Event::Meditation { phase_document: Some(_), .. }
+            log::Event::Meditation {
+                phase_document: Some(_),
+                ..
+            }
         )));
         let projected =
             crate::drive::projection::project(&lines, &regime(), None).expect("projected");
