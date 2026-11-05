@@ -12127,7 +12127,27 @@ fn audit_folded(
     if patches.is_empty() {
         return (log::ForkOutcome::Decline, Vec::new());
     }
-    applied(state, &patches, fork)
+    // A REMOVE's reason, by the entry it names: what a refused retire's chip
+    // shows (#1050).
+    let removed: BTreeMap<String, String> = lines
+        .iter()
+        .filter_map(|line| match &line.judgment {
+            Judgment::Remove(why) => {
+                let target = items.get(usize::try_from(line.number).ok()? - 1)?;
+                Some((target.as_str().to_owned(), why.clone()))
+            }
+            _ => None,
+        })
+        .collect();
+    let (outcome, mut written) = applied(state, &patches, fork);
+    for line in &mut written {
+        if let Event::PatchRefused { entry, why, .. } = line
+            && why.is_none()
+        {
+            *why = removed.get(entry.as_str()).cloned();
+        }
+    }
+    (outcome, written)
 }
 
 /// Where a window meditation due on `shape` falls (#617, #813): the window,
@@ -15874,6 +15894,12 @@ fn folded(state: &mut State, text: &str, turn: u32, fork: u64) -> Folded {
             };
             *reason = cited.and_then(|cited| reasons.get(cited)).cloned();
         }
+        // And on a refused change's line, for its chip (#1050).
+        if let Event::PatchRefused { entry, why, .. } = line
+            && why.is_none()
+        {
+            *why = reasons.get(entry.as_str()).cloned();
+        }
     }
     (outcome, lines, guarded)
 }
@@ -17460,9 +17486,10 @@ pub(in crate::drive) mod tests {
         assert!(
             log.iter().any(|logged| matches!(
                 &logged.event,
-                Event::PatchRefused { entry, .. } if *entry == kept
+                Event::PatchRefused { entry, why, .. }
+                    if *entry == kept && why.as_deref() == Some("one table no longer holds")
             )),
-            "the guard refused it"
+            "the guard refused it, the SUPERSEDE's reason on its line for the chip (#1050)"
         );
         let passed: Vec<log::PassedOver> = log
             .iter()
@@ -25702,6 +25729,45 @@ pub(in crate::drive) mod tests {
         assert_eq!(audited_templates(&log).len(), 2);
         assert_eq!(held_on(&log), None);
         assert_eq!(every_carried(&log)[0].1, Some(Vec::new()));
+    }
+
+    /// #1050: an audit's REMOVE of the operator's entry is refused, and its
+    /// reason rides on the refused line, for the chip that offers it.
+    #[test]
+    fn an_audits_refused_remove_carries_its_reason() {
+        let session = three_decisions_then(
+            |meditations| meditations.audit = true,
+            vec![deltas(&["1. KEEP\n2. KEEP\n3. REMOVE — the team grew\n"])],
+        );
+        let edited = live_entries(&session)[1].0.clone();
+        session
+            .edit_entry(&edited, "decision: for the one team that files bugs")
+            .expect("an edit");
+        let operator = live_entries(&session)
+            .into_iter()
+            .find(|(_, content)| content == "decision: for the one team that files bugs")
+            .expect("the operator's entry")
+            .0;
+        session.declare_meditation(None).expect("admitted");
+        let log = wait_until(&session, "the meditation", meditated);
+        let refused: Vec<(log::PatchOp, String, Option<String>)> = log
+            .iter()
+            .filter_map(|logged| match &logged.event {
+                Event::PatchRefused { op, entry, why, .. } => {
+                    Some((*op, entry.clone(), why.clone()))
+                }
+                _ => None,
+            })
+            .collect();
+        assert_eq!(
+            refused,
+            vec![(
+                log::PatchOp::Retire,
+                operator,
+                Some("the team grew".to_owned())
+            )]
+        );
+        reads_whole(&session);
     }
 
     /// #150: the operator edits one decision -- a new entry, on the
