@@ -645,6 +645,9 @@ pub fn working_set_bytes(object: &WorkingObject) -> u64 {
 #[must_use]
 pub fn source(entry: &crate::object::Entry) -> String {
     use crate::object::{KeptFrom, Origin, Vouched};
+    if entry.origin == Some(Origin::Corrected) {
+        return "you corrected, user accepted".to_owned();
+    }
     if let Some(Origin::Kept { from, tag }) = &entry.origin {
         let said = match from {
             KeptFrom::Ask => "user said",

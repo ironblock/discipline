@@ -282,6 +282,9 @@ pub enum Origin {
     },
     /// A note in the model's own words, and what vouches for it.
     Noted(Vouched),
+    /// The model's correction of the operator's entry, which the operator
+    /// accepted (#1050).
+    Corrected,
 }
 
 /// What an operator's keep kept from (#1050).
@@ -1324,6 +1327,9 @@ fn origin_of(line: &BTreeMap<String, Value>) -> Result<Option<Origin>, String> {
         Some(Value::String(text)) => Ok(Some(text.clone())),
         Some(_) => Err(format!("`{key}` is not text")),
     };
+    if line.get("corrected") == Some(&Value::Boolean(true)) {
+        return Ok(Some(Origin::Corrected));
+    }
     Ok(match (optional("kept_from")?, optional("authority")?) {
         (Some(from), None) => Some(Origin::Kept {
             from: KeptFrom::from_word(&from)
@@ -1391,6 +1397,9 @@ fn entry_value(entry: &Entry, aliases: &[&EntryId]) -> Value {
                 "authority".to_owned(),
                 Value::String(vouched.word().to_owned()),
             );
+        }
+        Some(Origin::Corrected) => {
+            members.insert("corrected".to_owned(), Value::Boolean(true));
         }
         None => {}
     }
