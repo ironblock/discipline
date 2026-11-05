@@ -1042,10 +1042,15 @@ impl<S: Streaming + 'static> Serving<S> {
                         ("span".to_owned(), Value::String(span)),
                     ])
                 }),
-            Command::Wrap(call, from, span) => self
+            Command::Wrap(call, from, Some(span)) => self
                 .session
                 .wrap(call, from, &span)
                 .map(|entry| BTreeMap::from([("entry".to_owned(), Value::String(entry))])),
+            // No span (#1050): nothing kept, so no entry rides back.
+            Command::Wrap(call, _, None) => self
+                .session
+                .wrap_without_span(call)
+                .map(|()| BTreeMap::new()),
             Command::Suggestion(shadow, answer) => {
                 self.session.suggestion(shadow, answer).map(|fork| {
                     fork.map_or_else(BTreeMap::new, |fork| {
@@ -1233,7 +1238,7 @@ enum Command {
     Suggestion(u64, crate::drive::session::SuggestionAnswer),
     /// Wrap the result of the `tool_call` line with the first seq, by the
     /// span from the line with the second (#1030).
-    Wrap(u64, u64, String),
+    Wrap(u64, u64, Option<String>),
 }
 
 /// A command's word as a client written before #583's rename may send it,
@@ -1450,7 +1455,19 @@ impl Command {
                     ) => u64::try_from(*call)
                         .ok()
                         .zip(u64::try_from(*from).ok())
-                        .map(|(call, from)| Self::Wrap(call, from, span.clone())),
+                        .map(|(call, from)| Self::Wrap(call, from, Some(span.clone()))),
+                    // No span (#1050): the result is cleared, and nothing kept;
+                    // its source is the call, named or not.
+                    (Some(Value::Integer(call)), from, None) => {
+                        let call = u64::try_from(*call).ok()?;
+                        match from {
+                            None => Some(Self::Wrap(call, call, None)),
+                            Some(Value::Integer(from)) if u64::try_from(*from).ok()? == call => {
+                                Some(Self::Wrap(call, call, None))
+                            }
+                            _ => None,
+                        }
+                    }
                     _ => None,
                 }
             }
@@ -2425,12 +2442,22 @@ mod tests {
         };
         assert!(matches!(
             read(r#"{"kind":"wrap","call":6,"from":19,"span":"It holds a note."}"#),
-            Some(Command::Wrap(6, 19, span)) if span == "It holds a note."
+            Some(Command::Wrap(6, 19, Some(span))) if span == "It holds a note."
         ));
+        // No span (#1050): the call alone, or with itself as the source.
+        for cleared in [
+            r#"{"kind":"wrap","call":6}"#,
+            r#"{"kind":"wrap","call":6,"from":6}"#,
+        ] {
+            assert!(
+                matches!(read(cleared), Some(Command::Wrap(6, 6, None))),
+                "{cleared}"
+            );
+        }
         for refused in [
             r#"{"kind":"wrap","call":6,"span":"x"}"#,
             r#"{"kind":"wrap","from":6,"span":"x"}"#,
-            r#"{"kind":"wrap","call":6,"from":6}"#,
+            r#"{"kind":"wrap","call":6,"from":19}"#,
             r#"{"kind":"wrap","call":-1,"from":6,"span":"x"}"#,
             r#"{"kind":"wrap","call":6,"from":6,"span":"x","tag":"y"}"#,
             r#"{"kind":"wrap","call":6,"from":6,"span":"x","idle_gap":{}}"#,

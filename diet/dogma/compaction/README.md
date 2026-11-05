@@ -2,6 +2,8 @@
 
 `qwen-code-v0.25.3.txt` is the system message of the summary request under `meditation_carry = "native_summary"` (#936). It is sent as written, so it is pinned in `../MANIFEST.tsv` as `compaction/qwen-code-v0.25.3` and must stay byte-exact. A change adds a file and bumps the dogma version.
 
+`qwen-code-v0.25.3-cleared.txt` is Qwen Code's stub for a tool result its microcompaction cleared, `[Old tool result content cleared]`: what the trunk carries in the place of a result the operator wraps with no span (#1050). It is pinned as `compaction/qwen-code-v0.25.3-cleared`, byte-exact, with no trailing newline. Its source is `packages/core/src/services/microcompaction/microcompact.ts`, line 14, `MICROCOMPACT_CLEARED_MESSAGE`, at the same tag; the license below covers it.
+
 ## Source
 
 - **Repository:** `QwenLM/qwen-code`, tag `v0.25.3` (`b28b0d948fa28b89750ac5f1525b95e1746f47ab`).

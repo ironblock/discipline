@@ -268,6 +268,12 @@
 //! log that declares 28 or less and carries it is refused. For a reader of
 //! earlier logs, the migration is nothing: no session declared one.
 //!
+//! v40 (#1050) carries a wrap that keeps nothing: `wrap.accepted` and
+//! `wrapped` may name no `entry`, the trunk carrying Qwen Code's
+//! `[Old tool result content cleared]` in the result's place. A line with no
+//! `entry` is refused in a log that declares 39 or less. For a reader of
+//! earlier logs, the migration is nothing.
+//!
 //! v39 (#1050) carries where working memory's words came from: a
 //! `patch` entry's `authority` may be `user-stated`, a note whose quote was
 //! found in the user's ask and not the turn's tool output; and an operator's
@@ -457,12 +463,12 @@ use super::record::vocabulary;
 struct LogParser;
 
 /// The version this module writes, as `session.start` states it.
-pub const VERSION: i64 = 39;
+pub const VERSION: i64 = 40;
 
 /// Every version this module reads.
 pub const READS: &[i64] = &[
     0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25,
-    26, 27, 28, 29, 30, 31, 32, 33, 34, 35, 36, 37, 38, 39,
+    26, 27, 28, 29, 30, 31, 32, 33, 34, 35, 36, 37, 38, 39, 40,
 ];
 
 /// How recent an input event must be, at the moment a turn settles, for the
@@ -2315,10 +2321,12 @@ pub enum Event {
     WrapAccepted {
         /// The `seq` of the `tool_call` whose result it wraps.
         call: u64,
-        /// The `seq` of the line the span came from.
+        /// The `seq` of the line the span came from: the call itself for a
+        /// wrap with no span.
         from: u64,
-        /// The operator entry that holds the span.
-        entry: String,
+        /// The operator entry that holds the span; absent for a wrap with no
+        /// span, which keeps nothing (v40, #1050).
+        entry: Option<String>,
     },
     /// The operator's note on a gesture (v36, #1037), logged immediately
     /// before the gesture's outcome.
@@ -2339,8 +2347,9 @@ pub enum Event {
         /// The `seq` of the line the span came from: that `tool_call`, or the
         /// `response` of an operator's fork cut at it.
         from: u64,
-        /// The operator entry that holds the span.
-        entry: String,
+        /// The operator entry that holds the span; absent for a wrap with no
+        /// span (v40, #1050).
+        entry: Option<String>,
         /// What the trunk carries in the result's place.
         text: String,
         /// The result's bytes as the trunk carried it.
@@ -4054,6 +4063,25 @@ fn in_order(line: &Line, index: usize, last_t: u64) -> Result<(), String> {
     Ok(())
 }
 
+/// A value -- not a key -- that arrived after its key did (#1050), with
+/// the version it arrived in: a wrap that keeps nothing (v40), and a note
+/// the user's words vouch for (v39).
+fn value_arrived(kind: Kind, object: &BTreeMap<String, Value>) -> Option<(i64, String)> {
+    if matches!(kind, Kind::WrapAccepted | Kind::Wrapped) && !object.contains_key("entry") {
+        return Some((40, format!("`{}` carries no `entry`", kind.tag())));
+    }
+    if kind == Kind::Patch
+        && let Some(Value::Object(entry)) = object.get("entry")
+        && entry.get("authority") == Some(&Value::String(USER_STATED.to_owned()))
+    {
+        return Some((
+            39,
+            "`patch`'s `entry.authority` is `user-stated`".to_owned(),
+        ));
+    }
+    None
+}
+
 /// What in `line` arrived after the version the log declares, if anything:
 /// its kind, a key it carries, or a tag it holds -- each read off
 /// [`introduced`], [`schema`]'s `since` and [`tag_introduced`], the one
@@ -4081,14 +4109,8 @@ fn beyond(line: &Line, declared: i64) -> Option<String> {
     {
         return Some(why);
     }
-    // A note the user's words vouch for (#1050).
-    if kind == Kind::Patch
-        && let Some(Value::Object(entry)) = object.get("entry")
-        && entry.get("authority") == Some(&Value::String(USER_STATED.to_owned()))
-        && let Some(why) = arrived(
-            39,
-            "`patch`'s `entry.authority` is `user-stated`".to_owned(),
-        )
+    if let Some((since, what)) = value_arrived(kind, &object)
+        && let Some(why) = arrived(since, what)
     {
         return Some(why);
     }
@@ -4502,7 +4524,7 @@ struct Wraps<'a> {
     /// Each operator entry an operator patch wrote.
     entries: BTreeSet<&'a str>,
     /// Each call a wrap was accepted for: its source and entry.
-    accepted: BTreeMap<u64, (u64, &'a str)>,
+    accepted: BTreeMap<u64, (u64, Option<&'a str>)>,
     /// Each call a wrap was applied to.
     wrapped: BTreeSet<u64>,
 }
@@ -4542,7 +4564,9 @@ impl<'a> Wraps<'a> {
             } if by == crate::object::OPERATOR => {
                 self.entries.insert(&entry.id);
             }
-            Event::WrapAccepted { call, from, entry } => self.accept(*call, *from, entry)?,
+            Event::WrapAccepted { call, from, entry } => {
+                self.accept(*call, *from, entry.as_deref())?;
+            }
             Event::Wrapped {
                 call,
                 from,
@@ -4551,7 +4575,11 @@ impl<'a> Wraps<'a> {
                 bytes_before,
                 bytes_after,
                 ..
-            } => self.apply((*call, *from, entry), text, (*bytes_before, *bytes_after))?,
+            } => self.apply(
+                (*call, *from, entry.as_deref()),
+                text,
+                (*bytes_before, *bytes_after),
+            )?,
             _ => {}
         }
         Ok(())
@@ -4574,7 +4602,7 @@ impl<'a> Wraps<'a> {
             .map(|(_, answer)| *answer)
     }
 
-    fn accept(&mut self, call: u64, from: u64, entry: &'a str) -> Result<(), String> {
+    fn accept(&mut self, call: u64, from: u64, entry: Option<&'a str>) -> Result<(), String> {
         if !self.shown.contains_key(&call) {
             return Err(format!(
                 "a wrap of seq {call}, which is no earlier `tool_call` that ran and was shown"
@@ -4589,17 +4617,26 @@ impl<'a> Wraps<'a> {
                  operator's fork cut at it"
             ));
         }
-        if !self.entries.contains(entry) {
-            return Err(format!(
-                "a wrap's entry `{entry}`, which no earlier operator patch wrote"
-            ));
+        match entry {
+            Some(entry) if !self.entries.contains(entry) => {
+                return Err(format!(
+                    "a wrap's entry `{entry}`, which no earlier operator patch wrote"
+                ));
+            }
+            // A wrap that keeps nothing (v40, #1050) has no source but the call.
+            None if from != call => {
+                return Err(format!(
+                    "a wrap with no entry, from seq {from} rather than its call's {call}"
+                ));
+            }
+            _ => {}
         }
         Ok(())
     }
 
     fn apply(
         &mut self,
-        (call, from, entry): (u64, u64, &str),
+        (call, from, entry): (u64, u64, Option<&str>),
         text: &str,
         (before, after): (u64, u64),
     ) -> Result<(), String> {
@@ -4615,10 +4652,20 @@ impl<'a> Wraps<'a> {
         let (Some(result), Some(source)) = (self.shown.get(&call), self.source(call, from)) else {
             unreachable!("an accepted wrap's call was shown and its source read");
         };
-        if text.is_empty() || !source.contains(text) {
-            return Err(format!(
-                "a wrap's text is not in the line at seq {from} it came from"
-            ));
+        // A wrap that keeps nothing carries Qwen Code's cleared stub (#1050).
+        let stub = crate::dogma::compaction::QWEN_CODE_CLEARED;
+        match entry {
+            None if text != stub => {
+                return Err(format!(
+                    "a wrap with no entry carries `{text}`, not `{stub}`"
+                ));
+            }
+            Some(_) if text.is_empty() || !source.contains(text) => {
+                return Err(format!(
+                    "a wrap's text is not in the line at seq {from} it came from"
+                ));
+            }
+            _ => {}
         }
         if before != result.len() as u64 || after != text.len() as u64 {
             return Err("a wrap's bytes are not the result's and the text's lengths".to_owned());
@@ -5420,13 +5467,13 @@ fn from_object(object: &BTreeMap<String, Value>) -> Result<Line, String> {
         Kind::WrapAccepted => Event::WrapAccepted {
             call: fields.count("call")?,
             from: fields.count("from")?,
-            entry: fields.string("entry")?,
+            entry: fields.optional_string("entry")?,
         },
         Kind::Wrapped => Event::Wrapped {
             turn: fields.turn("turn")?,
             call: fields.count("call")?,
             from: fields.count("from")?,
-            entry: fields.string("entry")?,
+            entry: fields.optional_string("entry")?,
             text: fields.string("text")?,
             bytes_before: fields.count("bytes_before")?,
             bytes_after: fields.count("bytes_after")?,
@@ -7619,7 +7666,13 @@ pub fn schema(kind: Kind) -> &'static [Field] {
             const F: &[Field] = &[
                 must_v35("call", Count),
                 must_v35("from", Count),
-                must_v35("entry", Text),
+                // Absent from v40 (#1050): a wrap with no span.
+                Field {
+                    key: "entry",
+                    holds: Text,
+                    required: false,
+                    since: 35,
+                },
             ];
             F
         }
@@ -7628,7 +7681,13 @@ pub fn schema(kind: Kind) -> &'static [Field] {
                 must_v35("turn", Count),
                 must_v35("call", Count),
                 must_v35("from", Count),
-                must_v35("entry", Text),
+                // Absent from v40 (#1050): a wrap with no span.
+                Field {
+                    key: "entry",
+                    holds: Text,
+                    required: false,
+                    since: 35,
+                },
                 must_v35("text", Text),
                 must_v35("bytes_before", Count),
                 must_v35("bytes_after", Count),
@@ -9036,7 +9095,9 @@ fn to_value(line: &Line) -> Value {
         Event::WrapAccepted { call, from, entry } => {
             put("call", count(*call));
             put("from", count(*from));
-            put("entry", text(entry));
+            if let Some(entry) = entry {
+                put("entry", text(entry));
+            }
             Kind::WrapAccepted
         }
         Event::Wrapped {
@@ -9054,7 +9115,9 @@ fn to_value(line: &Line) -> Value {
             put("turn", count(u64::from(*turn)));
             put("call", count(*call));
             put("from", count(*from));
-            put("entry", text(entry));
+            if let Some(entry) = entry {
+                put("entry", text(entry));
+            }
             put("text", text(carried));
             put("bytes_before", count(*bytes_before));
             put("bytes_after", count(*bytes_after));
@@ -10853,15 +10916,15 @@ mod tests {
     }
 
     /// #583, #878, #904, #555, #931, #936, #910, #942, #926, #932, #948, #971, #1016, #1021,
-    /// #1022, #1031, #1030, #1037, #1038, #1050: this module writes v39.
+    /// #1022, #1031, #1030, #1037, #1038, #1050: this module writes v40.
     #[test]
-    fn this_module_writes_v39_and_reads_every_version_before_it() {
-        assert_eq!(super::VERSION, 39);
+    fn this_module_writes_v40_and_reads_every_version_before_it() {
+        assert_eq!(super::VERSION, 40);
         assert_eq!(
             super::READS,
             &[
                 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22,
-                23, 24, 25, 26, 27, 28, 29, 30, 31, 32, 33, 34, 35, 36, 37, 38, 39
+                23, 24, 25, 26, 27, 28, 29, 30, 31, 32, 33, 34, 35, 36, 37, 38, 39, 40
             ]
         );
     }
@@ -11757,18 +11820,45 @@ mod tests {
             Event::WrapAccepted {
                 call: ran,
                 from: ran,
-                entry: "operator-w".to_owned(),
+                entry: Some("operator-w".to_owned()),
             },
             Event::Wrapped {
                 turn,
                 call: ran,
                 from: ran,
-                entry: "operator-w".to_owned(),
+                entry: Some("operator-w".to_owned()),
                 text: "port 5182 is free".to_owned(),
                 bytes_before: 27,
                 bytes_after: 17,
                 prefix_before: "a".repeat(64),
                 prefix_after: "b".repeat(64),
+                tail_tokens: 9,
+            },
+        ]);
+        // v40 (#1050): another call that ran, wrapped with no span: nothing
+        // kept, Qwen Code's cleared stub in its place.
+        let cleared = events.len() as u64;
+        let mut again = events[usize::try_from(ran).expect("an index")].clone();
+        if let Event::ToolCall { id, .. } = &mut again {
+            "call-c".clone_into(id);
+        }
+        events.extend([
+            again,
+            Event::WrapAccepted {
+                call: cleared,
+                from: cleared,
+                entry: None,
+            },
+            Event::Wrapped {
+                turn,
+                call: cleared,
+                from: cleared,
+                entry: None,
+                text: crate::dogma::compaction::QWEN_CODE_CLEARED.to_owned(),
+                bytes_before: 27,
+                bytes_after: 33,
+                prefix_before: "c".repeat(64),
+                prefix_after: "d".repeat(64),
                 tail_tokens: 9,
             },
         ]);
