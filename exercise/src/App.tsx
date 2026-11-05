@@ -1,7 +1,9 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 
 import { CannedTransport } from './drive/canned.ts';
 import { HttpTransport } from './drive/http.ts';
+import { notices, shellNotify } from './drive/notices.ts';
+import type { Waits } from './drive/notices.ts';
 import type { Web } from './drive/http.ts';
 import { ReplayTransport } from './drive/recorded.ts';
 import { SESSIONS } from './drive/sessions.ts';
@@ -68,6 +70,14 @@ export function App({
   };
   const [waiting, setWaiting] = useState<Prompt | undefined>(undefined);
   useEffect(() => (transport as DriveTransport).watchPrompt?.(setWaiting), [transport]);
+  // What waits on the operator, told by the native shell as it begins (#1049); in a browser nothing is sent.
+  const waits = useRef<Waits>({});
+  useEffect(() => {
+    if (!drive) return;
+    const now: Waits = { waiting, held: session.held, proposal: session.proposal };
+    for (const notice of notices(waits.current, now)) void shellNotify(notice).catch(() => undefined);
+    waits.current = now;
+  }, [drive, waiting, session.held, session.proposal]);
   const decide = (call: string, scope: Decision) => transport.dispatch({ kind: 'approve', call, scope });
   const [link, setLink] = useState<{ readonly link: Link; readonly why?: string }>({ link: 'live' });
   useEffect(() => (transport as DriveTransport).watchLink?.((next, why) => setLink(why === undefined ? { link: next } : { link: next, why })), [transport]);

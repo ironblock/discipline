@@ -11,6 +11,7 @@ This crate is its own Cargo workspace, outside the repository's, so CI's cargo n
 | `tauri` | `=2.12.4` | 2026-10-14 |
 | `tauri-build` | `=2.7.3` | 2026-10-14 |
 | `tauri-plugin-shell` | `=2.5.0` | 2026-10-10 |
+| `tauri-plugin-notification` | `=2.7.0` | 2026-10-14 |
 | `ctrlc` (`termination`) | `=3.5.2` | 2026-02-10 |
 | `base64` | `=0.23.1` | 2026-08-04 |
 | `security-framework` (macOS only) | `=3.7.0` | 2026-02-20 |
@@ -60,6 +61,16 @@ The page renders model output and holds a credential, so its CSP (`tauri.conf.js
 
 The sidecar is killed when the app exits, by a quit or by `SIGTERM`, `SIGINT` or `SIGHUP`; a `SIGKILL` leaves it running.
 
-## Not yet
+## Notifications
 
-- The native file picker and notifications (#719), each its own change.
+When the session begins to wait on the operator, the page asks the shell to tell them (`src/drive/notices.ts`), and the shell sends a system notification only while its window is not focused. The command, `notify`, is granted to the `main` window alone, and none of the notification plugin's own commands is. A click on a notification brings the window forward. The moments are those the page already shows:
+
+- a command waiting on approval: *a command waits on you*, with the command's first line;
+- a meditation held for the operator (#150's gate): *the meditation is held*;
+- the model's phase proposal (#651): *the model proposes a phase move*, with its from and to.
+
+Each is told once, as it begins.
+
+## Attachments
+
+The composer's **attach** button opens macOS's own file panel: the webview answers the page's file input itself (`wry`'s `NSOpenPanel`, #1048). That panel does not filter to PNG, so any file can be chosen; `POST /files` refuses anything else, and the page says so.

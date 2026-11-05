@@ -1,7 +1,7 @@
 {
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "default",
-  "description": "The page's own window: the core defaults, and the drive's credential (drive_authorization), granted to it alone; nothing of the shell's sidecar, which the Rust side alone starts.",
+  "description": "The page's own window: the core defaults, the drive's credential (drive_authorization) and its notifications (notify), granted to it alone; none of the notification plugin's own commands, and nothing of the shell's sidecar, which the Rust side alone starts.",
   "windows": ["main"],
-  "permissions": ["core:default", "allow-drive-authorization"]
+  "permissions": ["core:default", "allow-drive-authorization", "allow-notify"]
 }
