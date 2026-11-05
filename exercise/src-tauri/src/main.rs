@@ -15,7 +15,12 @@
 //! A drive that asks for a credential (`serve --auth-file`, which a regimen
 //! that runs commands requires) is given one by the auth file the shell is
 //! started with: `EXERCISE_AUTH_FILE`, or settings.json's `auth_file`. The
-//! sidecar is started with it, and the page asks for the `Authorization` value
+//! sidecar is started with it. Or, on macOS, by the login keychain (#1047):
+//! `EXERCISE_AUTH=keychain`, or settings.json's `"auth": "keychain"`, reads
+//! the generic password of service `app.discipline.exercise` and account the
+//! profile, and gives it to the sidecar on its stdin (`serve --auth-stdin`);
+//! no file is written, and the shell never writes the keychain. Either way
+//! the page asks for the `Authorization` value
 //! over IPC (`drive_authorization`, granted to the `main` window alone), never
 //! in its URL (`src/drive/credential.ts`). The page renders model output, so its
 //! CSP (`tauri.conf.json`) runs no script but the bundle's own.
@@ -51,6 +56,17 @@ struct Sidecar(Mutex<Option<CommandChild>>);
 
 /// The `Authorization` value for the drive, when it asks for one.
 struct Credential(Option<String>);
+
+/// The keychain item's service; its account is the profile.
+const KEYCHAIN_SERVICE: &str = "app.discipline.exercise";
+
+/// Where the drive's credential comes from.
+enum Auth {
+    /// An auth file, `user:password`, named to the sidecar.
+    File(String),
+    /// The login keychain's item for the profile, piped to the sidecar.
+    Keychain,
+}
 
 /// The drive's `Authorization` value, for the page's own window alone.
 #[tauri::command]
@@ -102,13 +118,35 @@ fn start(app: &mut tauri::App) -> Result<(), String> {
     let quit = handle.clone();
     ctrlc::set_handler(move || quit.exit(0)).map_err(|why| why.to_string())?;
     let settings = settings(&handle)?;
-    let auth_file = auth_file(settings.as_ref());
-    let credential = auth_file.as_deref().map(authorization).transpose()?;
+    let drive = setting(settings.as_ref())?;
+    // The credential's text, `user:password`, and how the sidecar is given it.
+    let (pair, auth) = match auth(settings.as_ref())? {
+        None => (None, None),
+        Some(Auth::File(path)) => (Some(read_auth_file(&path)?), Some(Auth::File(path))),
+        Some(Auth::Keychain) => {
+            let Drive::Profile(profile) = &drive else {
+                return Err("the keychain's account is a profile, and a `drive` URL names none; use an auth file".to_owned());
+            };
+            (Some(keychain(profile)?), Some(Auth::Keychain))
+        }
+    };
+    let credential = pair
+        .as_deref()
+        .map(|pair| {
+            basic(pair)
+                .ok_or_else(|| "the credential is not user:password, as serve reads it".to_owned())
+        })
+        .transpose()?;
     app.manage(Credential(credential));
-    let drive = match setting(settings.as_ref())? {
+    let drive = match drive {
         Drive::Remote(url) => url,
         Drive::Profile(profile) => {
-            let (url, child) = sidecar(&handle, &profile, auth_file.as_deref())?;
+            let given = match (&auth, &pair) {
+                (Some(Auth::File(path)), _) => Some(Given::File(path)),
+                (Some(Auth::Keychain), Some(pair)) => Some(Given::Stdin(pair)),
+                _ => None,
+            };
+            let (url, child) = sidecar(&handle, &profile, given)?;
             if let Ok(mut held) = handle.state::<Sidecar>().0.lock() {
                 *held = Some(child);
             }
@@ -169,20 +207,55 @@ fn setting(settings: Option<&(PathBuf, serde_json::Value)>) -> Result<Drive, Str
     }
 }
 
-/// The auth file the drive's credential is read from, when one is named.
-fn auth_file(settings: Option<&(PathBuf, serde_json::Value)>) -> Option<String> {
-    std::env::var("EXERCISE_AUTH_FILE")
+/// Where the drive's credential comes from, when one is named: the
+/// keychain, by `EXERCISE_AUTH` or settings.json's `auth`, or an auth file,
+/// by `EXERCISE_AUTH_FILE` or settings.json's `auth_file`; never both.
+fn auth(settings: Option<&(PathBuf, serde_json::Value)>) -> Result<Option<Auth>, String> {
+    let chosen = std::env::var("EXERCISE_AUTH")
         .ok()
-        .or_else(|| named(settings, "auth_file"))
+        .or_else(|| named(settings, "auth"));
+    let file = std::env::var("EXERCISE_AUTH_FILE")
+        .ok()
+        .or_else(|| named(settings, "auth_file"));
+    chosen_auth(chosen.as_deref(), file)
 }
 
-/// The `Authorization` value for an auth file, `user:password`, read as
-/// `serve --auth-file` reads it: one trailing line break is the file's.
-fn authorization(path: &str) -> Result<String, String> {
-    let written =
-        std::fs::read_to_string(path).map_err(|why| format!("{path} cannot be read: {why}"))?;
-    basic(&written)
-        .ok_or_else(|| format!("{path}: expected user:password, as serve --auth-file reads it"))
+/// [`auth`], from what was named.
+fn chosen_auth(chosen: Option<&str>, file: Option<String>) -> Result<Option<Auth>, String> {
+    match (chosen, file) {
+        (None, None) => Ok(None),
+        (None, Some(path)) => Ok(Some(Auth::File(path))),
+        (Some("keychain"), None) => Ok(Some(Auth::Keychain)),
+        (Some("keychain"), Some(_)) => {
+            Err("the keychain and an auth file each name the credential: name one".to_owned())
+        }
+        (Some(other), _) => Err(format!("auth `{other}` is not `keychain`")),
+    }
+}
+
+/// An auth file's text.
+fn read_auth_file(path: &str) -> Result<String, String> {
+    std::fs::read_to_string(path).map_err(|why| format!("{path} cannot be read: {why}"))
+}
+
+/// The login keychain's generic password for `profile`, `user:password`.
+/// macOS asks the operator, once, to let the app read it.
+#[cfg(target_os = "macos")]
+fn keychain(profile: &str) -> Result<String, String> {
+    use security_framework::passwords::get_generic_password;
+    let password = get_generic_password(KEYCHAIN_SERVICE, profile).map_err(|why| {
+        format!("the keychain has no readable item {KEYCHAIN_SERVICE} for {profile}: {why}")
+    })?;
+    String::from_utf8(password)
+        .map_err(|_| format!("the keychain's item {KEYCHAIN_SERVICE} for {profile} is not text"))
+}
+
+/// The keychain is macOS's.
+#[cfg(not(target_os = "macos"))]
+fn keychain(_profile: &str) -> Result<String, String> {
+    Err(format!(
+        "the keychain ({KEYCHAIN_SERVICE}) is read on macOS only; use an auth file"
+    ))
 }
 
 /// `Basic <base64>` for an auth file's text, or none when serve would refuse it.
@@ -221,25 +294,43 @@ fn remote(url: String) -> Result<Drive, String> {
     }
 }
 
+/// How the sidecar is given the credential.
+#[derive(Clone, Copy)]
+enum Given<'a> {
+    /// `--auth-file`, by its path.
+    File(&'a str),
+    /// `--auth-stdin`, the text written as stdin's first line.
+    Stdin(&'a str),
+}
+
 /// `serve --profile <profile>` as the sidecar, admitting the webview's
-/// origin, with the shell's auth file when it has one; its URL, from the
+/// origin, with the shell's credential when it has one; its URL, from the
 /// first line it prints, and the process.
 fn sidecar(
     app: &AppHandle,
     profile: &str,
-    auth_file: Option<&str>,
+    given: Option<Given>,
 ) -> Result<(String, CommandChild), String> {
     let mut args = vec!["serve", "--profile", profile, "--allow-origin", ORIGIN];
-    if let Some(file) = auth_file {
-        args.extend(["--auth-file", file]);
+    match given {
+        Some(Given::File(file)) => args.extend(["--auth-file", file]),
+        Some(Given::Stdin(_)) => args.push("--auth-stdin"),
+        None => {}
     }
-    let (mut events, child) = app
+    let (mut events, mut child) = app
         .shell()
         .sidecar("diet-drive")
         .map_err(|why| why.to_string())?
         .args(args)
         .spawn()
         .map_err(|why| why.to_string())?;
+    if let Some(Given::Stdin(pair)) = given {
+        // One line, as `--auth-stdin` reads it; every command serve runs is
+        // given a null stdin, so none reads what is left on the pipe.
+        child
+            .write(format!("{pair}\n").as_bytes())
+            .map_err(|why| format!("serve's stdin cannot be written: {why}"))?;
+    }
     while let Some(event) = events.blocking_recv() {
         match event {
             CommandEvent::Stdout(line) => {
@@ -282,7 +373,22 @@ fn page(drive: &str) -> Result<String, String> {
 
 #[cfg(test)]
 mod tests {
-    use super::{Drive, basic, remote};
+    use super::{Auth, Drive, basic, chosen_auth, remote};
+
+    #[test]
+    fn the_credential_is_named_by_the_keychain_or_a_file_never_both() {
+        assert!(matches!(chosen_auth(None, None), Ok(None)));
+        assert!(matches!(
+            chosen_auth(None, Some("auth".to_owned())),
+            Ok(Some(Auth::File(path))) if path == "auth"
+        ));
+        assert!(matches!(
+            chosen_auth(Some("keychain"), None),
+            Ok(Some(Auth::Keychain))
+        ));
+        assert!(chosen_auth(Some("keychain"), Some("auth".to_owned())).is_err());
+        assert!(chosen_auth(Some("file"), None).is_err());
+    }
 
     #[test]
     fn an_auth_file_is_read_as_serve_reads_it() {
