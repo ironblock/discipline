@@ -29728,6 +29728,54 @@ pub(in crate::drive) mod tests {
             .collect()
     }
 
+    /// #1050: a shadow never offered is logged as its warrant would have
+    /// asked -- under `t3`, in `t3`'s own words.
+    #[test]
+    fn a_hidden_shadow_under_t3_is_logged_in_t3s_words() {
+        let tree = scratch("hidden-t3");
+        std::fs::write(tree.join("notes.md"), "a note\n").expect("a note");
+        let mut interview = interviewing(&[]);
+        interview.asks = &crate::dogma::asks::T3;
+        interview.capture = crate::dogma::asks::Modality::Tools;
+        interview.shadow = vec![log::Warrant::Read];
+        interview.shadow_offer = ShadowOffer::Hidden;
+        let session = Session::open_with(
+            Canned::new(vec![
+                vec![bash("call-1", "cat notes.md")],
+                deltas(&["Read it. Next, I will write the schema."]),
+            ]),
+            looping(),
+            None,
+            Some(tools(
+                Confinement::Unconfined,
+                &tree,
+                &["cat"],
+                None,
+                Decider::Decline,
+            )),
+            None,
+            Some(interview),
+        );
+        session.ask("look around", None).expect("accepted");
+        let log = wait_until(&session, "the turn and its gap", settled);
+        let logged = log
+            .iter()
+            .find_map(|logged| match &logged.event {
+                Event::Shadowed {
+                    why: log::Warrant::Read,
+                    question,
+                    ..
+                } => Some(question.clone()),
+                _ => None,
+            })
+            .expect("a read shadow");
+        assert!(
+            logged.starts_with("<interview>\nAnswer from this turn alone. No tool runs here except update_record and resolve_entry, which are how you answer.\n"),
+            "{logged}"
+        );
+        tidy(&[&tree]);
+    }
+
     /// #1050: an accepted chip is the operator's fork, read as text. Under
     /// `t3` a read shadow's chip is asked in `v5`'s words -- the fields line
     /// first, no record tool named, no `<interview>` tags -- and the chip
