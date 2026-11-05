@@ -1,0 +1,1 @@
+the phase to move to; the current phase's note lists the moves it allows

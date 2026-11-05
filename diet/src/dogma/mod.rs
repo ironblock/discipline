@@ -144,7 +144,12 @@ pub mod vocabulary;
 ///   2026-11-03 (relayed by Dispatch). `resolve_entry`, the reminder and the
 ///   sweep are c2's, byte for byte. No template and no set already pinned
 ///   changed.
-pub const VERSION: u32 = 14;
+/// * 15, 2026-11-04: `PHASE_TOOL_TO` and `PHASE_TOOL_REASON` joined
+///   (#1050, item 1): the phase tool's `to`, now an enum of the library's
+///   phases, and `reason`, described, the maintainer's wording approved on
+///   2026-11-04 (relayed by Dispatch). No template and no set already pinned
+///   changed.
+pub const VERSION: u32 = 15;
 
 /// The digest of `diet/dogma/MANIFEST.tsv` that [`VERSION`] was declared
 /// against.
@@ -154,7 +159,7 @@ pub const VERSION: u32 = 14;
 /// that recomputes it fails until both lines are edited together. Without it
 /// the manifest could be regenerated after an edit and the version left at
 /// what it was, which is a bump that never happened.
-pub const MANIFEST_DIGEST: &str = "709fb5be1d2200b5";
+pub const MANIFEST_DIGEST: &str = "5e78b61b90f03a8f";
 
 /// The per-model operating points, as TOML text, exactly as pinned.
 ///
@@ -389,6 +394,10 @@ pub enum Template {
     ForkNoteImperative,
     /// The phase tool's description (#788).
     PhaseTool,
+    /// The phase tool's `to`, described (#1050).
+    PhaseToolTo,
+    /// The phase tool's `reason`, described (#1050).
+    PhaseToolReason,
     /// What the model is shown when its own phase proposal is pending
     /// (#788): its turn ends.
     PhaseProposed,
@@ -426,6 +435,8 @@ impl Template {
         Self::ForkNoteAdvisory,
         Self::ForkNoteImperative,
         Self::PhaseTool,
+        Self::PhaseToolTo,
+        Self::PhaseToolReason,
         Self::PhaseProposed,
         Self::PhaseOperatorProposal,
     ];
@@ -462,6 +473,8 @@ impl Template {
             Self::ForkNoteAdvisory => "FORK_NOTE_ADVISORY",
             Self::ForkNoteImperative => "FORK_NOTE_IMPERATIVE",
             Self::PhaseTool => "PHASE_TOOL",
+            Self::PhaseToolTo => "PHASE_TOOL_TO",
+            Self::PhaseToolReason => "PHASE_TOOL_REASON",
             Self::PhaseProposed => "PHASE_PROPOSED",
             Self::PhaseOperatorProposal => "PHASE_OPERATOR_PROPOSAL",
         }
@@ -515,6 +528,8 @@ impl Template {
                 include_str!("../../dogma/templates/FORK_NOTE_IMPERATIVE.txt")
             }
             Self::PhaseTool => include_str!("../../dogma/templates/PHASE_TOOL.txt"),
+            Self::PhaseToolTo => include_str!("../../dogma/templates/PHASE_TOOL_TO.txt"),
+            Self::PhaseToolReason => include_str!("../../dogma/templates/PHASE_TOOL_REASON.txt"),
             Self::PhaseProposed => include_str!("../../dogma/templates/PHASE_PROPOSED.txt"),
             Self::PhaseOperatorProposal => {
                 include_str!("../../dogma/templates/PHASE_OPERATOR_PROPOSAL.txt")
@@ -530,6 +545,8 @@ impl Template {
             Self::ForkNoteAdvisory
             | Self::ForkNoteImperative
             | Self::PhaseTool
+            | Self::PhaseToolTo
+            | Self::PhaseToolReason
             | Self::PhaseProposed
             | Self::PhaseOperatorProposal => Site::Trunk,
             Self::ApiSurface
@@ -593,7 +610,9 @@ impl Template {
             | Self::AuditOpenNote
             | Self::AddQ
             | Self::NativeGenerate
-            | Self::PhaseTool => &[],
+            | Self::PhaseTool
+            | Self::PhaseToolTo
+            | Self::PhaseToolReason => &[],
         }
     }
 

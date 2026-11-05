@@ -336,10 +336,29 @@ pub fn refill_with(head: &[Message], render: &str, after: Option<&str>) -> Vec<M
 /// `head` with a phase's ground rules, when it is in one, after its system message (#787,
 /// refining #597): what a meditation's refill opens with while the session
 /// is in a phase. The head's own text is unchanged, the rules following it
-/// after a blank line; a head with no system message is returned as it is,
-/// and its rules ride as a note instead ([`phase_note`]).
+/// after a blank line, and then, after another, the sentence naming the
+/// phase's moves (v38, #1050: [`phase_moves`]); a head with no system
+/// message is returned as it is, and its rules ride as a note instead
+/// ([`phase_note`]).
 #[must_use]
 pub fn with_ground_rules(
+    head: &[Message],
+    document: Option<&crate::formats::log::PhaseDocument>,
+) -> Vec<Message> {
+    let mut head = with_ground_rules_before_v38(head, document);
+    if let (Some(document), Some(first)) = (document, head.first_mut())
+        && first.role == Role::System
+        && let Some(moves) = phase_moves(&document.name, &document.transitions)
+    {
+        let _ = write!(first.content, "\n\n{moves}");
+    }
+    head
+}
+
+/// [`with_ground_rules`] as a log before v38 was sent it: the rules alone,
+/// with no sentence naming the moves.
+#[must_use]
+pub fn with_ground_rules_before_v38(
     head: &[Message],
     document: Option<&crate::formats::log::PhaseDocument>,
 ) -> Vec<Message> {
@@ -364,10 +383,66 @@ pub fn carries_ground_rules(head: &[Message]) -> bool {
 }
 
 /// The note a phase's ground rules ride in on the next ask when the session
-/// entered it with no meditation (#787): at its start, or on a `continue`.
+/// entered it with no meditation (#787): at its start, or on a `continue`;
+/// then, after a blank line, the sentence naming its moves (#1050:
+/// [`phase_moves`]).
 #[must_use]
-pub fn phase_note(name: &str, ground_rules: &str) -> String {
-    format!("The session is now in the {name} phase. Its ground rules:\n\n{ground_rules}")
+pub fn phase_note(
+    name: &str,
+    ground_rules: &str,
+    transitions: &[crate::formats::log::PhaseOption],
+) -> String {
+    let mut note =
+        format!("The session is now in the {name} phase. Its ground rules:\n\n{ground_rules}");
+    if let Some(moves) = phase_moves(name, transitions) {
+        let _ = write!(note, "\n\n{moves}");
+    }
+    note
+}
+
+/// The sentence naming the moves out of phase `name` (#1050, the
+/// maintainer's wording): the usual next phase -- its `suggested` moves --
+/// and what is also open -- its `allowed` ones; none when it lists no move.
+#[must_use]
+pub fn phase_moves(name: &str, transitions: &[crate::formats::log::PhaseOption]) -> Option<String> {
+    let of = |kind: &str| -> Vec<&str> {
+        transitions
+            .iter()
+            .filter(|option| option.kind == kind)
+            .map(|option| option.to.as_str())
+            .collect()
+    };
+    let (suggested, allowed) = (of("suggested"), of("allowed"));
+    let open = |phases: &[&str]| {
+        let verb = if phases.len() > 1 { "are" } else { "is" };
+        format!("{} {verb}", listed(phases))
+    };
+    let usual = |phases: &[&str]| {
+        if phases.len() > 1 {
+            format!("the usual next phases are {}", listed(phases))
+        } else {
+            format!("the usual next phase is {}", listed(phases))
+        }
+    };
+    match (suggested.is_empty(), allowed.is_empty()) {
+        (true, true) => None,
+        (false, true) => Some(format!("From {name}, {}.", usual(&suggested))),
+        (true, false) => Some(format!("From {name}, {} open to you.", open(&allowed))),
+        (false, false) => Some(format!(
+            "From {name}, {}; {} also open to you.",
+            usual(&suggested),
+            open(&allowed)
+        )),
+    }
+}
+
+/// Phase names joined with commas and a final "or" (#1050).
+fn listed(phases: &[&str]) -> String {
+    match phases {
+        [] => String::new(),
+        [one] => (*one).to_owned(),
+        [rest @ .., last] => format!("{} or {last}", rest.join(", ")),
+    }
 }
 
 /// The message a meditation's refill rides in (#597), shaped as Pi and `OpenCode`
@@ -567,6 +642,111 @@ pub fn working_set_bytes(object: &WorkingObject) -> u64 {
 /// [`working_set_bytes`] against what is actually emitted -- can find the
 /// section without re-deriving the header's shape.
 pub const WORKING_SET_HEADER: &str = "# working set\n";
+
+#[cfg(test)]
+mod phase_moves_tests {
+    use super::{
+        Message, Role, phase_moves, phase_note, with_ground_rules, with_ground_rules_before_v38,
+    };
+    use crate::formats::log::{PhaseDocument, PhaseOption};
+
+    fn moves(list: &[(&str, &str)]) -> Vec<PhaseOption> {
+        list.iter()
+            .map(|(to, kind)| PhaseOption {
+                to: (*to).to_owned(),
+                kind: (*kind).to_owned(),
+            })
+            .collect()
+    }
+
+    /// Every move shape #1050 names, in the maintainer's words.
+    #[test]
+    fn the_sentence_names_each_shape_of_moves() {
+        type Case<'a> = (&'a [(&'a str, &'a str)], Option<&'a str>);
+        let cases: &[Case<'_>] = &[
+            (
+                &[("build", "suggested"), ("orient", "allowed")],
+                Some("From plan, the usual next phase is build; orient is also open to you."),
+            ),
+            (
+                &[
+                    ("build", "suggested"),
+                    ("orient", "allowed"),
+                    ("review", "allowed"),
+                ],
+                Some(
+                    "From plan, the usual next phase is build; orient or review are also open to you.",
+                ),
+            ),
+            (
+                &[("build", "suggested")],
+                Some("From plan, the usual next phase is build."),
+            ),
+            (
+                &[("orient", "allowed")],
+                Some("From plan, orient is open to you."),
+            ),
+            (
+                &[
+                    ("orient", "allowed"),
+                    ("build", "allowed"),
+                    ("review", "allowed"),
+                ],
+                Some("From plan, orient, build or review are open to you."),
+            ),
+            (
+                &[("build", "suggested"), ("review", "suggested")],
+                Some("From plan, the usual next phases are build or review."),
+            ),
+            (&[], None),
+        ];
+        for (list, expected) in cases {
+            assert_eq!(
+                phase_moves("plan", &moves(list)).as_deref(),
+                *expected,
+                "{list:?}"
+            );
+        }
+    }
+
+    /// The first-ask note closes with the sentence after a blank line, and a
+    /// phase with no moves (`quick`) adds nothing.
+    #[test]
+    fn the_phase_note_closes_with_the_moves() {
+        assert_eq!(
+            phase_note("plan", "Plan first.", &moves(&[("build", "suggested")])),
+            "The session is now in the plan phase. Its ground rules:\n\nPlan first.\n\nFrom plan, the usual next phase is build."
+        );
+        assert_eq!(
+            phase_note("quick", "Be quick.", &[]),
+            "The session is now in the quick phase. Its ground rules:\n\nBe quick."
+        );
+    }
+
+    /// The refill's system message closes with the same sentence (v38); a
+    /// log before v38 rebuilds without it.
+    #[test]
+    fn the_refill_closes_with_the_moves_from_v38() {
+        let head = vec![Message::new(Role::System, "you are the trunk")];
+        let document = PhaseDocument {
+            name: "plan".to_owned(),
+            digest: String::new(),
+            transitions: moves(&[("build", "suggested"), ("orient", "allowed")]),
+            ground_rules: "Plan first.".to_owned(),
+        };
+        let rules = "you are the trunk\n\nGround rules for the plan phase:\n\nPlan first.";
+        assert_eq!(
+            with_ground_rules(&head, Some(&document))[0].content,
+            format!(
+                "{rules}\n\nFrom plan, the usual next phase is build; orient is also open to you."
+            )
+        );
+        assert_eq!(
+            with_ground_rules_before_v38(&head, Some(&document))[0].content,
+            rules
+        );
+    }
+}
 
 #[cfg(test)]
 mod refill_tests {

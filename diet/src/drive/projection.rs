@@ -563,9 +563,11 @@ pub fn project_in(
     let Some(log::Line {
         event:
             Line::SessionStart {
+                version,
                 model,
                 head,
                 tools,
+                phases,
                 template_kwargs,
                 fork_delivery,
                 tool_output,
@@ -591,10 +593,15 @@ pub fn project_in(
         .ok_or("the regime declares no substrate")?;
     let mut walk = Walk::over(lines, substrate, engine);
     walk.recording = recording.map(std::path::Path::to_path_buf);
+    // From v38 (#1050) the phase tool's `to` is an enum of the session's
+    // phases, and a refill's ground rules close with the phase's moves.
+    walk.version = *version;
+    let library = (*version >= 38).then(|| phases.clone().unwrap_or_default());
     walk.tools = tools_of(
         tools.as_deref().unwrap_or_default(),
         *bash_timeout_ms,
         capture_contract_of(levers.as_ref()),
+        library.as_deref(),
     );
     walk.template_kwargs = kwargs_of(template_kwargs.as_ref());
     walk.model.clone_from(model);
@@ -724,6 +731,9 @@ struct Walk<'a> {
     /// Whether the trunk carries a meditation's refill message after the head
     /// (#597): the turns start after it.
     refilled: bool,
+    /// The version the log declares: from v38 (#1050) a refill's ground
+    /// rules close with the sentence naming the phase's moves.
+    version: i64,
     /// Each lane but the trunk's last logged head digest (v5, #374): a live
     /// record names every move of a lane's head, and an interview head moves
     /// with the trunk it is cut from.
@@ -820,6 +830,7 @@ fn tools_of(
     names: &[String],
     bash_timeout_ms: Option<u64>,
     capture_contract: &crate::dogma::capture::CaptureSet,
+    phases: Option<&[String]>,
 ) -> Result<Vec<ToolDefinition>, String> {
     // Background commands (#614) were on exactly when `task_stop` was
     // declared: `bash` then took `is_background`.
@@ -843,8 +854,12 @@ fn tools_of(
                 Ok(super::background::task_stop_tool())
             } else if name == super::session::PHASE_TOOL {
                 // The phase tool (#788), offered whenever a phase library is
-                // active: one fixed definition, whatever the library holds.
-                Ok(super::session::phase_tool())
+                // active: from v38 (#1050) its `to` an enum of the session's
+                // phases; before, one fixed definition, whatever the library held.
+                Ok(phases.map_or_else(
+                    super::session::phase_tool_before_v38,
+                    super::session::phase_tool,
+                ))
             } else if name == crate::dogma::refutation::NAME {
                 // The refutation tool (#878), offered whenever the interview
                 // is on: its pinned definition.
@@ -961,6 +976,7 @@ impl<'a> Walk<'a> {
             compacted: BTreeMap::new(),
             trunk_unrebuilt: None,
             refilled: false,
+            version: 0,
             side_heads: BTreeMap::new(),
             whole_trunk_forks: BTreeSet::new(),
             calls: BTreeMap::new(),
@@ -1607,8 +1623,14 @@ impl<'a> Walk<'a> {
             // Its list of the background commands still running (#614),
             // after the summary.
             // The phase's ground rules after the system prompt (v8, #787).
-            let head =
-                crate::meditation::render::with_ground_rules(&self.head, phase_document.as_ref());
+            let head = if self.version >= 38 {
+                crate::meditation::render::with_ground_rules(&self.head, phase_document.as_ref())
+            } else {
+                crate::meditation::render::with_ground_rules_before_v38(
+                    &self.head,
+                    phase_document.as_ref(),
+                )
+            };
             crate::meditation::render::refill_with(&head, &sent, background.as_deref())
         } else {
             crate::meditation::render::refill_in_the_system_message(&self.head, &sent)
@@ -2321,13 +2343,14 @@ mod tests {
         let c2 = lever(&format!("on:every:3:c2:{}", C2.digest()));
         assert_eq!(capture_contract_of(Some(&c2)), &C2);
         let names = ["update_record".to_owned()];
-        let rebuilt = tools_of(&names, None, capture_contract_of(Some(&c2))).expect("declared");
+        let rebuilt =
+            tools_of(&names, None, capture_contract_of(Some(&c2)), None).expect("declared");
         let sent = crate::capture::tools::definitions(
             &crate::capture::tools::contract_of(&C2).expect("c2"),
         );
         assert_eq!(rebuilt[0], sent[0]);
         assert_ne!(
-            tools_of(&names, None, &C1).expect("declared")[0],
+            tools_of(&names, None, &C1, None).expect("declared")[0],
             sent[0],
             "c1's and c2's update_record differ"
         );
