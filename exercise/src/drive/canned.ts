@@ -106,7 +106,7 @@ export interface CannedOptions {
 }
 
 /** Which command ends a gap with which `ended_by`. An answer to a prompt ends none: a turn is in flight. */
-const ENDS = { ask: 'ask', meditation: 'meditation', cancel: 'cancel', end: 'end', approve: undefined, 'open-tangent': undefined, 'close-tangent': undefined, background: undefined, 'ratify-phase': undefined, 'start-phase': undefined, 'propose-phase': undefined, 'move-phase': undefined, 'edit-entry': undefined, 'flag-entry': undefined, 'refill-anyway': undefined, fork: undefined, keep: undefined, suggestion: undefined, wrap: undefined } as const satisfies Record<Command['kind'], IdleGapBody['ended_by'] | undefined>;
+const ENDS = { ask: 'ask', meditation: 'meditation', cancel: 'cancel', end: 'end', approve: undefined, 'open-tangent': undefined, 'close-tangent': undefined, background: undefined, 'ratify-phase': undefined, 'start-phase': undefined, 'propose-phase': undefined, 'move-phase': undefined, 'edit-entry': undefined, 'flag-entry': undefined, 'refill-anyway': undefined, fork: undefined, keep: undefined, suggestion: undefined, wrap: undefined, correction: undefined, 'retire-entry': undefined } as const satisfies Record<Command['kind'], IdleGapBody['ended_by'] | undefined>;
 
 /** An event the script will play, and what follows it: what a timer holds, and what a prompt holds back. */
 interface Scheduled {
@@ -197,7 +197,7 @@ export class CannedTransport implements DriveTransport {
     if (command.kind === 'open-tangent' || command.kind === 'close-tangent') return Promise.resolve({ ok: false, refused: 'off-script' });
     // The canned script runs no command long enough to move (#614): the served drive's to take.
     // Nor the operator's gestures (#1021): the canned script forks, keeps and answers no suggestion (#1031).
-    if (command.kind === 'fork' || command.kind === 'keep' || command.kind === 'suggestion' || command.kind === 'wrap') return Promise.resolve({ ok: false, refused: 'off-script' });
+    if (command.kind === 'fork' || command.kind === 'keep' || command.kind === 'suggestion' || command.kind === 'wrap' || command.kind === 'correction' || command.kind === 'retire-entry') return Promise.resolve({ ok: false, refused: 'off-script' });
     if (command.kind === 'background' || command.kind === 'ratify-phase' || command.kind === 'start-phase' || command.kind === 'propose-phase' || command.kind === 'move-phase' || command.kind === 'edit-entry' || command.kind === 'flag-entry' || command.kind === 'refill-anyway') return Promise.resolve({ ok: false, refused: 'off-script' });
     const gap = extras?.idle_gap;
     const opened = this.#openGap;

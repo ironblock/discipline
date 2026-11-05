@@ -4,7 +4,7 @@ import type { AssistantNode, Folded, Gate, OffTrunk, SettledNode, SystemNode, To
 import { Block } from './Block.tsx';
 import { tokens, took } from './format.ts';
 import { Copy } from './Copy.tsx';
-import { ForkAction, KeepAction, ShadowMarks } from './Gestures.tsx';
+import { CorrectionChips, ForkAction, KeepAction, ShadowMarks } from './Gestures.tsx';
 import { edgeOf, readingOf, warmOf, writingOf, writtenApart } from './flow.ts';
 import { Flowing } from './Flowing.tsx';
 import { FileResults } from './Files.tsx';
@@ -234,6 +234,8 @@ export function AssistantMessage({ node, calls = [] }: { readonly node: Folded<A
     >
       {bare ? readLine : <AssistantBody node={node} live={live} long={long} showReasoning={showReasoning} thinking={thinking} setThinking={setThinking} streamingInto={streamingInto} />}
       <ShadowMarks shadowed={node.shadowed} />
+      {/* The model's refused changes to the operator's entries at this step (#1050), each a chip. */}
+      <CorrectionChips corrections={node.corrections} />
     </Block>
   );
 }

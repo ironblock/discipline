@@ -92,7 +92,13 @@ export function Memory({ entries, seenThrough = -1, onSeen, act }: MemoryProps) 
                       refused: {e.refusedWrites.map((w) => `${w.op} by ${w.by}`).join(', ')}
                     </span>
                   ) : null}
-                  {act && e.state === 'live' ? <EntryActions id={e.id} text={e.text} act={act} /> : null}
+                  {/* A correction of it waiting beside its turn (#1050): the marker links to the chip. */}
+                  {e.waiting && e.waiting.length > 0 ? (
+                    <a className="ex-memory__waiting" href={`#correction-${e.waiting[0]!}`} title="the model's change to your entry waits on you beside its turn">
+                      a correction is waiting
+                    </a>
+                  ) : null}
+                  {act && e.state === 'live' ? <EntryActions id={e.id} text={e.text} act={act} yours={e.lane === 'operator'} /> : null}
                 </li>
               ))}
           </ul>
@@ -106,7 +112,7 @@ export function Memory({ entries, seenThrough = -1, onSeen, act }: MemoryProps) 
  * The operator's hand on one live entry (#150): rewrite it -- it supersedes, and the model may not overwrite it -- or
  * flag it with a note a meditation will address. Each answer the drive refuses is said in place.
  */
-function EntryActions({ id, text, act }: { readonly id: string; readonly text: string; readonly act: (command: Command) => Promise<Ack> }) {
+function EntryActions({ id, text, act, yours }: { readonly id: string; readonly text: string; readonly act: (command: Command) => Promise<Ack>; readonly yours: boolean }) {
   const [mode, setMode] = useState<'none' | 'edit' | 'flag'>('none');
   const [draft, setDraft] = useState(text);
   const [note, setNote] = useState('');
@@ -161,6 +167,12 @@ function EntryActions({ id, text, act }: { readonly id: string; readonly text: s
           <button type="button" data-action="flag" aria-label={`Flag ${id}`} title="flag this entry with a note: the next meditation addresses it" onClick={() => setMode('flag')}>
             flag
           </button>
+          {/* The operator's retire of their own entry (#1050): it stops mattering, and is kept. */}
+          {yours ? (
+            <button type="button" data-action="retire" aria-label={`Retire ${id}`} title="retire this entry of yours: it stops mattering, and is kept" onClick={() => void send({ kind: 'retire-entry', id })}>
+              retire
+            </button>
+          ) : null}
         </>
       )}
       {refused ? <span className="ex-memory__refusal">{refused}</span> : null}

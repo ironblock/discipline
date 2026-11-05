@@ -183,6 +183,25 @@ export interface Shadowed {
   readonly answer?: 'accepted' | 'rejected' | 'unanswered';
 }
 
+/**
+ * A model's change to the operator's entry that the guard refused, offered as a chip (log v41, #1050): by its
+ * `patch.refused` line, beside the turn that made it.
+ */
+export interface Correction {
+  /** Its `patch.refused` line's `seq`: what an answer to it names. */
+  readonly seq: number;
+  /** What it would have done: `supersede`, `resolve`, `retire` or `park`. */
+  readonly op: string;
+  /** The operator's entry it would have changed. */
+  readonly entry: string;
+  /** What a supersede would have written. */
+  readonly text?: string;
+  /** The model's reason for the change, when it gave one. */
+  readonly why?: string;
+  /** How the operator answered it, once a `correction` line says: `unanswered` when the turn moved on first. */
+  readonly answer?: 'accepted' | 'rejected' | 'unanswered';
+}
+
 export interface Gate {
   readonly outcome: string;
   readonly probes: readonly GateProbe[];
@@ -205,6 +224,8 @@ export interface AssistantNode extends Provenance, Generation {
   readonly logged?: LoggedText;
   /** The forks shadow warrants would have cut at this step (#1021), never sent. */
   readonly shadowed?: readonly Shadowed[];
+  /** The model's refused changes to the operator's entries made at this step (#1050), each offered as a chip. */
+  readonly corrections?: readonly Correction[];
   /**
    * Not in what the model reads from here on (#289): its turn failed or timed out before any step finished, or was
    * cancelled before anything was said -- a failed or timed-out turn keeps its ask and every finished step on the trunk
@@ -446,6 +467,8 @@ export interface MemoryEntry extends Provenance {
   readonly flag?: string;
   /** The model's writes refused over this operator entry (log v7's `patch.refused`, #150): each op, and who tried it. */
   readonly refusedWrites?: readonly { readonly op: string; readonly by: string }[];
+  /** The `patch.refused` line of each correction of it still waiting on the operator (#1050): what its marker links to. */
+  readonly waiting?: readonly number[];
   /** The notes merged into it as similar (a merged `add`, `note_dedupe`, #872): each one's id, now this entry's alias,
    * its text, their cosine as diet wrote it, and the patch that merged it. Its own text is unchanged. */
   readonly merges?: readonly { readonly id: string; readonly text: string; readonly cosine: string; readonly by: string }[];
@@ -738,6 +761,14 @@ export function fold(written: readonly LogLine[]): Session {
   // The warrant gate's lines (#850), by the request of the step they decided.
   const gated = new Map<number, LineOf<'warrant.gated'>[]>();
   const shadows = new Map<number, Shadowed[]>();
+  // The refused changes' chips (#1050), by the trunk request they were made at: a fork's at its cut, a trunk
+  // capture's at the request its `capture` line names, else the trunk's latest.
+  const corrections = new Map<number, Correction[]>();
+  const correctionAt = new Map<number, number>();
+  const forkCutAt = new Map<number, number>();
+  let captureAt: number | undefined;
+  let trunkAt: number | undefined;
+  let version = 0;
   // Each shadow's trunk request, by its line (#1031): where its answer is folded.
   const shadowAt = new Map<number, number>();
   const offered = start.levers?.['interview_shadow_offer'] === 'chips';
@@ -815,6 +846,8 @@ export function fold(written: readonly LogLine[]): Session {
   for (const e of lines) {
     switch (e.kind) {
       case 'session.start':
+        version = e.version;
+        break;
       case 'refused':
       case 'stop.asked':
         break;
@@ -850,6 +883,7 @@ export function fold(written: readonly LogLine[]): Session {
       case 'request':
         generations.set(e.seq, { request: e, deltas: [], frames: [] });
         if (e.lane === 'trunk') {
+          trunkAt = e.seq;
           if (!firstRequestOfTurn.has(e.turn)) firstRequestOfTurn.set(e.turn, e.seq);
           trunkRequestsOfTurn.set(e.turn, [...(trunkRequestsOfTurn.get(e.turn) ?? []), e.seq]);
           // A later step on the trunk: the cap that matters is the latest step's.
@@ -922,6 +956,7 @@ export function fold(written: readonly LogLine[]): Session {
         if (e.reason !== 'final' && e.reason !== 'cancelled') era().slots.push({ kind: 'settled', line: e });
         break;
       case 'fork':
+        if (e.at !== undefined) forkCutAt.set(e.seq, e.at);
         // A meditation's audit (#646) rules on the working memory live when it opens: what it leaves alone, it kept.
         forks.set(e.seq, { fork: e, patches: [], ...(e.lane === 'audit' ? { audited: [...entries.values()].filter((x) => x.state === 'live').map((x) => x.id) } : {}) });
         break;
@@ -994,7 +1029,21 @@ export function fold(written: readonly LogLine[]): Session {
       // A model's patch refused over the operator's entry (#150): nothing in working memory changed.
       case 'patch.refused': {
         const target = entries.get(e.entry);
-        if (target) entries.set(e.entry, { ...target, refusedWrites: [...(target.refusedWrites ?? []), { op: e.op, by: e.fork !== undefined ? `fork ${e.fork}` : (e.lane ?? 'the model') }] });
+        // From v41 every refused change is a chip (#1050): its entry waits on the operator until a `correction` answers.
+        const chip = version >= 41;
+        if (target) {
+          entries.set(e.entry, {
+            ...target,
+            refusedWrites: [...(target.refusedWrites ?? []), { op: e.op, by: e.fork !== undefined ? `fork ${e.fork}` : (e.lane ?? 'the model') }],
+            ...(chip ? { waiting: [...(target.waiting ?? []), e.seq] } : {}),
+          });
+        }
+        // With no `capture` line naming its request, the trunk's latest: a chip is never left without a turn to sit by.
+        const at = e.fork !== undefined ? forkCutAt.get(e.fork) : (captureAt ?? trunkAt);
+        if (chip && at !== undefined) {
+          corrections.set(at, [...(corrections.get(at) ?? []), { seq: e.seq, op: e.op, entry: e.entry, ...(e.text !== undefined ? { text: e.text } : {}), ...(e.why !== undefined ? { why: e.why } : {}) }]);
+          correctionAt.set(e.seq, at);
+        }
         break;
       }
       case 'delivered':
@@ -1059,9 +1108,15 @@ export function fold(written: readonly LogLine[]): Session {
       // The operator's note on a gesture (#1037): the page draws it later; the API comes first.
       case 'operator.note':
         break;
-      // The operator's answer to a correction's chip (#1050): the page draws the chips next.
-      case 'correction':
+      // The operator's answer to a correction's chip (#1050): on the chip, and its entry no longer waits.
+      case 'correction': {
+        const at = correctionAt.get(e.refused);
+        if (at !== undefined) corrections.set(at, (corrections.get(at) ?? []).map((chip) => (chip.seq === e.refused ? { ...chip, answer: e.outcome } : chip)));
+        for (const [id, entry] of entries) {
+          if (entry.waiting?.includes(e.refused)) entries.set(id, { ...entry, waiting: entry.waiting.filter((seq) => seq !== e.refused) });
+        }
         break;
+      }
       // The operator's wrap, accepted (#1030): waiting until its `wrapped` line.
       case 'wrap.accepted':
         wrapsAccepted.add(e.call);
@@ -1073,6 +1128,7 @@ export function fold(written: readonly LogLine[]): Session {
         phaseNotes.set(e.turn, e);
         break;
       case 'capture':
+        captureAt = e.request;
         captures.set(`${e.request}/${e.call}`, e);
         // The model's phase proposal (#651): the latest one waits on the operator until a ruling names its call.
         if (e.tool === 'propose_phase_transition' && e.outcome === 'proposed' && e.to !== undefined) {
@@ -1286,6 +1342,7 @@ export function fold(written: readonly LogLine[]): Session {
             ...(gated.has(g.request.seq) ? { gate: gateOf(gated.get(g.request.seq)!) } : {}),
             ...(g.response ? { logged: { seq: g.response.seq, text: g.response.text } } : {}),
             ...(shadows.has(g.request.seq) ? { shadowed: shadows.get(g.request.seq)! } : {}),
+            ...(corrections.has(g.request.seq) ? { corrections: corrections.get(g.request.seq)! } : {}),
             ...provenance(g.request, ...g.deltas.slice(0, 1), g.response, g.cancelled, g.failed),
           };
           return brand(node);
