@@ -12106,7 +12106,9 @@ fn audit_folded(
     let patches: Vec<Patch> = lines
         .iter()
         .filter_map(|line| {
-            let target = items.get(usize::try_from(line.number).ok()? - 1)?.clone();
+            let target = items
+                .get(usize::try_from(line.number).ok()?.checked_sub(1)?)?
+                .clone();
             match &line.judgment {
                 Judgment::Keep => None,
                 Judgment::Update(note) => Some(Patch::Supersede {
@@ -12133,7 +12135,7 @@ fn audit_folded(
         .iter()
         .filter_map(|line| match &line.judgment {
             Judgment::Remove(why) => {
-                let target = items.get(usize::try_from(line.number).ok()? - 1)?;
+                let target = items.get(usize::try_from(line.number).ok()?.checked_sub(1)?)?;
                 Some((target.as_str().to_owned(), why.clone()))
             }
             _ => None,

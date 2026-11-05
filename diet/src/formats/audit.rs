@@ -182,7 +182,25 @@ pub fn project(source: &str) -> Result<Value, String> {
 
 #[cfg(test)]
 mod tests {
-    use super::{Judgment, parse};
+    use super::{Judgment, ParseError, parse};
+
+    /// A line numbered 0 judges no note, and the grammar refuses it: a
+    /// note's number is `nonzero` (`diet/formats/audit/grammar.pest`), so no
+    /// line numbered 0 reaches a reader that counts from 1 (#1059's review).
+    #[test]
+    fn a_line_numbered_zero_is_refused() {
+        for answer in [
+            "0. REMOVE — gone\n",
+            "0. KEEP\n1. KEEP\n",
+            "1. KEEP\n0. REMOVE — gone\n",
+        ] {
+            assert!(
+                matches!(parse(answer), Err(ParseError::Syntax(_))),
+                "{answer:?}: {:?}",
+                parse(answer)
+            );
+        }
+    }
 
     #[test]
     fn each_verdict_reads_and_case_is_not_significant() {
