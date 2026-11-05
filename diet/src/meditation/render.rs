@@ -1163,7 +1163,18 @@ mod source_tests {
     /// #1050: an entry's origin crosses a dump, as everything else of it does.
     #[test]
     fn an_origin_crosses_a_dump() {
-        let object = every_source();
+        let mut object = every_source();
+        // And a note's check of an entry (#1050, c4).
+        object
+            .confirm(
+                &EntryId::new("d-observed").expect("an id"),
+                &EntryId::new("h-interview").expect("an id"),
+            )
+            .expect("both held");
+        assert!(
+            render(&object, None)
+                .contains("h-interview\tyou said, when asked, checked by d-observed\t")
+        );
         let read = WorkingObject::from_dump(regime(), &object.dump()).expect("it reads");
         assert_eq!(read.dump(), object.dump());
         assert_eq!(render(&read, None), render(&object, None));
