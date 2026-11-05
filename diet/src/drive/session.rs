@@ -1098,10 +1098,12 @@ pub enum Event {
     WrapAccepted {
         /// The `tool_call` line whose result it wraps.
         call: u64,
-        /// The line the span came from.
+        /// The line the span came from: the call itself for a wrap with no
+        /// span.
         from: u64,
-        /// The operator entry that holds the span.
-        entry: String,
+        /// The operator entry that holds the span; none for a wrap with no
+        /// span (#1050).
+        entry: Option<String>,
     },
     /// A tool result the operator wrapped (#1030), replaced on the trunk as
     /// the trunk request after this line carries it.
@@ -1113,8 +1115,9 @@ pub enum Event {
         /// The line the span came from: the call, or an operator's fork's
         /// answer cut at it.
         from: u64,
-        /// The operator entry that holds the span.
-        entry: String,
+        /// The operator entry that holds the span; none for a wrap with no
+        /// span (#1050).
+        entry: Option<String>,
         /// What the trunk carries in the result's place.
         text: String,
         /// The result's bytes as the trunk carried it.
@@ -5069,7 +5072,7 @@ impl<S: Streaming + 'static> Session<S> {
         state.push(Event::WrapAccepted {
             call,
             from,
-            entry: entry.clone(),
+            entry: Some(entry.clone()),
         });
         state.wraps.insert(
             call,
@@ -5077,7 +5080,7 @@ impl<S: Streaming + 'static> Session<S> {
                 id,
                 shown,
                 from,
-                entry: entry.clone(),
+                entry: Some(entry.clone()),
                 text: span.to_owned(),
                 applied: false,
             },
@@ -5085,6 +5088,50 @@ impl<S: Streaming + 'static> Session<S> {
         drop(state);
         self.shared.changed.notify_all();
         Ok(entry)
+    }
+
+    /// Wrap the tool result of the `tool_call` line `call` with no span
+    /// (#1050): nothing is kept, and Qwen Code's
+    /// `[Old tool result content cleared]` takes the result's place from the
+    /// next trunk request on, as [`Self::wrap`]'s span does. A
+    /// `wrap.accepted` line names the call as its own source and no entry.
+    ///
+    /// # Errors
+    ///
+    /// [`Refusal::Ended`]; [`Refusal::NotASource`] for a `call` that is no
+    /// shown tool result; [`Refusal::WrappedAlready`]; and
+    /// [`Refusal::NotOnTheTrunk`] for a result a meditation took off it.
+    pub fn wrap_without_span(&self, call: u64) -> Result<(), Rejected> {
+        let mut state = self.shared.lock();
+        let (id, shown) = match unspanned_wrap_refusal(&state, call) {
+            Ok(admitted) => admitted,
+            Err(because) => {
+                let refused = state.refuse(CommandKind::Wrap, because);
+                drop(state);
+                self.shared.changed.notify_all();
+                return Err(Rejected::Refused(refused));
+            }
+        };
+        state.admit_within_the_gap();
+        state.push(Event::WrapAccepted {
+            call,
+            from: call,
+            entry: None,
+        });
+        state.wraps.insert(
+            call,
+            Wrap {
+                id,
+                shown,
+                from: call,
+                entry: None,
+                text: crate::dogma::compaction::QWEN_CODE_CLEARED.to_owned(),
+                applied: false,
+            },
+        );
+        drop(state);
+        self.shared.changed.notify_all();
+        Ok(())
     }
 
     /// Answer the shadow at the `fork.shadowed` line `shadow`, offered as a
@@ -9817,9 +9864,11 @@ struct Wrap {
     shown: String,
     /// The line the span came from.
     from: u64,
-    /// The operator entry that holds the span.
-    entry: String,
-    /// The span, which takes the result's place.
+    /// The operator entry that holds the span; none for a wrap with no
+    /// span (#1050).
+    entry: Option<String>,
+    /// The span, which takes the result's place, or Qwen Code's cleared
+    /// stub for a wrap with no span.
     text: String,
     /// Whether a trunk request has carried it yet.
     applied: bool,
@@ -10082,6 +10131,37 @@ fn kept_from(state: &State, from: u64) -> Option<crate::object::KeptFrom> {
         Event::Answered { .. } | Event::Called { .. } => Some(KeptFrom::Answer),
         _ => None,
     }
+}
+
+/// Why a wrap of the result at `call` with no span is refused, if it is
+/// (#1050); admitted, the call's id and the result as the trunk carries it.
+fn unspanned_wrap_refusal(state: &State, call: u64) -> Result<(String, String), Refusal> {
+    if state.settlement == Settlement::Ended {
+        return Err(Refusal::Ended);
+    }
+    let Some((id, shown)) = state
+        .log
+        .iter()
+        .find(|logged| logged.seq == call)
+        .and_then(|logged| match &logged.event {
+            Event::ToolCalled(line) => line.shown.clone().map(|shown| (line.id.clone(), shown)),
+            _ => None,
+        })
+    else {
+        return Err(Refusal::NotASource);
+    };
+    if state.wraps.contains_key(&call) {
+        return Err(Refusal::WrappedAlready);
+    }
+    let carried = |message: &Message| {
+        message.role == Role::Tool
+            && message.tool_call_id.as_deref() == Some(id.as_str())
+            && message.content == shown
+    };
+    if !state.trunk.iter().chain(&state.ran).any(carried) {
+        return Err(Refusal::NotOnTheTrunk);
+    }
+    Ok((id, shown))
 }
 
 /// Why a wrap of the result at `call` by `span` from the line `from` is
@@ -19593,13 +19673,13 @@ pub(in crate::drive) mod tests {
         events.push(Event::WrapAccepted {
             call: 9,
             from: 9,
-            entry: "operator-9".to_owned(),
+            entry: Some("operator-9".to_owned()),
         });
         events.push(Event::Wrapped {
             turn: 2,
             call: 9,
             from: 9,
-            entry: "operator-9".to_owned(),
+            entry: Some("operator-9".to_owned()),
             text: "a".to_owned(),
             bytes_before: 2,
             bytes_after: 1,
@@ -20260,13 +20340,13 @@ pub(in crate::drive) mod tests {
             log::Event::WrapAccepted {
                 call: 9,
                 from: 9,
-                entry: "operator-9".to_owned(),
+                entry: Some("operator-9".to_owned()),
             },
             log::Event::Wrapped {
                 turn: 2,
                 call: 9,
                 from: 9,
-                entry: "operator-9".to_owned(),
+                entry: Some("operator-9".to_owned()),
                 text: "a".to_owned(),
                 bytes_before: 2,
                 bytes_after: 1,
@@ -29437,8 +29517,8 @@ pub(in crate::drive) mod tests {
         };
         assert_eq!((*turn, *call, *from), (2, called, called));
         assert_eq!(
-            (named.as_str(), text.as_str()),
-            (entry.as_str(), "port 5182 is free")
+            (named.as_deref(), text.as_str()),
+            (Some(entry.as_str()), "port 5182 is free")
         );
         assert_eq!((*bytes_before, *bytes_after), (27, 17));
         assert_ne!(prefix_before, prefix_after);
@@ -29454,6 +29534,83 @@ pub(in crate::drive) mod tests {
         assert_eq!(
             result_in(&sent[2].messages, "call-1").as_deref(),
             Some("port 5182 is free")
+        );
+        reads_whole(&session);
+        heads_rebuild(&session.events_from(0));
+        tidy(&[&tree]);
+    }
+
+    /// #1050: a wrap with no span keeps nothing -- no entry, no patch -- and
+    /// from the next trunk request the result's place is Qwen Code's
+    /// `[Old tool result content cleared]`; `wrap.accepted` and `wrapped`
+    /// name the call as their source and no entry, and the log reads and its
+    /// heads rebuild.
+    #[test]
+    fn a_wrap_with_no_span_clears_the_result_and_keeps_nothing() {
+        let tree = scratch("wrap-no-span");
+        let session = wrapping(
+            &tree,
+            vec![
+                vec![bash("call-1", "cat notes.md")],
+                deltas(&["Read it."]),
+                deltas(&["Next."]),
+            ],
+            Vec::new(),
+        );
+        session.ask("look", None).expect("accepted");
+        let log = wait_until(&session, "the turn", settled);
+        let called = seq_of(&log, |event| matches!(event, Event::ToolCalled(_)));
+        let entries = |session: &Session<Canned>| {
+            session
+                .shared
+                .lock()
+                .interview
+                .as_ref()
+                .expect("memory")
+                .object
+                .entries()
+                .count()
+        };
+        let before = entries(&session);
+        session.wrap_without_span(called).expect("wrapped");
+        assert_eq!(
+            session.wrap_without_span(called),
+            Err(Rejected::Refused(Refusal::WrappedAlready))
+        );
+        assert_eq!(entries(&session), before, "nothing kept");
+        let log = session.events_from(0);
+        assert!(
+            !log.iter()
+                .any(|logged| matches!(logged.event, Event::Patched { .. }))
+        );
+        assert!(log.iter().any(|logged| matches!(
+            &logged.event,
+            Event::WrapAccepted { call, from, entry: None } if *call == called && *from == called
+        )));
+        session.ask("go on", None).expect("accepted");
+        let log = wait_until(&session, "the second turn", two_settled);
+        let [
+            (
+                _,
+                Event::Wrapped {
+                    from,
+                    entry,
+                    text,
+                    bytes_after,
+                    ..
+                },
+            ),
+        ] = &wrapped_lines(&log)[..]
+        else {
+            unreachable!("one wrapped line: {:?}", wrapped_lines(&log));
+        };
+        assert_eq!((*from, entry.as_deref()), (called, None));
+        assert_eq!(text, "[Old tool result content cleared]");
+        assert_eq!(*bytes_after, 33);
+        let sent = session.shared.transport.sent();
+        assert_eq!(
+            result_in(&sent[2].messages, "call-1").as_deref(),
+            Some("[Old tool result content cleared]")
         );
         reads_whole(&session);
         heads_rebuild(&session.events_from(0));
@@ -29487,7 +29644,7 @@ pub(in crate::drive) mod tests {
                 _ => None,
             })
             .collect();
-        assert_eq!(accepted, vec![(called, called, entry)]);
+        assert_eq!(accepted, vec![(called, called, Some(entry))]);
         assert!(wrapped_lines(&log).is_empty(), "never applied");
         reads_whole(&session);
         tidy(&[&tree]);

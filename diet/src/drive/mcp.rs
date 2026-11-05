@@ -508,7 +508,8 @@ fn later_tools() -> Vec<Value> {
              result as shown, or of the answer to the operator's fork cut at it, takes the \
              result's place from the next trunk request on, and is kept as the operator's entry. \
              The request in flight stands as sent; everything after the result is prefilled \
-             again. Answers the entry's id.",
+             again. Answers the entry's id. With no span, the result is cleared: Qwen Code's \
+             `[Old tool result content cleared]` takes its place and nothing is kept.",
             object(
                 json!({
                     "call": integer("The seq of the `tool_call` line whose result to wrap."),
@@ -518,7 +519,8 @@ fn later_tools() -> Vec<Value> {
                     ),
                     "span": string("The exact text to keep in the result's place.")
                 }),
-                &["call", "from", "span"],
+                // `from` and `span` together, or neither (#1050).
+                &["call"],
             ),
         ),
         tool(
@@ -633,6 +635,23 @@ fn last_tools() -> Vec<Value> {
             none(),
         ),
     ]
+}
+
+/// The `wrap` command's body (#1030): with a span, its call, source and
+/// span; with none (#1050), its call alone -- the result cleared.
+fn wrap_body(args: &Args<'_>) -> Result<Value, String> {
+    let call = args
+        .optional_count("call")?
+        .ok_or_else(|| "`call` is required".to_owned())?;
+    Ok(match args.optional_string("span")? {
+        Some(span) => json!({
+            "kind": "wrap",
+            "call": call,
+            "from": args.optional_count("from")?.ok_or_else(|| "`from` is required".to_owned())?,
+            "span": span
+        }),
+        None => json!({"kind": "wrap", "call": call}),
+    })
 }
 
 /// A tool's arguments, read.
@@ -902,12 +921,7 @@ pub fn call(serve: &Serve, name: &str, arguments: &Map<String, Value>) -> Result
             "note": args.string("note")?
         }))?,
         "fork" | "keep" => serve.command(&gesture(name, &args)?)?,
-        "wrap" => serve.command(&json!({
-            "kind": "wrap",
-            "call": args.optional_count("call")?.ok_or_else(|| "`call` is required".to_owned())?,
-            "from": args.optional_count("from")?.ok_or_else(|| "`from` is required".to_owned())?,
-            "span": args.string("span")?
-        }))?,
+        "wrap" => serve.command(&wrap_body(&args)?)?,
         "declare_meditation" => {
             let mut body = json!({"kind": "declare-meditation"});
             if let Some(phase) = args.optional_string("phase")? {
