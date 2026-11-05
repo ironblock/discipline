@@ -268,6 +268,13 @@
 //! log that declares 28 or less and carries it is refused. For a reader of
 //! earlier logs, the migration is nothing: no session declared one.
 //!
+//! v38 (#1050) changes no line: it marks what a session sent the model in
+//! a phase. The phase tool's `to` is an enum of `session.start`'s `phases`,
+//! with `to` and `reason` described, and a refill's ground rules close with
+//! the sentence naming the phase's moves; a log of 37 or less rebuilds the
+//! fixed tool and the rules alone. For a reader of earlier logs, the
+//! migration is nothing.
+//!
 //! v37 (#1038) carries the operator's keep by anchors: its refusal
 //! `anchor-not-unique`, a start or end anchor found more than once in the
 //! line it names. It is refused in a log that declares 36 or less. And a
@@ -443,12 +450,12 @@ use super::record::vocabulary;
 struct LogParser;
 
 /// The version this module writes, as `session.start` states it.
-pub const VERSION: i64 = 37;
+pub const VERSION: i64 = 38;
 
 /// Every version this module reads.
 pub const READS: &[i64] = &[
     0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25,
-    26, 27, 28, 29, 30, 31, 32, 33, 34, 35, 36, 37,
+    26, 27, 28, 29, 30, 31, 32, 33, 34, 35, 36, 37, 38,
 ];
 
 /// How recent an input event must be, at the moment a turn settles, for the
@@ -10796,15 +10803,15 @@ mod tests {
     }
 
     /// #583, #878, #904, #555, #931, #936, #910, #942, #926, #932, #948, #971, #1016, #1021,
-    /// #1022, #1031, #1030, #1037, #1038: this module writes v37.
+    /// #1022, #1031, #1030, #1037, #1038, #1050: this module writes v38.
     #[test]
-    fn this_module_writes_v37_and_reads_every_version_before_it() {
-        assert_eq!(super::VERSION, 37);
+    fn this_module_writes_v38_and_reads_every_version_before_it() {
+        assert_eq!(super::VERSION, 38);
         assert_eq!(
             super::READS,
             &[
                 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22,
-                23, 24, 25, 26, 27, 28, 29, 30, 31, 32, 33, 34, 35, 36, 37
+                23, 24, 25, 26, 27, 28, 29, 30, 31, 32, 33, 34, 35, 36, 37, 38
             ]
         );
     }

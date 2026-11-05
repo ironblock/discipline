@@ -12649,9 +12649,48 @@ pub fn operator_proposal_note(from: Option<&str>, to: &str) -> String {
 }
 
 /// The phase tool's definition (#788): `to` and `reason`, and `accept`, a
-/// boolean, when answering the operator.
+/// boolean, when answering the operator. From v38 (#1050) `to` is an enum of
+/// the library's `phases`, and `to` and `reason` are described.
 #[must_use]
-pub fn phase_tool() -> crate::client::shape::ToolDefinition {
+pub fn phase_tool(phases: &[String]) -> crate::client::shape::ToolDefinition {
+    use crate::formats::record::json::Value;
+    let text = |s: &str| Value::String(s.to_owned());
+    let described = |kind: &str, template: crate::dogma::Template| {
+        BTreeMap::from([
+            ("type".to_owned(), text(kind)),
+            ("description".to_owned(), text(template.text())),
+        ])
+    };
+    let mut to = described("string", crate::dogma::Template::PhaseToolTo);
+    to.insert(
+        "enum".to_owned(),
+        Value::Array(phases.iter().map(|phase| text(phase)).collect()),
+    );
+    phase_tool_with(
+        Value::Object(to),
+        Value::Object(described("string", crate::dogma::Template::PhaseToolReason)),
+    )
+}
+
+/// [`phase_tool`] as a log before v38 declared it: one fixed definition,
+/// whatever the library holds, its `to` and `reason` plain strings.
+#[must_use]
+pub fn phase_tool_before_v38() -> crate::client::shape::ToolDefinition {
+    use crate::formats::record::json::Value;
+    let typed = |kind: &str| {
+        Value::Object(BTreeMap::from([(
+            "type".to_owned(),
+            Value::String(kind.to_owned()),
+        )]))
+    };
+    phase_tool_with(typed("string"), typed("string"))
+}
+
+/// The phase tool with `to` and `reason` as given.
+fn phase_tool_with(
+    to: crate::formats::record::json::Value,
+    reason: crate::formats::record::json::Value,
+) -> crate::client::shape::ToolDefinition {
     use crate::formats::record::json::Value;
     let text = |s: &str| Value::String(s.to_owned());
     let typed = |kind: &str| Value::Object(BTreeMap::from([("type".to_owned(), text(kind))]));
@@ -12662,8 +12701,8 @@ pub fn phase_tool() -> crate::client::shape::ToolDefinition {
             (
                 "properties".to_owned(),
                 Value::Object(BTreeMap::from([
-                    ("to".to_owned(), typed("string")),
-                    ("reason".to_owned(), typed("string")),
+                    ("to".to_owned(), to),
+                    ("reason".to_owned(), reason),
                     ("accept".to_owned(), typed("boolean")),
                 ])),
             ),
@@ -12679,9 +12718,9 @@ pub fn phase_tool() -> crate::client::shape::ToolDefinition {
 /// The phase tool on `shape`, offered whenever the session's phases are
 /// active (#788), in place of any self-capture set's own.
 pub fn declare_phase_tool(shape: &mut RequestShape, interview: Option<&Interview>) {
-    if interview.is_some_and(|interview| !interview.phases.is_empty()) {
+    if let Some(interview) = interview.filter(|interview| !interview.phases.is_empty()) {
         shape.tools.retain(|tool| tool.name != PHASE_TOOL);
-        shape.tools.push(phase_tool());
+        shape.tools.push(phase_tool(interview.phases.phases()));
     }
 }
 
@@ -12749,7 +12788,7 @@ fn phase_call<S>(
     } else if state.operator_proposal.is_some() {
         format!("refused: {}", Refusal::ProposalPending.tag())
     } else if let Some(refusal) = graph_refusal(&state, &to) {
-        format!("refused: {}", refusal.tag())
+        graph_refused(&state, refusal)
     } else {
         let from = state.phase.clone();
         state.proposal = Some(PendingProposal {
@@ -12836,9 +12875,43 @@ impl State {
     /// The note carrying the current phase's ground rules (#787).
     fn phase_note(&self) -> Option<String> {
         self.phase_document().map(|document| {
-            crate::meditation::render::phase_note(&document.name, &document.ground_rules)
+            crate::meditation::render::phase_note(
+                &document.name,
+                &document.ground_rules,
+                &document.transitions,
+            )
         })
     }
+}
+
+/// What the model is shown when the graph refuses its move (#1050): the
+/// refusal's tag; then, for a move to a phase that is not one, or with no
+/// edge, or to the phase it is in, where it is and the moves open from there
+/// ([`crate::meditation::render::phase_moves`]).
+fn graph_refused(state: &State, refusal: Refusal) -> String {
+    let mut shown = format!("refused: {}", refusal.tag());
+    if !matches!(
+        refusal,
+        Refusal::NotAPhase | Refusal::NoPhaseEdge | Refusal::AlreadyInPhase
+    ) {
+        return shown;
+    }
+    if let (Refusal::AlreadyInPhase, Some(phase)) = (refusal, &state.phase) {
+        shown.push_str(". You are in ");
+        shown.push_str(phase);
+    }
+    let moves = state.phase_document().and_then(|document| {
+        crate::meditation::render::phase_moves(&document.name, &document.transitions)
+    });
+    match moves {
+        Some(moves) => {
+            shown.push_str(". ");
+            shown.push_str(&moves);
+        }
+        None if refusal == Refusal::AlreadyInPhase && state.phase.is_some() => shown.push('.'),
+        None => {}
+    }
+    shown
 }
 
 /// The phase graph's ruling on a move from `from` to `to` (#563, #124),
@@ -32885,6 +32958,71 @@ pub(in crate::drive) mod tests {
         reads_whole(&session);
     }
 
+    /// #1050: the phase tool's `to` is an enum of the library's phases, in
+    /// its order, and `to` and `reason` carry the maintainer's descriptions;
+    /// a log before v38 declared neither.
+    #[test]
+    fn the_phase_tools_to_is_an_enum_of_the_librarys_phases() {
+        let phases = ["orient", "plan", "build"].map(str::to_owned);
+        let json = |value: &crate::formats::record::json::Value| -> serde_json::Value {
+            let mut text = String::new();
+            crate::formats::record::json::render(value, &mut text);
+            serde_json::from_str(&text).expect("json")
+        };
+        let schema = json(&phase_tool(&phases).schema);
+        assert_eq!(
+            schema["properties"]["to"]["enum"],
+            serde_json::json!(["orient", "plan", "build"])
+        );
+        assert_eq!(
+            schema["properties"]["to"]["description"],
+            "the phase to move to; the current phase's note lists the moves it allows"
+        );
+        assert_eq!(
+            schema["properties"]["reason"]["description"],
+            "why the session is ready for that phase"
+        );
+        let before = json(&phase_tool_before_v38().schema);
+        assert_eq!(
+            before["properties"]["to"],
+            serde_json::json!({ "type": "string" })
+        );
+        assert_eq!(
+            before["properties"]["reason"],
+            serde_json::json!({ "type": "string" })
+        );
+    }
+
+    /// #1050: the three graph refusals name where the session is and the
+    /// moves open from there, in the maintainer's words.
+    #[test]
+    fn a_refused_move_names_the_moves_open_from_the_phase() {
+        const MOVES: &str = "From plan, the usual next phase is build; orient is also open to you.";
+        for (to, shown) in [
+            ("nowhere", format!("refused: not-a-phase. {MOVES}")),
+            ("test", format!("refused: no-phase-edge. {MOVES}")),
+            (
+                "plan",
+                format!("refused: already-in-phase. You are in plan. {MOVES}"),
+            ),
+        ] {
+            let (_, log) = proposing_in(in_the_starter_library(), to, Vec::new());
+            assert!(
+                log.iter().any(|logged| matches!(
+                    &logged.event,
+                    Event::ToolCalled(line) if line.shown.as_deref() == Some(shown.as_str())
+                )),
+                "{to}: {:?}",
+                log.iter()
+                    .filter_map(|logged| match &logged.event {
+                        Event::ToolCalled(line) => line.shown.clone(),
+                        _ => None,
+                    })
+                    .collect::<Vec<_>>()
+            );
+        }
+    }
+
     /// An interview under the starter phase library (#787), opening in `plan`.
     fn in_the_starter_library() -> Interview {
         Interview {
@@ -32928,7 +33066,14 @@ pub(in crate::drive) mod tests {
             Event::Started { phase_document: Some(document), phases: Some((_, _, first)), .. }
                 if *document == plan && first == "plan"
         )));
-        let note = crate::meditation::render::phase_note("plan", &plan.ground_rules);
+        let note =
+            crate::meditation::render::phase_note("plan", &plan.ground_rules, &plan.transitions);
+        assert!(
+            note.ends_with(
+                "\n\nFrom plan, the usual next phase is build; orient is also open to you."
+            ),
+            "{note}"
+        );
         assert_eq!(phase_notes(&log), [(1, note.clone())]);
         let trunk = session.trunk();
         assert_eq!(
@@ -32975,7 +33120,14 @@ pub(in crate::drive) mod tests {
                     .count()
                     == 3
         });
-        let note = crate::meditation::render::phase_note("build", &build.ground_rules);
+        let note =
+            crate::meditation::render::phase_note("build", &build.ground_rules, &build.transitions);
+        assert!(
+            note.ends_with(
+                "\n\nFrom build, the usual next phase is test; plan is also open to you."
+            ),
+            "{note}"
+        );
         assert_eq!(
             phase_notes(&log).last(),
             Some(&(2, note)),
@@ -33008,9 +33160,10 @@ pub(in crate::drive) mod tests {
         assert_eq!(
             trunk[0].content,
             format!(
-                "{HEAD}\n\nGround rules for the build phase:\n\n{}",
+                "{HEAD}\n\nGround rules for the build phase:\n\n{}\n\nFrom build, the usual next phase is test; plan is also open to you.",
                 build.ground_rules
-            )
+            ),
+            "the rules, then the moves (#1050)"
         );
         assert!(
             trunk[1..]
