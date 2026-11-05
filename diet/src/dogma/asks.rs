@@ -122,8 +122,19 @@ pub const T3: AskSet = AskSet {
     operator_imperative: true,
 };
 
+/// v5 with the judgment ask's SUPERSEDE sentence asking for the corrected
+/// entry in full (#1050, item 3): every detail of it still true, with the
+/// correction made. The maintainer's approved wording (relayed by Dispatch).
+pub const V6: AskSet = AskSet {
+    name: "v6",
+    modality: Modality::Fields,
+    files: set_files!("v6": "api_surface", "change", "finding", "generic", "imperative",
+        "judgment", "outcome", "reminder"),
+    operator_imperative: true,
+};
+
 /// Every set, in the order they were added.
-pub const SETS: &[&AskSet] = &[&V3, &V4, &T1, &T2, &V5, &T3];
+pub const SETS: &[&AskSet] = &[&V3, &V4, &T1, &T2, &V5, &T3, &V6];
 
 /// The set a served regimen that names none runs: v3, today's asks, by the
 /// maintainer's decision (2026-10-09); v4 is selectable beside it.

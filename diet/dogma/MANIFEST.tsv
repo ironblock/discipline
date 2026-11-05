@@ -40,6 +40,9 @@ self-capture/c2/sweep	f30c90a6c82e2959	58
 self-capture/c3/contract	98991d3192be25ba	1171
 self-capture/c3/reminder	d647fcc4a028d32e	29
 self-capture/c3/sweep	f30c90a6c82e2959	58
+self-capture/c4/contract.jsonl	06eebccfd64d0d79	1546
+self-capture/c4/reminder.txt	d647fcc4a028d32e	29
+self-capture/c4/sweep.txt	f30c90a6c82e2959	58
 refutation/tool	b5aabfb99bbeb917	856
 compaction/qwen-code-v0.25.3	2f12951045d918ee	3589
 compaction/qwen-code-v0.25.3-cleared	2cee0829e1d9e6f8	33
@@ -93,6 +96,14 @@ fork-asks/t3/judgment	78844ffa1569ff0f	438
 fork-asks/t3/outcome	57382d5d5b329968	333
 fork-asks/t3/priming	022fb70bf838aba4	281
 fork-asks/t3/reminder	80e7b42fd5251727	265
+fork-asks/v6/api_surface	f23f9b8e6012614e	354
+fork-asks/v6/change	dd3d2627552842f0	297
+fork-asks/v6/finding	5095cdcf72f94ec2	272
+fork-asks/v6/generic	4d3dad2ec5b820e0	259
+fork-asks/v6/imperative	943d545631e6e62a	100
+fork-asks/v6/judgment	34e9a2be0004d72b	488
+fork-asks/v6/outcome	827069e3bcd061e9	270
+fork-asks/v6/reminder	06c1d8f15ca37341	230
 audit-tools/t1/AUDIT_Q	b5e4d23dacd91983	165
 audit-tools/t1/AUDIT_Q_CADENCE	af07f4b05c7c3228	239
 audit-tools/t1/AUDIT_Q_HUMAN	08c8bb084d45f524	195

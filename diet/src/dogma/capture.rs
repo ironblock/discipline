@@ -88,8 +88,31 @@ pub const C3: CaptureSet = CaptureSet {
     ],
 };
 
+/// c3 with replace by detail and a check (#1050, item 3): `update_record`
+/// takes `replaces` and `with` beside `supersedes` -- the old words, copied
+/// exactly, and the new -- and `confirms`, an entry this note checks against
+/// tool output. `resolve_entry`, the reminder and the sweep are c3's, byte
+/// for byte. The maintainer's approved wording (relayed by Dispatch).
+pub const C4: CaptureSet = CaptureSet {
+    name: "c4",
+    files: &[
+        (
+            "contract.jsonl",
+            include_str!("../../dogma/self-capture/c4/contract.jsonl"),
+        ),
+        (
+            "reminder.txt",
+            include_str!("../../dogma/self-capture/c4/reminder.txt"),
+        ),
+        (
+            "sweep.txt",
+            include_str!("../../dogma/self-capture/c4/sweep.txt"),
+        ),
+    ],
+};
+
 /// Every set, in the order they were added.
-pub const SETS: &[&CaptureSet] = &[&C1, &C2, &C3];
+pub const SETS: &[&CaptureSet] = &[&C1, &C2, &C3, &C4];
 
 /// The set a session offers when its regimen names none: c1, today's.
 pub const DEFAULT: &CaptureSet = &C1;
