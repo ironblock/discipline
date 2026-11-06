@@ -3,7 +3,7 @@ import { createRoot } from 'react-dom/client';
 
 import { App } from './App.tsx';
 import { driveBase } from './drive/base.ts';
-import { credentialedWeb, shellAuthorization } from './drive/credential.ts';
+import { credentialedWeb, shellCredential } from './drive/credential.ts';
 import { SESSIONS } from './drive/sessions.ts';
 import type { SessionName } from './drive/sessions.ts';
 import './theme/tokens.css';
@@ -30,9 +30,16 @@ const root = document.getElementById('root');
 if (!root) throw new Error('index.html has no #root');
 
 // The native shell holds the drive's credential and hands it over here, never in a URL (#719, `drive/credential.ts`);
-// in a browser there is none, and Vite's proxy presents it.
-const authorization = drive ? await shellAuthorization() : undefined;
-const web = authorization ? credentialedWeb(authorization) : undefined;
+// in a browser there is none, and Vite's proxy presents it. A shell that will not hand it over is said so (#1050's audit).
+const credential = drive ? await shellCredential() : {};
+if ('why' in credential) {
+  const said = document.createElement('p');
+  said.setAttribute('role', 'alert');
+  said.textContent = credential.why;
+  root.replaceChildren(said);
+  throw new Error(credential.why);
+}
+const web = credential.authorization ? credentialedWeb(credential.authorization) : undefined;
 
 createRoot(root).render(
   <StrictMode>

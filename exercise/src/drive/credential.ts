@@ -125,3 +125,16 @@ export async function shellAuthorization(scope: Shell = globalThis as Shell): Pr
   const answer = await invoke('drive_authorization');
   return typeof answer === 'string' && answer !== '' ? answer : undefined;
 }
+
+/**
+ * What the page starts with in the shell (#1050's audit, finding 6): the credential, none, or why the shell would not
+ * hand it over -- a capability not granted, say -- for the page to show rather than a blank window.
+ */
+export async function shellCredential(scope: Shell = globalThis as Shell): Promise<{ readonly authorization?: string } | { readonly why: string }> {
+  try {
+    const authorization = await shellAuthorization(scope);
+    return authorization !== undefined ? { authorization } : {};
+  } catch (why) {
+    return { why: `the shell did not hand over the drive’s credential: ${why instanceof Error ? why.message : String(why)}` };
+  }
+}
