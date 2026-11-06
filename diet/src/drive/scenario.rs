@@ -161,6 +161,25 @@ pub enum Pick {
     Containing(String),
 }
 
+/// Which logged line a gesture acts at (the app audit's page walk, F20):
+/// named by what it is, read back from `GET /line/<seq>`, never by its seq.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum LinePick {
+    /// The last tool result of the call with this id.
+    Call(String),
+    /// The last answer -- the trunk's or a fork's -- whose text holds this.
+    Answer(String),
+}
+
+/// What an operator's fork asks.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Asking {
+    /// A pinned fork ask, by its name.
+    Pinned(String),
+    /// The operator's own words.
+    Own(String),
+}
+
 /// One thing the runner does.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Step {
@@ -232,6 +251,52 @@ pub enum Step {
         text: String,
         /// The name the operator's entry is bound to.
         bind: Option<String>,
+    },
+    /// The operator forks at a line (#1021), and the fork settles.
+    Fork {
+        /// The line.
+        at: LinePick,
+        /// What it asks.
+        asking: Asking,
+    },
+    /// The operator keeps a span of a line (#1021), its entry bound to
+    /// `bind` when named.
+    Keep {
+        /// The line.
+        from: LinePick,
+        /// The span, exactly as logged.
+        span: String,
+        /// The keep's tag.
+        tag: Option<String>,
+        /// The name the entry is bound to.
+        bind: Option<String>,
+    },
+    /// The operator wraps the result of `call` with a span of `from`
+    /// (#1030).
+    Wrap {
+        /// The call whose result is wrapped, by its id.
+        call: String,
+        /// The line the span is from: the result itself, or an answer.
+        from: LinePick,
+        /// The span.
+        span: String,
+    },
+    /// The operator answers the first shadow offered and not yet answered
+    /// (#1031); an accept fires its fork, which settles.
+    Suggestion {
+        /// Accept, or reject.
+        accept: bool,
+    },
+    /// The operator answers the first refused change to their entry not
+    /// yet answered (#1050).
+    Correction {
+        /// Accept, or reject.
+        accept: bool,
+    },
+    /// The operator retires an entry of theirs (#1050).
+    Retire {
+        /// The entry.
+        pick: Pick,
     },
     /// The operator declares a meditation.
     DeclareMeditation,
@@ -379,7 +444,9 @@ impl Step {
     fn settles(&self) -> bool {
         match self {
             Self::Ask { refused, .. } => refused.is_none(),
-            Self::Grade(_)
+            Self::Suggestion { accept } => *accept,
+            Self::Fork { .. }
+            | Self::Grade(_)
             | Self::DeclareMeditation
             | Self::RefillAnyway
             | Self::RulePhase { .. }
@@ -388,6 +455,10 @@ impl Step {
             | Self::MovePhase { .. } => true,
             Self::OpenTangent { .. }
             | Self::CloseTangent { .. }
+            | Self::Keep { .. }
+            | Self::Wrap { .. }
+            | Self::Correction { .. }
+            | Self::Retire { .. }
             | Self::Flag { .. }
             | Self::Edit { .. }
             | Self::Wait { .. }
@@ -1390,6 +1461,9 @@ fn step_of(mut fields: Fields) -> Result<(Step, Option<u64>), ScenarioError> {
             text: fields.text("text")?,
             bind: fields.maybe_text("as")?,
         },
+        word @ ("fork" | "keep" | "wrap" | "suggestion" | "correction" | "retire") => {
+            gesture_of(word, &mut fields)?
+        }
         "declare-meditation" => Step::DeclareMeditation,
         "refill-anyway" => Step::RefillAnyway,
         "rule-phase" => Step::RulePhase {
@@ -1487,6 +1561,42 @@ fn expect_of(mut fields: Fields, names: &[String]) -> Result<Expect, ScenarioErr
     })
 }
 
+/// One of the operator's gestures as a step (the app audit's page walk,
+/// F20): `word`, its line's `step`.
+fn gesture_of(word: &str, fields: &mut Fields) -> Result<Step, ScenarioError> {
+    Ok(match word {
+        "fork" => Step::Fork {
+            at: fields.line_pick("at")?,
+            asking: match (fields.maybe_text("ask")?, fields.maybe_text("text")?) {
+                (Some(name), None) => Asking::Pinned(name),
+                (None, Some(text)) => Asking::Own(text),
+                _ => return Err(fields.wrong("`ask`, a pinned ask's name, or `text`: one of them")),
+            },
+        },
+        "keep" => Step::Keep {
+            from: fields.line_pick("from")?,
+            span: fields.text("span")?,
+            tag: fields.maybe_text("tag")?,
+            bind: fields.maybe_text("as")?,
+        },
+        "wrap" => Step::Wrap {
+            call: fields.text("call")?,
+            from: fields.line_pick("from")?,
+            span: fields.text("span")?,
+        },
+        "suggestion" => Step::Suggestion {
+            accept: fields.accept()?,
+        },
+        "correction" => Step::Correction {
+            accept: fields.accept()?,
+        },
+        "retire" => Step::Retire {
+            pick: fields.pick()?,
+        },
+        _ => unreachable!("a gesture's word"),
+    })
+}
+
 /// One line's fields, taken one by one; any left over is refused.
 struct Fields {
     at: usize,
@@ -1545,6 +1655,37 @@ impl Fields {
         match self.take(key) {
             Some(Value::Object(object)) => Ok(object),
             _ => Err(self.wrong(&format!("`{key}` an object"))),
+        }
+    }
+
+    /// `key`: a line, as `{"call": <id>}` or `{"answer": <text it holds>}`.
+    fn line_pick(&mut self, key: &str) -> Result<LinePick, ScenarioError> {
+        let wrong = |this: &Self| {
+            this.wrong(&format!(
+                "`{key}`, {{\"call\": <id>}} or {{\"answer\": <text>}}"
+            ))
+        };
+        let Some(Value::Object(mut picked)) = self.take(key) else {
+            return Err(wrong(self));
+        };
+        let pick = match (picked.remove("call"), picked.remove("answer")) {
+            (Some(Value::String(id)), None) if !id.is_empty() => LinePick::Call(id),
+            (None, Some(Value::String(text))) if !text.is_empty() => LinePick::Answer(text),
+            _ => return Err(wrong(self)),
+        };
+        if picked.is_empty() {
+            Ok(pick)
+        } else {
+            Err(wrong(self))
+        }
+    }
+
+    /// `answer`: `accept` or `reject`, read as whether it accepts.
+    fn accept(&mut self) -> Result<bool, ScenarioError> {
+        match self.text("answer")?.as_str() {
+            "accept" => Ok(true),
+            "reject" => Ok(false),
+            _ => Err(self.wrong("`answer` accept or reject")),
         }
     }
 
@@ -2098,6 +2239,74 @@ impl Driver {
             .ok_or_else(|| Failure(format!("no live entry is {pick:?}: {memory}")))
     }
 
+    /// The logged line at `seq`, or none where serve shows none (a hidden
+    /// shadow).
+    fn line(&self, seq: u64) -> Result<Option<serde_json::Value>, Failure> {
+        match self.request("GET", &format!("/line/{seq}"), None)? {
+            (200, body) => serde_json::from_str(&body)
+                .map(Some)
+                .map_err(|why| Failure(format!("GET /line/{seq}: {why}"))),
+            (404, _) => Ok(None),
+            (status, body) => Err(Failure(format!("GET /line/{seq}: {status} {body}"))),
+        }
+    }
+
+    /// The seq of the last line `pick` names (the app audit's page walk,
+    /// F20): a call's result by its id, or an answer by text it holds.
+    fn line_of(&self, pick: &LinePick) -> Result<u64, Failure> {
+        let last = self.last_seq()?;
+        for seq in (0..=last).rev() {
+            let Some(line) = self.line(seq)? else {
+                continue;
+            };
+            let found = match pick {
+                LinePick::Call(id) => line["kind"] == "tool_call" && line["id"] == id.as_str(),
+                LinePick::Answer(text) => {
+                    line["kind"] == "response"
+                        && line["text"]
+                            .as_str()
+                            .is_some_and(|said| said.contains(text.as_str()))
+                }
+            };
+            if found {
+                return Ok(seq);
+            }
+        }
+        Err(Failure(format!("no logged line is {pick:?}")))
+    }
+
+    /// The seq of the first `kind` line no `answered` line names by `key`:
+    /// the first shadow offered and unanswered, or refused change.
+    fn unanswered(&self, kind: &str, (answered, key): (&str, &str)) -> Result<u64, Failure> {
+        let last = self.last_seq()?;
+        let mut open = Vec::new();
+        let mut done = BTreeSet::new();
+        for seq in 0..=last {
+            let Some(line) = self.line(seq)? else {
+                continue;
+            };
+            if line["kind"] == kind {
+                open.push(seq);
+            } else if line["kind"] == answered {
+                done.extend(line[key].as_u64());
+            }
+        }
+        open.into_iter()
+            .find(|seq| !done.contains(seq))
+            .ok_or_else(|| Failure(format!("no `{kind}` waits on an answer")))
+    }
+
+    /// Post `body`, a command that must be admitted, and the entry its
+    /// reply names (a keep's).
+    fn answered_entry(&self, body: &serde_json::Value) -> Result<Option<String>, Failure> {
+        match self.post("/commands", body)? {
+            (200, reply) => Ok(serde_json::from_str::<serde_json::Value>(&reply)
+                .ok()
+                .and_then(|reply| reply["entry"].as_str().map(str::to_owned))),
+            (status, reply) => Err(Failure(format!("{body} was answered {status} {reply}"))),
+        }
+    }
+
     /// The live entry that superseded `id`.
     fn superseding(&self, id: &str) -> Result<String, Failure> {
         let memory = self.get("/memory")?;
@@ -2192,6 +2401,80 @@ pub fn drive_from(
                     let theirs = driver.superseding(&id).map_err(failed)?;
                     bound.insert(name.clone(), theirs);
                 }
+            }
+            // The operator's gestures (the app audit's page walk, F20), each the command serve takes.
+            Step::Fork { at: line, asking } => {
+                let seq = driver.line_of(line).map_err(failed)?;
+                let mut fork = serde_json::json!({"kind": "fork", "at": seq});
+                match asking {
+                    Asking::Pinned(name) => fork["ask"] = serde_json::Value::String(name.clone()),
+                    Asking::Own(text) => fork["text"] = serde_json::Value::String(text.clone()),
+                }
+                mark = driver.last_seq().map_err(failed)?;
+                driver.command(&fork).map_err(failed)?;
+                driver
+                    .settle(approvals, scenario.patience(at))
+                    .map_err(failed)?;
+            }
+            Step::Keep {
+                from,
+                span,
+                tag,
+                bind,
+            } => {
+                let seq = driver.line_of(from).map_err(failed)?;
+                let mut keep = serde_json::json!({"kind": "keep", "from": seq, "span": span});
+                if let Some(tag) = tag {
+                    keep["tag"] = serde_json::Value::String(tag.clone());
+                }
+                let entry = driver.answered_entry(&keep).map_err(failed)?;
+                if let Some(name) = bind {
+                    let entry = entry.ok_or_else(|| {
+                        failed(Failure(
+                            "the keep's reply named no entry to bind".to_owned(),
+                        ))
+                    })?;
+                    bound.insert(name.clone(), entry);
+                }
+            }
+            Step::Wrap { call, from, span } => {
+                let result = driver
+                    .line_of(&LinePick::Call(call.clone()))
+                    .map_err(failed)?;
+                let seq = driver.line_of(from).map_err(failed)?;
+                driver
+                    .command(&serde_json::json!({"kind": "wrap", "call": result, "from": seq, "span": span}))
+                    .map_err(failed)?;
+            }
+            Step::Suggestion { accept } => {
+                let shadow = driver
+                    .unanswered("fork.shadowed", ("suggestion", "shadow"))
+                    .map_err(failed)?;
+                let answer = if *accept { "accept" } else { "reject" };
+                mark = driver.last_seq().map_err(failed)?;
+                driver
+                    .command(&serde_json::json!({"kind": "suggestion", "shadow": shadow, "answer": answer}))
+                    .map_err(failed)?;
+                if *accept {
+                    driver
+                        .settle(approvals, scenario.patience(at))
+                        .map_err(failed)?;
+                }
+            }
+            Step::Correction { accept } => {
+                let refused = driver
+                    .unanswered("patch.refused", ("correction", "refused"))
+                    .map_err(failed)?;
+                let answer = if *accept { "accept" } else { "reject" };
+                driver
+                    .command(&serde_json::json!({"kind": "correction", "refused": refused, "answer": answer}))
+                    .map_err(failed)?;
+            }
+            Step::Retire { pick } => {
+                let id = driver.picked(pick).map_err(failed)?;
+                driver
+                    .command(&serde_json::json!({"kind": "retire-entry", "id": id}))
+                    .map_err(failed)?;
             }
             Step::DeclareMeditation if reseat => {
                 driver.command(&step.command()).map_err(failed)?;
@@ -4473,6 +4756,27 @@ mod tests {
             (r#"{"step":"flag","pick":0,"note":"n","patience":60}"#, 2),
             (r#"{"step":"wait","until":"idle","patience":60}"#, 2),
             (r#"{"step":"end","patience":60}"#, 2),
+            // The operator's gestures (the app audit's page walk, F20).
+            (r#"{"step":"fork","at":{"call":"c"}}"#, 2),
+            (
+                r#"{"step":"fork","at":{"call":"c"},"ask":"A","text":"t"}"#,
+                2,
+            ),
+            (
+                r#"{"step":"fork","at":{"call":"c","answer":"a"},"ask":"A"}"#,
+                2,
+            ),
+            (r#"{"step":"fork","at":7,"ask":"A"}"#, 2),
+            (r#"{"step":"keep","from":{"answer":"a"}}"#, 2),
+            (r#"{"step":"keep","from":{"answer":""},"span":"s"}"#, 2),
+            (r#"{"step":"wrap","from":{"answer":"a"},"span":"s"}"#, 2),
+            (r#"{"step":"suggestion","answer":"maybe"}"#, 2),
+            (r#"{"step":"correction"}"#, 2),
+            (r#"{"step":"retire"}"#, 2),
+            (
+                r#"{"step":"keep","from":{"answer":"a"},"span":"s","patience":60}"#,
+                2,
+            ),
             (r#"{"classify":{"when":"x","hypothesis":"y"}}"#, 2),
             (
                 r#"{"classify":{"when":"x","hypothesis":"y","score":"1.5"}}"#,
@@ -4517,6 +4821,57 @@ mod tests {
             )),
             Err(ScenarioError::Line(1, _))
         ));
+    }
+
+    /// The operator's gestures as steps (the app audit's page walk, F20):
+    /// each the command serve takes, a line named by what it is -- a call
+    /// by its id, an answer by text it holds -- never by its seq.
+    #[test]
+    fn the_operators_gestures_read_as_steps() {
+        let header = r#"{"scenario":"s","regimen":"r.toml","head":"h.md"}"#;
+        let body = [
+            r#"{"step":"fork","at":{"call":"call-1"},"ask":"GOTCHAS"}"#,
+            r#"{"step":"fork","at":{"answer":"Read it."},"text":"Why two tables?"}"#,
+            r#"{"step":"keep","from":{"call":"call-1"},"span":"a note","tag":"notes","as":"kept"}"#,
+            r#"{"step":"wrap","call":"call-1","from":{"answer":"It holds a note."},"span":"It holds a note."}"#,
+            r#"{"step":"suggestion","answer":"accept"}"#,
+            r#"{"step":"correction","answer":"reject"}"#,
+            r#"{"step":"retire","pick":"a note"}"#,
+        ]
+        .join("\n");
+        let read = parse(&format!("{header}\n{body}\n")).expect("it reads");
+        assert_eq!(
+            read.steps,
+            vec![
+                Step::Fork {
+                    at: LinePick::Call("call-1".to_owned()),
+                    asking: Asking::Pinned("GOTCHAS".to_owned()),
+                },
+                Step::Fork {
+                    at: LinePick::Answer("Read it.".to_owned()),
+                    asking: Asking::Own("Why two tables?".to_owned()),
+                },
+                Step::Keep {
+                    from: LinePick::Call("call-1".to_owned()),
+                    span: "a note".to_owned(),
+                    tag: Some("notes".to_owned()),
+                    bind: Some("kept".to_owned()),
+                },
+                Step::Wrap {
+                    call: "call-1".to_owned(),
+                    from: LinePick::Answer("It holds a note.".to_owned()),
+                    span: "It holds a note.".to_owned(),
+                },
+                Step::Suggestion { accept: true },
+                Step::Correction { accept: false },
+                Step::Retire {
+                    pick: Pick::Containing("a note".to_owned()),
+                },
+            ]
+        );
+        // A fork settles as an ask does, and an accept fires one; the rest are one command each.
+        assert!(read.steps[0].settles() && read.steps[4].settles());
+        assert!(!read.steps[2].settles() && !read.steps[3].settles() && !read.steps[6].settles());
     }
 
     /// A step that waits for the session to settle takes its own

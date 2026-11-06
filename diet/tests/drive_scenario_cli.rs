@@ -154,6 +154,46 @@ fn a_request_no_reply_answers_fails_the_run_naming_it() {
     let _ = std::fs::remove_dir_all(&dir);
 }
 
+/// The operator's gestures as steps (the app audit's page walk, F20): one
+/// serve refuses fails its step, naming the refusal -- here a second wrap
+/// of a result the first already wraps.
+#[test]
+fn a_gesture_serve_refuses_fails_its_step_naming_the_refusal() {
+    let dir = scratch("gesture-refused");
+    let root = root();
+    std::fs::write(dir.join("notes.md"), "a note\n").expect("the seed");
+    let header = serde_json::json!({
+        "scenario": "gesture-refused",
+        "regimen": root.join("diet/scenarios/gestures.toml"),
+        "head": root.join("diet/drive/heads/floor.md"),
+        "seed": {"notes.md": "notes.md"},
+    });
+    let body = concat!(
+        r#"{"reply":{"when":"Read notes.md","text":"Reading it.","calls":[{"id":"call-1","name":"bash","arguments":"{\"command\": \"cat notes.md\"}"}]}}"#,
+        "\n",
+        r#"{"reply":{"when":"a note","text":"Read it."}}"#,
+        "\n",
+        r#"{"step":"ask","text":"Read notes.md."}"#,
+        "\n",
+        r#"{"step":"wrap","call":"call-1","from":{"call":"call-1"},"span":"a note"}"#,
+        "\n",
+        r#"{"step":"wrap","call":"call-1","from":{"call":"call-1"},"span":"a note"}"#,
+        "\n",
+        r#"{"step":"end"}"#,
+        "\n",
+    );
+    let file = dir.join("gesture-refused.jsonl");
+    std::fs::write(&file, format!("{header}\n{body}")).expect("the scenario");
+    let (code, said) = run(&file, &dir.join("out"));
+    assert_ne!(code, Some(0), "{said}");
+    assert!(said["failure"].to_string().contains("step 3"), "{said}");
+    assert!(
+        said["failure"].to_string().contains("wrapped-already"),
+        "{said}"
+    );
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
 /// #798: on `canned-scenario-windowed`, whose registry entry declares a
 /// context window, a reply reporting a large prompt fires the budget
 /// meditation at its turn's end, and a large tool result fires the window
