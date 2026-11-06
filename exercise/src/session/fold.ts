@@ -463,6 +463,9 @@ export interface MemoryEntry extends Provenance {
   readonly fresh: boolean;
   /** The trunk's lane that wrote it, when no fork did (a patch's `lane`, #627): `self-capture` today. */
   readonly lane?: string;
+  /** Where it came from, in a word (the app audit's page walk, F8): the trunk's lane that wrote it, or the lane of the
+   * fork that did -- `interview`, say. Absent only where neither is logged. */
+  readonly source?: string;
   /** The tangent it was born in (a patch's `tangent`, #608): what that tangent's close rules on. */
   readonly tangent?: string;
   /** The operator's flag on it (log v7's `flag`, #150): their note, kept until a meditation addresses it. Folded, not yet drawn. */
@@ -1035,7 +1038,16 @@ export function fold(written: readonly LogLine[]): Session {
           if (replaced) entries.set(replaced.id, { ...replaced, state: 'superseded', by: id(e.seq), seq: e.seq, from: [...replaced.from, e.seq] });
         }
         if (e.op === 'add' || e.op === 'supersede' || !old) {
-          entries.set(e.entry.id, { id: e.entry.id, state: 'live', ...base, ...(e.op !== 'add' && e.op !== 'supersede' ? { op: e.op } : {}), ...(e.tangent !== undefined ? { tangent: e.tangent } : {}), ...(e.lane !== undefined ? { lane: e.lane } : {}) });
+          const source = e.lane ?? (e.fork !== undefined ? forks.get(e.fork)?.fork.lane : undefined);
+          entries.set(e.entry.id, {
+            id: e.entry.id,
+            state: 'live',
+            ...base,
+            ...(e.op !== 'add' && e.op !== 'supersede' ? { op: e.op } : {}),
+            ...(e.tangent !== undefined ? { tangent: e.tangent } : {}),
+            ...(e.lane !== undefined ? { lane: e.lane } : {}),
+            ...(source !== undefined ? { source } : {}),
+          });
           break;
         }
         // Any other op rewrites the entry, keeps its state, and is shown by name.

@@ -114,6 +114,11 @@
   text-decoration: line-through;
 }
 
+/* Settled, not wrong (the app audit's page walk, F8): dimmed, never struck. */
+.ex-memory__entry[data-state='resolved'] .ex-memory__text {
+  opacity: 0.6;
+}
+
 /* An entry's last op, when it was not one that sets its state: `park`, `resolve`, or a name from a newer drive. */
 .ex-memory__op {
   margin-left: 0.5em;
@@ -131,12 +136,14 @@
   font-style: italic;
 }
 
-/* The trunk's own lane that wrote the entry (#627): said quietly, after the text, as an op is. */
+/* Who vouches for the entry, and where it came from (#627, F8): said quietly, after the text, as an op is, and never
+   broken mid-word. */
 .ex-memory__authority,
-.ex-memory__lane {
+.ex-memory__source {
   margin-left: 0.5em;
   color: var(--ink-faint);
   font: var(--size-chrome) / 1 var(--font-chrome);
+  white-space: nowrap;
 }
 
 /* The operator's flag on an entry, the model's writes refused over it (#150), and the operator's edit and flag actions. */

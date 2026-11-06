@@ -656,7 +656,7 @@ export const ServedSelfCapturedEntry: Story = {
       await expect(found).not.toBeNull();
       return found!;
     });
-    await expect(entry.querySelector('.ex-memory__lane')?.textContent).toBe('self-capture');
+    await expect(entry.querySelector('.ex-memory__source')?.textContent).toBe('self-capture');
     await expect(entry.querySelector('.ex-memory__text')?.textContent).toContain('The parser drops blank lines');
   },
 };
@@ -1234,9 +1234,10 @@ export const ServedCorrectionChips: Story = {
     await expect(page.getByText('The model would retire your entry')).toBeTruthy();
     await expect(canvasElement.ownerDocument.getElementById('correction-14')).not.toBeNull();
     const entry = canvasElement.querySelector<HTMLElement>('[id="memory/d2"]');
-    const marker = entry?.querySelector<HTMLAnchorElement>('.ex-memory__waiting');
-    await expect(marker?.textContent).toBe('a correction is waiting');
-    await expect(marker?.getAttribute('href')).toBe('#correction-14');
+    // Both waiting corrections, counted, each linked to its chip (the app audit's page walk, F9).
+    const marker = entry?.querySelector<HTMLElement>('.ex-memory__waiting');
+    await expect(marker?.textContent).toMatch(/^2 corrections waiting/);
+    await expect([...(marker?.querySelectorAll('a') ?? [])].map((a) => a.getAttribute('href'))).toEqual(['#correction-14', '#correction-15']);
     posted.length = 0;
     await userEvent.click(page.getByRole('button', { name: 'Accept: The model would replace your entry with: d2' }));
     await waitFor(async () => expect(posted).toEqual([{ kind: 'correction', refused: 15, answer: 'accept' }]), slow);
@@ -1326,7 +1327,9 @@ export const ServedWrapFromAForkAnswer: Story = {
     await waitFor(async () => expect(says(canvasElement)).toBe('the session has ended'));
     const slow = { timeout: 5_000 };
     // The fork's branch, folded shut, opened first.
-    await userEvent.click(await page.findByRole('button', { name: /^▸? *operator$/ }, slow));
+    // The operator's own fork opens unfolded (the app audit's page walk, F10): open it only if it is folded.
+    const toggle = await page.findByRole('button', { name: /^[▸▾]? *operator$/ }, slow);
+    if (toggle.getAttribute('aria-expanded') === 'false') await userEvent.click(toggle);
     await cornerClick(await page.findByRole('button', { name: /^Wrap from fork / }, slow));
     const raw = await page.findByLabelText(/^What fork .* logged, to wrap$/, undefined, slow);
     await expect(raw.textContent).toBe('It holds a note.\n\nAlso: ports.');
@@ -1573,7 +1576,9 @@ export const AuditForkReasoningKept: Story = {
     const page = within(canvasElement.ownerDocument.body);
     const slow = { timeout: 5_000 };
     await waitFor(async () => expect(says(canvasElement)).toBe('your turn'));
-    await userEvent.click(await page.findByRole('button', { name: /^▸? *operator$/ }, slow));
+    // The operator's own fork opens unfolded (the app audit's page walk, F10): open it only if it is folded.
+    const toggle = await page.findByRole('button', { name: /^[▸▾]? *operator$/ }, slow);
+    if (toggle.getAttribute('aria-expanded') === 'false') await userEvent.click(toggle);
     await waitFor(async () => expect(canvasElement.querySelector('.ex-branch')?.textContent).toContain('The file lists ports first.'), slow);
     await cornerClick(await page.findByRole('button', { name: /^Keep from fork / }, slow));
     const reasoned = await page.findByLabelText(/^What fork .* reasoned$/, undefined, slow);
@@ -1606,7 +1611,7 @@ export const AuditCorrectionNamesItsEntry: Story = {
     await expect(chip.textContent).toContain('#d2');
     await expect(chip.textContent).toContain('a tracker for one team');
     const entry = canvasElement.querySelector('[id="memory/d2"]')!;
-    await expect(entry.querySelector('.ex-memory__waiting')?.textContent).toBe('2 corrections waiting');
+    await expect(entry.querySelector('.ex-memory__waiting')?.textContent).toMatch(/^2 corrections waiting/);
     await expect(entry.querySelectorAll('.ex-memory__waiting a')).toHaveLength(2);
   },
 };

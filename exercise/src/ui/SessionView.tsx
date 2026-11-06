@@ -24,7 +24,7 @@ import { AssistantMessage, SystemMessage, TurnEnd, UserMessage } from './Message
 import { Receipt } from './Receipt.tsx';
 import { Meditation } from './Meditation.tsx';
 import { SessionHeader } from './SessionHeader.tsx';
-import { laneStyle } from './sets.ts';
+import { callOf, laneStyle } from './sets.ts';
 import { ClockContext, HotEntriesContext, SurfaceContext, TargetContext } from './surface.tsx';
 import type { Room, Surface } from './surface.tsx';
 import { ToolBlock } from './ToolCall.tsx';
@@ -229,7 +229,22 @@ export function SessionView({ session, link = 'live', linkWhy, onReconnect, surf
   const eraOf = new Map(session.eras.flatMap((era) => era.nodes.map((n) => [n.id, era.index] as const)));
   // What serve takes a fork or a wrap at (the app audit, finding 10): a line of the latest era's, while the session awaits.
   const onTrunk = new Set(session.eras.at(-1)?.nodes.flatMap((n) => ((n as { readonly logged?: { readonly seq: number } }).logged ? [(n as { readonly logged: { readonly seq: number } }).logged.seq] : [])) ?? []);
-  const moment: GestureMoment = { awaiting: session.state === 'awaiting', onTrunk: (seq) => onTrunk.has(seq) };
+  // Each result on the trunk by its call's line: named for the wrap dialog, and whether it can still be wrapped (F17).
+  const results = new Map(
+    (session.eras.at(-1)?.nodes ?? []).flatMap((n) =>
+      n.kind === 'tool' && n.logged
+        ? [[n.logged.seq, { name: `call ${n.call?.id ?? n.id}'s result (${callOf(n.tool, n.args).text.split('\n')[0]})`, wrapped: n.wrapped !== undefined || n.wrapWaiting === true }] as const]
+        : [],
+    ),
+  );
+  const texts = new Map(session.memory.filter((e) => e.state === 'live').map((e) => [e.id, e.text] as const));
+  const moment: GestureMoment = {
+    awaiting: session.state === 'awaiting',
+    onTrunk: (seq) => onTrunk.has(seq),
+    wrappable: (call) => results.get(call)?.wrapped !== true,
+    resultOf: (call) => results.get(call)?.name,
+    entryText: (id) => texts.get(id),
+  };
   const laneBranches = (slot: number) =>
     trunkOrder.flatMap((id) => (session.branches.get(id) ?? []).filter((b) => b.slot === slot));
 
@@ -621,7 +636,8 @@ export function SessionView({ session, link = 'live', linkWhy, onReconnect, surf
                       condensed={condensed}
                       wired={wiring !== undefined}
                       hot={hot.branches.has(branch.id)}
-                      open={branch.id === revealed}
+                      // The operator's own fork is what they forked to read: it opens unfolded (the app audit's page walk, F10).
+                      open={branch.id === revealed || branch.why === 'operator'}
                       {...(room === 'bars'
                         ? { onOpen: () => toggleInline([branch.id]) }
                         : onSurface
