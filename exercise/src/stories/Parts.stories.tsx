@@ -20,6 +20,7 @@ import { AssistantMessage, SystemMessage, UserMessage } from '../ui/Message.tsx'
 import { Meditation } from '../ui/Meditation.tsx';
 import { Segments } from '../ui/Segments.tsx';
 import { SessionHeader } from '../ui/SessionHeader.tsx';
+import { Titlebar } from '../ui/titlebar.ts';
 import { ms, rate, tokens, took } from '../ui/format.ts';
 import { laneStyle } from '../ui/sets.ts';
 import { ToolBlock } from '../ui/ToolCall.tsx';
@@ -934,6 +935,41 @@ export const UnknownEvents: Story = {
     const chip = canvasElement.querySelector('.ex-header__unknown');
     await expect(chip?.textContent).toBe('1 unknown');
     await expect(chip?.getAttribute('title')).toContain('gate.verdict ×1');
+  },
+};
+
+/**
+ * The macOS shell's overlay title bar: the header is the window's drag region, inset past the traffic lights' edge the
+ * shell measured, and its controls stay controls; in a browser it is neither.
+ */
+export const HeaderUnderTheOverlayTitleBar: Story = {
+  name: 'Header · under the shell’s overlay title bar, a drag region clear of the traffic lights',
+  render: () => (
+    <>
+      <div data-view="shell">
+        <Titlebar.Provider value={78}>
+          <SessionHeader session={sessionAt(MOMENTS.opened)} surface={{ curtain: true, gaps: false }} />
+        </Titlebar.Provider>
+      </div>
+      <div data-view="browser">
+        <SessionHeader session={sessionAt(MOMENTS.opened)} surface={{ curtain: true, gaps: false }} />
+      </div>
+    </>
+  ),
+  play: async ({ canvasElement }) => {
+    const header = (view: string) => canvasElement.querySelector<HTMLElement>(`[data-view="${view}"] .ex-header`)!;
+    const shell = header('shell');
+    const browser = header('browser');
+    await expect(shell.hasAttribute('data-tauri-drag-region')).toBe(true);
+    await expect(browser.hasAttribute('data-tauri-drag-region')).toBe(false);
+    // The logo, the header's first thing, starts past the traffic lights' edge; in a browser it does not move.
+    const logoLeft = (h: HTMLElement) => h.querySelector('.ex-header__logo')!.getBoundingClientRect().left - h.getBoundingClientRect().left;
+    await expect(logoLeft(shell)).toBeGreaterThanOrEqual(78);
+    await expect(logoLeft(browser)).toBeLessThan(78);
+    // Its controls are not drag regions themselves, so a press on one is a press, not a drag.
+    const controls = [...shell.querySelectorAll('button, summary, select, a, input')];
+    await expect(controls.length).toBeGreaterThan(0);
+    await expect(controls.filter((c) => c.hasAttribute('data-tauri-drag-region'))).toEqual([]);
   },
 };
 
