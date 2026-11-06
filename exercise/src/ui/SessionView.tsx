@@ -29,7 +29,8 @@ import { ClockContext, HotEntriesContext, SurfaceContext, TargetContext } from '
 import type { Room, Surface } from './surface.tsx';
 import { ToolBlock } from './ToolCall.tsx';
 import { ApprovalContext, ApprovalPrompt } from './Approval.tsx';
-import { GestureContext } from './Gestures.tsx';
+import { GestureContext, GestureMomentContext } from './Gestures.tsx';
+import type { GestureMoment } from './Gestures.tsx';
 import type { Approving } from './Approval.tsx';
 import { FilesContext } from './Files.tsx';
 import type { FileSource } from '../drive/files.ts';
@@ -223,6 +224,9 @@ export function SessionView({ session, link = 'live', linkWhy, surface, onSurfac
 
   const trunkOrder = session.eras.flatMap((era) => era.nodes.map((n) => n.id));
   const eraOf = new Map(session.eras.flatMap((era) => era.nodes.map((n) => [n.id, era.index] as const)));
+  // What serve takes a fork or a wrap at (#1050's audit, finding 10): a line of the latest era's, while the session awaits.
+  const onTrunk = new Set(session.eras.at(-1)?.nodes.flatMap((n) => ((n as { readonly logged?: { readonly seq: number } }).logged ? [(n as { readonly logged: { readonly seq: number } }).logged.seq] : [])) ?? []);
+  const moment: GestureMoment = { awaiting: session.state === 'awaiting', onTrunk: (seq) => onTrunk.has(seq) };
   const laneBranches = (slot: number) =>
     trunkOrder.flatMap((id) => (session.branches.get(id) ?? []).filter((b) => b.slot === slot));
 
@@ -480,6 +484,7 @@ export function SessionView({ session, link = 'live', linkWhy, surface, onSurfac
       <TargetContext.Provider value={target}>
       {/* The operator's fork and keep (#1021): where the drive takes them, as it does the edit and flag. */}
       <GestureContext.Provider value={composer.tangents && composer.dispatch ? composer.dispatch : undefined}>
+      <GestureMomentContext.Provider value={moment}>
       <HotEntriesContext.Provider value={hot.entries}>
       <div
         ref={root}
@@ -695,6 +700,7 @@ export function SessionView({ session, link = 'live', linkWhy, surface, onSurfac
         </div>
       </div>
       </HotEntriesContext.Provider>
+      </GestureMomentContext.Provider>
       </GestureContext.Provider>
       </TargetContext.Provider>
       </ClockContext.Provider>

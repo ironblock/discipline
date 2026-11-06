@@ -148,6 +148,37 @@ function posting(log: string): Web {
   };
 }
 
+/** `posting`, every command refused with REFUSED, as serve refuses one (409). */
+function refusing(log: string, refused: string): Web {
+  return {
+    ...serving(log),
+    fetch: async (url, init) => {
+      if (/(^|\/)commands$/.test(String(url)) && typeof init?.body === 'string') posted.push(JSON.parse(init.body));
+      return new Response(JSON.stringify({ refused }), { status: 409, headers: { 'Content-Type': 'application/json' } });
+    },
+  };
+}
+
+/** `posting`, every command held unanswered: what a second press sends while the first is still out. */
+function holding(log: string): Web {
+  return {
+    ...serving(log),
+    fetch: async (url, init) => {
+      if (/(^|\/)commands$/.test(String(url)) && typeof init?.body === 'string') posted.push(JSON.parse(init.body));
+      return new Promise<Response>(() => {});
+    },
+  };
+}
+
+/** A log, its last line -- the session's end -- cut: the session awaits the operator. */
+const open = (log: string) => log.trimEnd().split('\n').slice(0, -1).join('\n');
+/** A log that awaits the operator, then an ask taken: a turn runs. */
+const inTurn = (log: string) => {
+  const lines = open(log).split('\n');
+  const seq = lines.length;
+  return [...lines, JSON.stringify({ seq, t: 99, kind: 'ask', turn: 9, text: 'and then?' }), JSON.stringify({ seq: seq + 1, t: 99, kind: 'settlement', from: 'awaiting', to: 'turn' })].join('\n');
+};
+
 /** The rehearsal's log up to the line with SEQ (#177): a session as `serve` wrote it, from its start. */
 const rehearsalTo = (seq?: number) => {
   const lines = rehearsal.trimEnd().split('\n');
@@ -464,12 +495,13 @@ export const ServedEndTangent: Story = {
  * exactly the moves the graph allows from there, and its refill sends the phase picked.
  */
 export const ServedPhaseGraph: Story = {
-  name: '?drive: refill offers the moves the logged phase graph allows, and sends the one picked',
+  name: '?drive: refill offers staying and the moves the logged phase graph allows, and sends the one picked',
   args: { drive: true, web: posting(phaseMoved) },
   play: async ({ canvasElement }) => {
     await waitFor(async () => expect(canvasElement.querySelector('.ex-composer__phase')?.textContent).toBe('phase build'));
     const select = canvasElement.querySelector<HTMLSelectElement>('select[aria-label="move to"]');
-    await expect([...(select?.options ?? [])].map((o) => o.value)).toEqual(['review']);
+    await expect([...(select?.options ?? [])].map((o) => o.value)).toEqual(['', 'review']);
+    await userEvent.selectOptions(select!, 'review');
     posted.length = 0;
     await userEvent.click([...canvasElement.querySelectorAll('button')].find((b) => b.textContent === 'refill')!);
     await waitFor(async () => expect(posted.map((p) => (p as { kind: string }).kind)).toEqual(['declare-meditation']));
@@ -1083,11 +1115,12 @@ async function cornerClick(button: HTMLElement) {
  * closes on the post. */
 export const ServedForkAtAStep: Story = {
   name: '?drive: fork at a step with a pinned ask or your own words',
-  args: { drive: true, web: posting(gestures) },
+  // Open: serve takes a fork only while the session awaits (#1050's audit, finding 10).
+  args: { drive: true, web: posting(open(gestures)) },
   play: async ({ canvasElement }) => {
     const page = within(canvasElement.ownerDocument.body);
     // The whole log folded first, then each dialog awaited open, and each post given time: a loaded runner is slow.
-    await waitFor(async () => expect(says(canvasElement)).toBe('the session has ended'));
+    await waitFor(async () => expect(says(canvasElement)).toBe('your turn'));
     const slow = { timeout: 5_000 };
     await cornerClick(await page.findByRole('button', { name: 'Fork at step 7' }));
     const pinned = await page.findByRole('button', { name: 'Fork at step 7 asking GOTCHAS' }, slow);
@@ -1369,37 +1402,6 @@ export const ServedEditAndFlag: Story = {
 };
 
 // ---------------------------------------------------------------- the app audit (findings 1, 9, 10)
-
-/** `posting`, every command refused with REFUSED, as serve refuses one (409). */
-function refusing(log: string, refused: string): Web {
-  return {
-    ...serving(log),
-    fetch: async (url, init) => {
-      if (/(^|\/)commands$/.test(String(url)) && typeof init?.body === 'string') posted.push(JSON.parse(init.body));
-      return new Response(JSON.stringify({ refused }), { status: 409, headers: { 'Content-Type': 'application/json' } });
-    },
-  };
-}
-
-/** `posting`, every command held unanswered: what a second press sends while the first is still out. */
-function holding(log: string): Web {
-  return {
-    ...serving(log),
-    fetch: async (url, init) => {
-      if (/(^|\/)commands$/.test(String(url)) && typeof init?.body === 'string') posted.push(JSON.parse(init.body));
-      return new Promise<Response>(() => {});
-    },
-  };
-}
-
-/** A log, its last line -- the session's end -- cut: the session awaits the operator. */
-const open = (log: string) => log.trimEnd().split('\n').slice(0, -1).join('\n');
-/** A log that awaits the operator, then an ask taken: a turn runs. */
-const inTurn = (log: string) => {
-  const lines = open(log).split('\n');
-  const seq = lines.length;
-  return [...lines, JSON.stringify({ seq, t: 99, kind: 'ask', turn: 9, text: 'and then?' }), JSON.stringify({ seq: seq + 1, t: 99, kind: 'settlement', from: 'awaiting', to: 'turn' })].join('\n');
-};
 
 /** Audit finding 1: refill stays in the phase unless the operator picks a move -- "stay" is offered first, and sent as no phase. */
 export const AuditRefillStaysByDefault: Story = {

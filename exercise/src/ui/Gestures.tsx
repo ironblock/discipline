@@ -18,6 +18,21 @@ export function useGestures(): ((command: Command) => Promise<Ack>) | undefined 
   return useContext(GestureContext);
 }
 
+/**
+ * What serve will take a gesture at now (#1050's audit, finding 10): a fork, and a suggestion's accept that fires one,
+ * only while the session awaits; a fork or a wrap only at a line still on the trunk, which a meditation's refill takes
+ * off. Outside a session view, everything is taken.
+ */
+export interface GestureMoment {
+  readonly awaiting: boolean;
+  readonly onTrunk: (seq: number) => boolean;
+}
+
+export const GestureMomentContext = createContext<GestureMoment>({ awaiting: true, onTrunk: () => true });
+
+/** Why a fork waits, on its disabled control. */
+const FORK_WAITS = 'fork when the turn or fork settles';
+
 /** What a refused gesture says: its label, and the entry a refusal names. */
 function refusedOf(ack: Extract<Ack, { ok: false }>): string {
   const label = refusalOf(ack.refused).label;
@@ -52,12 +67,13 @@ function useModal(open: boolean, onClose: () => void) {
  */
 export function ForkAction({ at, label }: { readonly at: LoggedText; readonly label: string }) {
   const act = useGestures();
+  const moment = useContext(GestureMomentContext);
   const [open, setOpen] = useState(false);
   const [text, setText] = useState('');
   const [refused, setRefused] = useState<string>();
   const close = () => setOpen(false);
   const dialog = useModal(open, close);
-  if (!act) return null;
+  if (!act || !moment.onTrunk(at.seq)) return null;
   const { first, more } = pickerAsks();
   const send = async (command: Command) => {
     const ack = await act(command);
@@ -85,7 +101,17 @@ export function ForkAction({ at, label }: { readonly at: LoggedText; readonly la
   };
   return (
     <>
-      <button type="button" className="ex-action" aria-label={`Fork at ${label}`} title="fork here: a pinned ask, or your own words -- it writes nothing to working memory" onClick={() => setOpen(true)}>
+      <button
+        type="button"
+        className="ex-action"
+        aria-label={`Fork at ${label}`}
+        title={moment.awaiting ? 'fork here: a pinned ask, or your own words -- it writes nothing to working memory' : FORK_WAITS}
+        disabled={!moment.awaiting}
+        onClick={() => {
+          setRefused(undefined);
+          setOpen(true);
+        }}
+      >
         fork
       </button>
       <dialog ref={dialog} className="ex-gesture" aria-label={`Fork at ${label}`}>
@@ -151,7 +177,16 @@ export function KeepAction({ logged, label }: { readonly logged: LoggedText; rea
   };
   return (
     <>
-      <button type="button" className="ex-action" aria-label={`Keep from ${label}`} title="keep a span of this, exactly as logged, as your entry in working memory" onClick={() => setOpen(true)}>
+      <button
+        type="button"
+        className="ex-action"
+        aria-label={`Keep from ${label}`}
+        title="keep a span of this, exactly as logged, as your entry in working memory"
+        onClick={() => {
+          setRefused(undefined);
+          setOpen(true);
+        }}
+      >
         keep
       </button>
       <dialog ref={dialog} className="ex-gesture" aria-label={`Keep from ${label}`}>
@@ -186,6 +221,7 @@ export function KeepAction({ logged, label }: { readonly logged: LoggedText; rea
  */
 export function WrapAction({ call, from, label }: { readonly call: number; readonly from: LoggedText; readonly label: string }) {
   const act = useGestures();
+  const moment = useContext(GestureMomentContext);
   const [open, setOpen] = useState(false);
   const [refused, setRefused] = useState<string>();
   const raw = useRef<HTMLPreElement>(null);
@@ -194,7 +230,7 @@ export function WrapAction({ call, from, label }: { readonly call: number; reado
   useEffect(() => {
     if (open) raw.current?.focus();
   }, [open]);
-  if (!act) return null;
+  if (!act || !moment.onTrunk(call)) return null;
   const submit = async (e: FormEvent) => {
     e.preventDefault();
     const selection = window.getSelection();
@@ -209,7 +245,16 @@ export function WrapAction({ call, from, label }: { readonly call: number; reado
   };
   return (
     <>
-      <button type="button" className="ex-action" aria-label={`Wrap from ${label}`} title="replace the result on the trunk by a span you keep, from the next request on" onClick={() => setOpen(true)}>
+      <button
+        type="button"
+        className="ex-action"
+        aria-label={`Wrap from ${label}`}
+        title="replace the result on the trunk by a span you keep, from the next request on"
+        onClick={() => {
+          setRefused(undefined);
+          setOpen(true);
+        }}
+      >
         wrap
       </button>
       <dialog ref={dialog} className="ex-gesture" aria-label={`Wrap from ${label}`}>
@@ -274,6 +319,7 @@ export function ShadowMarks({ shadowed }: { readonly shadowed: readonly Shadowed
  * fires that fork as the operator's; reject declines it. Either answer is logged, and so is one never given.
  */
 function SuggestionChip({ shadow, act }: { readonly shadow: Shadowed; readonly act: (command: Command) => Promise<Ack> }) {
+  const moment = useContext(GestureMomentContext);
   const [busy, setBusy] = useState(false);
   const [refused, setRefused] = useState<string>();
   if (shadow.answer) {
@@ -297,7 +343,8 @@ function SuggestionChip({ shadow, act }: { readonly shadow: Shadowed; readonly a
       <span className="ex-shadow__why">
         {shadow.why} · {shadow.trigger}
       </span>
-      <button type="button" disabled={busy} aria-label={`Accept: ${question}`} onClick={() => void answer('accept')}>
+      {/* Accepted, it fires a fork: serve takes that only while the session awaits. */}
+      <button type="button" disabled={busy || !moment.awaiting} title={moment.awaiting ? undefined : FORK_WAITS} aria-label={`Accept: ${question}`} onClick={() => void answer('accept')}>
         Accept
       </button>
       <button type="button" disabled={busy} aria-label={`Reject: ${question}`} onClick={() => void answer('reject')}>
