@@ -37,6 +37,14 @@ const preview: Preview = {
     ]),
   ),
   initialGlobals: { ...DEFAULT_PREFS, mode: 'dark' },
+  // A story stands alone: no draft another story typed is kept for it (the composer's, in session storage).
+  beforeEach: () => {
+    try {
+      sessionStorage.clear();
+    } catch {
+      // No session storage: nothing was kept.
+    }
+  },
   decorators: [
     (Story, context) => {
       const prefs = Object.fromEntries(names.map((name) => [name, context.globals[name] ?? DEFAULT_PREFS[name]])) as unknown as Prefs;
