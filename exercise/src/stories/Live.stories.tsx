@@ -172,6 +172,13 @@ function holding(log: string): Web {
 
 /** A log, its last line -- the session's end -- cut: the session awaits the operator. */
 const open = (log: string) => log.trimEnd().split('\n').slice(0, -1).join('\n');
+/** A log, as it stands, then an ask taken: a turn runs. */
+const asked = (log: string) => {
+  const lines = log.trimEnd().split('\n');
+  const seq = lines.length;
+  return [...lines, JSON.stringify({ seq, t: 99, kind: 'ask', turn: 9, text: 'and then?' }), JSON.stringify({ seq: seq + 1, t: 99, kind: 'settlement', from: 'awaiting', to: 'turn' })].join('\n');
+};
+
 /** A log that awaits the operator, then an ask taken: a turn runs. */
 const inTurn = (log: string) => {
   const lines = open(log).split('\n');
@@ -1489,7 +1496,8 @@ export const AuditForkWaitsForAwaiting: Story = {
 /** Audit finding 10: a suggestion's Accept fires a fork, so it waits for the session to await too; Reject does not. */
 export const AuditAcceptWaitsForAwaiting: Story = {
   name: 'audit 10: a suggestion’s Accept is disabled while a turn runs',
-  args: { drive: true, web: posting(inTurn(suggestions)) },
+  // The chips as offered, awaiting (`offering`), then an ask taken: a turn runs.
+  args: { drive: true, web: posting(asked(offering)) },
   play: async ({ canvasElement }) => {
     const page = within(canvasElement.ownerDocument.body);
     await waitFor(async () => expect(says(canvasElement)).toBe('working · esc cancels'));
