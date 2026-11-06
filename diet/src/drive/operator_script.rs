@@ -915,4 +915,175 @@ mod tests {
         assert_eq!(read.fixed_asks, [0]);
         assert_eq!(read.steps.len(), 3);
     }
+
+    /// The operator's gestures (the app audit's page walk, F20): each one a
+    /// log holds derives as its step -- an entry picked by its text, a line
+    /// by its call's id or its answer's text, never by a seq -- and the steps
+    /// read as a scenario again. The replay's operator lines are the round
+    /// trip's, in `drive_scenario_cli`.
+    #[test]
+    #[allow(clippy::too_many_lines)]
+    fn every_gesture_derives_as_its_step() {
+        let answer = "It holds a note.\n\nAlso: ports.";
+        // Seqs 1 to 5: a trunk request that called `call-1`, its result,
+        // and the request after it, answered.
+        let prefix = [
+            json!({"kind": "request", "lane": "trunk", "turn": 1}),
+            json!({"kind": "response", "to_request": 1, "text": "Reading it."}),
+            json!({"kind": "tool_call", "id": "call-1", "request": 1, "turn": 1, "shown": "a note\n"}),
+            json!({"kind": "request", "lane": "trunk", "turn": 1}),
+            json!({"kind": "response", "to_request": 4, "text": answer}),
+        ];
+        let kept = |text: &str, from: &str| {
+            json!({"kind": "patch", "lane": "operator", "op": "add", "entry": {
+                "id": "operator-6", "text": text, "authority": "operator", "kept_from": from,
+            }})
+        };
+        let keep = json!({"step": "keep", "from": {"call": "call-1"}, "span": "a note"});
+        let refused = json!({
+            "kind": "patch.refused", "lane": "self-capture", "op": "resolve",
+            "entry": "operator-6", "reason": "operator-entry",
+        });
+        let shadowed = json!({"kind": "fork.shadowed", "why": "open", "at": 4});
+        let cases: Vec<(&str, Vec<Value>, Vec<Value>)> = vec![
+            (
+                "a keep from a tool result",
+                vec![
+                    json!({"kind": "patch", "lane": "operator", "op": "add", "entry": {
+                        "id": "operator-6", "text": "a note", "category": "notes",
+                        "authority": "operator", "kept_from": "tool-result",
+                    }}),
+                ],
+                vec![
+                    json!({"step": "keep", "from": {"call": "call-1"}, "span": "a note", "tag": "notes"}),
+                ],
+            ),
+            (
+                "a keep from an answer",
+                vec![kept("Also: ports.", "answer")],
+                vec![
+                    json!({"step": "keep", "from": {"answer": "Also: ports."}, "span": "Also: ports."}),
+                ],
+            ),
+            (
+                "a fork at a call, by a pinned ask",
+                vec![json!({
+                    "kind": "fork", "lane": "interview", "why": "operator", "trigger": "operator",
+                    "ask": "open_next", "at": 1, "cut": 3,
+                })],
+                vec![json!({"step": "fork", "at": {"call": "call-1"}, "ask": "open_next"})],
+            ),
+            (
+                "a fork at an answer, in the operator's words",
+                vec![json!({
+                    "kind": "fork", "lane": "interview", "why": "operator", "trigger": "operator",
+                    "ask": "operator-text", "question": "What is in it?", "at": 4,
+                })],
+                vec![json!({"step": "fork", "at": {"answer": answer}, "text": "What is in it?"})],
+            ),
+            (
+                "a wrap",
+                vec![
+                    kept("It holds a note.", "answer"),
+                    json!({"kind": "wrap.accepted", "call": 3, "from": 5, "entry": "operator-6"}),
+                ],
+                vec![json!({
+                    "step": "wrap", "call": "call-1", "from": {"answer": answer},
+                    "span": "It holds a note.",
+                })],
+            ),
+            (
+                "a suggestion rejected, after one that lapsed",
+                vec![
+                    shadowed.clone(),
+                    json!({"kind": "suggestion", "shadow": 6, "outcome": "unanswered"}),
+                    shadowed.clone(),
+                    json!({"kind": "suggestion", "shadow": 8, "outcome": "rejected"}),
+                ],
+                vec![json!({"step": "suggestion", "answer": "reject"})],
+            ),
+            (
+                "a suggestion accepted, its fork no step of its own",
+                vec![
+                    shadowed.clone(),
+                    json!({
+                        "kind": "fork", "lane": "interview", "why": "operator",
+                        "trigger": "operator", "ask": "open_next", "at": 4,
+                    }),
+                    json!({"kind": "suggestion", "shadow": 6, "outcome": "accepted", "fork": 7}),
+                ],
+                vec![json!({"step": "suggestion", "answer": "accept"})],
+            ),
+            (
+                "a correction rejected",
+                vec![
+                    kept("a note", "tool-result"),
+                    refused.clone(),
+                    json!({"kind": "correction", "refused": 7, "outcome": "rejected"}),
+                ],
+                vec![
+                    keep.clone(),
+                    json!({"step": "correction", "answer": "reject"}),
+                ],
+            ),
+            (
+                "a correction accepted",
+                vec![
+                    kept("a note", "tool-result"),
+                    refused,
+                    json!({"kind": "patch", "lane": "self-capture", "op": "resolve",
+                           "entry": {"id": "operator-6", "text": "a note"}}),
+                    json!({"kind": "correction", "refused": 7, "outcome": "accepted", "entry": "operator-6"}),
+                ],
+                vec![
+                    keep.clone(),
+                    json!({"step": "correction", "answer": "accept"}),
+                ],
+            ),
+            (
+                "a retire",
+                vec![
+                    kept("a note", "tool-result"),
+                    json!({"kind": "patch", "lane": "operator", "op": "retire",
+                           "entry": {"id": "operator-6", "text": "a note"}}),
+                ],
+                vec![keep, json!({"step": "retire", "pick": "a note"})],
+            ),
+        ];
+        let mut wrong = Vec::new();
+        for (name, rest, expected) in cases {
+            let lines: Vec<Value> = prefix.iter().cloned().chain(rest).collect();
+            let read = log("h", &lines);
+            let steps = match derived(&read, None) {
+                Ok(derived) => {
+                    let text = scenario_text("s", &derived, &Canned::default());
+                    if let Err(error) = crate::drive::scenario::parse(&text) {
+                        wrong.push(format!("{name}: its steps do not read: {error}"));
+                    }
+                    derived
+                        .steps
+                        .into_iter()
+                        .map(|mut step| {
+                            if let Some(step) = step.as_object_mut() {
+                                step.remove("place");
+                            }
+                            step
+                        })
+                        .collect::<Vec<_>>()
+                }
+                Err(refusal) => {
+                    wrong.push(format!("{name}: refused: {refusal}"));
+                    continue;
+                }
+            };
+            if steps != expected {
+                wrong.push(format!(
+                    "{name}: derived {}, not {}",
+                    json!(steps),
+                    json!(expected)
+                ));
+            }
+        }
+        assert!(wrong.is_empty(), "{}", wrong.join("\n"));
+    }
 }
