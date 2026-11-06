@@ -166,7 +166,7 @@ export function opOf(op: PatchOp): Op {
  */
 export const authorityOf = registry<Authority>({
   observed: { label: 'seen in tool output', level: 'ok' },
-  'self-stated': { label: "the model's own words", level: 'quiet' },
+  'self-stated': { label: "the model's own claim", level: 'quiet' },
   'user-stated': { label: 'from your words', level: 'ok' },
   operator: { label: 'kept by you', level: 'ok' },
   stated: { label: 'stated', level: 'quiet' },
@@ -267,7 +267,7 @@ export const refusalOf = registry<Refusal>({
   restates: { label: 'not taken: working memory already holds that text', level: 'quiet' },
   // A shadow's suggestion (#1031).
   'not-a-suggestion': { label: 'not taken: no chip was offered there', level: 'warn' },
-  'answered-already': { label: 'not taken: that chip was already answered, or let go', level: 'quiet' },
+  'answered-already': { label: 'not taken: that chip was already answered, or has expired', level: 'quiet' },
   // The operator's wrap (#1030).
   'wrapped-already': { label: 'not taken: that result is wrapped already, or waits for the next request', level: 'quiet' },
   // The operator's retire of their own entry (#1050).
