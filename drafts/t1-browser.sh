@@ -119,11 +119,22 @@ shot() {
   # the CLI client writes it under TMPDIR.
   J=$(TMPDIR=$TMP cdt take_screenshot "$PAGE" --output-format=json)
   F=$(echo "$J" | jq -r '.images[0].filePath // empty' 2>/dev/null)
+  SAVED=
+  if [ -z "$F" ]; then
+    # Over CLI 1.10.1's inline limit (measured 2026-11-06: a 21 MB viewport), the
+    # daemon saves the PNG in its own temp dir, whatever this TMPDIR, and names it
+    # only in the message: "...\nSaved screenshot to <dir>/screenshot.png.". Take
+    # it only from a chrome-devtools-mcp-* dir, which the daemon made for it.
+    F=$(echo "$J" | jq -r '.message // empty' 2>/dev/null | sed -n 's/^Saved screenshot to \(.*\)\.$/\1/p')
+    case "$(basename "$(dirname "${F:-/}")")" in chrome-devtools-mcp-*) SAVED=$(dirname "$F") ;; *) F= ;; esac
+  fi
   if [ -z "$F" ] || [ ! -f "$F" ]; then
     rm -rf "${TMP:?}"
     die "no screenshot: $J"
   fi
   mv "$F" "$RUN/shots/$NAME.png"
+  # The daemon's dir held this one file: remove it, or each shot leaves one behind.
+  [ -n "$SAVED" ] && rmdir "$SAVED" 2>/dev/null
   rm -rf "${TMP:?}"
   echo "$RUN/shots/$NAME.png"
 }

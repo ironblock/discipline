@@ -257,6 +257,14 @@ check_scenarios() {
       rc=1
     fi
   done
+  # T1's operator browser: `shot` against a fake chrome-devtools that prints
+  # what CLI 1.10.1 prints, both the inline and the daemon-saved screenshot.
+  code=0
+  bash drafts/t1-browser-test.sh || code=$?
+  if [[ "$code" -ne 0 ]]; then
+    echo "verify: drafts/t1-browser-test.sh failed (exit ${code})" >&2
+    rc=1
+  fi
   return "$rc"
 }
 
