@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { credentialedWeb, shellAuthorization, StreamedSource } from './credential.ts';
+import { credentialedWeb, shellAuthorization, shellCredential, StreamedSource } from './credential.ts';
 import { HttpTransport } from './http.ts';
 import type { LogLine } from './log.ts';
 
@@ -153,5 +153,19 @@ describe('shellAuthorization: the credential the native shell holds', () => {
     expect(await shellAuthorization(shell(null))).toBeUndefined();
     expect(await shellAuthorization(shell(''))).toBeUndefined();
     expect(asked).toEqual(['drive_authorization', 'drive_authorization', 'drive_authorization']);
+  });
+});
+
+/** #1050's audit, finding 6: a shell that cannot hand the credential over says why, and the page shows it, not a blank window. */
+describe('shellCredential: what the page starts with, or why it cannot', () => {
+  it('is the credential, or none, as shellAuthorization answers', async () => {
+    const shell = (answer: unknown) => ({ __TAURI_INTERNALS__: { invoke: async () => answer } });
+    expect(await shellCredential(shell(AUTH))).toEqual({ authorization: AUTH });
+    expect(await shellCredential({})).toEqual({});
+  });
+
+  it('says why when the shell refuses to answer, as a missing capability makes it', async () => {
+    const refusing = { __TAURI_INTERNALS__: { invoke: async () => Promise.reject(new Error('drive_authorization not allowed')) } };
+    expect(await shellCredential(refusing)).toEqual({ why: 'the shell did not hand over the drive’s credential: drive_authorization not allowed' });
   });
 });
