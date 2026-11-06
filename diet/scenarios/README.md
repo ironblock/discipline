@@ -121,6 +121,7 @@ What the deny list does:
 - `calls` are the tool calls the reply makes; `arguments` is the JSON text the model would write.
 - A `$job` anywhere in a reply is the last background job id (`bg_` and eight hex digits) the request carries: what `task_stop` names, which no script can know ahead of the run.
 - A `$entry:<call>/<field>` anywhere in a reply is the last record entry id for that call and field the request carries, read from the request's decoded text: `r`, the seq diet built it at, then `/<call>/<field>`, as `resolve_entry` names it. A line logged earlier moves the seq, so a reply names the entry by its call and field instead. With none in the request, it stays as written.
+- A `$operator-entry` anywhere in a reply is the last operator entry id the request carries, `operator-` and the seq serve coined it at, for the same reason. The trunk sees working memory, and so those ids, only in a refill's render: a reply that names one follows a meditation. With none in the request, it stays as written.
 - `prompt_tokens` (optional) is the prompt the reply's usage reports, in tokens; absent, the canned server's 600. A trunk that large is what a budget meditation measures.
 - On a hosted substrate (`server_kind = "api"`, #555) a reply may also say what only that wire carries; any other substrate refuses the run:
   - `thinking` (optional): the thinking before the answer, sent as a thinking block with a constructed signature;
@@ -169,7 +170,7 @@ What the deny list does:
 
 - After each admitted ask, meditation or refill, the runner waits until `GET /state` is `idle`.
 - `patience` (optional) on a step it waits after -- an ask to be admitted, a `fork`, a `suggestion` that accepts, `declare-meditation`, `refill-anyway`, `rule-phase`, `start-phase`, `propose-phase` or `move-phase` -- is how long, in whole seconds above 0, that wait may take before the drive fails; absent, 900. A live re-fire whose turns run long names one, and always a number: a hung run still ends. Any other step refuses it.
-- `pick` names a live entry, read from `GET /memory`: a number is its place in id order, and text is the first entry whose content holds it.
+- `pick` names a live entry, read from `GET /memory`: a number is its place in id order, and text is the first entry whose content holds it. `"$name"` is the entry a step earlier in the run bound to `name` with `as`, its id never written down.
 - `at` and `from` name a logged line by what it is, read back from `GET /line/<seq>`, never by its seq: `{"call": <id>}` is the last result of the call with that id, and `{"answer": <text>}` the last answer, the trunk's or a fork's, whose text holds it.
 - A gesture serve refuses fails its step, naming serve's refusal.
 - `place` (optional, an object) on any step is for a reader. The runner never reads it. An operator script writes it (below).
