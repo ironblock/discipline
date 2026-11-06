@@ -2566,6 +2566,41 @@ pub fn drive_from(
     Ok((bound, None))
 }
 
+/// `text` with each `$name` of `names` in place of its value, and each
+/// `$$name` as `$name` itself: the scenario format's one escape rule
+/// wherever it reads a `$name` (the app audit's page walk, F20). A `$` before
+/// no name in `names`, doubled or not, stays as written; the longest name
+/// that fits is the one read.
+#[must_use]
+pub fn with_names(text: &str, names: &[(&str, &str)]) -> String {
+    let fitting = |rest: &str| {
+        names
+            .iter()
+            .filter(|(name, _)| !name.is_empty() && rest.starts_with(name))
+            .max_by_key(|(name, _)| name.len())
+            .copied()
+    };
+    let mut out = String::new();
+    let mut rest = text;
+    while let Some(at) = rest.find('$') {
+        out.push_str(&rest[..at]);
+        let after = &rest[at + 1..];
+        if let Some((name, _)) = after.strip_prefix('$').and_then(fitting) {
+            out.push('$');
+            out.push_str(name);
+            rest = &after[1 + name.len()..];
+        } else if let Some((name, value)) = fitting(after) {
+            out.push_str(value);
+            rest = &after[name.len()..];
+        } else {
+            out.push('$');
+            rest = after;
+        }
+    }
+    out.push_str(rest);
+    out
+}
+
 /// Each of `scenario`'s expectations `log` -- the session's log -- does not
 /// meet, with `bound`'s names in place of each `$name`; empty when it meets
 /// every one. Matched by [`crate::formats::log_query::find_terms`], the one
@@ -2573,11 +2608,11 @@ pub fn drive_from(
 /// `key=value` or `key~text`.
 #[must_use]
 pub fn unmet(scenario: &Scenario, log: &str, bound: &Bindings) -> Vec<String> {
-    let bind = |wanted: &str| {
-        bound.iter().fold(wanted.to_owned(), |out, (name, id)| {
-            out.replace(&format!("${name}"), id)
-        })
-    };
+    let names: Vec<(&str, &str)> = bound
+        .iter()
+        .map(|(name, id)| (name.as_str(), id.as_str()))
+        .collect();
+    let bind = |wanted: &str| with_names(wanted, &names);
     let mut first: BTreeMap<&str, i64> = BTreeMap::new();
     let mut missed = Vec::new();
     for expect in &scenario.expects {
@@ -4942,6 +4977,35 @@ mod tests {
             Some(Err(_))
         ));
         assert_eq!(Pick::Index(0).bound_in(&bound), None);
+    }
+
+    /// An expectation's `where` text reads `$name` as the entry bound to
+    /// `name`, and `$$name` as the text `$name` itself: one escape rule
+    /// wherever a `$name` is read. A `$$` before no bound name stays.
+    #[test]
+    fn a_where_writes_a_literal_dollar_name_doubled() {
+        let log = include_str!("../../formats/log/fixtures/valid/an-answered-turn.jsonl")
+            .replace("say hello", "is $kept set? $$ and $$$A stay");
+        let header = r#"{"scenario":"s","regimen":"r.toml","head":"h.md"}"#;
+        let expecting = |wanted: &str| {
+            parse(&format!(
+                "{header}\n{}\n",
+                serde_json::json!({"expect": "ask", "where": {"text~": wanted}})
+            ))
+            .expect("it reads")
+        };
+        let mut bound = Bindings::new();
+        bound.insert("kept".to_owned(), "operator-15".to_owned());
+        let met = |wanted: &str| unmet(&expecting(wanted), &log, &bound).is_empty();
+        assert!(met("is $$kept set?"), "`$$kept` is the text `$kept`");
+        assert!(
+            !met("is $kept set?"),
+            "`$kept` is the entry bound to `kept`"
+        );
+        assert!(
+            met("$$ and $$$A stay"),
+            "a `$$` before no bound name stays as written"
+        );
     }
 
     /// A `pick` whose text itself starts with `$` writes it `$$`: one `$`

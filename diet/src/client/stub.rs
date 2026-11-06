@@ -533,10 +533,8 @@ fn routed(routes: &mut Routes, read: &io::Result<(String, String)>) -> Result<Ac
     let Ok((_, body)) = read.as_ref() else {
         return Ok(act);
     };
-    let act = match last_job(body) {
-        Some(job) => with_job(act, &job),
-        None => act,
-    };
+    // With no job in the request, `$job` stands for itself, so `$$job` is still `$job`.
+    let act = with_job(act, last_job(body).as_deref().unwrap_or("$job"));
     Ok(with_entries(act, &decoded(body)))
 }
 
@@ -577,7 +575,9 @@ fn last_job(body: &str) -> Option<String> {
 
 /// `act` with each `$job` in what it sends replaced by `job`.
 fn with_job(act: Act, job: &str) -> Act {
-    named(act, &|text: String| text.replace("$job", job))
+    named(act, &|text: String| {
+        crate::drive::scenario::with_names(&text, &[("job", job)])
+    })
 }
 
 /// What an `$entry:` placeholder may name: a call id's and a field's
@@ -595,22 +595,22 @@ fn with_entries(act: Act, body: &str) -> Act {
     let operator = last_operator_entry(body);
     let resolve = |text: String| {
         // The operator's last entry, by the id serve coined it (the app audit's page walk, F20).
-        let text = match &operator {
-            Some(id) => text.replace("$operator-entry", id),
-            None => text,
-        };
+        let id = operator.as_deref().unwrap_or("$operator-entry");
+        let text = crate::drive::scenario::with_names(&text, &[("operator-entry", id)]);
         if !text.contains(MARK) {
             return text;
         }
         let mut out = String::new();
         let mut rest = text.as_str();
         while let Some(at) = rest.find(MARK) {
-            out.push_str(&rest[..at]);
+            // `$$entry:...` is that text itself, written once (`with_names`'s rule).
+            let doubled = rest[..at].ends_with('$');
+            out.push_str(&rest[..at - usize::from(doubled)]);
             let after = &rest[at + MARK.len()..];
             let end = after.find(|c: char| !entry_char(c)).unwrap_or(after.len());
             let suffix = &after[..end];
             match last_entry(body, suffix) {
-                Some(id) if !suffix.is_empty() => out.push_str(&id),
+                Some(id) if !suffix.is_empty() && !doubled => out.push_str(&id),
                 _ => out.push_str(&rest[at..at + MARK.len() + end]),
             }
             rest = &after[end..];
@@ -1206,6 +1206,43 @@ mod tests {
         assert!(
             head.contains(&format!("Content-Length: {}", body.len())),
             "the declared length is the body's: {head}"
+        );
+    }
+
+    /// A reply's placeholder doubled -- `$$job`, `$$operator-entry`,
+    /// `$$entry:<call>/<field>` -- is that text itself, written once: one
+    /// escape rule wherever a `$name` is read. A `$$` before no
+    /// placeholder, a shell's `$$` or ast-grep's `$$$A`, stays.
+    #[test]
+    fn a_doubled_dollar_keeps_a_placeholder_as_written() {
+        let answer = |act: Act| match act {
+            Act::Answer(text) => text,
+            _ => unreachable!("an answer stays an answer"),
+        };
+        assert_eq!(
+            answer(with_job(
+                Act::Answer("stop $job, not $$job; echo $$ $$$A".to_owned()),
+                "bg_0123abcd"
+            )),
+            "stop bg_0123abcd, not $job; echo $$ $$$A"
+        );
+        assert_eq!(
+            answer(with_entries(
+                Act::Answer(
+                    "retire $operator-entry, not $$operator-entry; resolve $entry:call-r1/decision, not $$entry:call-r1/decision"
+                        .to_owned()
+                ),
+                "operator-15\tits text\nr5/call-r1/decision"
+            )),
+            "retire operator-15, not $operator-entry; resolve r5/call-r1/decision, not $entry:call-r1/decision"
+        );
+        // A request that carries none: the placeholder stays, and its double is still it, once.
+        assert_eq!(
+            answer(with_entries(
+                Act::Answer("$operator-entry, $$operator-entry".to_owned()),
+                "nothing here"
+            )),
+            "$operator-entry, $operator-entry"
         );
     }
 
