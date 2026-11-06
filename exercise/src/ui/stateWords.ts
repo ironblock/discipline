@@ -1,5 +1,5 @@
 /**
- * What the session is doing, in the operator's words (#1050's audit, finding 13): the composer's state line and the
+ * What the session is doing, in the operator's words (the app audit, finding 13): the composer's state line and the
  * header's state say the same thing. A capture is said by what runs in it -- the operator's own fork, a refill's
  * work, or an interview -- since under manual first most captures are no interview.
  */

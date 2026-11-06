@@ -48,7 +48,7 @@ export interface ComposerProps {
   readonly noMeditation?: string;
   /** A meditation held for the operator (#150's gate): the changes its reconcile left unaddressed, each with its entry's text. */
   readonly held?: { readonly unaddressed: readonly { readonly id: string; readonly text: string }[] };
-  /** What a capture runs (#1050's audit, finding 13): the state line says it. Absent: an interview. */
+  /** What a capture runs (the app audit, finding 13): the state line says it. Absent: an interview. */
   readonly capturing?: Capturing;
 }
 
@@ -91,14 +91,14 @@ export function Composer({ state, link = 'live', phase, phases, dispatch, hint, 
   const [refusal, setRefusal] = useState<string | undefined>();
   // A refusal says why the last command was not taken; once the session's state moves, the state line says what it is now.
   useEffect(() => setRefusal(undefined), [state]);
-  // Where a refill goes (#1050's audit, finding 1): '' stays in the phase, and is the default; a move is picked.
+  // Where a refill goes (the app audit, finding 1): '' stays in the phase, and is the default; a move is picked.
   const [to, setTo] = useState('');
   // The phase moved (#733): the refill stays again, and nothing else resets -- not the draft, the attachments or the
   // scope mark, which a remount per phase used to lose.
   useEffect(() => setTo(''), [phase]);
   // The moves a refill may name: the graph's from here, where the operator may move alone (#788); else none.
   const moves = unilateral ? phases.filter((p) => p !== phase) : [];
-  // An ask out and not yet answered (#1050's audit, finding 9): a second Enter sends nothing until it is.
+  // An ask out and not yet answered (the app audit, finding 9): a second Enter sends nothing until it is.
   const sending = useRef(false);
   // Ending cannot be taken back: the first press asks, a second one sends (#289) -- a second the person chose after
   // seeing the question, not the other half of a double click or a held key.

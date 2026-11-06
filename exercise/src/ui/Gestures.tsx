@@ -19,7 +19,7 @@ export function useGestures(): ((command: Command) => Promise<Ack>) | undefined 
 }
 
 /**
- * What serve will take a gesture at now (#1050's audit, finding 10): a fork, and a suggestion's accept that fires one,
+ * What serve will take a gesture at now (the app audit, finding 10): a fork, and a suggestion's accept that fires one,
  * only while the session awaits; a fork or a wrap only at a line still on the trunk, which a meditation's refill takes
  * off. Outside a session view, everything is taken.
  */

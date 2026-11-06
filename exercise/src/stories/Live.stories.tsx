@@ -1115,7 +1115,7 @@ async function cornerClick(button: HTMLElement) {
  * closes on the post. */
 export const ServedForkAtAStep: Story = {
   name: '?drive: fork at a step with a pinned ask or your own words',
-  // Open: serve takes a fork only while the session awaits (#1050's audit, finding 10).
+  // Open: serve takes a fork only while the session awaits (the app audit, finding 10).
   args: { drive: true, web: posting(open(gestures)) },
   play: async ({ canvasElement }) => {
     const page = within(canvasElement.ownerDocument.body);

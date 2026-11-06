@@ -225,7 +225,7 @@ export function SessionView({ session, link = 'live', linkWhy, surface, onSurfac
 
   const trunkOrder = session.eras.flatMap((era) => era.nodes.map((n) => n.id));
   const eraOf = new Map(session.eras.flatMap((era) => era.nodes.map((n) => [n.id, era.index] as const)));
-  // What serve takes a fork or a wrap at (#1050's audit, finding 10): a line of the latest era's, while the session awaits.
+  // What serve takes a fork or a wrap at (the app audit, finding 10): a line of the latest era's, while the session awaits.
   const onTrunk = new Set(session.eras.at(-1)?.nodes.flatMap((n) => ((n as { readonly logged?: { readonly seq: number } }).logged ? [(n as { readonly logged: { readonly seq: number } }).logged.seq] : [])) ?? []);
   const moment: GestureMoment = { awaiting: session.state === 'awaiting', onTrunk: (seq) => onTrunk.has(seq) };
   const laneBranches = (slot: number) =>
