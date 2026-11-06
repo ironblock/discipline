@@ -1002,7 +1002,11 @@ fn a_drive_server_ended_over_http_writes_its_record_and_exits() {
         }
         std::thread::sleep(Duration::from_millis(20));
     };
-    assert_eq!(exited.and_then(|exited| exited.code()), Some(0), "serve did not exit");
+    assert_eq!(
+        exited.and_then(|exited| exited.code()),
+        Some(0),
+        "serve did not exit"
+    );
     let written = std::fs::read_to_string(&record_path).expect("the record");
     assert!(!written.trim().is_empty(), "no record was written");
     let _ = std::fs::remove_file(format!("{record_path}.receipt.json"));
