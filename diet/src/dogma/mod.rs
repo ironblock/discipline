@@ -168,7 +168,8 @@ pub mod vocabulary;
 ///   "the words in that entry this note corrects, copied exactly; give the
 ///   new words in with" and "the words that replace them" -- and `confirms`,
 ///   "id of an entry this note checks against tool output you saw; omit
-///   otherwise"; the rest is c3's, byte for byte. v6 is v5 with the
+///   otherwise" -- and its `content` is optional, required unless `replaces`
+///   and `with` are given; the rest is c3's, byte for byte. v6 is v5 with the
 ///   judgment ask's SUPERSEDE sentence asking for the corrected entry in
 ///   full. The maintainer's approved wording (relayed by Dispatch). No
 ///   template and no set already pinned changed.
@@ -182,7 +183,7 @@ pub const VERSION: u32 = 18;
 /// that recomputes it fails until both lines are edited together. Without it
 /// the manifest could be regenerated after an edit and the version left at
 /// what it was, which is a bump that never happened.
-pub const MANIFEST_DIGEST: &str = "4d9687221a245e19";
+pub const MANIFEST_DIGEST: &str = "ad80a505cc9600ed";
 
 /// The per-model operating points, as TOML text, exactly as pinned.
 ///

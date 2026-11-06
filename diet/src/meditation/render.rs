@@ -143,7 +143,7 @@ pub fn rendered_marked(
         format!(
             "{}\t{}\t{}{}\n",
             one_line(entry.id.as_str()),
-            source(entry),
+            source_in(object, entry),
             one_line(content),
             mark(&entry.id)
         )
@@ -630,11 +630,24 @@ pub fn working_set_bytes(object: &WorkingObject) -> u64 {
         // that decides a trigger.
         total = total
             .saturating_add(one_line(entry.id.as_str()).len() as u64)
-            .saturating_add(source(entry).len() as u64)
+            .saturating_add(source_in(object, entry).len() as u64)
             .saturating_add(one_line(&entry.content).len() as u64)
             .saturating_add(3);
     }
     total
+}
+
+/// [`source`], and the note that checks the entry against tool output while
+/// that note is live (#1050, c4's `confirms`): `…, checked by <note id>`,
+/// the most recent such note when several are.
+#[must_use]
+pub fn source_in(object: &WorkingObject, entry: &crate::object::Entry) -> String {
+    let mut said = source(entry);
+    if let Some(check) = object.checks_of(&entry.id).first() {
+        said.push_str(", checked by ");
+        said.push_str(&one_line(check.id.as_str()));
+    }
+    said
 }
 
 /// What an entry's line says of where its words came from (#1050), in the

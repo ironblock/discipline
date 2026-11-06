@@ -166,7 +166,7 @@ impl CaptureSet {
 
 #[cfg(test)]
 mod tests {
-    use super::{C1, C2, C3, DEFAULT, SETS, set};
+    use super::{C1, C2, C3, C4, DEFAULT, SETS, set};
     use crate::dogma::MANIFEST;
     use std::collections::BTreeSet;
     use std::path::Path;
@@ -266,7 +266,8 @@ mod tests {
         assert_eq!(set("c1"), Some(&C1));
         assert_eq!(set("c2"), Some(&C2));
         assert_eq!(set("c3"), Some(&C3));
-        assert_eq!(set("c4"), None);
+        assert_eq!(set("c4"), Some(&C4));
+        assert_eq!(set("c5"), None);
         assert_eq!(DEFAULT, &C1);
     }
 }

@@ -2982,6 +2982,9 @@ struct State {
     /// contract whose `update_record` takes no field kind (#1016): read by
     /// its result and its `patch` lines, and taken.
     vouched: Option<crate::capture::tools::Authority>,
+    /// The entry the last capture call's note checks, under c4 (#1050):
+    /// recorded on the note once it is applied ([`vouch`]).
+    confirmed: Option<crate::object::EntryId>,
 }
 
 impl State {
@@ -3143,6 +3146,7 @@ impl State {
             meditation_floor: 0,
             native_files: crate::meditation::native::Files::default(),
             vouched: None,
+            confirmed: None,
             jobs: BTreeMap::new(),
             notices: Vec::new(),
             promotable: None,
@@ -8399,7 +8403,25 @@ fn capture_patches(
         .as_ref()
         .map(|(tangent, _)| tangent.id().to_owned());
     state.vouched = effect.authority;
-    let mut patches = effect.patches;
+    state.confirmed.clone_from(&effect.confirms);
+    // Replace by detail (c4, #1050): the voided entry's content with the
+    // words it corrects replaced, refused `not-in-source` when they are not
+    // in it. A voided entry the object does not hold is refused as before.
+    let held = effect.patches.iter().find_map(|patch| match patch {
+        Patch::Supersede { voids, .. } => state.interview.as_ref().and_then(|interview| {
+            interview
+                .object
+                .entries()
+                .find(|entry| entry.id == *voids)
+                .map(|entry| entry.content.clone())
+        }),
+        _ => None,
+    });
+    let mut patches = match (&effect.replaces, held) {
+        (Some(_), Some(held)) => crate::capture::tools::replaced(&effect, &held)
+            .ok_or_else(|| Refusal::NotInSource.tag().to_owned())?,
+        _ => effect.patches,
+    };
     for patch in &mut patches {
         provenance_of(patch).tangent.clone_from(&tangent);
     }
@@ -10718,6 +10740,8 @@ fn vouch(
         Authority::UserStated => Vouched::UserStated,
         Authority::SelfStated => Vouched::SelfStated,
     };
+    // The entry the note checks (c4, #1050), on its line and in the object.
+    let confirms = state.confirmed.take();
     let mut object = state
         .interview
         .as_mut()
@@ -10725,6 +10749,14 @@ fn vouch(
     for line in lines {
         if let Event::Patched { entry, .. } = line {
             entry.authority = Some(authority.tag().to_owned());
+            if let (Some(checked), Some(object), Ok(note)) = (
+                &confirms,
+                object.as_deref_mut(),
+                crate::object::EntryId::new(&entry.id),
+            ) && object.confirm(&note, checked).is_ok()
+            {
+                entry.confirms = Some(checked.as_str().to_owned());
+            }
             if let (Some(object), Ok(id)) = (
                 object.as_deref_mut(),
                 crate::object::EntryId::new(&entry.id),
@@ -16508,6 +16540,7 @@ fn patched(fork: Option<u64>, patch: &Patch, object: &WorkingObject) -> Event {
             category: None,
             authority: None,
             kept_from: None,
+            confirms: None,
         },
         supersedes,
         tangent: patch.provenance().tangent.clone(),
@@ -19816,6 +19849,7 @@ pub(in crate::drive) mod tests {
                     category: None,
                     authority: None,
                     kept_from: None,
+                confirms: None,
                 },
                 supersedes: None,
                 tangent: Some("t/1".to_owned()),
@@ -20493,6 +20527,7 @@ pub(in crate::drive) mod tests {
                     category: None,
                     authority: None,
                     kept_from: None,
+                confirms: None,
                 },
                 supersedes: None,
                 tangent: Some("t/1".to_owned()),
@@ -25594,6 +25629,7 @@ pub(in crate::drive) mod tests {
                 category: None,
                 authority: None,
                 kept_from: None,
+                confirms: None,
             },
             supersedes: None,
             tangent: None,
@@ -32589,6 +32625,156 @@ pub(in crate::drive) mod tests {
         reads_whole(&session);
     }
 
+    /// #1050: under c4 a note checks an entry against tool output -- the
+    /// entry's render line then names it, while it is live -- and a note
+    /// corrects an entry by detail, the words it corrects replaced in that
+    /// entry's content; words the entry does not hold are refused
+    /// `not-in-source`.
+    #[test]
+    #[allow(clippy::too_many_lines)] // one session's steps, then its render twice
+    fn a_c4_note_checks_an_entry_and_corrects_another_by_detail() {
+        let tree = scratch("c4-check-and-correct");
+        std::fs::write(tree.join("notes.md"), "port 5182 is free\n").expect("a note");
+        let call = |id: &str, args: serde_json::Value| {
+            Step::call(0, id, "update_record", &args.to_string())
+        };
+        let mut interview = interviewing(&[]);
+        interview.self_capture = Some(crate::capture::tools::Cadence::DEFAULT);
+        interview.capture_contract = &crate::dogma::capture::C4;
+        let mut shape = looping();
+        declare_self_capture(&mut shape, Some(&interview));
+        let session = Session::open_with(
+            Canned::new(vec![
+                vec![bash("call-1", "cat notes.md")],
+                vec![call(
+                    "call-2",
+                    serde_json::json!({
+                        "content": "port 5182 is free",
+                        "evidence": "port 5182 is free",
+                        "confirms": "e-port"
+                    }),
+                )],
+                vec![call(
+                    "call-3",
+                    serde_json::json!({
+                        "supersedes": "e-server",
+                        "replaces": "port 5180",
+                        "with": "port 5182"
+                    }),
+                )],
+                vec![call(
+                    "call-4",
+                    serde_json::json!({
+                        "supersedes": "e-port",
+                        "replaces": "port 9999",
+                        "with": "port 1"
+                    }),
+                )],
+                deltas(&["done"]),
+            ]),
+            shape,
+            None,
+            Some(tools(
+                Confinement::Unconfined,
+                &tree,
+                &["cat"],
+                None,
+                Decider::Decline,
+            )),
+            None,
+            Some(interview),
+        );
+        {
+            let mut state = session.shared.lock();
+            let object = &mut state.interview.as_mut().expect("memory").object;
+            for (id, content) in [
+                ("e-port", "port 5182 is the dev server's"),
+                ("e-server", "the dev server runs on port 5180"),
+            ] {
+                object
+                    .apply(&Patch::Add {
+                        id: crate::object::EntryId::new(id).expect("an id"),
+                        content: content.to_owned(),
+                        provenance: crate::object::Provenance {
+                            turn: 0,
+                            lane: "self-capture".to_owned(),
+                            fork: None,
+                            tangent: None,
+                            index: 0,
+                        },
+                    })
+                    .expect("seeded");
+            }
+        }
+        session.ask("check the port", None).expect("accepted");
+        let log = wait_until(&session, "the turn", settled);
+        let shown: Vec<String> = log
+            .iter()
+            .filter_map(|logged| match &logged.event {
+                Event::ToolCalled(line) if line.name == "update_record" => line.shown.clone(),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(shown.len(), 3, "{shown:?}");
+        assert!(shown[0].ends_with("(observed)"), "{shown:?}");
+        assert_eq!(shown[2], "refused: not-in-source");
+        let checker = log
+            .iter()
+            .find_map(|logged| match &logged.event {
+                Event::Patched { entry, .. } if entry.confirms.as_deref() == Some("e-port") => {
+                    Some(entry.id.clone())
+                }
+                _ => None,
+            })
+            .expect("the note's line names what it checks");
+        let render = |session: &Session<Canned>| {
+            let state = session.shared.lock();
+            crate::meditation::render::render(
+                &state.interview.as_ref().expect("memory").object,
+                None,
+            )
+        };
+        let text = render(&session);
+        assert!(
+            text.contains(&format!(
+                "e-port\tyou noted, checked by {checker}\tport 5182 is the dev server's\n"
+            )),
+            "{text}"
+        );
+        assert!(
+            text.contains("\tthe dev server runs on port 5182\n"),
+            "{text}"
+        );
+        assert!(
+            !text.contains("e-server\t"),
+            "the corrected entry is voided: {text}"
+        );
+        // The check stops vouching once it is not live.
+        {
+            let mut state = session.shared.lock();
+            let object = &mut state.interview.as_mut().expect("memory").object;
+            object
+                .apply(&Patch::Resolve {
+                    target: crate::object::EntryId::new(&checker).expect("an id"),
+                    provenance: crate::object::Provenance {
+                        turn: 2,
+                        lane: "self-capture".to_owned(),
+                        fork: None,
+                        tangent: None,
+                        index: 0,
+                    },
+                })
+                .expect("resolved");
+        }
+        let text = render(&session);
+        assert!(
+            text.contains("e-port\tyou noted\tport 5182 is the dev server's\n"),
+            "{text}"
+        );
+        reads_whole(&session);
+        tidy(&[&tree]);
+    }
+
     /// #1016: under contract set c3 a note is always kept, and the model is
     /// shown who vouches for it: `observed` when its quote is a run of one
     /// line of a tool result, `user-stated` when of the ask and not a tool
@@ -32767,6 +32953,7 @@ pub(in crate::drive) mod tests {
                     category: None,
                     authority: None,
                     kept_from: None,
+                    confirms: None,
                 }
             )]
         );

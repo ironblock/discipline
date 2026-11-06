@@ -216,7 +216,7 @@ impl AskSet {
 
 #[cfg(test)]
 mod tests {
-    use super::{DEFAULT, Modality, SETS, T1, T2, T3, V3, V4, V5, set};
+    use super::{DEFAULT, Modality, SETS, T1, T2, T3, V3, V4, V5, V6, set};
     use crate::dogma::MANIFEST;
     use std::collections::BTreeSet;
     use std::path::Path;
@@ -358,6 +358,24 @@ mod tests {
         for other in [&V3, &V4, &T1, &T2, &V5] {
             assert_eq!(other.fields_counterpart(), None, "{}", other.name);
         }
+    }
+
+    /// #1050: v6 is v5 with the judgment ask's SUPERSEDE sentence asking
+    /// for the corrected entry in full, in the maintainer's words.
+    #[test]
+    fn v6_is_v5_with_the_supersede_sentence_changed() {
+        assert_eq!(set("v6"), Some(&V6));
+        for (file, text) in V5.files() {
+            let changed = V6.text(file) != Some(*text);
+            assert_eq!(changed, *file == "judgment", "{file}");
+        }
+        let judgment = V6.text("judgment").expect("a judgment ask");
+        assert!(judgment.contains(
+            "SUPERSEDE cites the id of a working-record entry this turn corrects, then that \
+             entry in full as it should now stand: every detail of it that is still true, with \
+             the correction made;"
+        ));
+        assert_eq!(V6.operator_imperative(), V5.operator_imperative());
     }
 
     /// v4 differs from v3 in the judgment ask alone.

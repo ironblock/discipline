@@ -267,6 +267,9 @@ pub struct Entry {
     /// Where its words came from, beyond its lane (#1050): what the
     /// render's source column says of it. Absent where the lane says enough.
     pub origin: Option<Origin>,
+    /// The entry this note checks against tool output, under c4 (#1050):
+    /// the link's one record; [`WorkingObject::checks_of`] reads it back.
+    pub confirms: Option<EntryId>,
 }
 
 /// Where an entry's words came from, beyond its lane (#1050).
@@ -760,6 +763,43 @@ impl WorkingObject {
         })
     }
 
+    /// Record that note `note` checks entry `checked` against tool output
+    /// (#1050, c4's `confirms`).
+    ///
+    /// # Errors
+    ///
+    /// When the object holds no entry `note`, or none `checked`.
+    pub fn confirm(&mut self, note: &EntryId, checked: &EntryId) -> Result<(), ObjectError> {
+        if !self.entries.contains_key(checked) {
+            return Err(ObjectError::UnknownTarget(checked.clone()));
+        }
+        let entry = self
+            .entries
+            .get_mut(note)
+            .ok_or_else(|| ObjectError::UnknownTarget(note.clone()))?;
+        entry.confirms = Some(checked.clone());
+        Ok(())
+    }
+
+    /// The live notes that check entry `id` (#1050), most recent first: a
+    /// check superseded, resolved or otherwise not live no longer vouches.
+    #[must_use]
+    pub fn checks_of(&self, id: &EntryId) -> Vec<&Entry> {
+        let mut checks: Vec<&Entry> = self
+            .entries
+            .values()
+            .filter(|entry| entry.state.is_live() && entry.confirms.as_ref() == Some(id))
+            .collect();
+        checks.sort_by(|a, b| {
+            b.provenances
+                .iter()
+                .max()
+                .cmp(&a.provenances.iter().max())
+                .then_with(|| b.id.cmp(&a.id))
+        });
+        checks
+    }
+
     /// Say where entry `id`'s words came from (#1050), replacing what was
     /// said: an operator's keep that restates a model's note is the keep's,
     /// the user's endorsement being the authority that counts.
@@ -974,6 +1014,7 @@ impl WorkingObject {
                 provenances: vec![provenance.clone()],
                 refuted: None,
                 origin: None,
+                confirms: None,
             },
         );
         self.by_content.insert(key, id.clone());
@@ -1249,6 +1290,11 @@ impl WorkingObject {
                 Some(_) => return Err(wrong("`aliases` is not a list")),
             }
             let origin = origin_of(&line).map_err(|why| wrong(&why))?;
+            let confirms = match line.get("confirms") {
+                None => None,
+                Some(Value::String(text)) => Some(id_of(text)?),
+                Some(_) => return Err(wrong("`confirms` is not text")),
+            };
             let content = text("content")?;
             let key = normalise(&content);
             let live = state.is_live();
@@ -1270,6 +1316,7 @@ impl WorkingObject {
                     provenances,
                     refuted,
                     origin,
+                    confirms,
                 },
             );
         }
@@ -1380,6 +1427,10 @@ fn entry_value(entry: &Entry, aliases: &[&EntryId]) -> Value {
                 ("pointer".to_owned(), Value::String(pointer.clone())),
             ])),
         );
+    }
+    // The entry it checks (#1050).
+    if let Some(checked) = &entry.confirms {
+        members.insert("confirms".to_owned(), Value::String(checked.0.clone()));
     }
     // Where its words came from (#1050).
     match &entry.origin {
