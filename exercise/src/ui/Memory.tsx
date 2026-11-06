@@ -1,4 +1,4 @@
-import { useState, type FormEvent } from 'react';
+import { useRef, useState, type FormEvent } from 'react';
 
 import type { Ack, Command } from '../drive/transport.ts';
 import type { Folded, MemoryEntry } from '../session/fold.ts';
@@ -114,12 +114,17 @@ export function Memory({ entries, seenThrough = -1, onSeen, act }: MemoryProps) 
   );
 }
 
+/** How long "retire it?" shows before a press answers it. */
+const RETIRE_CONFIRM_AFTER_MS = 500;
+
 /**
  * The operator's hand on one live entry (#150): rewrite it -- it supersedes, and the model may not overwrite it -- or
  * flag it with a note a meditation will address. Each answer the drive refuses is said in place.
  */
 function EntryActions({ id, text, act, yours }: { readonly id: string; readonly text: string; readonly act: (command: Command) => Promise<Ack>; readonly yours: boolean }) {
   const [mode, setMode] = useState<'none' | 'edit' | 'flag'>('none');
+  const [retiring, setRetiring] = useState(false);
+  const retireArmedAt = useRef(0);
   const [draft, setDraft] = useState(text);
   const [note, setNote] = useState('');
   const [refused, setRefused] = useState<string>();
@@ -173,10 +178,27 @@ function EntryActions({ id, text, act, yours }: { readonly id: string; readonly 
           <button type="button" data-action="flag" aria-label={`Flag ${id}`} title="flag this entry with a note: the next meditation addresses it" onClick={() => setMode('flag')}>
             flag
           </button>
-          {/* The operator's retire of their own entry (#1050): it stops mattering, and is kept. */}
+          {/* The operator's retire of their own entry (#1050): it stops mattering, and is kept. The first press asks, a
+              second one -- after the question could be read -- retires (the app audit's page walk, F11), as end does. */}
           {yours ? (
-            <button type="button" data-action="retire" aria-label={`Retire ${id}`} title="retire this entry of yours: it stops mattering, and is kept" onClick={() => void send({ kind: 'retire-entry', id })}>
-              retire
+            <button
+              type="button"
+              data-action="retire"
+              data-armed={retiring || undefined}
+              aria-label={`Retire ${id}`}
+              title="retire this entry of yours: it stops mattering, and is kept"
+              onClick={() => {
+                if (!retiring) {
+                  retireArmedAt.current = performance.now();
+                  return setRetiring(true);
+                }
+                if (performance.now() - retireArmedAt.current < RETIRE_CONFIRM_AFTER_MS) return;
+                setRetiring(false);
+                void send({ kind: 'retire-entry', id });
+              }}
+              onBlur={() => setRetiring(false)}
+            >
+              {retiring ? 'retire it?' : 'retire'}
             </button>
           ) : null}
         </>
