@@ -1,7 +1,8 @@
 //! The operator script (#908): a run's log read back into a scenario that
 //! holds every move its operator made -- the asks and their files, the
 //! scoping marks, meditations, flags and edits, the phase moves and rulings,
-//! the tangents, and the end -- so `diet-drive scenario` can play them again.
+//! the tangents, the operator's gestures (the app audit's page walk, F20),
+//! and the end -- so `diet-drive scenario` can play them again.
 //!
 //! The script fixes the inputs, not what comes back. Each step keeps its
 //! place (`place`, which the runner does not read): the turn it belongs to,
@@ -17,9 +18,11 @@
 //! A move the format cannot express is refused, naming its line, and never
 //! dropped: a stop, a call moved to the background, an approval answered
 //! call by call, a tangent closed with more than one ruling, a meditation
-//! declared with a phase move, and a refused command that is not an ask.
+//! declared with a phase move, a refused command that is not an ask, a keep
+//! from an ask, a wrap that keeps nothing, a gesture whose line the runner
+//! would not find again, and a chip answered out of order.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::fmt;
 
 use serde_json::{Map, Value, json};
@@ -171,6 +174,135 @@ impl Live {
     }
 }
 
+/// The line `seq` names among `before`, the lines logged before a gesture.
+fn line_at(before: &[Map<String, Value>], seq: u64) -> Option<&Map<String, Value>> {
+    before
+        .iter()
+        .find(|line| line.get("seq").and_then(Value::as_u64) == Some(seq))
+}
+
+/// How a gesture's step names the line `seq` (the app audit's page walk,
+/// F20): a `tool_call` by its id, a `response` by its text -- as the runner
+/// finds it again, the last such line among `before`.
+fn line_pick(
+    before: &[Map<String, Value>],
+    seq: u64,
+    gesture: &Map<String, Value>,
+) -> Result<Value, Refusal> {
+    let line = line_at(before, seq).ok_or_else(|| {
+        refused(
+            gesture,
+            format!("it names line {seq}, which is not before it"),
+        )
+    })?;
+    let last = |found: &dyn Fn(&Map<String, Value>) -> bool| {
+        before
+            .iter()
+            .rev()
+            .find(|line| found(line))
+            .and_then(|line| line.get("seq").and_then(Value::as_u64))
+    };
+    match text(line, "kind") {
+        Some("tool_call") => {
+            let id = text(line, "id").unwrap_or_default();
+            if id.is_empty()
+                || last(&|other| {
+                    text(other, "kind") == Some("tool_call") && text(other, "id") == Some(id)
+                }) != Some(seq)
+            {
+                return Err(refused(
+                    gesture,
+                    format!("call `{id}` at line {seq} is not the last call of its id"),
+                ));
+            }
+            Ok(json!({"call": id}))
+        }
+        Some("response") => {
+            let said = text(line, "text").unwrap_or_default();
+            if said.is_empty()
+                || last(&|other| {
+                    text(other, "kind") == Some("response")
+                        && text(other, "text").is_some_and(|text| text.contains(said))
+                }) != Some(seq)
+            {
+                return Err(refused(
+                    gesture,
+                    format!("the answer at line {seq} is not the last one holding its text"),
+                ));
+            }
+            Ok(json!({"answer": said}))
+        }
+        _ => Err(refused(
+            gesture,
+            format!("line {seq} is neither a call nor an answer"),
+        )),
+    }
+}
+
+/// The step of an operator's keep, `entry` the operator entry it wrote: its
+/// span from the last call's result or answer holding it, as the runner
+/// finds it again.
+fn keep_step(
+    before: &[Map<String, Value>],
+    entry: &Map<String, Value>,
+    gesture: &Map<String, Value>,
+) -> Result<Value, Refusal> {
+    let span = text(entry, "text").unwrap_or_default();
+    let from = match text(entry, "kept_from") {
+        Some("tool-result") => before
+            .iter()
+            .rev()
+            .find(|line| {
+                text(line, "kind") == Some("tool_call")
+                    && text(line, "shown").is_some_and(|shown| shown.contains(span))
+            })
+            .and_then(|line| line.get("seq").and_then(Value::as_u64))
+            .map(|seq| line_pick(before, seq, gesture))
+            .transpose()?,
+        Some("answer") => before
+            .iter()
+            .any(|line| {
+                text(line, "kind") == Some("response")
+                    && text(line, "text").is_some_and(|said| said.contains(span))
+            })
+            .then(|| json!({"answer": span})),
+        kept_from => {
+            return Err(refused(
+                gesture,
+                format!(
+                    "a keep from `{}` has no step: a step keeps from a call's result or an answer",
+                    kept_from.unwrap_or_default()
+                ),
+            ));
+        }
+    };
+    let from = from.ok_or_else(|| refused(gesture, "no line before it holds its span"))?;
+    let mut step = json!({"step": "keep", "from": from, "span": span, "place": {"between": true}});
+    if let Some(tag) = text(entry, "category") {
+        step["tag"] = json!(tag);
+    }
+    Ok(step)
+}
+
+/// The first chip of `open` unanswered: what a `suggestion` or `correction`
+/// step answers. A line answering another is refused.
+fn answered_first(
+    open: &mut Vec<u64>,
+    answers: Option<u64>,
+    line: &Map<String, Value>,
+) -> Result<(), Refusal> {
+    match (open.first().copied(), answers) {
+        (Some(first), Some(answers)) if first == answers => {
+            open.remove(0);
+            Ok(())
+        }
+        _ => Err(refused(
+            line,
+            "it answers a chip that is not the first unanswered: its step answers the first",
+        )),
+    }
+}
+
 /// `log`'s operator moves as a scenario's steps, `priming` -- the fork ask
 /// set's, as the regimen the replay runs under adds it -- taken off the head.
 ///
@@ -255,8 +387,24 @@ fn derived(lines: &[Map<String, Value>], priming: Option<&str>) -> Result<Derive
     // The open grade step (#942): its task, its index among the steps, and
     // the latest grade of it, which the next ask of its task answers.
     let mut grading: Option<OpenGrade> = None;
+    // The operator's gestures (the app audit's page walk, F20): the forks an
+    // accepted suggestion fired and the entries a wrap kept, which are that
+    // gesture's and no step of their own; the chips not yet answered.
+    let fired: BTreeSet<u64> = lines
+        .iter()
+        .filter(|line| text(line, "kind") == Some("suggestion"))
+        .filter_map(|line| line.get("fork").and_then(Value::as_u64))
+        .collect();
+    let wrapping: BTreeSet<&str> = lines
+        .iter()
+        .filter(|line| text(line, "kind") == Some("wrap.accepted"))
+        .filter_map(|line| text(line, "entry"))
+        .collect();
+    let mut shadows: Vec<u64> = Vec::new();
+    let mut refusals: Vec<u64> = Vec::new();
 
-    for line in lines {
+    for (at, line) in lines.iter().enumerate() {
+        let before = &lines[..at];
         let kind = text(line, "kind").unwrap_or_default();
         let seq = line.get("seq").and_then(Value::as_u64).unwrap_or_default();
         let turn = line.get("turn").and_then(Value::as_u64);
@@ -409,31 +557,126 @@ fn derived(lines: &[Map<String, Value>], priming: Option<&str>) -> Result<Derive
                     "place": {"turn": turn, "between": true},
                 }));
             }
-            "patch" => {
-                if text(line, "lane") == Some("operator") {
-                    if text(line, "op") != Some("supersede") {
+            "patch" if text(line, "lane") == Some("operator") => {
+                let entry = line.get("entry").and_then(Value::as_object);
+                match text(line, "op") {
+                    Some("add") => {
+                        let entry = entry.ok_or_else(|| refused(line, "its entry is missing"))?;
+                        if !text(entry, "id").is_some_and(|id| wrapping.contains(id)) {
+                            steps.push(keep_step(before, entry, line)?);
+                        }
+                    }
+                    Some("retire") => {
+                        let id = entry
+                            .and_then(|entry| text(entry, "id"))
+                            .unwrap_or_default();
+                        steps.push(json!({
+                            "step": "retire",
+                            "pick": live.pick(id, line)?,
+                            "place": {"between": true},
+                        }));
+                    }
+                    Some("supersede") => {
+                        let old = text(line, "supersedes").unwrap_or_default();
+                        let new = entry
+                            .and_then(|entry| text(entry, "text"))
+                            .unwrap_or_default();
+                        steps.push(json!({
+                            "step": "edit",
+                            "pick": live.pick(old, line)?,
+                            "text": new,
+                            "place": {"between": true},
+                        }));
+                    }
+                    op => {
                         return Err(refused(
                             line,
                             format!(
-                                "an operator's `{}` has no step: only an edit, a supersede, does",
-                                text(line, "op").unwrap_or_default()
+                                "an operator's `{}` has no step: only a keep, an edit and a \
+                                 retire do",
+                                op.unwrap_or_default()
                             ),
                         ));
                     }
-                    let old = text(line, "supersedes").unwrap_or_default();
-                    let new = line
-                        .get("entry")
-                        .and_then(Value::as_object)
-                        .and_then(|entry| text(entry, "text"))
-                        .unwrap_or_default();
-                    steps.push(json!({
-                        "step": "edit",
-                        "pick": live.pick(old, line)?,
-                        "text": new,
-                        "place": {"between": true},
-                    }));
                 }
                 live.patched(line);
+            }
+            "patch" => live.patched(line),
+            "fork" if text(line, "why") == Some("operator") && !fired.contains(&seq) => {
+                let place = if let Some(cut) = line.get("cut").and_then(Value::as_u64) {
+                    cut
+                } else {
+                    let request = line.get("at").and_then(Value::as_u64);
+                    before
+                        .iter()
+                        .find(|other| {
+                            text(other, "kind") == Some("response")
+                                && other.get("to_request").and_then(Value::as_u64) == request
+                        })
+                        .and_then(|other| other.get("seq").and_then(Value::as_u64))
+                        .ok_or_else(|| refused(line, "its request has no answer before it"))?
+                };
+                let mut step = json!({
+                    "step": "fork",
+                    "at": line_pick(before, place, line)?,
+                    "place": {"between": true},
+                });
+                match text(line, "ask") {
+                    Some(crate::drive::session::OPERATOR_TEXT_ASK) => {
+                        step["text"] = json!(text(line, "question").unwrap_or_default());
+                    }
+                    ask => step["ask"] = json!(ask.unwrap_or_default()),
+                }
+                steps.push(step);
+            }
+            "wrap.accepted" => {
+                let entry = text(line, "entry")
+                    .ok_or_else(|| refused(line, "a wrap that keeps nothing has no step"))?;
+                let span = live
+                    .0
+                    .get(entry)
+                    .ok_or_else(|| refused(line, format!("entry `{entry}` is not live")))?;
+                let (Some(call), Some(from)) = (
+                    line.get("call").and_then(Value::as_u64),
+                    line.get("from").and_then(Value::as_u64),
+                ) else {
+                    return Err(refused(line, "it names no call or no source"));
+                };
+                let call = line_pick(before, call, line)?;
+                steps.push(json!({
+                    "step": "wrap",
+                    "call": call["call"],
+                    "from": line_pick(before, from, line)?,
+                    "span": span,
+                    "place": {"between": true},
+                }));
+            }
+            "fork.shadowed" => shadows.push(seq),
+            "patch.refused" => refusals.push(seq),
+            "suggestion" | "correction" => {
+                let (open, key) = if kind == "suggestion" {
+                    (&mut shadows, "shadow")
+                } else {
+                    (&mut refusals, "refused")
+                };
+                let answers = line.get(key).and_then(Value::as_u64);
+                let answer = match text(line, "outcome") {
+                    Some("accepted") => Some("accept"),
+                    Some("rejected") => Some("reject"),
+                    _ => None,
+                };
+                match answer {
+                    Some(answer) => {
+                        answered_first(open, answers, line)?;
+                        steps.push(json!({
+                            "step": kind,
+                            "answer": answer,
+                            "place": {"between": true},
+                        }));
+                    }
+                    // Unanswered: the chip lapsed, no step's.
+                    None => open.retain(|chip| Some(*chip) != answers),
+                }
             }
             "meditation.held" => {
                 if text(line, "reason") == Some("operator") {
@@ -684,16 +927,43 @@ pub fn operator_lines(log: &str) -> Result<Vec<Value>, Refusal> {
                     .unwrap_or_default();
                 if text(line, "lane") == Some("operator") {
                     let old = text(line, "supersedes").unwrap_or_default();
-                    out.push(json!({
+                    let mut patch = json!({
                         "kind": kind,
                         "op": text(line, "op"),
                         "text": content,
                         "supersedes": texts.get(old).cloned().unwrap_or_else(|| old.to_owned()),
-                    }));
+                    });
+                    // A keep's tag and where it kept from (the app audit's page walk, F20).
+                    for key in ["category", "kept_from"] {
+                        if let Some(value) = entry.and_then(|entry| entry.get(key)) {
+                            patch[key] = value.clone();
+                        }
+                    }
+                    out.push(patch);
                 }
                 if let Some(id) = entry.and_then(|entry| text(entry, "id")) {
                     texts.insert(id.to_owned(), content.to_owned());
                 }
+            }
+            // The operator's gestures (the app audit's page walk, F20).
+            "fork" if text(line, "why") == Some("operator") => {
+                let mut fork = pick(&["why", "ask"]);
+                if text(line, "ask") == Some(crate::drive::session::OPERATOR_TEXT_ASK) {
+                    fork["question"] = json!(text(line, "question"));
+                }
+                out.push(fork);
+            }
+            "wrap.accepted" => {
+                let entry = text(line, "entry").unwrap_or_default();
+                out.push(json!({
+                    "kind": kind,
+                    "entry": texts.get(entry).cloned().unwrap_or_else(|| entry.to_owned()),
+                }));
+            }
+            "suggestion" | "correction"
+                if matches!(text(line, "outcome"), Some("accepted" | "rejected")) =>
+            {
+                out.push(pick(&["outcome"]));
             }
             "meditation.held" if text(line, "reason") == Some("operator") => {
                 out.push(pick(&["reason"]));
@@ -866,6 +1136,34 @@ mod tests {
         assert_eq!(command.kind.as_deref(), Some("refused"));
         let unpicked = refusal(&[json!({"kind": "flag", "turn": 1, "entry": "gone", "note": "n"})]);
         assert_eq!(unpicked.kind.as_deref(), Some("flag"));
+        // The operator's gestures (the app audit's page walk, F20).
+        let asked = refusal(&[
+            json!({"kind": "patch", "lane": "operator", "op": "add", "entry": {
+                "id": "operator-1", "text": "x", "kept_from": "ask",
+            }}),
+        ]);
+        assert!(asked.to_string().contains("a keep from `ask`"), "{asked}");
+        let bare = refusal(&[json!({"kind": "wrap.accepted", "call": 1, "from": 1})]);
+        assert_eq!(bare.kind.as_deref(), Some("wrap.accepted"), "{bare}");
+        let out_of_order = refusal(&[
+            json!({"kind": "fork.shadowed", "why": "open"}),
+            json!({"kind": "fork.shadowed", "why": "open"}),
+            json!({"kind": "suggestion", "shadow": 2, "outcome": "rejected"}),
+        ]);
+        assert_eq!(
+            (out_of_order.seq, out_of_order.kind.as_deref()),
+            (Some(3), Some("suggestion")),
+            "{out_of_order}"
+        );
+        let not_last = refusal(&[
+            json!({"kind": "tool_call", "id": "c", "shown": "x"}),
+            json!({"kind": "tool_call", "id": "c", "shown": "y"}),
+            json!({"kind": "fork", "why": "operator", "ask": "open_next", "at": 0, "cut": 1}),
+        ]);
+        assert!(
+            not_last.to_string().contains("not the last call of its id"),
+            "{not_last}"
+        );
     }
 
     /// #908: the moves it writes keep their place -- the first ask fixed,

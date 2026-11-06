@@ -249,7 +249,7 @@ A `grade` step comes right after the admitted `ask` of its task. That ask asks t
 diet-drive script --log RUN/session.log --regimen R.toml --out DIR [--name NAME] [--canned SCENARIO] [--recording DIR]
 ```
 
-This writes a scenario, `DIR/NAME.jsonl` (`script` unless named). It holds every move the run's operator made, in the log's order: asks with their scoping marks and attached files, flags, edits, meditations and refills, phase starts, proposals, moves and rulings, tangents, and the end.
+This writes a scenario, `DIR/NAME.jsonl` (`script` unless named). It holds every move the run's operator made, in the log's order: asks with their scoping marks and attached files, flags, edits, meditations and refills, phase starts, proposals, moves and rulings, tangents, the operator's gestures (keeps, forks, wraps, suggestion and correction answers, retires), and the end.
 
 Beside it the command writes:
 - the head, `head.md`;
@@ -266,9 +266,16 @@ Beside it the command writes:
   The header's `fixed_asks` is `[0]`.
 - **Background jobs are waited for.** A job that ended between turns, before the next move, becomes a `wait` for its `background.ended`.
 - **The head is what the replay's start begins from.** The instruction files' render (#559) and the fork ask set's priming (#598) come off it, since the replay's start adds them again from its worktree and its regimen. The report names the instruction files the run read, which the replay's worktree must hold.
+- **A gesture names its lines as the runner finds them, never by a seq.**
+  - A keep's `from` is the last call whose result holds its span, by the call's id, or `{"answer": <span>}`.
+  - A fork's or a wrap's line is a call by its id, or an answer by its whole text. That line must be the last of its id, or the last answer holding its text.
+  - A retire picks its entry by text, as an edit does.
+  - An accepted suggestion's fork is no step of its own, nor is a wrap's entry.
+  - A `suggestion` or `correction` step answers the first chip still unanswered, so the line it derives from must answer that chip.
+  - A lapsed chip has no step.
 - **A refused ask is written with no text.** Its log line keeps none, and its refusal turns on the session's state.
 - **For a replay on the canned substrate**, `--canned SCENARIO` copies that scenario's `reply` and `classify` lines and its `seed` (under `seed/`).
-  - The round trip is tested this way. The kitchen sink's log becomes a script, which replays with the kitchen sink's replies, and its operator lines are the original's apart from `seq` and `t` (`diet/tests/drive_scenario_cli.rs`).
+  - The round trip is tested this way, on the kitchen sink and on the gestures scenario. Each log becomes a script, which replays with that scenario's replies, and its operator lines are the original's apart from `seq` and `t` (`diet/tests/drive_scenario_cli.rs`).
   - A live re-fire takes no replies.
 - **A move the format cannot express is refused, naming its line, and never dropped:**
   - a stop;
@@ -277,7 +284,11 @@ Beside it the command writes:
   - a tangent closed with more than one ruling;
   - a meditation declared with a phase move;
   - a refused command that is not an ask;
-  - a flag or edit whose entry's text does not pick it alone.
+  - a flag, edit or retire whose entry's text does not pick it alone;
+  - a keep from an ask;
+  - a wrap that keeps nothing;
+  - a gesture whose line is not the last of its id or text;
+  - a chip answered out of order.
 
 ## A session that goes on from its refill (#948)
 
