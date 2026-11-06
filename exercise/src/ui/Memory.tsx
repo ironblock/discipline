@@ -74,8 +74,9 @@ export function Memory({ entries, seenThrough = -1, onSeen, act }: MemoryProps) 
                     {e.op !== undefined ? <span className="ex-memory__op">{opOf(e.op).label}</span> : null}
                     {/* Who vouches for it (the app audit, finding 7): observed, the model's own words, yours. */}
                     {e.authority !== undefined ? <span className="ex-memory__authority">{authorityOf(e.authority).label}</span> : null}
-                    {/* Where it came from, for every entry (the app audit's page walk, F8): the trunk's lane, or a fork's. */}
-                    {e.source !== undefined ? (
+                    {/* Where it came from, for every entry (the app audit's page walk, F8): the trunk's lane, or a fork's. An entry
+                        whose authority is the operator's already says "kept by you", so its source word would say it twice. */}
+                    {e.source !== undefined && e.authority !== 'operator' ? (
                       <span className="ex-memory__source" title={sourceTitle(e.source)}>
                         {e.source}
                       </span>
