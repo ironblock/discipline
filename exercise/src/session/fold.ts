@@ -1167,8 +1167,8 @@ export function fold(written: readonly LogLine[]): Session {
         if (proposal?.call === e.call) proposal = undefined;
         asked = undefined;
         // "keep" (v7's "continue") moves the phase with no meditation; "meditation" is followed by the meditation line,
-        // which moves it -- and only then is the new phase's document in force, its moves and ground rules (#1050's page
-        // audit, F6). A move the phase makes leaves the model's last answer about one behind (F16).
+        // which moves it -- and only then is the new phase's document in force, its moves and ground rules (the app
+        // audit's page walk, F6). A move the phase makes leaves the model's last answer about one behind (F16).
         if (e.choice === 'keep' || e.choice === 'continue') {
           phase = e.to;
           answered = stillSaid(answered, e.to);
