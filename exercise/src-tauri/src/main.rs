@@ -36,8 +36,11 @@
 
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
+use std::io::{Read as _, Write as _};
+use std::net::TcpStream;
 use std::path::PathBuf;
-use std::sync::Mutex;
+use std::sync::{Arc, Condvar, Mutex};
+use std::time::{Duration, Instant};
 
 use base64::Engine as _;
 
@@ -57,8 +60,20 @@ enum Drive {
     Profile(String),
 }
 
-/// The sidecar, held so it is killed when the app exits.
-struct Sidecar(Mutex<Option<CommandChild>>);
+/// The sidecar, held so its session is ended when the app exits.
+struct Sidecar(Mutex<Option<Held>>);
+
+/// A running sidecar: the process, where it listens, and whether it has
+/// exited, set when its output says so.
+struct Held {
+    child: CommandChild,
+    listening: String,
+    exited: Arc<(Mutex<bool>, Condvar)>,
+}
+
+/// How long a quit waits for serve to end its session and exit before it is
+/// killed (#1050's audit, finding 5).
+const QUIT_WAIT: Duration = Duration::from_secs(10);
 
 /// The `Authorization` value for the drive, when it asks for one.
 struct Credential(Option<String>);
@@ -123,9 +138,9 @@ fn main() {
             // flag does, rather than panicking; a sidecar it started goes too.
             if let Err(why) = start(app) {
                 if let Ok(mut held) = app.state::<Sidecar>().0.lock()
-                    && let Some(child) = held.take()
+                    && let Some(held) = held.take()
                 {
-                    let _ = child.kill();
+                    let _ = held.child.kill();
                 }
                 eprintln!("exercise: {why}");
                 std::process::exit(1);
@@ -140,9 +155,10 @@ fn main() {
     app.run(|handle, event| {
         if let RunEvent::Exit = event
             && let Ok(mut held) = handle.state::<Sidecar>().0.lock()
-            && let Some(child) = held.take()
+            && let Some(held) = held.take()
         {
-            let _ = child.kill();
+            let authorization = handle.state::<Credential>().0.clone();
+            quit(held, authorization.as_deref());
         }
     });
 }
@@ -190,9 +206,9 @@ fn start(app: &mut tauri::App) -> Result<(), String> {
                 (Some(Auth::Keychain), Some(pair)) => Some(Given::Stdin(pair)),
                 _ => None,
             };
-            let (url, child) = sidecar(&handle, &profile, given)?;
-            if let Ok(mut held) = handle.state::<Sidecar>().0.lock() {
-                *held = Some(child);
+            let (url, held) = sidecar(&handle, &profile, given)?;
+            if let Ok(mut slot) = handle.state::<Sidecar>().0.lock() {
+                *slot = Some(held);
             }
             url
         }
@@ -362,7 +378,7 @@ fn sidecar(
     app: &AppHandle,
     profile: &str,
     given: Option<Given>,
-) -> Result<(String, CommandChild), String> {
+) -> Result<(String, Held), String> {
     let mut args = vec!["serve", "--profile", profile, "--allow-origin", ORIGIN];
     match given {
         Some(Given::File(file)) => args.extend(["--auth-file", file]),
@@ -401,16 +417,31 @@ fn sidecar(
                     ));
                 }
                 let url = format!("http://{listening}/");
+                let exited = Arc::new((Mutex::new(false), Condvar::new()));
+                let told = Arc::clone(&exited);
                 // What serve says after its first line goes to the shell's
-                // own stderr, so the channel never fills.
+                // own stderr, so the channel never fills; its exit is told to
+                // a quit waiting on it.
                 tauri::async_runtime::spawn(async move {
                     while let Some(event) = events.recv().await {
-                        if let CommandEvent::Stderr(line) | CommandEvent::Stdout(line) = event {
-                            eprintln!("serve: {}", String::from_utf8_lossy(&line).trim_end());
+                        match event {
+                            CommandEvent::Stderr(line) | CommandEvent::Stdout(line) => {
+                                eprintln!("serve: {}", String::from_utf8_lossy(&line).trim_end());
+                            }
+                            CommandEvent::Terminated(ended) => {
+                                eprintln!("serve: exited ({:?})", ended.code);
+                                let (gone, changed) = &*told;
+                                if let Ok(mut gone) = gone.lock() {
+                                    *gone = true;
+                                }
+                                changed.notify_all();
+                            }
+                            _ => {}
                         }
                     }
                 });
-                return Ok((url, child));
+                let listening = listening.to_owned();
+                return Ok((url, Held { child, listening, exited }));
             }
             CommandEvent::Stderr(line) => {
                 eprintln!("serve: {}", String::from_utf8_lossy(&line).trim_end());
@@ -422,6 +453,83 @@ fn sidecar(
         }
     }
     Err("serve's output closed before it listened".to_owned())
+}
+
+/// The app is quitting (#1050's audit, finding 5): end the session as the
+/// page would -- `end`, and with a turn in flight, a cancel of it first --
+/// then wait for serve to write its record and exit, and kill it only if it
+/// has not within [`QUIT_WAIT`]. No signal handler: #230's ruling.
+fn quit(held: Held, authorization: Option<&str>) {
+    let deadline = Instant::now() + QUIT_WAIT;
+    while Instant::now() < deadline {
+        match exchange(&held.listening, &command_request(&held.listening, authorization, r#"{"kind":"end"}"#)).as_deref().and_then(status_of) {
+            Some(409) => {
+                let state = exchange(&held.listening, &get_request(&held.listening, authorization, "/state"));
+                if let Some(turn) = state.as_deref().and_then(|reply| reply.split_once("\r\n\r\n")).and_then(|(_, body)| running_turn(body)) {
+                    let cancel = format!(r#"{{"kind":"cancel","turn":{turn}}}"#);
+                    let _ = exchange(&held.listening, &command_request(&held.listening, authorization, &cancel));
+                }
+                std::thread::sleep(Duration::from_millis(200));
+            }
+            _ => break,
+        }
+    }
+    let (gone, changed) = &*held.exited;
+    let left = deadline.saturating_duration_since(Instant::now());
+    let exited = gone
+        .lock()
+        .ok()
+        .and_then(|guard| changed.wait_timeout_while(guard, left, |gone| !*gone).ok())
+        .is_some_and(|(gone, _)| *gone);
+    if !exited {
+        let _ = held.child.kill();
+    }
+}
+
+/// A `POST /commands` of `body`, with the credential when there is one, as
+/// the page sends a command.
+fn command_request(listening: &str, authorization: Option<&str>, body: &str) -> String {
+    let credential = authorization.map(|value| format!("Authorization: {value}\r\n")).unwrap_or_default();
+    format!(
+        "POST /commands HTTP/1.1\r\nHost: {listening}\r\n{credential}Content-Type: application/json\r\n\
+         Content-Length: {}\r\nConnection: close\r\n\r\n{body}",
+        body.len()
+    )
+}
+
+/// A `GET` of `path`, with the credential when there is one.
+fn get_request(listening: &str, authorization: Option<&str>, path: &str) -> String {
+    let credential = authorization.map(|value| format!("Authorization: {value}\r\n")).unwrap_or_default();
+    format!("GET {path} HTTP/1.1\r\nHost: {listening}\r\n{credential}Connection: close\r\n\r\n")
+}
+
+/// One request to serve on loopback, and its whole reply; none when serve
+/// does not answer within a second or two.
+fn exchange(listening: &str, request: &str) -> Option<String> {
+    let mut stream = TcpStream::connect(listening).ok()?;
+    stream.set_read_timeout(Some(Duration::from_secs(2))).ok()?;
+    stream.set_write_timeout(Some(Duration::from_secs(1))).ok()?;
+    stream.write_all(request.as_bytes()).ok()?;
+    let mut reply = Vec::new();
+    let _ = stream.read_to_end(&mut reply);
+    Some(String::from_utf8_lossy(&reply).into_owned())
+}
+
+/// An HTTP reply's status code.
+fn status_of(reply: &str) -> Option<u16> {
+    reply.strip_prefix("HTTP/1.1 ")?.split(' ').next()?.parse().ok()
+}
+
+/// The turn `GET /state` says is running, or waits on an approval: what a
+/// quit cancels so that `end` is taken.
+fn running_turn(body: &str) -> Option<u64> {
+    let state: serde_json::Value = serde_json::from_str(body).ok()?;
+    let turn = state.get("turn")?;
+    if matches!(turn.get("state")?.as_str()?, "running" | "awaiting-approval") {
+        turn.get("number")?.as_u64()
+    } else {
+        None
+    }
 }
 
 /// Whether a link the page opens goes to the system's browser: the web's
