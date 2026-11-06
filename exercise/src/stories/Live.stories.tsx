@@ -1517,3 +1517,16 @@ export const AuditNoForkBeforeTheMeditation: Story = {
     }
   },
 };
+
+/** The gestures log while the operator's own fork runs: its request out, its answer streaming. */
+const operatorForkRunning = gestures.trimEnd().split('\n').slice(0, 19).join('\n');
+
+/** Audit finding 13: while the operator's own fork runs, the composer and the header say so -- not "interview". */
+export const AuditOperatorForkIsNoInterview: Story = {
+  name: 'audit 13: the operator’s own fork running is said as such, in the composer and the header',
+  args: { drive: true, web: posting(operatorForkRunning) },
+  play: async ({ canvasElement }) => {
+    await waitFor(async () => expect(says(canvasElement)).toBe('your fork is running · send when it settles'));
+    await expect(canvasElement.querySelector('.ex-header__state')?.textContent).toBe('your fork');
+  },
+};
