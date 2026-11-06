@@ -2,7 +2,7 @@ import { useState, type FormEvent } from 'react';
 
 import type { Ack, Command } from '../drive/transport.ts';
 import type { Folded, MemoryEntry } from '../session/fold.ts';
-import { opOf, refusalOf } from './sets.ts';
+import { authorityOf, opOf, refusalOf } from './sets.ts';
 import { useHotEntries, useTarget } from './surface.tsx';
 import './panel.css';
 import './memory.css';
@@ -72,8 +72,14 @@ export function Memory({ entries, seenThrough = -1, onSeen, act }: MemoryProps) 
                   <span className="ex-memory__text">
                     {e.text}
                     {e.op !== undefined ? <span className="ex-memory__op">{opOf(e.op).label}</span> : null}
-                    {/* Written by the trunk's own lane, not a fork (#627): self-capture today. */}
-                    {e.lane !== undefined ? <span className="ex-memory__lane" title="written by the trunk's own lane, not by a fork">{e.lane}</span> : null}
+                    {/* Who vouches for it (the app audit, finding 7): observed, the model's own words, yours. */}
+                    {e.authority !== undefined ? <span className="ex-memory__authority">{authorityOf(e.authority).label}</span> : null}
+                    {/* Written by the trunk's own lane, not a fork (#627): self-capture; or the operator's own keep. */}
+                    {e.lane !== undefined && e.authority !== 'operator' ? (
+                      <span className="ex-memory__lane" title={e.lane === 'operator' ? 'kept by you' : "written by the trunk's own lane, not by a fork"}>
+                        {e.lane}
+                      </span>
+                    ) : null}
                   </span>
                   {/* The operator's flag (#150), kept until a meditation addresses it; and the model's writes refused over their entry. */}
                   {e.flag !== undefined ? <span className="ex-memory__flag">flag · {e.flag}</span> : null}

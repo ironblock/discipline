@@ -10,7 +10,7 @@
 
 import type { CSSProperties } from 'react';
 
-import type { ApprovalScope, FailReason, ForkLane, ForkOutcome, PatchOp, MeditationReason, SettleReason, Tool, ToolOutcome, ToolRefusal } from '../drive/log.ts';
+import type { ApprovalScope, Authority, FailReason, ForkLane, ForkOutcome, PatchOp, MeditationReason, SettleReason, Tool, ToolOutcome, ToolRefusal } from '../drive/log.ts';
 import type { Stop } from '../session/fold.ts';
 import type { Refusal } from '../drive/transport.ts';
 
@@ -158,6 +158,22 @@ export function opOf(op: PatchOp): Op {
   return entry ? { ...entry, known: true } : { glyph: '·', label: op, level: 'quiet', known: false };
 }
 
+// ------------------------------------------------------------------ authorities
+
+/**
+ * Who vouches for an entry (the app audit, finding 7): diet's words (`V0.AUTHORITIES`), and the surface's older
+ * shape's (#117 naming 5), which placed recordings still carry.
+ */
+export const authorityOf = registry<Authority>({
+  observed: { label: 'seen in tool output', level: 'ok' },
+  'self-stated': { label: "the model's own claim", level: 'quiet' },
+  'user-stated': { label: 'from your words', level: 'ok' },
+  operator: { label: 'kept by you', level: 'ok' },
+  stated: { label: 'stated', level: 'quiet' },
+  extracted: { label: 'extracted', level: 'quiet' },
+  arm: { label: 'arm', level: 'quiet' },
+});
+
 // ------------------------------------------------------------------ meditations, stops, settlements
 
 export const meditationReasonOf = registry<MeditationReason>({
@@ -214,7 +230,7 @@ export const refusalOf = registry<Refusal>({
   'in-flight': { label: 'not taken: something is still running', level: 'warn' },
   'nothing-in-flight': { label: 'nothing is running', level: 'quiet' },
   'meditation-not-built': { label: 'not taken: the drive cannot refill yet', level: 'quiet' },
-  stale: { label: 'not taken: that turn is over', level: 'quiet' },
+  stale: { label: 'not taken: that turn or prompt is over', level: 'quiet' },
   unreachable: { label: 'not taken: the drive cannot be reached', level: 'bad' },
   // An attachment's (`POST /files`), and an ask naming one the drive was never sent.
   'not-a-png': { label: 'not attached: the file is not a PNG', level: 'warn' },
@@ -248,13 +264,18 @@ export const refusalOf = registry<Refusal>({
   'no-working-memory': { label: 'not taken: this session keeps no working memory', level: 'quiet' },
   'not-on-the-trunk': { label: 'not taken: a meditation has replaced that part of the trunk', level: 'quiet' },
   'not-a-pinned-ask': { label: 'not taken: no pinned fork ask has that name', level: 'warn' },
-  restates: { label: 'already kept: working memory holds that span as yours', level: 'quiet' },
+  restates: { label: 'not taken: working memory already holds that text', level: 'quiet' },
   // A shadow's suggestion (#1031).
-  'not-a-suggestion': { label: 'not taken: no suggestion was offered at that line', level: 'warn' },
-  'answered-already': { label: 'not taken: that suggestion was already answered, or let go', level: 'quiet' },
+  'not-a-suggestion': { label: 'not taken: no chip was offered there', level: 'warn' },
+  'answered-already': { label: 'not taken: that chip was already answered, or has expired', level: 'quiet' },
   // The operator's wrap (#1030).
   'wrapped-already': { label: 'not taken: that result is wrapped already, or waits for the next request', level: 'quiet' },
   // The operator's retire of their own entry (#1050).
   'not-the-operators': { label: 'not taken: only an entry of yours can be retired here', level: 'warn' },
   'anchor-not-unique': { label: 'not taken: an anchor is in that line more than once', level: 'warn' },
+  // An image for a model served without vision (#815), and the session's request cap reached (#555).
+  'no-vision': { label: 'not taken: the model is served without vision -- remove the attachment', level: 'warn' },
+  'api-cap': { label: 'not taken: the session has sent all the requests it may', level: 'bad' },
+  // An answer to a prompt when none waits (`POST /approve`'s 409, #389).
+  'nothing-waiting': { label: 'not taken: nothing is waiting on your answer', level: 'quiet' },
 });
