@@ -226,7 +226,7 @@ export function AssistantMessage({ node, calls = [] }: { readonly node: Folded<A
                 {node.text !== '' ? <Copy text={node.text} /> : null}
                 {/* The operator's gestures (#1021): fork at this step, or keep a span of what it said. */}
                 {node.logged ? <ForkAction at={node.logged} label={`step ${node.id}`} /> : null}
-                {node.logged && node.logged.text !== '' ? <KeepAction logged={node.logged} label={`step ${node.id}`} /> : null}
+                {node.logged && (node.logged.text !== '' || (node.logged.reasoning ?? '') !== '') ? <KeepAction logged={node.logged} label={`step ${node.id}`} /> : null}
               </>
             ),
           }

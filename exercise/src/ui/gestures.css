@@ -78,6 +78,17 @@
   user-select: text;
 }
 
+/* What the line reasoned, kept from as its text is (#1050's audit, finding 3): italic, as the trunk draws reasoning. */
+.ex-gesture__raw--reasoning {
+  font-style: italic;
+}
+
+/* The span the keep will post, shown before it does (finding 2). */
+.ex-gesture__captured {
+  margin: 0 0 0.5rem;
+  font-size: var(--size-chrome, 0.85em);
+}
+
 .ex-gesture__row {
   display: flex;
   flex-wrap: wrap;
