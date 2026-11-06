@@ -1100,6 +1100,21 @@ mod tests {
         (status, body)
     }
 
+    /// A reply's `$operator-entry` is the last operator entry id its request
+    /// carries -- `operator-`, then the seq serve coined it at -- so a
+    /// scenario's model can name an entry the operator kept without
+    /// counting the log ahead of the run (the app audit's page walk, F20);
+    /// it stays as written when the request carries none.
+    #[test]
+    fn a_reply_names_the_operator_entry_its_request_carries() {
+        let named = |body: &str| match with_entries(Act::Answer("retire $operator-entry".to_owned()), body) {
+            Act::Answer(text) => text,
+            _ => unreachable!("an answer stays an answer"),
+        };
+        assert_eq!(named("# working set\noperator-15\ta note\noperator-23\tits text"), "retire operator-23");
+        assert_eq!(named("no operator-entry here, nor xoperator-9"), "retire $operator-entry");
+    }
+
     /// A routed reply's `$entry:<call>/<field>` is the last record entry id
     /// for that call and field the request carries -- `r`, the request count
     /// diet built it at, then `/<call>/<field>` -- so a scenario names an

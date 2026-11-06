@@ -4874,6 +4874,26 @@ mod tests {
         assert!(!read.steps[2].settles() && !read.steps[3].settles() && !read.steps[6].settles());
     }
 
+    /// A `pick` of `$name` is the entry a step bound to `name` with `as`
+    /// (the app audit's page walk, F20): an entry the run itself makes,
+    /// named without its coined id.
+    #[test]
+    fn a_pick_names_an_entry_a_step_bound() {
+        let header = r#"{"scenario":"s","regimen":"r.toml","head":"h.md"}"#;
+        let read = parse(&format!("{header}\n{}\n", r#"{"step":"retire","pick":"$kept"}"#)).expect("it reads");
+        assert_eq!(
+            read.steps,
+            vec![Step::Retire {
+                pick: Pick::Bound("kept".to_owned())
+            }]
+        );
+        let mut bound = Bindings::new();
+        bound.insert("kept".to_owned(), "operator-15".to_owned());
+        assert_eq!(Pick::Bound("kept".to_owned()).bound_in(&bound), Some(Ok("operator-15".to_owned())));
+        assert!(matches!(Pick::Bound("other".to_owned()).bound_in(&bound), Some(Err(_))));
+        assert_eq!(Pick::Index(0).bound_in(&bound), None);
+    }
+
     /// A step that waits for the session to settle takes its own
     /// `patience`, in seconds; one that names none keeps
     /// [`STEP_PATIENCE`].
