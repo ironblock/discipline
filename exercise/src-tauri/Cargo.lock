@@ -978,6 +978,7 @@ version = "0.1.0"
 dependencies = [
  "base64 0.23.1",
  "ctrlc",
+ "objc2-app-kit",
  "security-framework",
  "serde_json",
  "tauri",

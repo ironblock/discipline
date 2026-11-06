@@ -25,3 +25,6 @@ ctrlc = { version = "=3.5.2", features = ["termination"] }
 # The drive's credential from the login keychain (#1047), read only.
 [target.'cfg(target_os = "macos")'.dependencies]
 security-framework = "=3.7.0"
+# The traffic lights' right edge, read from the window (the overlay title bar):
+# the version Tauri already builds with, and only the classes it reads.
+objc2-app-kit = { version = "=0.3.2", default-features = false, features = ["std", "NSButton", "NSControl", "NSResponder", "NSView", "NSWindow", "objc2-core-foundation"] }

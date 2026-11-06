@@ -191,25 +191,34 @@ fn start(app: &mut tauri::App) -> Result<(), String> {
     // The window opens at once (the app audit, finding 6), on the shell's own
     // page saying the start; then it shows the drive's page, or why there is
     // none, rather than a stderr no one launched from Finder sees.
-    WebviewWindowBuilder::new(
+    let window = WebviewWindowBuilder::new(
         app,
         "main",
         WebviewUrl::App(shell_page("starting", None)?.into()),
     )
     .title("exercise")
-    .inner_size(1280.0, 860.0)
-    // A link in model output opens in the system's browser when it is the
-    // web's or mail's (the app audit, finding 19); no window ever opens here.
-    .on_new_window(|url, _| {
-        if openable(&url) {
-            let _ = tauri_plugin_opener::open_url(url.as_str(), None::<&str>);
-        }
-        tauri::webview::NewWindowResponse::Deny
-    })
-    .build()
-    .map_err(|why| why.to_string())?;
+    .inner_size(1280.0, 860.0);
+    // On macOS the page draws to the top edge, the traffic lights over its
+    // header's left end, which the page insets by their measured edge.
+    #[cfg(target_os = "macos")]
+    let window = window
+        .title_bar_style(tauri::TitleBarStyle::Overlay)
+        .hidden_title(true);
+    let window = window
+        // A link in model output opens in the system's browser when it is the
+        // web's or mail's (the app audit, finding 19); no window ever opens here.
+        .on_new_window(|url, _| {
+            if openable(&url) {
+                let _ = tauri_plugin_opener::open_url(url.as_str(), None::<&str>);
+            }
+            tauri::webview::NewWindowResponse::Deny
+        })
+        .build()
+        .map_err(|why| why.to_string())?;
+    // Read here, on the main thread, as AppKit asks.
+    let titlebar = titlebar_inset(&window);
     std::thread::spawn(move || {
-        let shown = drive_page(&handle).unwrap_or_else(|why| {
+        let shown = drive_page(&handle, titlebar).unwrap_or_else(|why| {
             eprintln!("exercise: {why}");
             shell_page("failed", Some(&why)).unwrap_or_default()
         });
@@ -220,7 +229,7 @@ fn start(app: &mut tauri::App) -> Result<(), String> {
 
 /// The drive found, its credential held, the sidecar started when it is one:
 /// the drive's page.
-fn drive_page(handle: &AppHandle) -> Result<String, String> {
+fn drive_page(handle: &AppHandle, titlebar: Option<f64>) -> Result<String, String> {
     let settings = settings(handle)?;
     let drive = setting(settings.as_ref())?;
     // The credential's text, `user:password`, and how the sidecar is given it.
@@ -259,7 +268,28 @@ fn drive_page(handle: &AppHandle) -> Result<String, String> {
             url
         }
     };
-    page(&drive)
+    page(&drive, titlebar)
+}
+
+/// The right edge of the window's traffic lights, in points from its left
+/// edge, as AppKit lays them out under the overlay title bar: the zoom
+/// button's frame in the window. None where there are none to read.
+#[cfg(target_os = "macos")]
+fn titlebar_inset(window: &tauri::WebviewWindow) -> Option<f64> {
+    use objc2_app_kit::{NSWindow, NSWindowButton};
+    let ns_window = window.ns_window().ok()?;
+    // SAFETY: Tauri's pointer is the window's NSWindow, live while `window` is,
+    // and this runs on the main thread.
+    let ns_window: &NSWindow = unsafe { &*ns_window.cast::<NSWindow>() };
+    let zoom = ns_window.standardWindowButton(NSWindowButton::ZoomButton)?;
+    let frame = zoom.convertRect_toView(zoom.bounds(), None);
+    Some(frame.origin.x + frame.size.width)
+}
+
+/// No overlay title bar off macOS.
+#[cfg(not(target_os = "macos"))]
+fn titlebar_inset(_window: &tauri::WebviewWindow) -> Option<f64> {
+    None
 }
 
 /// Show the page at RELATIVE, the bundle's, in the main window.
@@ -649,9 +679,14 @@ fn csp_admits(listening: &str) -> bool {
 }
 
 /// The bundle's page, told its drive by `?drive=<url>`.
-fn page(drive: &str) -> Result<String, String> {
+fn page(drive: &str, titlebar: Option<f64>) -> Result<String, String> {
     let mut url = Url::parse("tauri://localhost/index.html").map_err(|why| why.to_string())?;
     url.query_pairs_mut().append_pair("drive", drive);
+    // The traffic lights' edge, whole points up, for the page's header to clear.
+    if let Some(edge) = titlebar.filter(|edge| edge.is_finite() && *edge > 0.0) {
+        url.query_pairs_mut()
+            .append_pair("titlebar", &format!("{}", edge.ceil()));
+    }
     Ok(format!("index.html?{}", url.query().unwrap_or_default()))
 }
 
