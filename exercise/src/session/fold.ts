@@ -698,6 +698,15 @@ function loggedOf(response: LineOf<'response'>): LoggedText {
   return { seq: response.seq, text: response.text, ...(response.reasoning ? { reasoning: response.reasoning } : {}) };
 }
 
+/**
+ * The model's last answer to the operator's proposal, once the phase moves to TO (the app audit's page walk, F16): it
+ * stands when it accepted that very move, and is past otherwise -- a decline the operator overrode, or an answer about
+ * another move.
+ */
+function stillSaid<T extends { readonly to: string; readonly accepted: boolean }>(answered: T | undefined, to: string): T | undefined {
+  return answered?.accepted && answered.to === to ? answered : undefined;
+}
+
 /** A call's arguments read as the object a tool takes; a text that does not read as one (yet) is no arguments. */
 function objectOf(text: string): Readonly<Record<string, unknown>> {
   try {
@@ -1158,9 +1167,13 @@ export function fold(written: readonly LogLine[]): Session {
         if (proposal?.call === e.call) proposal = undefined;
         asked = undefined;
         // "keep" (v7's "continue") moves the phase with no meditation; "meditation" is followed by the meditation line,
-        // which moves it.
-        if (e.choice === 'keep' || e.choice === 'continue') phase = e.to;
-        if (e.phase_document) inForce = e.phase_document;
+        // which moves it -- and only then is the new phase's document in force, its moves and ground rules (the app
+        // audit's page walk, F6). A move the phase makes leaves the model's last answer about one behind (F16).
+        if (e.choice === 'keep' || e.choice === 'continue') {
+          phase = e.to;
+          answered = stillSaid(answered, e.to);
+          if (e.phase_document) inForce = e.phase_document;
+        }
         break;
       }
       // The two keys (#788): the model's proposal waits on the operator's ruling; the operator's, on the model's answer.
@@ -1185,7 +1198,10 @@ export function fold(written: readonly LogLine[]): Session {
       case 'meditation': {
         held = undefined;
         for (const call of e.pruned ?? []) replacedByMeditation.add(call);
-        if (e.phase) phase = e.phase.to;
+        if (e.phase) {
+          phase = e.phase.to;
+          answered = stillSaid(answered, e.phase.to);
+        }
         if (e.phase_document) inForce = e.phase_document;
         // What the model was sent after the meditation -- `diet`'s `meditation::render::refill`, whose output the record's head
         // check verifies: since #597 the head as it was and a user message carrying the render (and the tool outputs

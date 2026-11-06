@@ -68,7 +68,8 @@ export function SessionHeader({ session, link = 'live', linkWhy, onReconnect, su
           <dl>
             {Object.entries(session.levers.table).map(([lever, state]) => (
               <div key={lever} data-lever-row={lever} data-undeclared={state === 'undeclared' ? '' : undefined}>
-                <dt>{lever.replaceAll('_', ' ')}</dt>
+                {/* As the start row spells it, which is what an operator checks against (the app audit's page walk, F7). */}
+                <dt>{lever}</dt>
                 <dd>{state}</dd>
               </div>
             ))}

@@ -29,6 +29,8 @@ import { UNCLOSED_FENCE, WHAT_MODELS_WRITE } from './markdown.ts';
 import type { Cursor } from '../drive/canned.ts';
 import { MOMENTS, branchAt, sessionAt, trunkNodeAt, variantAt } from './moments.ts';
 import { fold } from '../session/fold.ts';
+import { AUTHORED } from '../drive/examples.ts';
+import { placed } from '../drive/recorded.ts';
 import type { Session, SessionState } from '../session/fold.ts';
 import type { LogLine } from '../drive/log.ts';
 import { useIdleGap } from '../session/useIdleGap.ts';
@@ -825,6 +827,24 @@ export const MeditationRefill: Story = {
     const label = canvasElement.querySelector('.ex-meditation__label')?.textContent ?? '';
     await expect(canvasElement.querySelector('.ex-meditation__kind')?.textContent).toBe('refill');
     for (const said of ['spec → build', `${tokens(18_009)} → ${tokens(1_512)} tok`, 'a41c09e2 → 7e02b5d1', `warm ${ms(1_050)}`]) await expect(label).toContain(said);
+  },
+};
+
+/** The kitchen sink's every refill (the app audit's page walk, F13): a pre-warm whose timings carry no `prompt_ms` says no NaN. */
+export const MeditationKitchenSinkRefills: Story = {
+  name: 'Meditation · every kitchen-sink refill, timed or not',
+  render: () => (
+    <div>
+      {fold(placed(AUTHORED['kitchen-sink']))
+        .eras.flatMap((era) => (era.meditation ? [era.meditation] : []))
+        .map((node) => (
+          <Meditation key={node.id} node={node} />
+        ))}
+    </div>
+  ),
+  play: async ({ canvasElement }) => {
+    await expect(canvasElement.querySelectorAll('.ex-meditation').length).toBeGreaterThan(1);
+    await expect(canvasElement.textContent).not.toContain('NaN');
   },
 };
 

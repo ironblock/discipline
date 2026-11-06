@@ -64,7 +64,10 @@ export function Meditation({ node }: { readonly node: Folded<MeditationNode> }) 
           </span>
         ) : null}
         {node.warm ? (
-          <span title="the pre-warm: the new prefix sent once so the next ask finds it cached">warm {ms(node.warm.prompt_ms)}</span>
+          // Its time when the timings carry one (the app audit's page walk, F13); else what it read.
+          <span title="the pre-warm: the new prefix sent once so the next ask finds it cached">
+            {node.warm.prompt_ms !== undefined ? `warm ${ms(node.warm.prompt_ms)}` : node.warm.prompt_n !== undefined ? `warm · ${tokens(node.warm.prompt_n)} tok` : 'warm, time not recorded'}
+          </span>
         ) : (
           <span title="the record has no pre-warm for this meditation">no pre-warm recorded</span>
         )}

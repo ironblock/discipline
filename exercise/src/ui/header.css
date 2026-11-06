@@ -189,7 +189,7 @@
 
 .ex-header__levers > dl {
   position: absolute;
-  z-index: 10;
+  z-index: 30;
   top: calc(100% + 0.4rem);
   left: 0;
   display: grid;
@@ -201,8 +201,13 @@
   padding: 0.6rem 0.8rem;
   border: 1px solid var(--glass-rim, var(--rule));
   border-radius: var(--radius);
-  background: var(--fill-memory);
+  /* Opaque, as settings is, and all of it reachable (the app audit's page walk, F7): it scrolls within the window, above the
+     composer that would otherwise cover its lower rows. */
+  background-color: var(--page);
+  background-image: var(--glass-overlay);
   box-shadow: var(--relief-panel);
+  max-height: calc(100vh - 8rem);
+  overflow: auto;
 }
 
 .ex-header__levers dl > div {

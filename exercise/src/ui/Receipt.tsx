@@ -23,9 +23,11 @@ export function Receipt({ receipt: r }: { readonly receipt: Numbers }) {
     },
     {
       measure: 'idle-before-refill',
-      value: r.idleBeforeRefill.length === 0 ? '–' : r.idleBeforeRefill.map((ms) => `${Math.round(ms / 1000)} s`).join(' · '),
+      // How many and the longest, the whole list on hover: a list as long as the refills pushed every value out of the
+      // panel (the app audit's page walk, F12).
+      value: r.idleBeforeRefill.length === 0 ? '–' : `${r.idleBeforeRefill.length} · longest ${Math.round(Math.max(...r.idleBeforeRefill) / 1000)} s`,
       label: 'trunk idle before refill',
-      title: 'for each refill, from the trunk last finishing something to the meditation',
+      title: `for each refill, from the trunk last finishing something to the meditation${r.idleBeforeRefill.length > 0 ? `: ${r.idleBeforeRefill.map((ms) => `${Math.round(ms / 1000)} s`).join(' · ')}` : ''}`,
     },
     {
       measure: 'side-call-time-in-gap',

@@ -3,10 +3,13 @@
   max-width: min(46rem, calc(100vw - 2rem));
   max-height: calc(100vh - 4rem);
   padding: 1rem;
-  border: 1px solid var(--ex-rule, currentColor);
-  border-radius: 6px;
-  background: var(--ex-paper, Canvas);
-  color: inherit;
+  border: 1px solid var(--rule);
+  border-radius: var(--radius);
+  /* The theme's own panel fill, as settings has it (the app audit's page walk, F15), never the system canvas. */
+  background-color: var(--page);
+  background-image: var(--glass-overlay);
+  color: var(--ink);
+  font: var(--size-chrome) / 1.4 var(--font-chrome);
   /* Opened from a block's corner, which takes no pointer until hovered: the dialog always does. */
   pointer-events: auto;
 }
@@ -41,7 +44,7 @@
 }
 
 .ex-gesture__ask-name {
-  font-family: var(--ex-mono, monospace);
+  font-family: var(--font-tool);
   font-weight: 600;
 }
 
@@ -83,8 +86,8 @@
   overflow: auto;
   margin: 0 0 0.5rem;
   padding: 0.5rem;
-  border: 1px solid var(--ex-rule, currentColor);
-  font-family: var(--ex-mono, monospace);
+  border: 1px solid var(--rule);
+  font-family: var(--font-tool);
   white-space: pre-wrap;
   user-select: text;
 }
@@ -119,8 +122,8 @@
   margin: 0.25rem 0 0;
   padding: 0;
   list-style: none;
-  font-family: var(--ex-mono, monospace);
-  font-size: 0.75em;
+  font-family: var(--font-tool);
+  font-size: var(--size-aside);
   opacity: 0.55;
 }
 
@@ -142,13 +145,14 @@
   align-items: baseline;
   gap: 0.25rem 0.5rem;
   padding: 0.25rem 0.5rem;
-  border: 1px dashed var(--ex-rule, currentColor);
+  border: 1px dashed var(--rule);
   border-radius: 3px;
 }
 
 .ex-shadow__question {
   flex-basis: 100%;
-  font-family: inherit;
+  /* What the operator judges before Accept or Reject, at the size the trunk is read at (F15). */
+  font: var(--size-prose) / 1.45 var(--font-answer);
 }
 
 .ex-shadow__why {
