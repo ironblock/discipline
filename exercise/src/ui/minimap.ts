@@ -20,6 +20,17 @@ export function onMap(span: Span, stageHeight: number, min = 0): { readonly top:
 }
 
 /**
+ * The height the map's picture spans, in stage pixels: what `onMap` divides by. The map draws the column at one scale
+ * for both axes -- a trunk mark's width over the trunk's -- so each block keeps its message's shape, and a short
+ * column fills only the top of the map. A column whose picture at that scale is taller than the map is fitted to the
+ * map's height instead, as the map always drew it: still one scale for every block, each squashed alike.
+ */
+export function pictured(stageHeight: number, columnWidth: number, markWidth: number, mapHeight: number): number {
+  if (columnWidth <= 0 || markWidth <= 0 || mapHeight <= 0) return stageHeight;
+  return Math.max(stageHeight, (mapHeight * columnWidth) / markWidth);
+}
+
+/**
  * The lens: the part of the stage in view. `stageTop` is the stage's top
  * edge relative to the viewport's (negative once scrolled past it);
  * `viewTop`/`viewBottom` are the band of the viewport the stage can be seen

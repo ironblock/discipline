@@ -1,7 +1,7 @@
 import { memo, useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import type { PointerEvent, RefObject } from 'react';
 
-import { jump, lens, onMap } from './minimap.ts';
+import { jump, lens, onMap, pictured } from './minimap.ts';
 import { laneStyle } from './sets.ts';
 import './minimap.css';
 
@@ -17,7 +17,10 @@ interface Mark {
 
 interface Measured {
   readonly marks: readonly Mark[];
+  /** The stage's height the map pictures (`pictured`): the stage's own, or more when it is short. */
   readonly height: number;
+  /** The stage's own height over that: how much of the map the stage fills, 1 once it is fitted. */
+  readonly fill: number;
 }
 
 /**
@@ -32,7 +35,11 @@ interface Measured {
  */
 export function Minimap({ stage, revision, curtain }: { readonly stage: RefObject<HTMLElement | null>; readonly revision: readonly unknown[]; readonly curtain: boolean }) {
   const map = useRef<HTMLDivElement>(null);
-  const [measured, setMeasured] = useState<Measured>({ marks: [], height: 0 });
+  // A trunk mark's width, measured, never derived from the stylesheet's percentages.
+  const probe = useRef<HTMLSpanElement>(null);
+  const [measured, setMeasured] = useState<Measured>({ marks: [], height: 0, fill: 1 });
+  // How much of the map the stage fills, for the lens and a press, which run apart from a re-render.
+  const fill = useRef(1);
   const [view, setView] = useState({ top: 0, height: 1 });
   const frame = useRef(0);
 
@@ -56,7 +63,8 @@ export function Minimap({ stage, revision, curtain }: { readonly stage: RefObjec
     if (!root) return;
     const rect = root.getBoundingClientRect();
     const { top, bottom } = band();
-    setView(lens(rect.top, rect.height, top, bottom));
+    const seen = lens(rect.top, rect.height, top, bottom);
+    setView({ top: seen.top * fill.current, height: seen.height * fill.current });
   }, [stage, band]);
 
   const remeasure = useCallback(() => {
@@ -64,7 +72,9 @@ export function Minimap({ stage, revision, curtain }: { readonly stage: RefObjec
     frame.current = requestAnimationFrame(() => {
       const root = stage.current;
       if (!root) return;
-      setMeasured(measure(root));
+      const next = measure(root, map.current, probe.current);
+      fill.current = next.fill;
+      setMeasured(next);
       look();
     });
   }, [stage, look]);
@@ -78,6 +88,8 @@ export function Minimap({ stage, revision, curtain }: { readonly stage: RefObjec
     if (!root) return;
     const observer = new ResizeObserver(remeasure);
     observer.observe(root);
+    // The map's own height sets how much of a short stage it pictures.
+    if (map.current) observer.observe(map.current);
     // One look a frame, however many scroll events the frame had.
     const onScroll = () => {
       cancelAnimationFrame(frame.current);
@@ -99,7 +111,8 @@ export function Minimap({ stage, revision, curtain }: { readonly stage: RefObjec
     if (!root || !box || box.height <= 0) return;
     const rect = root.getBoundingClientRect();
     const { top, bottom } = band();
-    window.scrollTo({ top: jump((e.clientY - box.top) / box.height, window.scrollY, rect.top, rect.height, top, bottom) });
+    const at = (e.clientY - box.top) / box.height / fill.current;
+    window.scrollTo({ top: jump(at, window.scrollY, rect.top, rect.height, top, bottom) });
   };
 
   return (
@@ -116,6 +129,7 @@ export function Minimap({ stage, revision, curtain }: { readonly stage: RefObjec
         if (e.currentTarget.hasPointerCapture(e.pointerId)) go(e);
       }}
     >
+      <span className="ex-mm__probe" ref={probe} />
       <Marks measured={measured} />
       <span className="ex-mm__lens" style={{ top: `${view.top * 100}%`, height: `${view.height * 100}%` }} />
     </div>
@@ -142,7 +156,7 @@ const Marks = memo(function Marks({ measured }: { readonly measured: Measured })
   });
 });
 
-function measure(stage: HTMLElement): Measured {
+function measure(stage: HTMLElement, map: HTMLElement | null, probe: HTMLElement | null): Measured {
   const base = stage.getBoundingClientRect();
   const span = (el: Element) => {
     const r = el.getBoundingClientRect();
@@ -164,5 +178,7 @@ function measure(stage: HTMLElement): Measured {
     const live = bar ? bar.classList.contains('ex-block--live') || bar.hasAttribute('data-live') : false;
     marks.push({ kind: 'lane', ...span(el), ...(lane ? { lane } : {}), ...(alarm ? { alarm } : {}), live });
   }
-  return { marks, height: base.height };
+  const column = stage.querySelector('.ex-trunk')?.getBoundingClientRect().width ?? 0;
+  const height = pictured(base.height, column, probe?.getBoundingClientRect().width ?? 0, map?.clientHeight ?? 0);
+  return { marks, height, fill: height > 0 ? base.height / height : 1 };
 }

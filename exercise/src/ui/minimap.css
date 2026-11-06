@@ -1,6 +1,6 @@
 /*
- * The minimap: a narrow rail down the left edge, the session scaled to its
- * height. Trunk slivers on the left of it, side calls on the right (behind
+ * The minimap: a narrow rail down the left edge, the session scaled to it
+ * at one scale for both axes, fitted to its height once the session is taller. Trunk slivers on the left of it, side calls on the right (behind
  * the curtain), refills across, alarms over everything.
  */
 .ex-minimap {
@@ -24,14 +24,27 @@
   border-radius: 1px;
 }
 
-.ex-mm__trunk {
-  --c: var(--ink-assistant);
+.ex-mm__trunk,
+.ex-mm__probe {
   left: 3px;
   right: 3px;
+}
+
+/* A trunk mark's geometry, unseen: what the map measures a mark's width by (Minimap.tsx). */
+.ex-minimap > .ex-mm__probe {
+  visibility: hidden;
+  top: 0;
+  height: 0;
+  min-height: 0;
+}
+
+.ex-mm__trunk {
+  --c: var(--ink-assistant);
   background: color-mix(in oklab, var(--c) calc(42% * var(--minimap-ink)), transparent);
 }
 
-.ex-minimap[data-curtain] .ex-mm__trunk {
+.ex-minimap[data-curtain] .ex-mm__trunk,
+.ex-minimap[data-curtain] .ex-mm__probe {
   right: 42%;
 }
 
