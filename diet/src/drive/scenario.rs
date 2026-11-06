@@ -4939,6 +4939,24 @@ mod tests {
         assert_eq!(Pick::Index(0).bound_in(&bound), None);
     }
 
+    /// A `pick` whose text itself starts with `$` writes it `$$`: one `$`
+    /// is a bound name, two are a literal `$`.
+    #[test]
+    fn a_pick_writes_a_literal_dollar_doubled() {
+        let header = r#"{"scenario":"s","regimen":"r.toml","head":"h.md"}"#;
+        let read = parse(&format!(
+            "{header}\n{}\n",
+            r#"{"step":"retire","pick":"$$HOME is unset in the sandbox"}"#
+        ))
+        .expect("it reads");
+        assert_eq!(
+            read.steps,
+            vec![Step::Retire {
+                pick: Pick::Containing("$HOME is unset in the sandbox".to_owned())
+            }]
+        );
+    }
+
     /// A step that waits for the session to settle takes its own
     /// `patience`, in seconds; one that names none keeps
     /// [`STEP_PATIENCE`].

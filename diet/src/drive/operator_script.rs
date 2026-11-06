@@ -1434,4 +1434,28 @@ mod tests {
         }
         assert!(wrong.is_empty(), "{}", wrong.join("\n"));
     }
+
+    /// An entry whose text starts with `$` is picked as `$$...`: a single
+    /// `$` would read as a bound name.
+    #[test]
+    fn a_pick_of_text_starting_with_a_dollar_doubles_it() {
+        let derived = derived(
+            &log(
+                "h",
+                &[
+                    json!({"kind": "patch", "lane": "self-capture", "op": "add",
+                           "entry": {"id": "r1/c/note", "text": "$HOME is unset in the sandbox"}}),
+                    json!({"kind": "patch", "lane": "operator", "op": "supersede",
+                           "supersedes": "r1/c/note",
+                           "entry": {"id": "operator-2", "text": "HOME is unset in the sandbox"}}),
+                ],
+            ),
+            None,
+        )
+        .expect("derived");
+        assert_eq!(
+            derived.steps[0]["pick"],
+            json!("$$HOME is unset in the sandbox")
+        );
+    }
 }
