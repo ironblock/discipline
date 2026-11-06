@@ -1345,15 +1345,16 @@ export const AuditDraftKeptAcrossAReload: Story = {
   name: 'audit 4: the draft is kept across a reload',
   render: () => <RemountHarness />,
   play: async ({ canvasElement }) => {
-    try {
-      sessionStorage.clear();
-    } catch {
-      // A browser that keeps no session storage keeps no draft either; the story then asks nothing of it.
-      return;
-    }
-    await userEvent.type(canvasElement.querySelector('textarea[aria-label="your ask"]')!, 'half a thought');
+    // The test browser keeps session storage; a story that could not use it would say nothing, so it is not optional here.
+    sessionStorage.clear();
+    const ask = () => canvasElement.querySelector('textarea[aria-label="your ask"]') as HTMLTextAreaElement;
+    const first = ask();
+    await userEvent.type(first, 'half a thought');
+    await expect(first.value).toBe('half a thought');
     (canvasElement.querySelector('[data-probe="remount"]') as HTMLButtonElement).click();
-    await waitFor(async () => expect((canvasElement.querySelector('textarea[aria-label="your ask"]') as HTMLTextAreaElement).value).toBe('half a thought'));
+    // A new composer, not the one typed into.
+    await waitFor(async () => expect(ask()).not.toBe(first));
+    await expect(ask().value).toBe('half a thought');
     sessionStorage.clear();
   },
 };
