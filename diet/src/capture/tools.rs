@@ -814,12 +814,17 @@ impl fmt::Display for ToolError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::NotAToolCall(kind) => write!(f, "a `{kind}` row is not a tool call"),
-            // HELD (#1050): both refusals' words wait on the maintainer; these
-            // are Dispatch's drafts, and the PR does not open before his.
-            Self::ContentBesideReplaces => {
-                write!(f, "update_record: `content` is not used with `replaces`")
-            }
-            Self::NotObserved => write!(f, "not-observed"),
+            // The maintainer's words (#1050), adopted for now; the model reads
+            // each after the harness's `refused: `.
+            Self::ContentBesideReplaces => write!(
+                f,
+                "send `content` to rewrite the whole entry, or `replaces` and `with` to \
+                 change part of it, not both."
+            ),
+            Self::NotObserved => write!(
+                f,
+                "only a note that quotes a tool's output can confirm an entry."
+            ),
             Self::NotACaptureTool(name) => write!(
                 f,
                 "`{name}` is not a capture tool: a harness tool call is not \
