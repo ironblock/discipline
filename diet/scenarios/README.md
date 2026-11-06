@@ -170,7 +170,7 @@ What the deny list does:
 
 - After each admitted ask, meditation or refill, the runner waits until `GET /state` is `idle`.
 - `patience` (optional) on a step it waits after -- an ask to be admitted, a `fork`, a `suggestion` that accepts, `declare-meditation`, `refill-anyway`, `rule-phase`, `start-phase`, `propose-phase` or `move-phase` -- is how long, in whole seconds above 0, that wait may take before the drive fails; absent, 900. A live re-fire whose turns run long names one, and always a number: a hung run still ends. Any other step refuses it.
-- `pick` names a live entry, read from `GET /memory`: a number is its place in id order, and text is the first entry whose content holds it. `"$name"` is the entry a step earlier in the run bound to `name` with `as`, its id never written down.
+- `pick` names a live entry, read from `GET /memory`: a number is its place in id order, and text is the first entry whose content holds it. `"$name"` is the entry a step earlier in the run bound to `name` with `as`, its id never written down. Text that itself starts with `$` is written with it doubled: `"$$HOME is unset"` picks the entry holding `$HOME is unset`.
 - `at` and `from` name a logged line by what it is, read back from `GET /line/<seq>`, never by its seq: `{"call": <id>}` is the last result of the call with that id, and `{"answer": <text>}` the last answer, the trunk's or a fork's, whose text holds it.
 - A gesture serve refuses fails its step, naming serve's refusal.
 - `place` (optional, an object) on any step is for a reader. The runner never reads it. An operator script writes it (below).

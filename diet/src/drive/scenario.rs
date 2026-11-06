@@ -159,7 +159,8 @@ pub enum Pick {
     Index(usize),
     /// The first live entry whose content holds this text.
     Containing(String),
-    /// The entry a step bound to this name with `as` (`"$name"`).
+    /// The entry a step bound to this name with `as` (`"$name"`; `"$$..."`
+    /// is text starting with a literal `$`).
     Bound(String),
 }
 
@@ -1712,6 +1713,10 @@ impl Fields {
             Some(Value::Integer(n)) => usize::try_from(n)
                 .map(Pick::Index)
                 .map_err(|_| self.wrong("`pick` 0 or more")),
+            // Two `$` are a literal one: text that itself starts with `$`.
+            Some(Value::String(text)) if text.starts_with("$$") => {
+                Ok(Pick::Containing(text[1..].to_owned()))
+            }
             Some(Value::String(text)) if text.len() > 1 && text.starts_with('$') => {
                 Ok(Pick::Bound(text[1..].to_owned()))
             }

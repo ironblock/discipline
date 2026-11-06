@@ -170,7 +170,12 @@ impl Live {
                 format!("entry `{id}`'s text does not pick it alone among the live entries"),
             ));
         }
-        Ok(content.clone())
+        // A leading `$` doubled, so the pick reads as text, not a bound name.
+        Ok(if content.starts_with('$') {
+            format!("${content}")
+        } else {
+            content.clone()
+        })
     }
 }
 
