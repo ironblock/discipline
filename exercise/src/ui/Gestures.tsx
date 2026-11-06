@@ -155,7 +155,7 @@ export function KeepAction({ logged, label }: { readonly logged: LoggedText; rea
   const [open, setOpen] = useState(false);
   const [tag, setTag] = useState('');
   const [refused, setRefused] = useState<string>();
-  // The span last selected in either text (#1050's audit, finding 2): a click into the tag field moves the document's
+  // The span last selected in either text (the app audit, finding 2): a click into the tag field moves the document's
   // selection away, and the span stays what the person selected.
   const [captured, setCaptured] = useState('');
   const raw = useRef<HTMLPreElement>(null);

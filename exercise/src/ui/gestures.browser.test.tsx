@@ -8,7 +8,7 @@ import type { Command } from '../drive/transport.ts';
 import { GestureContext, KeepAction } from './Gestures.tsx';
 
 /**
- * The keep dialog under the browser's own clicks and keys (#1050's audit, finding 2): a person selects a span of the
+ * The keep dialog under the browser's own clicks and keys (the app audit, finding 2): a person selects a span of the
  * logged text, then clicks into the tag field and types, then keeps. A click moves the document's selection; a
  * story's synthetic events never do, so only here is that order tried as a person tries it.
  */

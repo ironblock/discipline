@@ -166,7 +166,7 @@ export interface GateProbe {
 export interface LoggedText {
   readonly seq: number;
   readonly text: string;
-  /** What the line reasoned, when it did (#1050's audit, finding 3): serve finds a keep's span in it as in the text. */
+  /** What the line reasoned, when it did (the app audit, finding 3): serve finds a keep's span in it as in the text. */
   readonly reasoning?: string;
 }
 

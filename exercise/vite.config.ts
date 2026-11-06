@@ -101,7 +101,7 @@ export default defineConfig(({ mode }) => ({
         test: { name: 'unit', include: ['src/**/*.test.ts'], environment: 'node' },
       },
       {
-        // A component under a real browser's own clicks, focus and selection (#1050's audit): what a synthetic event
+        // A component under a real browser's own clicks, focus and selection (the app audit): what a synthetic event
         // cannot show, such as a selection a focus moves.
         extends: true,
         test: {

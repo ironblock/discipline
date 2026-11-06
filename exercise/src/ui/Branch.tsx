@@ -104,7 +104,7 @@ export function Branch({ node, open: initiallyOpen = false }: { readonly node: F
         {open ? (
           <div className="ex-branch__exchange">
             <p className="ex-branch__question">{node.question}</p>
-            {/* What it reasoned (#1050's audit, finding 3), as the trunk draws reasoning: a fork's answer may be only there. */}
+            {/* What it reasoned (the app audit, finding 3), as the trunk draws reasoning: a fork's answer may be only there. */}
             {node.reasoning !== undefined && node.reasoning !== '' ? <BranchReasoning text={node.reasoning} /> : null}
             {node.text !== undefined && node.text !== '' ? <TaggedAnswer text={node.text} /> : null}
             {node.failure ? (

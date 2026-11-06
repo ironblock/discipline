@@ -78,7 +78,7 @@
   user-select: text;
 }
 
-/* What the line reasoned, kept from as its text is (#1050's audit, finding 3): italic, as the trunk draws reasoning. */
+/* What the line reasoned, kept from as its text is (the app audit, finding 3): italic, as the trunk draws reasoning. */
 .ex-gesture__raw--reasoning {
   font-style: italic;
 }
