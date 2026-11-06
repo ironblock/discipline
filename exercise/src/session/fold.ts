@@ -1001,7 +1001,7 @@ export function fold(written: readonly LogLine[]): Session {
         const base = {
           ...(e.entry.category !== undefined ? { category: e.entry.category } : {}),
           // diet writes it on the entry (log v31); a recording in the surface's older shape, on the patch (#374).
-          ...(authorityOf(e) !== undefined ? { authority: authorityOf(e) } : {}),
+          ...((authority) => (authority !== undefined ? { authority } : {}))(authorityOf(e)),
           text: e.entry.text,
           by: id(e.seq),
           seq: e.seq,
@@ -1537,7 +1537,7 @@ export function fold(written: readonly LogLine[]): Session {
           ...(p.entry.category !== undefined ? { category: p.entry.category } : {}),
           text: p.entry.text,
           ...(p.supersedes ? { supersedes: p.supersedes } : {}),
-          ...(authorityOf(p) !== undefined ? { authority: authorityOf(p) } : {}),
+          ...((authority) => (authority !== undefined ? { authority } : {}))(authorityOf(p)),
           ...(p.op === 'add' && p.merged !== undefined && p.cosine !== undefined ? { merged: { into: p.merged, cosine: p.cosine } } : {}),
           ...provenance(p),
         }),
