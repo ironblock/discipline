@@ -1,4 +1,5 @@
 import type { Meta, StoryObj } from '@storybook/react-vite';
+import { useState } from 'react';
 import { expect, userEvent, waitFor, within } from 'storybook/test';
 
 import capped from '../../../diet/drive/fixtures/a-capped-turn.jsonl?raw';
@@ -34,6 +35,8 @@ import wrapped from '../../../diet/formats/log/fixtures/valid/a-v35-operator-wra
 import { App, PHASES } from '../App.tsx';
 import { fold } from '../session/fold.ts';
 import { SessionView } from '../ui/SessionView.tsx';
+import { Composer } from '../ui/Composer.tsx';
+import type { SessionState } from '../session/fold.ts';
 import { respelled } from '../drive/spelling.ts';
 import { tokens } from '../ui/format.ts';
 import { outcomeOf } from '../ui/sets.ts';
@@ -1362,5 +1365,153 @@ export const ServedEditAndFlag: Story = {
     posted.length = 0;
     await userEvent.click(entry.querySelector<HTMLButtonElement>('button[data-action="send-flag"]')!);
     await waitFor(async () => expect(posted).toEqual([{ kind: 'flag-entry', id, note: 'check with the team' }]));
+  },
+};
+
+// ---------------------------------------------------------------- the app audit (findings 1, 9, 10)
+
+/** `posting`, every command refused with REFUSED, as serve refuses one (409). */
+function refusing(log: string, refused: string): Web {
+  return {
+    ...serving(log),
+    fetch: async (url, init) => {
+      if (/(^|\/)commands$/.test(String(url)) && typeof init?.body === 'string') posted.push(JSON.parse(init.body));
+      return new Response(JSON.stringify({ refused }), { status: 409, headers: { 'Content-Type': 'application/json' } });
+    },
+  };
+}
+
+/** `posting`, every command held unanswered: what a second press sends while the first is still out. */
+function holding(log: string): Web {
+  return {
+    ...serving(log),
+    fetch: async (url, init) => {
+      if (/(^|\/)commands$/.test(String(url)) && typeof init?.body === 'string') posted.push(JSON.parse(init.body));
+      return new Promise<Response>(() => {});
+    },
+  };
+}
+
+/** A log, its last line -- the session's end -- cut: the session awaits the operator. */
+const open = (log: string) => log.trimEnd().split('\n').slice(0, -1).join('\n');
+/** A log that awaits the operator, then an ask taken: a turn runs. */
+const inTurn = (log: string) => {
+  const lines = open(log).split('\n');
+  const seq = lines.length;
+  return [...lines, JSON.stringify({ seq, t: 99, kind: 'ask', turn: 9, text: 'and then?' }), JSON.stringify({ seq: seq + 1, t: 99, kind: 'settlement', from: 'awaiting', to: 'turn' })].join('\n');
+};
+
+/** Audit finding 1: refill stays in the phase unless the operator picks a move -- "stay" is offered first, and sent as no phase. */
+export const AuditRefillStaysByDefault: Story = {
+  name: 'audit 1: refill offers "stay" first, and sends no phase unless a move is picked',
+  args: { drive: true, web: posting(phaseMoved) },
+  play: async ({ canvasElement }) => {
+    await waitFor(async () => expect(canvasElement.querySelector('.ex-composer__phase')?.textContent).toBe('phase build'));
+    const select = canvasElement.querySelector<HTMLSelectElement>('select[aria-label="move to"]')!;
+    await expect([...select.options].map((o) => o.textContent)).toEqual(['stay in build', 'review']);
+    await expect(select.value).toBe('');
+    posted.length = 0;
+    await userEvent.click([...canvasElement.querySelectorAll('button')].find((b) => b.textContent === 'refill')!);
+    await waitFor(async () => expect(posted.map((p) => (p as { kind: string }).kind)).toEqual(['declare-meditation']));
+    await expect('phase' in (posted[0] as object)).toBe(false);
+  },
+};
+
+/** Audit finding 9: a second Enter while the first ask is still out sends nothing. */
+export const AuditOneAskPerEnter: Story = {
+  name: 'audit 9: one ask per Enter, while the first is out',
+  args: { drive: true, web: holding(answeredTurn) },
+  play: async ({ canvasElement }) => {
+    await waitFor(async () => expect(says(canvasElement)).toBe('your turn'));
+    posted.length = 0;
+    await userEvent.type(canvasElement.querySelector('textarea[aria-label="your ask"]')!, 'go{Enter}{Enter}');
+    await new Promise((resolve) => setTimeout(resolve, 200));
+    await expect(posted.filter((p) => (p as { kind: string }).kind === 'ask')).toHaveLength(1);
+  },
+};
+
+/** The composer under a session state the story moves, each command refused with `in-flight`. */
+function RefusedHarness() {
+  const [state, setState] = useState<SessionState>('awaiting');
+  return (
+    <div>
+      <Composer state={state} phase="spec" phases={PHASES} dispatch={async () => ({ ok: false, refused: 'in-flight' })} />
+      <button type="button" data-probe="busy" onClick={() => setState('turn')}>
+        busy
+      </button>
+    </div>
+  );
+}
+
+/** Audit finding 9: a refusal stands until the session's state moves, and then the state line says the new state. */
+export const AuditRefusalClearsOnState: Story = {
+  name: "audit 9: a refusal clears when the session's state changes",
+  render: () => <RefusedHarness />,
+  play: async ({ canvasElement }) => {
+    await userEvent.type(canvasElement.querySelector('textarea[aria-label="your ask"]')!, 'go{Enter}');
+    await waitFor(async () => expect(says(canvasElement)).toBe('not taken: something is still running'));
+    (canvasElement.querySelector('[data-probe="busy"]') as HTMLButtonElement).click();
+    await waitFor(async () => expect(says(canvasElement)).toBe('working · esc cancels'));
+  },
+};
+
+/** Audit finding 9: the fork dialog's refusal is the last attempt's; reopened, it starts clean. */
+export const AuditForkRefusalResetsOnOpen: Story = {
+  name: "audit 9: a reopened fork dialog shows no earlier refusal",
+  args: { drive: true, web: refusing(open(gestures), 'not-a-pinned-ask') },
+  play: async ({ canvasElement }) => {
+    const page = within(canvasElement.ownerDocument.body);
+    const slow = { timeout: 5_000 };
+    await waitFor(async () => expect(says(canvasElement)).toBe('your turn'));
+    await cornerClick(await page.findByRole('button', { name: 'Fork at step 7' }));
+    await userEvent.click(await page.findByRole('button', { name: 'Fork at step 7 asking GOTCHAS' }, slow));
+    await page.findByRole('alert', undefined, slow);
+    await userEvent.click(page.getByRole('button', { name: 'cancel' }));
+    await cornerClick(page.getByRole('button', { name: 'Fork at step 7' }));
+    await page.findByRole('button', { name: 'Fork at step 7 asking GOTCHAS' }, slow);
+    await expect(page.queryByRole('alert')).toBeNull();
+  },
+};
+
+/** Audit finding 10: while a turn runs, fork is offered disabled, as serve takes a fork only when the session awaits. */
+export const AuditForkWaitsForAwaiting: Story = {
+  name: 'audit 10: fork is disabled while a turn runs',
+  args: { drive: true, web: posting(inTurn(gestures)) },
+  play: async ({ canvasElement }) => {
+    const page = within(canvasElement.ownerDocument.body);
+    await waitFor(async () => expect(says(canvasElement)).toBe('working · esc cancels'));
+    await expect(await page.findByRole('button', { name: 'Fork at step 7' })).toBeDisabled();
+  },
+};
+
+/** Audit finding 10: a suggestion's Accept fires a fork, so it waits for the session to await too; Reject does not. */
+export const AuditAcceptWaitsForAwaiting: Story = {
+  name: 'audit 10: a suggestion’s Accept is disabled while a turn runs',
+  args: { drive: true, web: posting(inTurn(suggestions)) },
+  play: async ({ canvasElement }) => {
+    const page = within(canvasElement.ownerDocument.body);
+    await waitFor(async () => expect(says(canvasElement)).toBe('working · esc cancels'));
+    const accepts = await page.findAllByRole('button', { name: /^Accept: / });
+    for (const accept of accepts) await expect(accept).toBeDisabled();
+    for (const reject of page.getAllByRole('button', { name: /^Reject: / })) await expect(reject).toBeEnabled();
+  },
+};
+
+/** Audit finding 10: a meditation took the earlier blocks off the trunk, so they offer no fork and no wrap; keep stays. */
+export const AuditNoForkBeforeTheMeditation: Story = {
+  name: 'audit 10: no fork or wrap on blocks a meditation took off the trunk',
+  args: { drive: true, web: posting(phaseMoved) },
+  play: async ({ canvasElement }) => {
+    const page = within(canvasElement.ownerDocument.body);
+    await waitFor(async () => expect(canvasElement.querySelector('.ex-composer__phase')?.textContent).toBe('phase build'));
+    const session = fold(phaseMoved.trimEnd().split('\n').map((l) => respelled(JSON.parse(l) as LogLine)));
+    const before = session.eras.slice(0, -1).flatMap((era) => era.nodes);
+    const labelled = before.filter((n) => (n.kind === 'assistant' || n.kind === 'tool') && n.logged);
+    await expect(labelled.length).toBeGreaterThan(0);
+    for (const node of labelled) {
+      const label = node.kind === 'tool' ? `call ${node.call?.id ?? node.id}` : `step ${node.id}`;
+      await expect(page.queryByRole('button', { name: `Fork at ${label}` })).toBeNull();
+      await expect(page.queryByRole('button', { name: `Wrap from ${label}` })).toBeNull();
+    }
   },
 };
