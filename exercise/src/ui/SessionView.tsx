@@ -30,6 +30,7 @@ import type { Room, Surface } from './surface.tsx';
 import { ToolBlock } from './ToolCall.tsx';
 import { ApprovalContext, ApprovalPrompt } from './Approval.tsx';
 import { GestureContext, GestureMomentContext } from './Gestures.tsx';
+import { capturingOf } from './stateWords.ts';
 import type { GestureMoment } from './Gestures.tsx';
 import type { Approving } from './Approval.tsx';
 import { FilesContext } from './Files.tsx';
@@ -640,6 +641,7 @@ export function SessionView({ session, link = 'live', linkWhy, surface, onSurfac
               {approving.waiting && approving.decide ? <ApprovalPrompt key={`${approving.waiting.request}/${approving.waiting.id}`} prompt={approving.waiting} decide={approving.decide} /> : null}
               <Composer
                 state={session.state}
+                capturing={capturingOf(session)}
                 link={link}
                 phase={session.phase}
                 tangent={{

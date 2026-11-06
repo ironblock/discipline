@@ -7,6 +7,8 @@ import { Phases } from './Phases.tsx';
 import type { PhaseMove } from './Phases.tsx';
 import { Segments } from './Segments.tsx';
 import { refusalOf } from './sets.ts';
+import { CAPTURE_LINE } from './stateWords.ts';
+import type { Capturing } from './stateWords.ts';
 import './panel.css';
 import './composer.css';
 
@@ -46,6 +48,8 @@ export interface ComposerProps {
   readonly noMeditation?: string;
   /** A meditation held for the operator (#150's gate): the changes its reconcile left unaddressed, each with its entry's text. */
   readonly held?: { readonly unaddressed: readonly { readonly id: string; readonly text: string }[] };
+  /** What a capture runs (#1050's audit, finding 13): the state line says it. Absent: an interview. */
+  readonly capturing?: Capturing;
 }
 
 const DISPOSITIONS: readonly Disposition[] = ['keep', 'drop', 'park'];
@@ -70,7 +74,7 @@ const STATE_LINE: Readonly<Record<SessionState, string>> = {
 /** How long the question "end the session?" shows before a press answers it. */
 const CONFIRM_AFTER_MS = 500;
 
-export function Composer({ state, link = 'live', phase, phases, dispatch, hint, upload, tangents = false, tangent, foreground = false, nearTimeout = false, proposal, phaseDocument, asked, answered, startable, unilateral = true, noMeditation, held }: ComposerProps) {
+export function Composer({ state, link = 'live', phase, phases, dispatch, hint, upload, tangents = false, tangent, foreground = false, nearTimeout = false, proposal, phaseDocument, asked, answered, startable, unilateral = true, noMeditation, held, capturing = 'interview' }: ComposerProps) {
   // Ending a tangent (#608): the operator rules on each of its entries, keep by default, then closes it.
   const [closing, setClosing] = useState(false);
   const [rulings, setRulings] = useState<Readonly<Record<string, Disposition>>>({});
@@ -313,7 +317,7 @@ export function Composer({ state, link = 'live', phase, phases, dispatch, hint, 
             ? 'reconnecting to the drive · your draft is kept'
             : link === 'lost'
               ? 'the connection to the drive is lost · your draft is kept'
-              : (refusal ?? STATE_LINE[state])}
+              : (refusal ?? (state === 'capture' ? CAPTURE_LINE[capturing] : STATE_LINE[state]))}
         </span>
         <span className="ex-composer__spacer" />
         {/* As `diet` takes it: only while awaiting. Leaving the button, or the composer leaving idle, disarms it. */}
