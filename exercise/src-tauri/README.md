@@ -74,7 +74,7 @@ Each is told once, as it begins.
 
 ## Links
 
-A link in model output opens in the system's browser when it is http, https or mailto (`on_new_window`, #1050's audit); anything else, and any new window, is refused. The opener is called from Rust alone: the page is granted none of its commands.
+A link in model output opens in the system's browser when it is http, https or mailto (`on_new_window`, the app audit); anything else, and any new window, is refused. The opener is called from Rust alone: the page is granted none of its commands.
 
 A profile whose serve listens anywhere but `127.0.0.1` or `localhost` is refused at start, since the page's CSP connects nowhere else.
 

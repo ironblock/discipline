@@ -30,7 +30,7 @@ const overrides = Object.fromEntries(Object.keys(PREFS).map((name) => [name, par
 const root = document.getElementById('root');
 if (!root) throw new Error('index.html has no #root');
 
-/** Say TEXT in the window in place of the app: the shell's start, or why it has no drive (#1050's audit, finding 6). */
+/** Say TEXT in the window in place of the app: the shell's start, or why it has no drive (the app audit, finding 6). */
 function say(text: string, role: 'status' | 'alert'): void {
   const said = document.createElement('p');
   said.setAttribute('role', role);
@@ -47,7 +47,7 @@ else await mount();
 /** The app, on its drive; or, when the shell will not hand over the credential, why. */
 async function mount(): Promise<void> {
   // The native shell holds the drive's credential and hands it over here, never in a URL (#719, `drive/credential.ts`);
-  // in a browser there is none, and Vite's proxy presents it. A shell that will not hand it over is said so (#1050's audit).
+  // in a browser there is none, and Vite's proxy presents it. A shell that will not hand it over is said so (the app audit).
   const credential = drive ? await shellCredential() : {};
   if ('why' in credential) return say(credential.why, 'alert');
   const web = credential.authorization ? credentialedWeb(credential.authorization) : undefined;

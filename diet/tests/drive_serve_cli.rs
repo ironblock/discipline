@@ -950,7 +950,7 @@ fn a_drive_server_exits_0_after_ended_and_ended_is_its_logs_last_line() {
     assert!(streamed.contains(r#""to":"ended""#), "{streamed}");
 }
 
-/// #1050's audit, finding 5: the native shell quits by posting `end` with
+/// the app audit, finding 5: the native shell quits by posting `end` with
 /// its credential and waiting for serve to exit (no signal handler, #230).
 /// So `end` alone must leave the record written and the process gone.
 #[test]

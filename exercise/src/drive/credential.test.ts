@@ -156,7 +156,7 @@ describe('shellAuthorization: the credential the native shell holds', () => {
   });
 });
 
-/** #1050's audit, finding 6: a shell that cannot hand the credential over says why, and the page shows it, not a blank window. */
+/** the app audit, finding 6: a shell that cannot hand the credential over says why, and the page shows it, not a blank window. */
 describe('shellCredential: what the page starts with, or why it cannot', () => {
   it('is the credential, or none, as shellAuthorization answers', async () => {
     const shell = (answer: unknown) => ({ __TAURI_INTERNALS__: { invoke: async () => answer } });

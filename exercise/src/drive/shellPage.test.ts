@@ -3,7 +3,7 @@ import { describe, expect, it } from 'vitest';
 import { shellPage } from './shellPage.ts';
 
 /**
- * The native shell's own page before and after its drive (#1050's audit, finding 6): the window opens at once on
+ * The native shell's own page before and after its drive (the app audit, finding 6): the window opens at once on
  * "starting serve…", and a start that fails -- or a sidecar that exits -- is said there, not on a stderr nobody sees.
  */
 describe('shellPage: what the shell says while it has no drive', () => {

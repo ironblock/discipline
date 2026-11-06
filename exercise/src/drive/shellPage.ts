@@ -1,5 +1,5 @@
 /**
- * The native shell's own page while it has no drive (#1050's audit, finding 6): it opens the window at once on
+ * The native shell's own page while it has no drive (the app audit, finding 6): it opens the window at once on
  * `?shell=starting`, then on the drive's page; a start that fails, or a sidecar that exits, sends it to
  * `?shell=failed&why=…`. A browser never sees either, and a page with a drive is none of these.
  */

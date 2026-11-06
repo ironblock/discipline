@@ -72,7 +72,7 @@ struct Held {
 }
 
 /// How long a quit waits for serve to end its session and exit before it is
-/// killed (#1050's audit, finding 5).
+/// killed (the app audit, finding 5).
 const QUIT_WAIT: Duration = Duration::from_secs(10);
 
 /// The `Authorization` value for the drive, when it asks for one: held once
@@ -183,14 +183,14 @@ fn start(app: &mut tauri::App) -> Result<(), String> {
         .notification()
         .on_action(move |_| bring_forward(&clicked))
         .map_err(|why| why.to_string())?;
-    // The window opens at once (#1050's audit, finding 6), on the shell's own
+    // The window opens at once (the app audit, finding 6), on the shell's own
     // page saying the start; then it shows the drive's page, or why there is
     // none, rather than a stderr no one launched from Finder sees.
     WebviewWindowBuilder::new(app, "main", WebviewUrl::App(shell_page("starting", None)?.into()))
         .title("exercise")
         .inner_size(1280.0, 860.0)
         // A link in model output opens in the system's browser when it is the
-        // web's or mail's (#1050's audit, finding 19); no window ever opens here.
+        // web's or mail's (the app audit, finding 19); no window ever opens here.
         .on_new_window(|url, _| {
             if openable(&url) {
                 let _ = tauri_plugin_opener::open_url(url.as_str(), None::<&str>);
@@ -508,7 +508,7 @@ fn sidecar(
     Err("serve's output closed before it listened".to_owned())
 }
 
-/// The app is quitting (#1050's audit, finding 5): end the session as the
+/// The app is quitting (the app audit, finding 5): end the session as the
 /// page would -- `end`, and with a turn in flight, a cancel of it first --
 /// then wait for serve to write its record and exit, and kill it only if it
 /// has not within [`QUIT_WAIT`]. No signal handler: #230's ruling.
@@ -586,14 +586,14 @@ fn running_turn(body: &str) -> Option<u64> {
 }
 
 /// Whether a link the page opens goes to the system's browser: the web's
-/// and mail's alone (#1050's audit, finding 19).
+/// and mail's alone (the app audit, finding 19).
 fn openable(url: &Url) -> bool {
     matches!(url.scheme(), "http" | "https" | "mailto")
 }
 
 /// Whether the page's CSP (`connect-src`, `tauri.conf.json`) admits a drive
 /// at `listening`, serve's `host:port`: loopback by name or by 127.0.0.1
-/// (#1050's audit, finding 23).
+/// (the app audit, finding 23).
 fn csp_admits(listening: &str) -> bool {
     listening
         .rsplit_once(':')
@@ -611,7 +611,7 @@ fn page(drive: &str) -> Result<String, String> {
 mod tests {
     use super::{Auth, Drive, basic, chosen_auth, command_request, csp_admits, openable, remote, running_turn, shell_page, status_of};
 
-    /// #1050's audit, finding 6: the window opens at once on the page's
+    /// the app audit, finding 6: the window opens at once on the page's
     /// "starting serve…", and a failure is said there, its reason in the URL.
     #[test]
     fn the_shells_own_page_says_starting_and_why_a_start_failed() {
@@ -622,7 +622,7 @@ mod tests {
         );
     }
 
-    /// #1050's audit, finding 5: the shell ends the session as the page
+    /// the app audit, finding 5: the shell ends the session as the page
     /// would, a `POST /commands` with the credential, before it lets serve go.
     #[test]
     fn the_shell_ends_the_session_with_a_command_as_the_page_sends_one() {
@@ -647,7 +647,7 @@ mod tests {
         assert_eq!(running_turn(r#"{"session":"idle"}"#), None);
     }
 
-    /// #1050's audit, finding 19: a link in the page opens in the system's
+    /// the app audit, finding 19: a link in the page opens in the system's
     /// browser when it is the web's or mail's, and nothing else opens.
     #[test]
     fn a_link_opens_outside_only_for_the_web_and_mail() {
@@ -671,7 +671,7 @@ mod tests {
         }
     }
 
-    /// #1050's audit, finding 23: the page reaches the sidecar only where
+    /// the app audit, finding 23: the page reaches the sidecar only where
     /// its CSP's `connect-src` admits, so an address it does not is refused
     /// at start, not met as an unreachable drive.
     #[test]
