@@ -436,7 +436,7 @@ export type PhaseRuled = V0.PhaseRuledLine;
 
 export type Kind = LogLine['kind'];
 
-/** A kind diet's bindings name that is no line here (#1050's audit, finding 8): `tsc` fails while there is one. */
+/** A kind diet's bindings name that is no line here (the app audit, finding 8): `tsc` fails while there is one. */
 type Unread = Exclude<V0.Kind, Kind>;
 export const EVERY_KIND_READ: [Unread] extends [never] ? true : Unread = true;
 

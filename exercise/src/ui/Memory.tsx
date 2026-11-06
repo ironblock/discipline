@@ -72,7 +72,7 @@ export function Memory({ entries, seenThrough = -1, onSeen, act }: MemoryProps) 
                   <span className="ex-memory__text">
                     {e.text}
                     {e.op !== undefined ? <span className="ex-memory__op">{opOf(e.op).label}</span> : null}
-                    {/* Who vouches for it (#1050's audit, finding 7): observed, the model's own words, yours. */}
+                    {/* Who vouches for it (the app audit, finding 7): observed, the model's own words, yours. */}
                     {e.authority !== undefined ? <span className="ex-memory__authority">{authorityOf(e.authority).label}</span> : null}
                     {/* Written by the trunk's own lane, not a fork (#627): self-capture; or the operator's own keep. */}
                     {e.lane !== undefined && e.authority !== 'operator' ? (

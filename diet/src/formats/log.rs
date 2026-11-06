@@ -8275,7 +8275,7 @@ pub fn typescript() -> String {
         out,
         "export const PRESENCE_WINDOW_MS = {PRESENCE_WINDOW_MS};\n\n"
     );
-    // The sets a reader must cover, as values too (#1050's audit): a test
+    // The sets a reader must cover, as values too (the app audit): a test
     // over them fails when the format gains a member its reader does not
     // handle, where a type alone is checked only against what the reader
     // already names.

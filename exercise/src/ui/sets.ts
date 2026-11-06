@@ -161,7 +161,7 @@ export function opOf(op: PatchOp): Op {
 // ------------------------------------------------------------------ authorities
 
 /**
- * Who vouches for an entry (#1050's audit, finding 7): diet's words (`V0.AUTHORITIES`), and the surface's older
+ * Who vouches for an entry (the app audit, finding 7): diet's words (`V0.AUTHORITIES`), and the surface's older
  * shape's (#117 naming 5), which placed recordings still carry.
  */
 export const authorityOf = registry<Authority>({

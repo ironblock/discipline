@@ -11,7 +11,7 @@ import type { LogLine } from './log.ts';
 import { respelled } from './spelling.ts';
 
 /**
- * The page against diet's own sets (#1050's audit, findings 7, 8 and 16): each test runs over what diet's generated
+ * The page against diet's own sets (the app audit, findings 7, 8 and 16): each test runs over what diet's generated
  * bindings list (`diet/formats/log/log.ts`), so a member diet adds that the page does not read fails here, the day
  * the bindings are regenerated, and not in a live session.
  */
