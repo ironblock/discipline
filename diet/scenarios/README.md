@@ -270,7 +270,7 @@ Beside it the command writes:
 - **A gesture names its lines as the runner finds them, never by a seq.**
   - A keep's `from` is the last call whose result holds its span, by the call's id, or `{"answer": <span>}`.
   - A fork's or a wrap's line is a call by its id, or an answer by its whole text. That line must be the last of its id, or the last answer holding its text.
-  - A retire picks its entry by text, as an edit does.
+  - A retire picks its entry by the name its keep or edit bound (`as`), which is the entry's id in the log. An entry no step wrote is picked by its text, as an edit's is.
   - An accepted suggestion's fork is no step of its own, nor is a wrap's entry.
   - A `suggestion` or `correction` step answers the first chip still unanswered, so the line it derives from must answer that chip.
   - A lapsed chip has no step.
