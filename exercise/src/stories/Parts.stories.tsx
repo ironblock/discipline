@@ -1324,3 +1324,36 @@ export const AttachWhileRunning: Story = {
     await waitFor(async () => expect(chips(canvasElement)).toEqual(['during.png']));
   },
 };
+
+// ---------------------------------------------------------------- the app audit (finding 4)
+
+/** A composer the story can mount afresh, as a reload mounts it. */
+function RemountHarness() {
+  const [mount, setMount] = useState(0);
+  return (
+    <div>
+      <Composer key={mount} state="awaiting" link="lost" phase="spec" phases={PHASES} dispatch={async () => ({ ok: true })} />
+      <button type="button" data-probe="remount" onClick={() => setMount((n) => n + 1)}>
+        remount
+      </button>
+    </div>
+  );
+}
+
+/** Audit finding 4: "your draft is kept" holds across a reload, which is how a lost link used to end. */
+export const AuditDraftKeptAcrossAReload: Story = {
+  name: 'audit 4: the draft is kept across a reload',
+  render: () => <RemountHarness />,
+  play: async ({ canvasElement }) => {
+    try {
+      sessionStorage.clear();
+    } catch {
+      // A browser that keeps no session storage keeps no draft either; the story then asks nothing of it.
+      return;
+    }
+    await userEvent.type(canvasElement.querySelector('textarea[aria-label="your ask"]')!, 'half a thought');
+    (canvasElement.querySelector('[data-probe="remount"]') as HTMLButtonElement).click();
+    await waitFor(async () => expect((canvasElement.querySelector('textarea[aria-label="your ask"]') as HTMLTextAreaElement).value).toBe('half a thought'));
+    sessionStorage.clear();
+  },
+};

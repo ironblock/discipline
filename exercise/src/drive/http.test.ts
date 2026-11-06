@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 
 import type { EventSourceLike, Web } from './http.ts';
 import { HttpTransport } from './http.ts';
@@ -45,7 +45,10 @@ class FakeSource implements EventSourceLike {
   }
 }
 
-function stand(answers: { readonly events?: number; readonly commands?: (body: Record<string, unknown>) => Response } = {}) {
+/** What a probe of `/events` is answered with: a status, or no answer at all -- a refused connection, a network asleep. */
+type EventsAnswer = number | 'unreachable';
+
+function stand(answers: { readonly events?: EventsAnswer | (() => EventsAnswer); readonly commands?: (body: Record<string, unknown>) => Response } = {}) {
   const sources: FakeSource[] = [];
   const fetched: { url: string; init?: RequestInit }[] = [];
   const web: Web = {
@@ -57,7 +60,11 @@ function stand(answers: { readonly events?: number; readonly commands?: (body: R
     },
     fetch: async (url, init) => {
       fetched.push({ url, ...(init ? { init } : {}) });
-      if (url.startsWith('events')) return new Response(null, { status: answers.events ?? 200 });
+      if (url.startsWith('events')) {
+        const answer = typeof answers.events === 'function' ? answers.events() : (answers.events ?? 200);
+        if (answer === 'unreachable') throw new TypeError('Failed to fetch');
+        return new Response(null, { status: answer });
+      }
       const body = JSON.parse(String(init?.body ?? '{}')) as Record<string, unknown>;
       return answers.commands ? answers.commands(body) : new Response('{}', { status: 200 });
     },
@@ -175,6 +182,58 @@ describe('HttpTransport: a closed stream (finding 17)', () => {
     }
     expect(sources).toHaveLength(4);
     expect(links.at(-1)).toBe('lost: the drive answers, but its stream keeps closing');
+  });
+
+  // The app audit (#1050's, finding 4): a lost link is never lost for good.
+  it('asks again after a probe found the drive unreachable, and is live once it answers', async () => {
+    vi.useFakeTimers();
+    try {
+      const answers: EventsAnswer[] = ['unreachable'];
+      const { sources, links, last } = stand({ events: () => answers.shift() ?? 200 });
+      last().open();
+      last().send(start);
+      last().fail(2);
+      await vi.advanceTimersByTimeAsync(0);
+      expect(links.at(-1)).toMatch(/^lost: /);
+      await vi.advanceTimersByTimeAsync(30_000);
+      expect(sources).toHaveLength(2);
+      last().open();
+      expect(links.at(-1)).toBe('live');
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('reconnects at once when asked to, after a lost link', async () => {
+    const answers: EventsAnswer[] = ['unreachable'];
+    const { transport, sources, links, last } = stand({ events: () => answers.shift() ?? 200 });
+    last().open();
+    last().send(start);
+    last().fail(2);
+    await settle();
+    expect(links.at(-1)).toMatch(/^lost: /);
+    transport.reconnect();
+    await settle();
+    expect(sources).toHaveLength(2);
+    last().open();
+    expect(links.at(-1)).toBe('live');
+  });
+
+  it('says why, while the browser keeps retrying a stream the drive does not answer', async () => {
+    vi.useFakeTimers();
+    try {
+      const { sources, links, last } = stand({ events: 'unreachable' });
+      last().open();
+      last().send(start);
+      last().fail(0);
+      expect(links.at(-1)).toBe('reconnecting');
+      await vi.advanceTimersByTimeAsync(30_000);
+      expect(links.at(-1)).toMatch(/^reconnecting: /);
+      // The browser's own retry is let be: no stream of the transport's own.
+      expect(sources).toHaveLength(1);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it('starts over when an id names another session: a restart a fresh resume could not name', () => {
