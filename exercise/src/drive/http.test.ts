@@ -184,7 +184,7 @@ describe('HttpTransport: a closed stream (finding 17)', () => {
     expect(links.at(-1)).toBe('lost: the drive answers, but its stream keeps closing');
   });
 
-  // The app audit (#1050's, finding 4): a lost link is never lost for good.
+  // The app audit, finding 4: a lost link is never lost for good.
   it('asks again after a probe found the drive unreachable, and is live once it answers', async () => {
     vi.useFakeTimers();
     try {
