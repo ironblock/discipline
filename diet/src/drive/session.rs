@@ -34541,6 +34541,39 @@ pub(in crate::drive) mod tests {
     /// refuses is refused with the graph's reason, logged; with no phase
     /// named the session stays where it is; and the projection rebuilds the
     /// refilled head.
+    /// #1050's audit, finding 1: where `operator_unilateral` is off, a
+    /// declared meditation that names a phase is a move the operator takes
+    /// alone, and is refused as `move_phase` refuses one; with no phase
+    /// named, the meditation stays, and is taken.
+    #[test]
+    fn a_declared_meditation_moves_a_phase_only_where_the_operator_may_move_alone() {
+        let session = Session::open_with(
+            Canned::new([deltas(&[SCOPED]), deltas(&[DECIDED])]),
+            template(),
+            None,
+            None,
+            None,
+            Some(Interview {
+                operator_unilateral: false,
+                ..phased()
+            }),
+        );
+        session
+            .ask_marked("what are we building?", None, true)
+            .expect("accepted");
+        wait_until(&session, "the fork to settle", |log| {
+            settled(log) && !fork_outcomes(log).is_empty()
+        });
+        assert_eq!(
+            session.declare_meditation_to(None, Some("build")),
+            Err(Rejected::Refused(Refusal::NotUnilateral))
+        );
+        assert_eq!(session.shared.lock().phase.as_deref(), Some("plan"));
+        session
+            .declare_meditation_to(None, None)
+            .expect("a meditation that stays");
+    }
+
     #[test]
     #[allow(clippy::too_many_lines)]
     fn a_served_meditation_moves_between_the_phases_its_graph_allows() {
