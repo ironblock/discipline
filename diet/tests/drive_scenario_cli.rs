@@ -1237,6 +1237,21 @@ fn a_step_that_outlives_its_patience_fails_the_drive_and_a_longer_patience_passe
 
 /// `diet-drive script` (#908) over `log`: its exit code, stdout and stderr.
 fn script(log: &Path, out: &Path, canned: Option<&Path>) -> (Option<i32>, String, String) {
+    script_under(
+        log,
+        out,
+        canned,
+        &root().join("diet/scenarios/kitchen-sink.toml"),
+    )
+}
+
+/// [`script`] under `regimen`.
+fn script_under(
+    log: &Path,
+    out: &Path,
+    canned: Option<&Path>,
+    regimen: &Path,
+) -> (Option<i32>, String, String) {
     let mut command = Command::new(DRIVE);
     command
         .current_dir(root())
@@ -1244,7 +1259,7 @@ fn script(log: &Path, out: &Path, canned: Option<&Path>) -> (Option<i32>, String
         .arg("--log")
         .arg(log)
         .arg("--regimen")
-        .arg(root().join("diet/scenarios/kitchen-sink.toml"))
+        .arg(regimen)
         .arg("--out")
         .arg(out);
     if let Some(canned) = canned {
@@ -1265,15 +1280,52 @@ fn script(log: &Path, out: &Path, canned: Option<&Path>) -> (Option<i32>, String
 /// its trunk starts from the same head.
 #[test]
 fn an_operator_script_derived_from_a_log_replays_its_operator_lines() {
-    let dir = scratch("operator-script");
+    let before_lines = round_trip("operator-script", "kitchen-sink");
+    assert!(
+        before_lines.len() > 30,
+        "the kitchen sink's moves: {}",
+        before_lines.len()
+    );
+}
+
+/// The round trip over the operator's gestures (the app audit's page walk,
+/// F20): the gestures scenario's keep, fork, wrap, suggestion, correction
+/// and retire derive as steps, and their replay logs them again.
+#[test]
+fn an_operator_script_replays_the_operators_gestures() {
+    let lines = round_trip("operator-script-gestures", "gestures");
+    for kind in ["fork", "wrap.accepted", "suggestion", "correction"] {
+        assert!(
+            lines.iter().any(|line| line["kind"] == kind),
+            "no `{kind}` among the operator lines: {lines:?}"
+        );
+    }
+    for op in ["add", "retire"] {
+        assert!(
+            lines
+                .iter()
+                .any(|line| line["kind"] == "patch" && line["op"] == op),
+            "no operator `{op}` among the operator lines: {lines:?}"
+        );
+    }
+}
+
+/// #908's round trip over scenario `name`, under its own regimen: run, derive
+/// an operator script from its log, replay it on the canned substrate with
+/// the scenario's replies and seed. The replay's operator lines are the
+/// original's, line for line, apart from `seq` and `t`, and its trunk starts
+/// from the same head. The original's operator lines.
+fn round_trip(scratch_name: &str, name: &str) -> Vec<serde_json::Value> {
+    let dir = scratch(scratch_name);
     let original = dir.join("original");
-    let kitchen = root().join("diet/scenarios/kitchen-sink.jsonl");
-    let (code, said) = run(&kitchen, &original);
+    let scenario = root().join(format!("diet/scenarios/{name}.jsonl"));
+    let (code, said) = run(&scenario, &original);
     assert_eq!(code, Some(0), "{said}");
-    let (code, stdout, stderr) = script(
+    let (code, stdout, stderr) = script_under(
         &original.join("session.log"),
         &dir.join("script"),
-        Some(&kitchen),
+        Some(&scenario),
+        &root().join(format!("diet/scenarios/{name}.toml")),
     );
     assert_eq!(code, Some(0), "{stdout}{stderr}");
     let report: serde_json::Value = serde_json::from_str(stdout.trim()).expect("the report");
@@ -1288,11 +1340,6 @@ fn an_operator_script_derived_from_a_log_replays_its_operator_lines() {
     );
     let lines = |log: &str| diet::drive::operator_script::operator_lines(log).expect("a log");
     let (before_lines, after_lines) = (lines(&before), lines(&after));
-    assert!(
-        before_lines.len() > 30,
-        "the kitchen sink's moves: {}",
-        before_lines.len()
-    );
     for (a, b) in before_lines.iter().zip(&after_lines) {
         assert_eq!(a, b, "an operator line differs");
     }
@@ -1308,6 +1355,7 @@ fn an_operator_script_derived_from_a_log_replays_its_operator_lines() {
         "the trunk starts from the same head"
     );
     let _ = std::fs::remove_dir_all(&dir);
+    before_lines
 }
 
 /// #908: a log holding a move the format cannot express -- here a stop --
