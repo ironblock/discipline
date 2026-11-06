@@ -16,16 +16,25 @@ import { respelled } from './spelling.ts';
  * the bindings are regenerated, and not in a live session.
  */
 
-/** One line of `kind` and nothing else: what the fold makes of a kind, whatever its fields. */
-const bare = (kind: string) => ({ seq: 0, t: 0, kind }) as unknown as LogLine;
+const valid = path.join(path.dirname(fileURLToPath(import.meta.url)), '../../../diet/formats/log/fixtures/valid');
+
+/** A session's start, as diet writes one: the fold reads nothing before it. */
+const START = (JSON.parse(readFileSync(path.join(valid, 'an-answered-turn.expected.json'), 'utf8')) as { events: LogLine[] }).events[0]!;
+
+/** A session's start, then one line of `kind` and nothing else: what the fold makes of a kind, whatever its fields. */
+const bare = (kind: string): LogLine[] => [START, { seq: 1, t: 0, kind } as unknown as LogLine];
 
 describe('every kind diet writes, the fold reads', () => {
+  it('can tell: a kind no format has is counted unknown', () => {
+    expect(fold(bare('no-such-kind')).unknown.has('no-such-kind')).toBe(true);
+  });
+
   for (const kind of V0.KINDS) {
     it(kind, () => {
       // A kind the fold handles may need its fields, and throw without them; only one it does not know is counted.
       let unknown = false;
       try {
-        unknown = fold([bare(kind)]).unknown.has(kind);
+        unknown = fold(bare(kind)).unknown.has(kind);
       } catch {
         unknown = false;
       }
@@ -33,8 +42,6 @@ describe('every kind diet writes, the fold reads', () => {
     });
   }
 });
-
-const valid = path.join(path.dirname(fileURLToPath(import.meta.url)), '../../../diet/formats/log/fixtures/valid');
 
 /**
  * The kinds no valid fixture of diet's carries, so `log.test.ts`'s folding of them reads none: named here, so a kind
@@ -64,8 +71,8 @@ describe('every refusal diet writes has a label', () => {
 describe("every authority diet writes on an entry is the entry's, and has a label", () => {
   for (const authority of V0.AUTHORITIES) {
     it(authority, () => {
-      const patch = { seq: 0, t: 0, kind: 'patch', op: 'add', lane: 'self-capture', entry: { id: 'e1', text: 'a note', authority } } as unknown as LogLine;
-      expect(fold([patch]).memory[0]?.authority).toBe(authority);
+      const patch = { seq: 1, t: 0, kind: 'patch', op: 'add', lane: 'self-capture', entry: { id: 'e1', text: 'a note', authority } } as unknown as LogLine;
+      expect(fold([START, patch]).memory[0]?.authority).toBe(authority);
       expect(authorityOf(authority).known, `${authority}: drawn as its raw word`).toBe(true);
     });
   }
