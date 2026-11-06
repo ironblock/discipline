@@ -956,7 +956,11 @@ fn a_drive_server_exits_0_after_ended_and_ended_is_its_logs_last_line() {
 #[test]
 fn a_drive_server_ended_over_http_writes_its_record_and_exits() {
     let tree = Dir::new("ended-record-tree");
-    let stub = Stub::serving(vec![Act::Raw(ANSWERED.to_vec())]).expect("loopback");
+    let stub = Stub::serving_with_props(
+        vec![Act::Raw(ANSWERED.to_vec())],
+        &diet::drive::canned::build_info(),
+    )
+    .expect("loopback");
     let regimen = commands_regimen(
         "allowed_commands = []\n",
         "isolation = \"none\"",
