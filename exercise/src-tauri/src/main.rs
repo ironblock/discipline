@@ -417,7 +417,44 @@ fn page(drive: &str) -> Result<String, String> {
 
 #[cfg(test)]
 mod tests {
-    use super::{Auth, Drive, basic, chosen_auth, remote};
+    use super::{Auth, Drive, basic, chosen_auth, csp_admits, openable, remote};
+
+    /// #1050's audit, finding 19: a link in the page opens in the system's
+    /// browser when it is the web's or mail's, and nothing else opens.
+    #[test]
+    fn a_link_opens_outside_only_for_the_web_and_mail() {
+        for opened in [
+            "https://docs.example/page",
+            "http://localhost:5173/",
+            "mailto:someone@example.com",
+        ] {
+            let url = tauri::Url::parse(opened).expect("a URL");
+            assert!(openable(&url), "{opened}");
+        }
+        for kept in [
+            "file:///etc/hosts",
+            "javascript:alert(1)",
+            "tauri://localhost/index.html",
+            "data:text/html,hi",
+            "ssh://example.com",
+        ] {
+            let url = tauri::Url::parse(kept).expect("a URL");
+            assert!(!openable(&url), "{kept}");
+        }
+    }
+
+    /// #1050's audit, finding 23: the page reaches the sidecar only where
+    /// its CSP's `connect-src` admits, so an address it does not is refused
+    /// at start, not met as an unreachable drive.
+    #[test]
+    fn the_sidecar_is_reached_only_where_the_csp_admits() {
+        for admitted in ["127.0.0.1:7801", "localhost:7801"] {
+            assert!(csp_admits(admitted), "{admitted}");
+        }
+        for refused in ["[::1]:7801", "0.0.0.0:7801", "drive.example:7801"] {
+            assert!(!csp_admits(refused), "{refused}");
+        }
+    }
 
     #[test]
     fn the_credential_is_named_by_the_keychain_or_a_file_never_both() {
