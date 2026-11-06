@@ -159,6 +159,23 @@ pub enum Pick {
     Index(usize),
     /// The first live entry whose content holds this text.
     Containing(String),
+    /// The entry a step bound to this name with `as` (`"$name"`).
+    Bound(String),
+}
+
+impl Pick {
+    /// The id a bound pick names in `bound`; none for a pick read from
+    /// `GET /memory`.
+    #[must_use]
+    pub fn bound_in(&self, bound: &Bindings) -> Option<Result<String, Failure>> {
+        let Self::Bound(name) = self else { return None };
+        Some(
+            bound
+                .get(name)
+                .cloned()
+                .ok_or_else(|| Failure(format!("no step bound `{name}` before this one"))),
+        )
+    }
 }
 
 /// Which logged line a gesture acts at (the app audit's page walk, F20):
@@ -1695,6 +1712,9 @@ impl Fields {
             Some(Value::Integer(n)) => usize::try_from(n)
                 .map(Pick::Index)
                 .map_err(|_| self.wrong("`pick` 0 or more")),
+            Some(Value::String(text)) if text.len() > 1 && text.starts_with('$') => {
+                Ok(Pick::Bound(text[1..].to_owned()))
+            }
             Some(Value::String(text)) if !text.is_empty() => Ok(Pick::Containing(text)),
             _ => Err(self.wrong("`pick`, a place or some text")),
         }
@@ -2232,6 +2252,12 @@ impl Driver {
                     .as_str()
                     .is_some_and(|c| c.contains(text.as_str()))
             }),
+            // Read from the run's bindings, never from memory (`Pick::bound_in`).
+            Pick::Bound(name) => {
+                return Err(Failure(format!(
+                    "`${name}` names a bound entry, not one read from memory"
+                )));
+            }
         };
         found
             .and_then(|entry| entry["id"].as_str())
@@ -2384,7 +2410,10 @@ pub fn drive_from(
                     .map_err(failed)?;
             }
             Step::Flag { pick, note, bind } => {
-                let id = driver.picked(pick).map_err(failed)?;
+                let id = pick
+                    .bound_in(&bound)
+                    .unwrap_or_else(|| driver.picked(pick))
+                    .map_err(failed)?;
                 driver
                     .command(&serde_json::json!({"kind": "flag-entry", "id": id, "note": note}))
                     .map_err(failed)?;
@@ -2393,7 +2422,10 @@ pub fn drive_from(
                 }
             }
             Step::Edit { pick, text, bind } => {
-                let id = driver.picked(pick).map_err(failed)?;
+                let id = pick
+                    .bound_in(&bound)
+                    .unwrap_or_else(|| driver.picked(pick))
+                    .map_err(failed)?;
                 driver
                     .command(&serde_json::json!({"kind": "edit-entry", "id": id, "content": text}))
                     .map_err(failed)?;
@@ -2471,7 +2503,10 @@ pub fn drive_from(
                     .map_err(failed)?;
             }
             Step::Retire { pick } => {
-                let id = driver.picked(pick).map_err(failed)?;
+                let id = pick
+                    .bound_in(&bound)
+                    .unwrap_or_else(|| driver.picked(pick))
+                    .map_err(failed)?;
                 driver
                     .command(&serde_json::json!({"kind": "retire-entry", "id": id}))
                     .map_err(failed)?;
@@ -4880,7 +4915,11 @@ mod tests {
     #[test]
     fn a_pick_names_an_entry_a_step_bound() {
         let header = r#"{"scenario":"s","regimen":"r.toml","head":"h.md"}"#;
-        let read = parse(&format!("{header}\n{}\n", r#"{"step":"retire","pick":"$kept"}"#)).expect("it reads");
+        let read = parse(&format!(
+            "{header}\n{}\n",
+            r#"{"step":"retire","pick":"$kept"}"#
+        ))
+        .expect("it reads");
         assert_eq!(
             read.steps,
             vec![Step::Retire {
@@ -4889,8 +4928,14 @@ mod tests {
         );
         let mut bound = Bindings::new();
         bound.insert("kept".to_owned(), "operator-15".to_owned());
-        assert_eq!(Pick::Bound("kept".to_owned()).bound_in(&bound), Some(Ok("operator-15".to_owned())));
-        assert!(matches!(Pick::Bound("other".to_owned()).bound_in(&bound), Some(Err(_))));
+        assert_eq!(
+            Pick::Bound("kept".to_owned()).bound_in(&bound),
+            Some(Ok("operator-15".to_owned()))
+        );
+        assert!(matches!(
+            Pick::Bound("other".to_owned()).bound_in(&bound),
+            Some(Err(_))
+        ));
         assert_eq!(Pick::Index(0).bound_in(&bound), None);
     }
 

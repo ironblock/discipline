@@ -592,7 +592,13 @@ fn entry_char(c: char) -> bool {
 /// none of stays as written.
 fn with_entries(act: Act, body: &str) -> Act {
     const MARK: &str = "$entry:";
+    let operator = last_operator_entry(body);
     let resolve = |text: String| {
+        // The operator's last entry, by the id serve coined it (the app audit's page walk, F20).
+        let text = match &operator {
+            Some(id) => text.replace("$operator-entry", id),
+            None => text,
+        };
         if !text.contains(MARK) {
             return text;
         }
@@ -613,6 +619,26 @@ fn with_entries(act: Act, body: &str) -> Act {
         out
     };
     named(act, &resolve)
+}
+
+/// The last `operator-<digits>` in `body` standing as a word of its own: the
+/// id serve coins an operator's entry by.
+fn last_operator_entry(body: &str) -> Option<String> {
+    const PREFIX: &str = "operator-";
+    body.match_indices(PREFIX)
+        .filter_map(|(at, _)| {
+            if body[..at].chars().next_back().is_some_and(entry_char) {
+                return None;
+            }
+            let digits: String = body[at + PREFIX.len()..]
+                .chars()
+                .take_while(char::is_ascii_digit)
+                .collect();
+            let after = body[at + PREFIX.len() + digits.len()..].chars().next();
+            (!digits.is_empty() && !after.is_some_and(entry_char))
+                .then(|| format!("{PREFIX}{digits}"))
+        })
+        .last()
 }
 
 /// The last `r<digits>/<suffix>` in `body` standing as a word of its own.
@@ -1107,12 +1133,20 @@ mod tests {
     /// it stays as written when the request carries none.
     #[test]
     fn a_reply_names_the_operator_entry_its_request_carries() {
-        let named = |body: &str| match with_entries(Act::Answer("retire $operator-entry".to_owned()), body) {
-            Act::Answer(text) => text,
-            _ => unreachable!("an answer stays an answer"),
-        };
-        assert_eq!(named("# working set\noperator-15\ta note\noperator-23\tits text"), "retire operator-23");
-        assert_eq!(named("no operator-entry here, nor xoperator-9"), "retire $operator-entry");
+        let named =
+            |body: &str| match with_entries(Act::Answer("retire $operator-entry".to_owned()), body)
+            {
+                Act::Answer(text) => text,
+                _ => unreachable!("an answer stays an answer"),
+            };
+        assert_eq!(
+            named("# working set\noperator-15\ta note\noperator-23\tits text"),
+            "retire operator-23"
+        );
+        assert_eq!(
+            named("no operator-entry here, nor xoperator-9"),
+            "retire $operator-entry"
+        );
     }
 
     /// A routed reply's `$entry:<call>/<field>` is the last record entry id
