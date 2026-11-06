@@ -1639,6 +1639,9 @@ export const AuditWrapNamesItsResult: Story = {
     const page = within(canvasElement.ownerDocument.body);
     const slow = { timeout: 5_000 };
     await waitFor(async () => expect(says(canvasElement)).toBe('your turn'));
+    // Opened when it is folded: whether it opens of itself is F10's, not this story's.
+    const toggle = canvasElement.querySelector<HTMLButtonElement>('.ex-branch__why[aria-expanded="false"]');
+    if (toggle) await userEvent.click(toggle);
     await cornerClick(await page.findByRole('button', { name: /^Wrap from fork / }, slow));
     const title = (await page.findByRole('heading', { name: /^wrap / }, slow)).textContent ?? '';
     await expect(title).toContain('call-1');
