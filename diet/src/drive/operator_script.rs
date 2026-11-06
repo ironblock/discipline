@@ -1345,7 +1345,24 @@ mod tests {
                     json!({"kind": "patch", "lane": "operator", "op": "retire",
                            "entry": {"id": "operator-6", "text": "a note"}}),
                 ],
-                vec![keep, json!({"step": "retire", "pick": "a note"})],
+                vec![
+                    json!({"step": "keep", "from": {"call": "call-1"}, "span": "a note", "as": "operator-6"}),
+                    json!({"step": "retire", "pick": "$operator-6"}),
+                ],
+            ),
+            (
+                "a retire of an entry whose text another live entry holds",
+                vec![
+                    json!({"kind": "patch", "lane": "mechanical", "op": "add",
+                           "entry": {"id": "mechanical/notes.md", "text": "files: a note"}}),
+                    kept("a note", "tool-result"),
+                    json!({"kind": "patch", "lane": "operator", "op": "retire",
+                           "entry": {"id": "operator-6", "text": "a note"}}),
+                ],
+                vec![
+                    json!({"step": "keep", "from": {"call": "call-1"}, "span": "a note", "as": "operator-6"}),
+                    json!({"step": "retire", "pick": "$operator-6"}),
+                ],
             ),
         ];
         let mut wrong = Vec::new();
