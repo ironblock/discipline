@@ -658,7 +658,7 @@ fn page(drive: &str) -> Result<String, String> {
 #[cfg(test)]
 mod tests {
     use super::{
-        Auth, Drive, basic, chosen_auth, command_request, csp_admits, openable, remote,
+        Auth, Drive, basic, chosen_auth, command_request, csp_admits, openable, page, remote,
         running_turn, shell_page, status_of,
     };
 
@@ -794,5 +794,43 @@ mod tests {
         for refused in ["http://drive.example/", "file:///x", "drive"] {
             assert!(remote(refused.to_owned()).is_err(), "{refused}");
         }
+    }
+
+    /// The overlay title bar (macOS): the drive's page is told the traffic
+    /// lights' right edge, whole points up, so its header clears them; with
+    /// none read, or none to read, it is told nothing.
+    #[test]
+    fn the_drive_page_names_the_traffic_lights_edge_for_the_header() {
+        let drive = "http://127.0.0.1:7801";
+        assert_eq!(
+            page(drive, Some(77.2)).as_deref(),
+            Ok("index.html?drive=http%3A%2F%2F127.0.0.1%3A7801&titlebar=78")
+        );
+        for none in [None, Some(0.0), Some(f64::NAN)] {
+            assert_eq!(
+                page(drive, none).as_deref(),
+                Ok("index.html?drive=http%3A%2F%2F127.0.0.1%3A7801"),
+                "{none:?}"
+            );
+        }
+    }
+
+    /// The page's window is granted what it was, and the overlay title bar's
+    /// drag region alone besides: `core:window:allow-start-dragging`.
+    #[test]
+    fn the_main_window_is_granted_dragging_and_nothing_else_new() {
+        let capability: serde_json::Value =
+            serde_json::from_str(include_str!("../capabilities/default.json"))
+                .expect("the capability reads");
+        assert_eq!(capability["windows"], serde_json::json!(["main"]));
+        assert_eq!(
+            capability["permissions"],
+            serde_json::json!([
+                "core:default",
+                "allow-drive-authorization",
+                "allow-notify",
+                "core:window:allow-start-dragging"
+            ])
+        );
     }
 }
