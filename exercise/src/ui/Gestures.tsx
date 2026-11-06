@@ -155,18 +155,35 @@ export function KeepAction({ logged, label }: { readonly logged: LoggedText; rea
   const [open, setOpen] = useState(false);
   const [tag, setTag] = useState('');
   const [refused, setRefused] = useState<string>();
+  // The span last selected in either text (the app audit, finding 2): a click into the tag field moves the document's
+  // selection away, and the span stays what the person selected.
+  const [captured, setCaptured] = useState('');
   const raw = useRef<HTMLPreElement>(null);
+  const thought = useRef<HTMLPreElement>(null);
   const close = () => setOpen(false);
   const dialog = useModal(open, close);
   useEffect(() => {
     if (open) raw.current?.focus();
   }, [open]);
+  useEffect(() => {
+    if (!open) return;
+    setCaptured('');
+    const selected = () => {
+      const selection = window.getSelection();
+      if (!selection || selection.rangeCount === 0 || selection.toString() === '') return;
+      const node = selection.getRangeAt(0).commonAncestorContainer;
+      if (raw.current?.contains(node) || thought.current?.contains(node)) setCaptured(selection.toString());
+    };
+    document.addEventListener('selectionchange', selected);
+    return () => document.removeEventListener('selectionchange', selected);
+  }, [open]);
   if (!act) return null;
   const submit = async (e: FormEvent) => {
     e.preventDefault();
     const selection = window.getSelection();
-    const inside = selection && raw.current && selection.rangeCount > 0 && raw.current.contains(selection.getRangeAt(0).commonAncestorContainer);
-    const span = inside ? selection.toString() : '';
+    const node = selection && selection.rangeCount > 0 ? selection.getRangeAt(0).commonAncestorContainer : undefined;
+    const inside = node !== undefined && (raw.current?.contains(node) || thought.current?.contains(node));
+    const span = selection && inside && selection.toString() !== '' ? selection.toString() : captured;
     if (span.trim() === '') return setRefused('select the span to keep first');
     const ack = await act({ kind: 'keep', from: logged.seq, span, ...(tag.trim() !== '' ? { tag: tag.trim() } : {}) });
     if (ack.ok) {
@@ -175,6 +192,7 @@ export function KeepAction({ logged, label }: { readonly logged: LoggedText; rea
       setOpen(false);
     } else setRefused(refusedOf(ack));
   };
+  const reasoning = logged.reasoning ?? '';
   return (
     <>
       <button
@@ -194,9 +212,18 @@ export function KeepAction({ logged, label }: { readonly logged: LoggedText; rea
           <form onSubmit={(e) => void submit(e)}>
             <h2 className="ex-gesture__title">keep from {label}</h2>
             <p className="ex-gesture__hint">select the span to keep, exactly as logged</p>
-            <pre ref={raw} className="ex-gesture__raw" tabIndex={0} aria-label={`What ${label} logged`}>
-              {logged.text}
-            </pre>
+            {logged.text !== '' ? (
+              <pre ref={raw} className="ex-gesture__raw" tabIndex={0} aria-label={`What ${label} logged`}>
+                {logged.text}
+              </pre>
+            ) : null}
+            {/* What it reasoned (#1037): a fork's right answer may be only there, and serve keeps a span of it too. */}
+            {reasoning !== '' ? (
+              <pre ref={thought} className="ex-gesture__raw ex-gesture__raw--reasoning" tabIndex={0} aria-label={`What ${label} reasoned`}>
+                {reasoning}
+              </pre>
+            ) : null}
+            {captured !== '' ? <p className="ex-gesture__captured">keeping: {captured}</p> : null}
             <div className="ex-gesture__row">
               <input type="text" aria-label={`Tag for the keep from ${label}`} placeholder="tag (optional)" value={tag} onChange={(e) => setTag(e.target.value)} />
               <button type="submit" aria-label={`Keep the selection from ${label}`}>

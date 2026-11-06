@@ -2,6 +2,7 @@ import { useState } from 'react';
 
 import type { BranchNode, Folded, PatchNode } from '../session/fold.ts';
 import { Block } from './Block.tsx';
+import { Prose } from './Prose.tsx';
 import { KeepAction, WrapAction } from './Gestures.tsx';
 import { barHeight, rowsOf } from './condensed.ts';
 import { edgeOf, readingOf, warmOf, writingOf } from './flow.ts';
@@ -88,7 +89,7 @@ export function Branch({ node, open: initiallyOpen = false }: { readonly node: F
         provenance={node}
         id={node.id}
         // The operator's keep (#1021): a span of the answer as written, trailer and all.
-        {...(node.logged && node.logged.text !== ''
+        {...(node.logged && (node.logged.text !== '' || (node.logged.reasoning ?? '') !== '')
           ? {
               actions: (
                 <>
@@ -103,6 +104,8 @@ export function Branch({ node, open: initiallyOpen = false }: { readonly node: F
         {open ? (
           <div className="ex-branch__exchange">
             <p className="ex-branch__question">{node.question}</p>
+            {/* What it reasoned (the app audit, finding 3), as the trunk draws reasoning: a fork's answer may be only there. */}
+            {node.reasoning !== undefined && node.reasoning !== '' ? <BranchReasoning text={node.reasoning} /> : null}
             {node.text !== undefined && node.text !== '' ? <TaggedAnswer text={node.text} /> : null}
             {node.failure ? (
               // What failed is the footer's to name; here, what the server said, under what it had written.
@@ -249,5 +252,27 @@ function PatchLine({ patch }: { readonly patch: Folded<PatchNode> }) {
       {patch.supersedes ? <span className="ex-patch__note">replaces #{patch.supersedes}</span> : null}
       {patch.merged ? <span className="ex-patch__note">{`into #${patch.merged.into} · cosine ${patch.merged.cosine}`}</span> : null}
     </li>
+  );
+}
+
+/** A branch's reasoning: italic, clipped past a few lines until asked for whole, as the trunk's is. */
+function BranchReasoning({ text }: { readonly text: string }) {
+  const [whole, setWhole] = useState(false);
+  const long = text.length > 280;
+  return (
+    <div className="ex-reasoning">
+      {whole || !long ? (
+        <Prose text={text} kind="reasoning" />
+      ) : (
+        <div className="ex-reasoning__clip">
+          <Prose text={text.slice(0, 200) + '…'} kind="reasoning" />
+        </div>
+      )}
+      {long ? (
+        <button type="button" className="ex-more" aria-expanded={whole} onClick={() => setWhole(!whole)}>
+          {whole ? 'less' : 'all reasoning'}
+        </button>
+      ) : null}
+    </div>
   );
 }

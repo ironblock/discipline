@@ -1538,3 +1538,49 @@ export const AuditOperatorForkIsNoInterview: Story = {
     await expect(canvasElement.querySelector('.ex-header__state')?.textContent).toBe('your fork');
   },
 };
+
+// ---------------------------------------------------------------- the app audit (findings 2, 3)
+
+/** The gestures log, open, with its lines rewritten by seq: what a reasoning model's lines carry. */
+const reworded = (changes: Readonly<Record<number, Readonly<Record<string, unknown>>>>) =>
+  gestures
+    .trimEnd()
+    .split('\n')
+    .slice(0, -1)
+    .map((l) => {
+      const line = JSON.parse(l) as { seq: number };
+      return JSON.stringify({ ...line, ...(changes[line.seq] ?? {}) });
+    })
+    .join('\n');
+
+/** The operator's fork answered with reasoning beside its text. */
+const forkReasoned = reworded({ 19: { reasoning: 'The file lists ports first.' } });
+/** The trunk's step 7 answered in reasoning alone. */
+const stepReasonedOnly = reworded({ 8: { text: '', reasoning: 'Read it.' }, 9: { text: '', reasoning: 'Read it.' } });
+
+/** Audit finding 3: a fork's reasoning is drawn in its branch, and its keep offers the reasoning as a text to keep from. */
+export const AuditForkReasoningKept: Story = {
+  name: 'audit 3: a fork’s reasoning is drawn, and can be kept from',
+  args: { drive: true, web: posting(forkReasoned) },
+  play: async ({ canvasElement }) => {
+    const page = within(canvasElement.ownerDocument.body);
+    const slow = { timeout: 5_000 };
+    await waitFor(async () => expect(says(canvasElement)).toBe('your turn'));
+    await userEvent.click(await page.findByRole('button', { name: /^▸? *operator$/ }, slow));
+    await waitFor(async () => expect(canvasElement.querySelector('.ex-branch')?.textContent).toContain('The file lists ports first.'), slow);
+    await cornerClick(await page.findByRole('button', { name: /^Keep from fork / }, slow));
+    const reasoned = await page.findByLabelText(/^What fork .* reasoned$/, undefined, slow);
+    await expect(reasoned.textContent).toBe('The file lists ports first.');
+  },
+};
+
+/** Audit finding 3: a step that answered in reasoning alone still offers keep. */
+export const AuditReasoningOnlyStepKeeps: Story = {
+  name: 'audit 3: a reasoning-only step offers keep',
+  args: { drive: true, web: posting(stepReasonedOnly) },
+  play: async ({ canvasElement }) => {
+    const page = within(canvasElement.ownerDocument.body);
+    await waitFor(async () => expect(says(canvasElement)).toBe('your turn'));
+    await expect(await page.findByRole('button', { name: 'Keep from step 7' }, { timeout: 5_000 })).toBeInTheDocument();
+  },
+};

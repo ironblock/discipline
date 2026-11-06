@@ -166,6 +166,8 @@ export interface GateProbe {
 export interface LoggedText {
   readonly seq: number;
   readonly text: string;
+  /** What the line reasoned, when it did (the app audit, finding 3): serve finds a keep's span in it as in the text. */
+  readonly reasoning?: string;
 }
 
 /** A fork a shadow warrant would have cut at this step, never sent (log v32, #1021): where the automation would have fired. */
@@ -686,12 +688,17 @@ function generation(g: GenerationBuilder, unnamed: number): Generation {
   };
 }
 
-/** A call's arguments read as the object a tool takes; a text that does not read as one (yet) is no arguments. */
 /** How a patch's entry was known: on the entry, as diet writes it (log v31), or on the patch, in the surface's older shape (#374). */
 function authorityOf(patch: Patch): Authority | undefined {
   return patch.entry.authority ?? patch.authority;
 }
 
+/** A response line's text as logged, with its reasoning when it has some: what the operator keeps a span of. */
+function loggedOf(response: LineOf<'response'>): LoggedText {
+  return { seq: response.seq, text: response.text, ...(response.reasoning ? { reasoning: response.reasoning } : {}) };
+}
+
+/** A call's arguments read as the object a tool takes; a text that does not read as one (yet) is no arguments. */
 function objectOf(text: string): Readonly<Record<string, unknown>> {
   try {
     const value: unknown = JSON.parse(text);
@@ -1349,7 +1356,7 @@ export function fold(written: readonly LogLine[]): Session {
             ...generation(g, trunkSlot),
             ...(outOf(g.request.turn, g.request.seq) ? { outOfContext: outOf(g.request.turn, g.request.seq)! } : {}),
             ...(gated.has(g.request.seq) ? { gate: gateOf(gated.get(g.request.seq)!) } : {}),
-            ...(g.response ? { logged: { seq: g.response.seq, text: g.response.text } } : {}),
+            ...(g.response ? { logged: loggedOf(g.response) } : {}),
             ...(shadows.has(g.request.seq) ? { shadowed: shadows.get(g.request.seq)! } : {}),
             ...(corrections.has(g.request.seq) ? { corrections: corrections.get(g.request.seq)! } : {}),
             ...provenance(g.request, ...g.deltas.slice(0, 1), g.response, g.cancelled, g.failed),
@@ -1497,7 +1504,7 @@ export function fold(written: readonly LogLine[]): Session {
     const node = brand<BranchNode>({
       kind: 'branch',
       id: id(fork.seq),
-      ...(g?.response ? { logged: { seq: g.response.seq, text: g.response.text } } : {}),
+      ...(g?.response ? { logged: loggedOf(g.response) } : {}),
       lane: fork.lane,
       slot,
       at,
