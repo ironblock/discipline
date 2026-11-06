@@ -4473,6 +4473,18 @@ mod tests {
             (r#"{"step":"flag","pick":0,"note":"n","patience":60}"#, 2),
             (r#"{"step":"wait","until":"idle","patience":60}"#, 2),
             (r#"{"step":"end","patience":60}"#, 2),
+            // The operator's gestures (the app audit's page walk, F20).
+            (r#"{"step":"fork","at":{"call":"c"}}"#, 2),
+            (r#"{"step":"fork","at":{"call":"c"},"ask":"A","text":"t"}"#, 2),
+            (r#"{"step":"fork","at":{"call":"c","answer":"a"},"ask":"A"}"#, 2),
+            (r#"{"step":"fork","at":7,"ask":"A"}"#, 2),
+            (r#"{"step":"keep","from":{"answer":"a"}}"#, 2),
+            (r#"{"step":"keep","from":{"answer":""},"span":"s"}"#, 2),
+            (r#"{"step":"wrap","from":{"answer":"a"},"span":"s"}"#, 2),
+            (r#"{"step":"suggestion","answer":"maybe"}"#, 2),
+            (r#"{"step":"correction"}"#, 2),
+            (r#"{"step":"retire"}"#, 2),
+            (r#"{"step":"keep","from":{"answer":"a"},"span":"s","patience":60}"#, 2),
             (r#"{"classify":{"when":"x","hypothesis":"y"}}"#, 2),
             (
                 r#"{"classify":{"when":"x","hypothesis":"y","score":"1.5"}}"#,
@@ -4517,6 +4529,61 @@ mod tests {
             )),
             Err(ScenarioError::Line(1, _))
         ));
+    }
+
+    /// The operator's gestures as steps (the app audit's page walk, F20):
+    /// each the command serve takes, a line named by what it is -- a call
+    /// by its id, an answer by text it holds -- never by its seq.
+    #[test]
+    fn the_operators_gestures_read_as_steps() {
+        let header = r#"{"scenario":"s","regimen":"r.toml","head":"h.md"}"#;
+        let body = [
+            r#"{"step":"fork","at":{"call":"call-1"},"ask":"GOTCHAS"}"#,
+            r#"{"step":"fork","at":{"answer":"Read it."},"text":"Why two tables?"}"#,
+            r#"{"step":"keep","from":{"call":"call-1"},"span":"a note","tag":"notes","as":"kept"}"#,
+            r#"{"step":"wrap","call":"call-1","from":{"answer":"It holds a note."},"span":"It holds a note."}"#,
+            r#"{"step":"suggestion","answer":"accept"}"#,
+            r#"{"step":"correction","answer":"reject"}"#,
+            r#"{"step":"retire","pick":"a note"}"#,
+        ]
+        .join("\n");
+        let read = parse(&format!("{header}\n{body}\n")).expect("it reads");
+        assert_eq!(
+            read.steps,
+            vec![
+                Step::Fork {
+                    at: LinePick::Call("call-1".to_owned()),
+                    asking: Asking::Pinned("GOTCHAS".to_owned()),
+                },
+                Step::Fork {
+                    at: LinePick::Answer("Read it.".to_owned()),
+                    asking: Asking::Own("Why two tables?".to_owned()),
+                },
+                Step::Keep {
+                    from: LinePick::Call("call-1".to_owned()),
+                    span: "a note".to_owned(),
+                    tag: Some("notes".to_owned()),
+                    bind: Some("kept".to_owned()),
+                },
+                Step::Wrap {
+                    call: "call-1".to_owned(),
+                    from: LinePick::Answer("It holds a note.".to_owned()),
+                    span: "It holds a note.".to_owned(),
+                },
+                Step::Suggestion {
+                    accept: true
+                },
+                Step::Correction {
+                    accept: false
+                },
+                Step::Retire {
+                    pick: Pick::Containing("a note".to_owned()),
+                },
+            ]
+        );
+        // A fork settles as an ask does, and an accept fires one; the rest are one command each.
+        assert!(read.steps[0].settles() && read.steps[4].settles());
+        assert!(!read.steps[2].settles() && !read.steps[3].settles() && !read.steps[6].settles());
     }
 
     /// A step that waits for the session to settle takes its own
