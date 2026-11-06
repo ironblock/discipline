@@ -143,7 +143,7 @@ pub fn rendered_marked(
         format!(
             "{}\t{}\t{}{}\n",
             one_line(entry.id.as_str()),
-            source(entry),
+            source_in(object, entry),
             one_line(content),
             mark(&entry.id)
         )
@@ -630,11 +630,24 @@ pub fn working_set_bytes(object: &WorkingObject) -> u64 {
         // that decides a trigger.
         total = total
             .saturating_add(one_line(entry.id.as_str()).len() as u64)
-            .saturating_add(source(entry).len() as u64)
+            .saturating_add(source_in(object, entry).len() as u64)
             .saturating_add(one_line(&entry.content).len() as u64)
             .saturating_add(3);
     }
     total
+}
+
+/// [`source`], and the note that checks the entry against tool output while
+/// that note is live (#1050, c4's `confirms`): `…, checked by <note id>`,
+/// the most recent such note when several are.
+#[must_use]
+pub fn source_in(object: &WorkingObject, entry: &crate::object::Entry) -> String {
+    let mut said = source(entry);
+    if let Some(check) = object.checks_of(&entry.id).first() {
+        said.push_str(", checked by ");
+        said.push_str(&one_line(check.id.as_str()));
+    }
+    said
 }
 
 /// What an entry's line says of where its words came from (#1050), in the
@@ -1150,7 +1163,18 @@ mod source_tests {
     /// #1050: an entry's origin crosses a dump, as everything else of it does.
     #[test]
     fn an_origin_crosses_a_dump() {
-        let object = every_source();
+        let mut object = every_source();
+        // And a note's check of an entry (#1050, c4).
+        object
+            .confirm(
+                &EntryId::new("d-observed").expect("an id"),
+                &EntryId::new("h-interview").expect("an id"),
+            )
+            .expect("both held");
+        assert!(
+            render(&object, None)
+                .contains("h-interview\tyou said, when asked, checked by d-observed\t")
+        );
         let read = WorkingObject::from_dump(regime(), &object.dump()).expect("it reads");
         assert_eq!(read.dump(), object.dump());
         assert_eq!(render(&read, None), render(&object, None));

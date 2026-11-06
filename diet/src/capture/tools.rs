@@ -679,6 +679,49 @@ pub struct Effect {
     /// Who vouches for the note it wrote, under a contract whose
     /// `update_record` takes no field kind (#1016).
     pub authority: Option<Authority>,
+    /// The words it corrects and their replacement, under c4 (#1050): its
+    /// `Supersede` patch's content is the voided entry's, those words
+    /// replaced, which only the working object holds -- [`replaced`]
+    /// writes it.
+    pub replaces: Option<(String, String)>,
+    /// The entry the note checks against tool output, under c4 (#1050).
+    pub confirms: Option<EntryId>,
+}
+
+/// `effect`'s supersede under c4's replace by detail (#1050), written with
+/// `held`, the content of the entry it voids: that content with the first
+/// occurrence of the words it corrects replaced. `None` when those words are
+/// not in it -- the call is refused `not-in-source`.
+#[must_use]
+pub fn replaced(effect: &Effect, held: &str) -> Option<Vec<Patch>> {
+    let Some((replaces, with)) = &effect.replaces else {
+        return Some(effect.patches.clone());
+    };
+    if !held.contains(replaces.as_str()) {
+        return None;
+    }
+    Some(
+        effect
+            .patches
+            .iter()
+            .map(|patch| match patch {
+                Patch::Supersede {
+                    id,
+                    voids,
+                    provenance,
+                    refuted,
+                    ..
+                } => Patch::Supersede {
+                    id: id.clone(),
+                    content: held.replacen(replaces.as_str(), with, 1),
+                    voids: voids.clone(),
+                    provenance: provenance.clone(),
+                    refuted: refuted.clone(),
+                },
+                other => other.clone(),
+            })
+            .collect(),
+    )
 }
 
 /// Who vouches for a note written under a contract whose `update_record`
@@ -712,6 +755,12 @@ impl Authority {
 pub enum ToolError {
     /// The event is not a tool call at all.
     NotAToolCall(&'static str),
+    /// c4's `content` beside `replaces` and `with` (#1050): the note is the
+    /// corrected entry, so its words would be said twice.
+    ContentBesideReplaces,
+    /// c4's `confirms` from a note whose quote is not the turn's tool output
+    /// (#1050): only what was observed checks an entry.
+    NotObserved,
     /// A tool this lane does not own. A harness tool call is not ours, and
     /// reading one as a capture is how another system's output becomes a fact
     /// about this session.
@@ -765,6 +814,17 @@ impl fmt::Display for ToolError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::NotAToolCall(kind) => write!(f, "a `{kind}` row is not a tool call"),
+            // The maintainer's words (#1050), adopted for now; the model reads
+            // each after the harness's `refused: `.
+            Self::ContentBesideReplaces => write!(
+                f,
+                "send `content` to rewrite the whole entry, or `replaces` and `with` to \
+                 change part of it, not both."
+            ),
+            Self::NotObserved => write!(
+                f,
+                "only a note that quotes a tool's output can confirm an entry."
+            ),
             Self::NotACaptureTool(name) => write!(
                 f,
                 "`{name}` is not a capture tool: a harness tool call is not \
@@ -1173,6 +1233,7 @@ fn update_record(
     let content = text_argument(args, "content");
     if spec.parameter(FIELD).is_none() {
         let id = EntryId::new(&format!("{call}/note")).map_err(ToolError::BadEntry)?;
+        let replaces = by_detail(spec, args)?;
         let found = |text: &str| {
             args.get(EVIDENCE)
                 .is_some_and(|quote| grounded::present(text, quote))
@@ -1184,10 +1245,17 @@ fn update_record(
         } else {
             Authority::SelfStated
         };
+        let confirms = match args.get(CONFIRMS) {
+            Some(_) if authority != Authority::Observed => return Err(ToolError::NotObserved),
+            Some(checked) => Some(EntryId::new(checked).map_err(ToolError::BadEntry)?),
+            None => None,
+        };
         let patch = written(args, (id, content), provenance)?;
         return Ok(Effect {
             patches: vec![patch],
             authority: Some(authority),
+            replaces,
+            confirms,
             ..Effect::default()
         });
     }
@@ -1232,6 +1300,35 @@ fn written(
             provenance,
         },
     })
+}
+
+/// c4's `update_record` parameter naming an entry a note checks (#1050).
+pub const CONFIRMS: &str = "confirms";
+
+/// c4's replace by detail (#1050), from a call under a contract that takes
+/// `replaces`: the words and their replacement when it gives them, each only
+/// with the other and with `supersedes`, and never beside `content`; under
+/// such a contract `content` is required otherwise.
+fn by_detail(
+    spec: &ToolSpec,
+    args: &BTreeMap<String, String>,
+) -> Result<Option<(String, String)>, ToolError> {
+    let missing = |parameter: &str| ToolError::MissingArgument {
+        tool: CaptureTool::UpdateRecord.tag(),
+        parameter: parameter.to_owned(),
+    };
+    if spec.parameter("replaces").is_none() {
+        return Ok(None);
+    }
+    match (args.get("replaces"), args.get("with")) {
+        (None, None) if args.contains_key("content") => Ok(None),
+        (None, None) => Err(missing("content")),
+        (Some(_), None) => Err(missing("with")),
+        (None, Some(_)) => Err(missing("replaces")),
+        (Some(_), Some(_)) if !args.contains_key("supersedes") => Err(missing("supersedes")),
+        (Some(_), Some(_)) if args.contains_key("content") => Err(ToolError::ContentBesideReplaces),
+        (Some(replaces), Some(with)) => Ok(Some((replaces.clone(), with.clone()))),
+    }
 }
 
 /// `resolve_entry`: a verdict, and the one patch a verdict alone can justify.
@@ -1641,6 +1738,119 @@ mod tests {
         )
         .expect("a well-formed call");
         assert!(effect.patches.is_empty(), "c2 grounds the claim itself");
+    }
+
+    /// A c4 `update_record` of `pairs`, seen as [`note`] sees one.
+    fn note_c4(pairs: &[(&str, &str)]) -> Result<Effect, ToolError> {
+        let source = format!("{ASKED}\n{OBSERVED}\n{PROSE}");
+        let args: BTreeMap<String, Value> = pairs
+            .iter()
+            .map(|(key, value)| ((*key).to_owned(), Value::String((*value).to_owned())))
+            .collect();
+        super::apply_call_under(
+            &super::contract_of(&crate::dogma::capture::C4).expect("c4"),
+            ("c1", 1),
+            (CaptureTool::UpdateRecord.tag(), &args),
+            0,
+            ContractInput {
+                source: &source,
+                session_prefix: PREFIX,
+                observed: OBSERVED,
+                user_words: ASKED,
+            },
+        )
+    }
+
+    /// #1050: under c4 a note corrects an entry by detail -- the words it
+    /// corrects and their replacement, beside `supersedes` -- and the
+    /// supersede is written from the voided entry's content, its first
+    /// occurrence of those words replaced; words not in it are none.
+    #[test]
+    fn a_c4_note_replaces_by_detail() {
+        let effect = note_c4(&[
+            ("supersedes", "r3/call-1/note"),
+            ("replaces", "port 5180"),
+            ("with", "port 5182"),
+        ])
+        .expect("a well-formed call");
+        assert_eq!(
+            effect.replaces,
+            Some(("port 5180".to_owned(), "port 5182".to_owned()))
+        );
+        let written = super::replaced(
+            &effect,
+            "the dev server is on port 5180; port 5180 is taken",
+        )
+        .expect("the words are in it");
+        let [Patch::Supersede { content, voids, .. }] = &written[..] else {
+            panic!("one supersede: {written:?}");
+        };
+        assert_eq!(voids.as_str(), "r3/call-1/note");
+        assert_eq!(
+            content, "the dev server is on port 5182; port 5180 is taken",
+            "the first match"
+        );
+        assert!(super::replaced(&effect, "the dev server is down").is_none());
+    }
+
+    /// #1050: c4's shape, in the existing words: each of `replaces` and
+    /// `with` only with the other and `supersedes`, never beside `content`,
+    /// and `content` required otherwise.
+    #[test]
+    fn a_c4_call_out_of_shape_is_refused_in_the_existing_words() {
+        let refused = |pairs: &[(&str, &str)]| note_c4(pairs).expect_err("refused").to_string();
+        assert_eq!(
+            refused(&[("supersedes", "e1"), ("replaces", "a")]),
+            "update_record: no `with`"
+        );
+        assert_eq!(
+            refused(&[("supersedes", "e1"), ("with", "b")]),
+            "update_record: no `replaces`"
+        );
+        assert_eq!(
+            refused(&[("replaces", "a"), ("with", "b")]),
+            "update_record: no `supersedes`"
+        );
+        assert_eq!(refused(&[]), "update_record: no `content`");
+        assert!(matches!(
+            note_c4(&[
+                ("supersedes", "e1"),
+                ("replaces", "a"),
+                ("with", "b"),
+                ("content", "c")
+            ]),
+            Err(ToolError::ContentBesideReplaces)
+        ));
+        assert!(
+            note_c4(&[("content", "a note")]).is_ok(),
+            "a plain note, as c3's"
+        );
+    }
+
+    /// #1050: a c4 note confirms an entry only when its quote is the turn's
+    /// tool output.
+    #[test]
+    fn only_an_observed_note_confirms() {
+        let effect = note_c4(&[
+            ("content", "supersede links the pair"),
+            (
+                super::EVIDENCE,
+                "It voids the old entry and links the pair.",
+            ),
+            (super::CONFIRMS, "e1"),
+        ])
+        .expect("observed");
+        assert_eq!(effect.confirms.as_ref().map(EntryId::as_str), Some("e1"));
+        for evidence in ["Keep the schema to two tables, please.", "nowhere"] {
+            assert!(matches!(
+                note_c4(&[
+                    ("content", "a note"),
+                    (super::EVIDENCE, evidence),
+                    (super::CONFIRMS, "e1"),
+                ]),
+                Err(ToolError::NotObserved)
+            ));
+        }
     }
 
     /// #1050: a quote found in the user's ask and not in the tool output is

@@ -2539,6 +2539,7 @@ mod tests {
                 category: None,
                 authority: None,
                 kept_from: None,
+                confirms: None,
             },
             supersedes: None,
             tangent: None,
@@ -3633,6 +3634,7 @@ mod tests {
     /// A v5 session with two forks, projected and validated: turn 1's
     /// scoping fork settled `value` with three patches, a plain turn 2, and
     /// turn 3's read fork, declined.
+    #[allow(clippy::too_many_lines)] // one session's lines, written out
     fn two_forks() -> Projection {
         let fork = |at: u64, of_turn: u32, why: log::Warrant| Line::Fork {
             after_meditation: None,
@@ -3691,6 +3693,7 @@ mod tests {
                 category: Some("scope".to_owned()),
                 authority: None,
                 kept_from: None,
+                confirms: None,
             },
             supersedes: None,
             tangent: None,

@@ -163,7 +163,17 @@ pub mod vocabulary;
 ///   trunk carries in the place of a result the operator wraps with no span.
 ///   The maintainer's ruling ("Yes" to a wrap that keeps nothing). No
 ///   template already pinned changed.
-pub const VERSION: u32 = 17;
+/// * 18, 2026-11-05: self-capture set `c4` and fork ask set `v6` joined
+///   (#1050, item 3): c4's `update_record` takes `replaces` and `with` --
+///   "the words in that entry this note corrects, copied exactly; give the
+///   new words in with" and "the words that replace them" -- and `confirms`,
+///   "id of an entry this note checks against tool output you saw; omit
+///   otherwise" -- and its `content` is optional, required unless `replaces`
+///   and `with` are given; the rest is c3's, byte for byte. v6 is v5 with the
+///   judgment ask's SUPERSEDE sentence asking for the corrected entry in
+///   full. The maintainer's approved wording (relayed by Dispatch). No
+///   template and no set already pinned changed.
+pub const VERSION: u32 = 18;
 
 /// The digest of `diet/dogma/MANIFEST.tsv` that [`VERSION`] was declared
 /// against.
@@ -173,7 +183,7 @@ pub const VERSION: u32 = 17;
 /// that recomputes it fails until both lines are edited together. Without it
 /// the manifest could be regenerated after an edit and the version left at
 /// what it was, which is a bump that never happened.
-pub const MANIFEST_DIGEST: &str = "32ad605e39df6ec0";
+pub const MANIFEST_DIGEST: &str = "ad80a505cc9600ed";
 
 /// The per-model operating points, as TOML text, exactly as pinned.
 ///

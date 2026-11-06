@@ -268,6 +268,11 @@
 //! log that declares 28 or less and carries it is refused. For a reader of
 //! earlier logs, the migration is nothing: no session declared one.
 //!
+//! v42 (#1050) carries a note's check: a `patch` entry's `confirms`
+//! names the entry an `observed` note checks against tool output (c4's
+//! `confirms`). It is refused in a log that declares 41 or less. For a
+//! reader of earlier logs, the migration is nothing.
+//!
 //! v41 (#1050) carries the operator's corrections: a `patch.refused` line
 //! may name what a refused supersede would have written (`text`) and the
 //! model's reason (`why`), for the chip that offers it; a `correction` line
@@ -472,12 +477,12 @@ use super::record::vocabulary;
 struct LogParser;
 
 /// The version this module writes, as `session.start` states it.
-pub const VERSION: i64 = 41;
+pub const VERSION: i64 = 42;
 
 /// Every version this module reads.
 pub const READS: &[i64] = &[
     0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25,
-    26, 27, 28, 29, 30, 31, 32, 33, 34, 35, 36, 37, 38, 39, 40, 41,
+    26, 27, 28, 29, 30, 31, 32, 33, 34, 35, 36, 37, 38, 39, 40, 41, 42,
 ];
 
 /// How recent an input event must be, at the moment a turn settles, for the
@@ -2738,6 +2743,9 @@ pub struct PatchEntry {
     /// `tool-result` or `answer` -- a trunk's or a fork's. Only on the keep's
     /// own patch line.
     pub kept_from: Option<String>,
+    /// The entry this note checks against tool output (v42, #1050): c4's
+    /// `confirms`, on an `observed` note's line.
+    pub confirms: Option<String>,
 }
 
 /// An `add` merged into a live entry of its kind for its likeness (v8, the
@@ -6646,6 +6654,13 @@ pub const PATCH_ENTRY: &[Field] = &[
         required: false,
         since: 39,
     },
+    // The entry a note checks (#1050).
+    Field {
+        key: "confirms",
+        holds: Holds::Text,
+        required: false,
+        since: 42,
+    },
 ];
 
 /// What a `patch` entry's `authority` may say: a self-capture note's (v31,
@@ -9159,6 +9174,9 @@ fn to_value(line: &Line) -> Value {
             if let Some(kept_from) = &entry.kept_from {
                 object.insert("kept_from".to_owned(), text(kept_from));
             }
+            if let Some(confirms) = &entry.confirms {
+                object.insert("confirms".to_owned(), text(confirms));
+            }
             put("entry", Value::Object(object));
             if let Some(replaced) = supersedes {
                 put("supersedes", text(replaced));
@@ -10542,6 +10560,7 @@ impl Fields<'_> {
                 }
                 said => said,
             },
+            confirms: inner.optional_string("confirms").map_err(within)?,
         })
     }
 
@@ -11094,15 +11113,15 @@ mod tests {
     }
 
     /// #583, #878, #904, #555, #931, #936, #910, #942, #926, #932, #948, #971, #1016, #1021,
-    /// #1022, #1031, #1030, #1037, #1038, #1050: this module writes v41.
+    /// #1022, #1031, #1030, #1037, #1038, #1050: this module writes v42.
     #[test]
-    fn this_module_writes_v41_and_reads_every_version_before_it() {
-        assert_eq!(super::VERSION, 41);
+    fn this_module_writes_v42_and_reads_every_version_before_it() {
+        assert_eq!(super::VERSION, 42);
         assert_eq!(
             super::READS,
             &[
                 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22,
-                23, 24, 25, 26, 27, 28, 29, 30, 31, 32, 33, 34, 35, 36, 37, 38, 39, 40, 41
+                23, 24, 25, 26, 27, 28, 29, 30, 31, 32, 33, 34, 35, 36, 37, 38, 39, 40, 41, 42
             ]
         );
     }
@@ -11561,6 +11580,7 @@ mod tests {
                     category: None,
                     authority: None,
                     kept_from: None,
+                    confirms: None,
                 },
                 supersedes: None,
                 tangent: Some("t/1".to_owned()),
@@ -11580,6 +11600,7 @@ mod tests {
                     category: None,
                     authority: None,
                     kept_from: None,
+                    confirms: None,
                 },
                 supersedes: None,
                 tangent: None,
@@ -11601,6 +11622,7 @@ mod tests {
                     category: Some("scope".to_owned()),
                     authority: Some("observed".to_owned()),
                     kept_from: None,
+                    confirms: None,
                 },
                 supersedes: Some("d1".to_owned()),
                 tangent: None,
@@ -11983,6 +12005,7 @@ mod tests {
                     category: None,
                     authority: Some(OPERATOR_AUTHORITY.to_owned()),
                     kept_from: None,
+                    confirms: None,
                 },
                 supersedes: None,
                 tangent: None,
