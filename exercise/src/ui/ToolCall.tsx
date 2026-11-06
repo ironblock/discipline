@@ -160,6 +160,12 @@ export function ToolBlock({ node, caller, first = false }: { readonly node: Fold
       {node.ruled ? <p className="ex-ruled">{`ruled · ${node.ruled.choice} → ${node.ruled.to}`}</p> : null}
       {/* The operator's wrap (#1030): what the trunk carries in its place, and from which turn's request. */}
       {node.wrapped ? (
+        // The span the model sees in its place now (the app audit's page walk, F17), and what the wrap cost.
+        <p className="ex-tool__wrapped">
+          in its place now: <q className="ex-tool__wrapped-span">{node.wrapped.text}</q>
+        </p>
+      ) : null}
+      {node.wrapped ? (
         <p className="ex-pruned" title={node.wrapped.text}>
           {`wrapped by you (${size(node.wrapped.bytesBefore)} → ${size(node.wrapped.bytesAfter)}) · from turn ${node.wrapped.turn}'s request · about ${node.wrapped.tailTokens} tokens prefilled again`}
         </p>

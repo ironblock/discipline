@@ -66,7 +66,7 @@ export function Memory({ entries, seenThrough = -1, onSeen, act }: MemoryProps) 
                   data-from={e.from.join(' ')}
                   data-needs={e.needs.join(' ')}
                   data-lane={e.lane}
-                  title={`${e.state}${e.authority ? ` · ${e.authority}` : ''} · last changed by ${e.by}`}
+                  title={`${e.state}${e.authority ? ` · ${e.authority}` : ''} · last changed at log line ${e.by}`}
                 >
                   <span className="ex-memory__id">#{e.id}</span>
                   <span className="ex-memory__text">
@@ -74,10 +74,10 @@ export function Memory({ entries, seenThrough = -1, onSeen, act }: MemoryProps) 
                     {e.op !== undefined ? <span className="ex-memory__op">{opOf(e.op).label}</span> : null}
                     {/* Who vouches for it (the app audit, finding 7): observed, the model's own words, yours. */}
                     {e.authority !== undefined ? <span className="ex-memory__authority">{authorityOf(e.authority).label}</span> : null}
-                    {/* Written by the trunk's own lane, not a fork (#627): self-capture; or the operator's own keep. */}
-                    {e.lane !== undefined && e.authority !== 'operator' ? (
-                      <span className="ex-memory__lane" title={e.lane === 'operator' ? 'kept by you' : "written by the trunk's own lane, not by a fork"}>
-                        {e.lane}
+                    {/* Where it came from, for every entry (the app audit's page walk, F8): the trunk's lane, or a fork's. */}
+                    {e.source !== undefined ? (
+                      <span className="ex-memory__source" title={sourceTitle(e.source)}>
+                        {e.source}
                       </span>
                     ) : null}
                   </span>
@@ -98,13 +98,18 @@ export function Memory({ entries, seenThrough = -1, onSeen, act }: MemoryProps) 
                       refused: {e.refusedWrites.map((w) => `${w.op} by ${w.by}`).join(', ')}
                     </span>
                   ) : null}
-                  {/* A correction of it waiting beside its turn (#1050): the marker links to the chip. */}
+                  {/* The corrections of it waiting beside their turns (#1050), counted, each linked to its chip (F9). */}
                   {e.waiting && e.waiting.length > 0 ? (
-                    <a className="ex-memory__waiting" href={`#correction-${e.waiting[0]!}`} title="the model's change to your entry waits on you beside its turn">
-                      a correction is waiting
-                    </a>
+                    <span className="ex-memory__waiting" title="the model's changes to your entry wait on you beside their turns">
+                      {e.waiting.length === 1 ? 'a correction is waiting' : `${e.waiting.length} corrections waiting`}
+                      {e.waiting.map((seq, i) => (
+                        <a key={seq} href={`#correction-${seq}`} aria-label={`correction ${i + 1} of ${e.waiting!.length}`}>
+                          {e.waiting!.length === 1 ? '' : ` ${i + 1}`}
+                        </a>
+                      ))}
+                    </span>
                   ) : null}
-                  {act && e.state === 'live' ? <EntryActions id={e.id} text={e.text} act={act} yours={e.lane === 'operator'} /> : null}
+                  {act && e.state === 'live' ? <EntryActions id={e.id} text={e.text} act={act} yours={e.lane === 'operator' || e.authority === 'operator'} /> : null}
                 </li>
               ))}
           </ul>
@@ -112,6 +117,20 @@ export function Memory({ entries, seenThrough = -1, onSeen, act }: MemoryProps) 
       ))}
     </section>
   );
+}
+
+/** What an entry's source word means, on hover. */
+function sourceTitle(source: string): string {
+  switch (source) {
+    case 'operator':
+      return 'kept by you';
+    case 'self-capture':
+      return "the model's own note, written as it went";
+    case 'mechanical':
+      return 'written by the harness, from the commands that ran';
+    default:
+      return `written by ${/^[aeiou]/.test(source) ? 'an' : 'a'} ${source} fork`;
+  }
 }
 
 /** How long "retire it?" shows before a press answers it. */

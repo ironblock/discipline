@@ -93,6 +93,9 @@ function storeDraft(draft: string): void {
   }
 }
 
+/** How long an armed cancel waits for its second Esc before it lets go. */
+const CANCEL_ARMED_MS = 3_000;
+
 /** How long the question "end the session?" shows before a press answers it. */
 const CONFIRM_AFTER_MS = 500;
 
@@ -240,6 +243,23 @@ export function Composer({ state, link = 'live', phase, phases, dispatch, hint, 
   useEffect(() => {
     if (!running) setCancelling(false);
   }, [running]);
+  // Armed, it lets go after a few seconds, on any other key, or on a click: an Esc meant for something else is never
+  // the first half of a cancel minutes later.
+  useEffect(() => {
+    if (!cancelling) return;
+    const disarm = () => setCancelling(false);
+    const timer = setTimeout(disarm, CANCEL_ARMED_MS);
+    const other = (e: globalThis.KeyboardEvent) => {
+      if (e.key !== 'Escape') disarm();
+    };
+    document.addEventListener('keydown', other);
+    document.addEventListener('pointerdown', disarm);
+    return () => {
+      clearTimeout(timer);
+      document.removeEventListener('keydown', other);
+      document.removeEventListener('pointerdown', disarm);
+    };
+  }, [cancelling]);
   useEffect(() => {
     if (!running || !dispatch) return;
     const escape = (e: globalThis.KeyboardEvent) => {

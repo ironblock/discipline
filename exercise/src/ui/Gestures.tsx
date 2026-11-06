@@ -26,6 +26,12 @@ export function useGestures(): ((command: Command) => Promise<Ack>) | undefined 
 export interface GestureMoment {
   readonly awaiting: boolean;
   readonly onTrunk: (seq: number) => boolean;
+  /** Whether the result at a call's line can still be wrapped: a result wraps once (the app audit's page walk, F17). */
+  readonly wrappable?: (call: number) => boolean;
+  /** The result at a call's line, named for the operator: which call, and what it ran. */
+  readonly resultOf?: (call: number) => string | undefined;
+  /** Each live entry's text, by id: what a correction would change (F9). */
+  readonly entryText?: (id: string) => string | undefined;
 }
 
 export const GestureMomentContext = createContext<GestureMoment>({ awaiting: true, onTrunk: () => true });
@@ -263,6 +269,12 @@ export function KeepAction({ logged, label }: { readonly logged: LoggedText; rea
   );
 }
 
+/** The wrap dialog's title: the result it replaces, with a span of it or of the answer it is wrapped from, once. */
+function wrapTitle(result: string | undefined, label: string, itself: boolean): string {
+  const what = result ?? `${label}'s result`;
+  return itself ? `wrap ${what} with a span of it: once, from the next request` : `wrap ${what} with a span of ${label}'s answer: once, from the next request`;
+}
+
 /**
  * Wrap a tool result (#1030): a span of `from` -- the result as the model was shown it, or the answer to the operator's
  * fork cut at it -- takes the result's place on the trunk from the next request, and is kept as the operator's entry.
@@ -279,7 +291,7 @@ export function WrapAction({ call, from, label }: { readonly call: number; reado
   useEffect(() => {
     if (open) raw.current?.focus();
   }, [open]);
-  if (!act || !moment.onTrunk(call)) return null;
+  if (!act || !moment.onTrunk(call) || moment.wrappable?.(call) === false) return null;
   const submit = async (e: FormEvent) => {
     e.preventDefault();
     const selection = window.getSelection();
@@ -309,7 +321,8 @@ export function WrapAction({ call, from, label }: { readonly call: number; reado
       <dialog ref={dialog} className="ex-gesture" aria-label={`Wrap from ${label}`}>
         {open ? (
           <form onSubmit={(e) => void submit(e)}>
-            <h2 className="ex-gesture__title">wrap from {label}</h2>
+            {/* Which result it replaces, from what, and that it is once (the app audit's page walk, F17). */}
+            <h2 className="ex-gesture__title">{wrapTitle(moment.resultOf?.(call), label, from.seq === call)}</h2>
             <p className="ex-gesture__hint">select the span the trunk keeps in the result’s place, from the next request on; everything after it is prefilled again</p>
             <pre ref={raw} className="ex-gesture__raw" tabIndex={0} aria-label={`What ${label} logged, to wrap`}>
               {from.text}
@@ -430,13 +443,17 @@ export function CorrectionChips({ corrections }: { readonly corrections: readonl
 }
 
 function CorrectionChip({ correction, act }: { readonly correction: Correction; readonly act: ((command: Command) => Promise<Ack>) | undefined }) {
+  const moment = useContext(GestureMomentContext);
   const [busy, setBusy] = useState(false);
   const [refused, setRefused] = useState<string>();
   const said = changeOf(correction);
+  // Which entry, and what it says now, beside what the model would make of it (the app audit's page walk, F9).
+  const current = moment.entryText?.(correction.entry);
+  const entry = <span className="ex-shadow__entry">{current !== undefined ? `#${correction.entry}: “${current}”` : `#${correction.entry}`}</span>;
   if (correction.answer || !act) {
     return (
       <li id={`correction-${correction.seq}`} className="ex-shadow__mark" title={`#${correction.entry}`}>
-        {said}
+        {entry} {said}
         {correction.op === 'supersede' && correction.text !== undefined ? ` ${correction.text}` : ''}
         {correction.answer ? ` · ${correction.answer}` : ''}
       </li>
@@ -450,6 +467,7 @@ function CorrectionChip({ correction, act }: { readonly correction: Correction; 
   };
   return (
     <li id={`correction-${correction.seq}`} className="ex-shadow__chip" title={`#${correction.entry}`}>
+      {entry}
       <span className="ex-shadow__said">{said}</span>
       {correction.op === 'supersede' && correction.text !== undefined ? <q className="ex-shadow__question">{correction.text}</q> : null}
       <button type="button" disabled={busy} aria-label={`Accept: ${said} ${correction.entry}`} onClick={() => void answer('accept')}>
