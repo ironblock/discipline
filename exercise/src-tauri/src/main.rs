@@ -556,7 +556,18 @@ fn page(drive: &str) -> Result<String, String> {
 
 #[cfg(test)]
 mod tests {
-    use super::{Auth, Drive, basic, chosen_auth, command_request, csp_admits, openable, remote, running_turn, status_of};
+    use super::{Auth, Drive, basic, chosen_auth, command_request, csp_admits, openable, remote, running_turn, shell_page, status_of};
+
+    /// #1050's audit, finding 6: the window opens at once on the page's
+    /// "starting serve…", and a failure is said there, its reason in the URL.
+    #[test]
+    fn the_shells_own_page_says_starting_and_why_a_start_failed() {
+        assert_eq!(shell_page("starting", None).as_deref(), Ok("index.html?shell=starting"));
+        assert_eq!(
+            shell_page("failed", Some("serve exited (code 1)")).as_deref(),
+            Ok("index.html?shell=failed&why=serve+exited+%28code+1%29")
+        );
+    }
 
     /// #1050's audit, finding 5: the shell ends the session as the page
     /// would, a `POST /commands` with the credential, before it lets serve go.
