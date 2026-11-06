@@ -32775,6 +32775,86 @@ pub(in crate::drive) mod tests {
         tidy(&[&tree]);
     }
 
+    /// #1050: c4's two refusals, as the model reads them -- the maintainer's
+    /// words, adopted for now: a `confirms` from a note that quotes no tool
+    /// output, and `content` sent beside `replaces` and `with`.
+    #[test]
+    fn a_c4_refusal_reads_in_the_maintainers_words() {
+        let tree = scratch("c4-refusals");
+        let call = |id: &str, args: serde_json::Value| {
+            Step::call(0, id, "update_record", &args.to_string())
+        };
+        let mut interview = interviewing(&[]);
+        interview.self_capture = Some(crate::capture::tools::Cadence::DEFAULT);
+        interview.capture_contract = &crate::dogma::capture::C4;
+        let mut shape = looping();
+        declare_self_capture(&mut shape, Some(&interview));
+        let session = Session::open_with(
+            Canned::new(vec![
+                vec![call(
+                    "call-1",
+                    serde_json::json!({"content": "port 5182 is free", "confirms": "e-port"}),
+                )],
+                vec![call(
+                    "call-2",
+                    serde_json::json!({
+                        "content": "port 1 is the dev server's",
+                        "supersedes": "e-port",
+                        "replaces": "port 5182",
+                        "with": "port 1"
+                    }),
+                )],
+                deltas(&["done"]),
+            ]),
+            shape,
+            None,
+            Some(tools(
+                Confinement::Unconfined,
+                &tree,
+                &["cat"],
+                None,
+                Decider::Decline,
+            )),
+            None,
+            Some(interview),
+        );
+        {
+            let mut state = session.shared.lock();
+            let object = &mut state.interview.as_mut().expect("memory").object;
+            object
+                .apply(&Patch::Add {
+                    id: crate::object::EntryId::new("e-port").expect("an id"),
+                    content: "port 5182 is the dev server's".to_owned(),
+                    provenance: crate::object::Provenance {
+                        turn: 0,
+                        lane: "self-capture".to_owned(),
+                        fork: None,
+                        tangent: None,
+                        index: 0,
+                    },
+                })
+                .expect("seeded");
+        }
+        session.ask("check the port", None).expect("accepted");
+        let log = wait_until(&session, "the turn", settled);
+        let shown: Vec<String> = log
+            .iter()
+            .filter_map(|logged| match &logged.event {
+                Event::ToolCalled(line) if line.name == "update_record" => line.shown.clone(),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(
+            shown,
+            [
+                "refused: only a note that quotes a tool's output can confirm an entry.",
+                "refused: send `content` to rewrite the whole entry, or `replaces` and `with` to \
+                 change part of it, not both.",
+            ],
+        );
+        tidy(&[&tree]);
+    }
+
     /// #1016: under contract set c3 a note is always kept, and the model is
     /// shown who vouches for it: `observed` when its quote is a run of one
     /// line of a tool result, `user-stated` when of the ask and not a tool
