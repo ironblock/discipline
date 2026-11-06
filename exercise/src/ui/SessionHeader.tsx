@@ -14,7 +14,7 @@ export interface SessionHeaderProps {
   readonly link?: Link;
   /** Why the link is not live, when the transport says. */
   readonly linkWhy?: string;
-  /** The operator's own retry of a lost link (#1050's audit, finding 4). Absent: none is offered. */
+  /** The operator's own retry of a lost link (the app audit, finding 4). Absent: none is offered. */
   readonly onReconnect?: () => void;
   readonly surface: Surface;
   /** What the row has room for beside the trunk (SessionView): the curtain can draw no more than that. */

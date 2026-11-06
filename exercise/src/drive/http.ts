@@ -69,7 +69,7 @@ const CONNECTING = 0;
 const CLOSED = 2;
 /** Resumes after a probe answered 200, in a row, before the stream is called lost. */
 const MAX_RETRIES = 3;
-/** A lost link's first wait before it asks again, and the most any wait grows to (#1050's audit, finding 4). */
+/** A lost link's first wait before it asks again, and the most any wait grows to (the app audit, finding 4). */
 const FIRST_BACKOFF_MS = 1_000;
 const MAX_BACKOFF_MS = 30_000;
 /** How long the browser retries a stream before the transport asks why (finding 4). */
@@ -113,7 +113,7 @@ export class HttpTransport implements DriveTransport {
   #why: string | undefined;
   /** Bumped by `close()`: a probe begun before it does nothing after. */
   #epoch = 0;
-  /** The next probe of a lost link (#1050's audit, finding 4), and how long the one before waited: it doubles to a cap. */
+  /** The next probe of a lost link (the app audit, finding 4), and how long the one before waited: it doubles to a cap. */
   #again: ReturnType<typeof setTimeout> | undefined;
   #backoff = 0;
   /** The probe that says why the browser's own retry has gone on this long. */
@@ -234,7 +234,7 @@ export class HttpTransport implements DriveTransport {
     this.#stopTimers();
   }
 
-  /** Ask the drive again now, when the link is lost (#1050's audit, finding 4): the operator's own retry. */
+  /** Ask the drive again now, when the link is lost (the app audit, finding 4): the operator's own retry. */
   reconnect(): void {
     if (this.#link !== 'lost' || this.#source) return;
     this.#stopTimers();
@@ -334,7 +334,7 @@ export class HttpTransport implements DriveTransport {
       }
       // Still trying: the browser retries a dropped stream itself, resuming from the last id.
       if (source.readyState === CONNECTING) {
-        // Past a while, ask once why, and say it beside the browser's retry, which goes on (#1050's audit, finding 4).
+        // Past a while, ask once why, and say it beside the browser's retry, which goes on (the app audit, finding 4).
         if (this.#slow === undefined) this.#slow = setTimeout(() => void this.#whyStill(source), SLOW_MS);
         if (this.#link !== 'reconnecting') this.#setLink('reconnecting');
         return;
@@ -430,7 +430,7 @@ export class HttpTransport implements DriveTransport {
       return;
     }
     this.#setLink('lost', status === 200 ? 'the drive answers, but its stream keeps closing' : whyClosed(status));
-    // Lost is never for good (#1050's audit, finding 4): ask again, each wait twice the last, to a cap.
+    // Lost is never for good (the app audit, finding 4): ask again, each wait twice the last, to a cap.
     this.#backoff = Math.min(MAX_BACKOFF_MS, this.#backoff === 0 ? FIRST_BACKOFF_MS : this.#backoff * 2);
     this.#again = setTimeout(() => {
       this.#again = undefined;

@@ -43,7 +43,7 @@ export interface SessionViewProps {
   readonly link?: Link;
   /** Why the link is not live, when the transport says (finding 17: a status the author must see). */
   readonly linkWhy?: string;
-  /** The operator's own retry of a lost link (#1050's audit, finding 4). */
+  /** The operator's own retry of a lost link (the app audit, finding 4). */
   readonly onReconnect?: () => void;
   readonly surface: Surface;
   readonly onSurface?: (next: Surface) => void;

@@ -100,7 +100,7 @@ export function Composer({ state, link = 'live', phase, phases, dispatch, hint, 
   // Ending a tangent (#608): the operator rules on each of its entries, keep by default, then closes it.
   const [closing, setClosing] = useState(false);
   const [rulings, setRulings] = useState<Readonly<Record<string, Disposition>>>({});
-  // Kept in the tab's session storage (#1050's audit, finding 4), so "your draft is kept" holds across a reload; a
+  // Kept in the tab's session storage (the app audit, finding 4), so "your draft is kept" holds across a reload; a
   // browser that keeps none keeps the draft for the page's life.
   const [draft, setDraft] = useState(storedDraft);
   useEffect(() => storeDraft(draft), [draft]);

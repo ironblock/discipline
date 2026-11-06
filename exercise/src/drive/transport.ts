@@ -224,7 +224,7 @@ export interface DriveTransport {
   upload?(bytes: Uint8Array): Promise<Uploaded>;
   /** The connection's state now, then each change, and why when it is not live. Absent: always `live`. */
   watchLink?(listener: (link: Link, why?: string) => void): () => void;
-  /** Ask the drive again now, when the link is lost (#1050's audit, finding 4). Absent: a link that cannot be lost. */
+  /** Ask the drive again now, when the link is lost (the app audit, finding 4). Absent: a link that cannot be lost. */
   reconnect?(): void;
   /** The call waiting on the operator now, then each change: `undefined` when none waits. Absent: none ever does (a replay). */
   watchPrompt?(listener: (prompt: Prompt | undefined) => void): () => void;
