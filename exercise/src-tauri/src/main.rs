@@ -75,8 +75,12 @@ struct Held {
 /// killed (#1050's audit, finding 5).
 const QUIT_WAIT: Duration = Duration::from_secs(10);
 
-/// The `Authorization` value for the drive, when it asks for one.
-struct Credential(Option<String>);
+/// The `Authorization` value for the drive, when it asks for one: held once
+/// the drive's start has read it, after the window opened.
+struct Credential(Mutex<Option<String>>);
+
+/// Set when the app quits: a sidecar's exit then is the quit's, not news.
+static QUITTING: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
 
 /// The keychain item's service; its account is the profile.
 const KEYCHAIN_SERVICE: &str = "app.discipline.exercise";
@@ -93,7 +97,7 @@ enum Auth {
 #[tauri::command]
 #[allow(clippy::needless_pass_by_value)] // a command takes its state by value
 fn drive_authorization(credential: tauri::State<'_, Credential>) -> Option<String> {
-    credential.0.clone()
+    credential.0.lock().ok().and_then(|held| held.clone())
 }
 
 /// A system notification of `title` and `body`, from the page's own window
@@ -132,6 +136,7 @@ fn main() {
         .plugin(tauri_plugin_shell::init())
         .plugin(tauri_plugin_notification::init())
         .manage(Sidecar(Mutex::new(None)))
+        .manage(Credential(Mutex::new(None)))
         .invoke_handler(tauri::generate_handler![drive_authorization, notify])
         .setup(|app| {
             // A start that cannot drive says why and exits, as a refused
@@ -157,7 +162,8 @@ fn main() {
             && let Ok(mut held) = handle.state::<Sidecar>().0.lock()
             && let Some(held) = held.take()
         {
-            let authorization = handle.state::<Credential>().0.clone();
+            QUITTING.store(true, std::sync::atomic::Ordering::SeqCst);
+            let authorization = handle.state::<Credential>().0.lock().ok().and_then(|held| held.clone());
             quit(held, authorization.as_deref());
         }
     });
@@ -177,7 +183,36 @@ fn start(app: &mut tauri::App) -> Result<(), String> {
         .notification()
         .on_action(move |_| bring_forward(&clicked))
         .map_err(|why| why.to_string())?;
-    let settings = settings(&handle)?;
+    // The window opens at once (#1050's audit, finding 6), on the shell's own
+    // page saying the start; then it shows the drive's page, or why there is
+    // none, rather than a stderr no one launched from Finder sees.
+    WebviewWindowBuilder::new(app, "main", WebviewUrl::App(shell_page("starting", None)?.into()))
+        .title("exercise")
+        .inner_size(1280.0, 860.0)
+        // A link in model output opens in the system's browser when it is the
+        // web's or mail's (#1050's audit, finding 19); no window ever opens here.
+        .on_new_window(|url, _| {
+            if openable(&url) {
+                let _ = tauri_plugin_opener::open_url(url.as_str(), None::<&str>);
+            }
+            tauri::webview::NewWindowResponse::Deny
+        })
+        .build()
+        .map_err(|why| why.to_string())?;
+    std::thread::spawn(move || {
+        let shown = drive_page(&handle).unwrap_or_else(|why| {
+            eprintln!("exercise: {why}");
+            shell_page("failed", Some(&why)).unwrap_or_default()
+        });
+        show(&handle, &shown);
+    });
+    Ok(())
+}
+
+/// The drive found, its credential held, the sidecar started when it is one:
+/// the drive's page.
+fn drive_page(handle: &AppHandle) -> Result<String, String> {
+    let settings = settings(handle)?;
     let drive = setting(settings.as_ref())?;
     // The credential's text, `user:password`, and how the sidecar is given it.
     let (pair, auth) = match auth(settings.as_ref())? {
@@ -197,7 +232,9 @@ fn start(app: &mut tauri::App) -> Result<(), String> {
                 .ok_or_else(|| "the credential is not user:password, as serve reads it".to_owned())
         })
         .transpose()?;
-    app.manage(Credential(credential));
+    if let Ok(mut held) = handle.state::<Credential>().0.lock() {
+        *held = credential;
+    }
     let drive = match drive {
         Drive::Remote(url) => url,
         Drive::Profile(profile) => {
@@ -206,27 +243,35 @@ fn start(app: &mut tauri::App) -> Result<(), String> {
                 (Some(Auth::Keychain), Some(pair)) => Some(Given::Stdin(pair)),
                 _ => None,
             };
-            let (url, held) = sidecar(&handle, &profile, given)?;
+            let (url, held) = sidecar(handle, &profile, given)?;
             if let Ok(mut slot) = handle.state::<Sidecar>().0.lock() {
                 *slot = Some(held);
             }
             url
         }
     };
-    WebviewWindowBuilder::new(app, "main", WebviewUrl::App(page(&drive)?.into()))
-        .title("exercise")
-        .inner_size(1280.0, 860.0)
-        // A link in model output opens in the system's browser when it is the
-        // web's or mail's (#1050's audit, finding 19); no window ever opens here.
-        .on_new_window(|url, _| {
-            if openable(&url) {
-                let _ = tauri_plugin_opener::open_url(url.as_str(), None::<&str>);
-            }
-            tauri::webview::NewWindowResponse::Deny
-        })
-        .build()
-        .map_err(|why| why.to_string())?;
-    Ok(())
+    page(&drive)
+}
+
+/// Show the page at RELATIVE, the bundle's, in the main window.
+fn show(handle: &AppHandle, relative: &str) {
+    if let Some(window) = handle.get_webview_window("main")
+        && let Ok(base) = window.url()
+        && let Ok(url) = base.join(relative)
+    {
+        let _ = window.navigate(url);
+    }
+}
+
+/// The shell's own page (`src/drive/shellPage.ts`): `starting`, or `failed`
+/// with why.
+fn shell_page(kind: &str, why: Option<&str>) -> Result<String, String> {
+    let mut url = Url::parse("tauri://localhost/index.html").map_err(|why| why.to_string())?;
+    url.query_pairs_mut().append_pair("shell", kind);
+    if let Some(why) = why {
+        url.query_pairs_mut().append_pair("why", why);
+    }
+    Ok(format!("index.html?{}", url.query().unwrap_or_default()))
 }
 
 /// settings.json in the app's config directory, when there is one.
@@ -419,6 +464,7 @@ fn sidecar(
                 let url = format!("http://{listening}/");
                 let exited = Arc::new((Mutex::new(false), Condvar::new()));
                 let told = Arc::clone(&exited);
+                let shown = app.clone();
                 // What serve says after its first line goes to the shell's
                 // own stderr, so the channel never fills; its exit is told to
                 // a quit waiting on it.
@@ -430,6 +476,13 @@ fn sidecar(
                             }
                             CommandEvent::Terminated(ended) => {
                                 eprintln!("serve: exited ({:?})", ended.code);
+                                // Outside a quit, the window says the drive is gone and why.
+                                if !QUITTING.load(std::sync::atomic::Ordering::SeqCst) {
+                                    let code = ended.code.map_or_else(|| "a signal".to_owned(), |code| format!("code {code}"));
+                                    if let Ok(page) = shell_page("failed", Some(&format!("serve exited ({code})"))) {
+                                        show(&shown, &page);
+                                    }
+                                }
                                 let (gone, changed) = &*told;
                                 if let Ok(mut gone) = gone.lock() {
                                     *gone = true;
