@@ -8275,6 +8275,23 @@ pub fn typescript() -> String {
         out,
         "export const PRESENCE_WINDOW_MS = {PRESENCE_WINDOW_MS};\n\n"
     );
+    // The sets a reader must cover, as values too (#1050's audit): a test
+    // over them fails when the format gains a member its reader does not
+    // handle, where a type alone is checked only against what the reader
+    // already names.
+    let listed = |name: &str, tags: &[&str]| {
+        let quoted: Vec<String> = tags.iter().map(|tag| format!("\"{tag}\"")).collect();
+        format!("export const {name} = [{}] as const;\n", quoted.join(", "))
+    };
+    let kinds: Vec<&str> = Kind::ALL.iter().map(|kind| kind.tag()).collect();
+    out.push_str(&listed("KINDS", &kinds));
+    out.push_str(&listed("REFUSALS", &Tags::Refusal.tags()));
+    out.push_str(&listed("AUTHORITIES", AUTHORITIES));
+    out.push_str(&listed("KEPT_FROM", KEPT_FROM));
+    out.push_str(
+        "export type Authority = (typeof AUTHORITIES)[number];\n\
+         export type KeptFrom = (typeof KEPT_FROM)[number];\n\n",
+    );
     out.push_str("export type Kind =\n");
     for kind in Kind::ALL {
         let _ = writeln!(out, "  | \"{}\"", kind.tag());
