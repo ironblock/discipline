@@ -43,6 +43,8 @@ export interface SessionViewProps {
   readonly link?: Link;
   /** Why the link is not live, when the transport says (finding 17: a status the author must see). */
   readonly linkWhy?: string;
+  /** The operator's own retry of a lost link (the app audit, finding 4). */
+  readonly onReconnect?: () => void;
   readonly surface: Surface;
   readonly onSurface?: (next: Surface) => void;
   readonly composer: Omit<ComposerProps, 'state' | 'phase'>;
@@ -77,7 +79,7 @@ interface Placement extends Placed {
  */
 const NOTHING_WAITS: Approving = { waiting: undefined };
 
-export function SessionView({ session, link = 'live', linkWhy, surface, onSurface, composer, follow = false, approving = NOTHING_WAITS, files }: SessionViewProps) {
+export function SessionView({ session, link = 'live', linkWhy, onReconnect, surface, onSurface, composer, follow = false, approving = NOTHING_WAITS, files }: SessionViewProps) {
   // What the row has room for beside the trunk (measured below): whole side calls, bars, or neither. With
   // less room than the curtain asks for, side calls condense to bars; with none, the curtain draws closed.
   // Either way a side call that cannot open in its lane opens under the message it came from (`inline`).
@@ -512,7 +514,7 @@ export function SessionView({ session, link = 'live', linkWhy, surface, onSurfac
         <div className="ex-session__need" data-for="bars" ref={needBars} aria-hidden="true" />
         {minimap ? <Minimap stage={stage} revision={[session, placed, meditationPad, curtain]} curtain={curtain} /> : null}
         <div className="ex-session__header">
-          <SessionHeader session={session} link={link} {...(linkWhy !== undefined ? { linkWhy } : {})} surface={surface} room={room} {...(onSurface ? { onSurface } : {})} />
+          <SessionHeader session={session} link={link} {...(linkWhy !== undefined ? { linkWhy } : {})} {...(onReconnect ? { onReconnect } : {})} surface={surface} room={room} {...(onSurface ? { onSurface } : {})} />
         </div>
         <div className="ex-session__main">
           <div className="ex-session__columns">

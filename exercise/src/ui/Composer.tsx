@@ -71,6 +71,28 @@ const STATE_LINE: Readonly<Record<SessionState, string>> = {
   ended: 'the session has ended',
 };
 
+/** Where the draft is kept across a reload. */
+const DRAFT_KEY = 'exercise.composer.draft';
+
+/** The draft a reload left, or none. */
+function storedDraft(): string {
+  try {
+    return sessionStorage.getItem(DRAFT_KEY) ?? '';
+  } catch {
+    return '';
+  }
+}
+
+/** Keep DRAFT for the next reload; an empty one is nothing to keep. */
+function storeDraft(draft: string): void {
+  try {
+    if (draft === '') sessionStorage.removeItem(DRAFT_KEY);
+    else sessionStorage.setItem(DRAFT_KEY, draft);
+  } catch {
+    // No session storage here: the draft lives as long as the page.
+  }
+}
+
 /** How long the question "end the session?" shows before a press answers it. */
 const CONFIRM_AFTER_MS = 500;
 
@@ -78,7 +100,10 @@ export function Composer({ state, link = 'live', phase, phases, dispatch, hint, 
   // Ending a tangent (#608): the operator rules on each of its entries, keep by default, then closes it.
   const [closing, setClosing] = useState(false);
   const [rulings, setRulings] = useState<Readonly<Record<string, Disposition>>>({});
-  const [draft, setDraft] = useState('');
+  // Kept in the tab's session storage (the app audit, finding 4), so "your draft is kept" holds across a reload; a
+  // browser that keeps none keeps the draft for the page's life.
+  const [draft, setDraft] = useState(storedDraft);
+  useEffect(() => storeDraft(draft), [draft]);
   // The operator's attachments (#372): uploaded as they are added, named by digest on the next ask, cleared once taken.
   const [attached, setAttached] = useState<readonly Attached[]>([]);
   // Uploads still out: an ask waits for them, so a screenshot never rides the ask after the one it was meant for.

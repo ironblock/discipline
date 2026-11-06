@@ -90,6 +90,7 @@ export function App({
       session={session}
       link={link.link}
       {...(link.why !== undefined ? { linkWhy: link.why } : {})}
+      {...((transport as DriveTransport).reconnect ? { onReconnect: () => (transport as DriveTransport).reconnect?.() } : {})}
       surface={surface}
       onSurface={setSurface}
       follow

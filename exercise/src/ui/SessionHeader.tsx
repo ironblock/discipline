@@ -14,6 +14,8 @@ export interface SessionHeaderProps {
   readonly link?: Link;
   /** Why the link is not live, when the transport says. */
   readonly linkWhy?: string;
+  /** The operator's own retry of a lost link (the app audit, finding 4). Absent: none is offered. */
+  readonly onReconnect?: () => void;
   readonly surface: Surface;
   /** What the row has room for beside the trunk (SessionView): the curtain can draw no more than that. */
   readonly room?: Room;
@@ -42,7 +44,7 @@ const LEVERS: readonly { readonly lever: Exclude<keyof Levers, 'table'>; readonl
 ];
 
 /** One quiet line: what is running this session, where it is, and the switches for seeing more. */
-export function SessionHeader({ session, link = 'live', linkWhy, surface, room = 'whole', onSurface }: SessionHeaderProps) {
+export function SessionHeader({ session, link = 'live', linkWhy, onReconnect, surface, room = 'whole', onSurface }: SessionHeaderProps) {
   const unavailable = CURTAIN.filter((c) => (room === 'bars' && c === 'open') || (room === 'none' && c !== 'closed'));
   const drawn = !surface.curtain || room === 'none' ? 'closed' : surface.condensed === true || room === 'bars' ? 'condensed' : 'open';
   return (
@@ -113,8 +115,13 @@ export function SessionHeader({ session, link = 'live', linkWhy, surface, room =
       {link !== 'live' ? (
         <span className="ex-header__link" data-link={link} role="status" title={linkWhy}>
           {link === 'reconnecting' ? 'reconnecting…' : 'connection lost'}
-          {link === 'lost' && linkWhy ? `: ${linkWhy}` : ''}
+          {linkWhy ? `: ${linkWhy}` : ''}
         </span>
+      ) : null}
+      {link === 'lost' && onReconnect ? (
+        <button type="button" className="ex-header__reconnect" onClick={onReconnect}>
+          reconnect
+        </button>
       ) : null}
       <span className="ex-header__state" data-state={session.state}>
         {stateWord(session.state, capturingOf(session))}
