@@ -158,3 +158,62 @@ export const NoteMerged: Story = {
     ]);
   },
 };
+
+// ---------------------------------------------------------------- the page audit (F7, F12, F14)
+
+/** The page audit's own width: the header wraps here, as it did on the walk-through. */
+const AT_1440 = { viewport: { options: { audit: { name: 'Audit', styles: { width: '1440px', height: '900px' } } }, defaultViewport: 'audit' } };
+
+/** A colour's alpha, from `rgb()`/`rgba()` as a computed style gives it. */
+const alpha = (colour: string) => {
+  const parts = colour.match(/[\d.]+/g)?.map(Number) ?? [];
+  return parts.length === 4 ? parts[3]! : parts.length === 3 ? 1 : 0;
+};
+
+/** Whether the element painted at the middle of RECT's bottom row is ELEMENT or inside it: nothing covers it there. */
+const onTop = (element: Element, x: number, y: number) => {
+  const hit = document.elementFromPoint(x, y);
+  return hit !== null && element.contains(hit);
+};
+
+/** F7: the levers table can be read -- opaque -- and all of it reached: within the window, scrolling, above the composer. */
+export const AuditLeversReadable: Story = {
+  name: 'audit F7: the levers table is opaque, fits the window, and is above the composer',
+  parameters: AT_1440,
+  play: async ({ canvasElement }) => {
+    await userEvent.click(canvasElement.querySelector('.ex-header__levers > summary')!);
+    const table = canvasElement.querySelector<HTMLElement>('.ex-header__levers > dl')!;
+    const style = getComputedStyle(table);
+    await expect(alpha(style.backgroundColor)).toBeGreaterThan(0.9);
+    const rect = table.getBoundingClientRect();
+    await expect(rect.bottom).toBeLessThanOrEqual(window.innerHeight);
+    await expect(['auto', 'scroll']).toContain(style.overflowY);
+    await expect(onTop(table, rect.left + rect.width / 2, rect.bottom - 4)).toBe(true);
+  },
+};
+
+/** F12: every receipt value is inside the receipt's panel, however many values the idle row lists. */
+export const AuditReceiptFits: Story = {
+  name: 'audit F12: the receipt’s values stay inside its panel',
+  parameters: AT_1440,
+  play: async ({ canvasElement }) => {
+    const panel = canvasElement.querySelector('.ex-receipt')!.getBoundingClientRect();
+    const outside = [...canvasElement.querySelectorAll('.ex-receipt__value')].filter((value) => value.getBoundingClientRect().right > panel.right + 1).map((value) => value.textContent);
+    await expect(outside).toEqual([]);
+  },
+};
+
+/** F14: the settings panel is inside the window and nothing paints over it. */
+export const AuditSettingsInView: Story = {
+  name: 'audit F14: the settings panel is in the window, above the minimap',
+  parameters: AT_1440,
+  play: async ({ canvasElement }) => {
+    await userEvent.click(canvasElement.querySelector('.ex-settings__button')!);
+    const panel = canvasElement.querySelector<HTMLElement>('.ex-settings__panel')!;
+    const rect = panel.getBoundingClientRect();
+    await expect(rect.left).toBeGreaterThanOrEqual(0);
+    await expect(rect.right).toBeLessThanOrEqual(window.innerWidth);
+    await expect(onTop(panel, rect.left + 8, rect.top + rect.height / 2)).toBe(true);
+    await expect(onTop(panel, rect.right - 8, rect.top + rect.height / 2)).toBe(true);
+  },
+};
