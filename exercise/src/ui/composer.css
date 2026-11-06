@@ -90,6 +90,12 @@
   gap: 0.4rem;
 }
 
+/* "stay in <phase>" is the move select's first option: no wider than a phase's name needs (the app audit, finding 1). */
+.ex-composer__meditation select {
+  max-width: 9rem;
+  text-overflow: ellipsis;
+}
+
 .ex-composer select,
 .ex-composer button {
   padding: 0.25em 0.6em;
