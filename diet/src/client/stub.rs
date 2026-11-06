@@ -1209,6 +1209,35 @@ mod tests {
         );
     }
 
+    /// A reply's placeholder doubled -- `$$job`, `$$operator-entry`,
+    /// `$$entry:<call>/<field>` -- is that text itself, written once: one
+    /// escape rule wherever a `$name` is read. A `$$` before no
+    /// placeholder, a shell's `$$` or ast-grep's `$$$A`, stays.
+    #[test]
+    fn a_doubled_dollar_keeps_a_placeholder_as_written() {
+        let answer = |act: Act| match act {
+            Act::Answer(text) => text,
+            _ => unreachable!("an answer stays an answer"),
+        };
+        assert_eq!(
+            answer(with_job(
+                Act::Answer("stop $job, not $$job; echo $$ $$$A".to_owned()),
+                "bg_0123abcd"
+            )),
+            "stop bg_0123abcd, not $job; echo $$ $$$A"
+        );
+        assert_eq!(
+            answer(with_entries(
+                Act::Answer(
+                    "retire $operator-entry, not $$operator-entry; resolve $entry:call-r1/decision, not $$entry:call-r1/decision"
+                        .to_owned()
+                ),
+                "operator-15\tits text\nr5/call-r1/decision"
+            )),
+            "retire operator-15, not $operator-entry; resolve r5/call-r1/decision, not $entry:call-r1/decision"
+        );
+    }
+
     /// #798: a routed reply's `$job` is the last background job id the
     /// request carries -- the id `task_stop` needs, which no script can know
     /// ahead of the run -- and stays `$job` when it carries none.

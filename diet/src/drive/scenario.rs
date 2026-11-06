@@ -4944,6 +4944,35 @@ mod tests {
         assert_eq!(Pick::Index(0).bound_in(&bound), None);
     }
 
+    /// An expectation's `where` text reads `$name` as the entry bound to
+    /// `name`, and `$$name` as the text `$name` itself: one escape rule
+    /// wherever a `$name` is read. A `$$` before no bound name stays.
+    #[test]
+    fn a_where_writes_a_literal_dollar_name_doubled() {
+        let log = include_str!("../../formats/log/fixtures/valid/an-answered-turn.jsonl")
+            .replace("say hello", "is $kept set? $$ and $$$A stay");
+        let header = r#"{"scenario":"s","regimen":"r.toml","head":"h.md"}"#;
+        let expecting = |wanted: &str| {
+            parse(&format!(
+                "{header}\n{}\n",
+                serde_json::json!({"expect": "ask", "where": {"text~": wanted}})
+            ))
+            .expect("it reads")
+        };
+        let mut bound = Bindings::new();
+        bound.insert("kept".to_owned(), "operator-15".to_owned());
+        let met = |wanted: &str| unmet(&expecting(wanted), &log, &bound).is_empty();
+        assert!(met("is $$kept set?"), "`$$kept` is the text `$kept`");
+        assert!(
+            !met("is $kept set?"),
+            "`$kept` is the entry bound to `kept`"
+        );
+        assert!(
+            met("$$ and $$$A stay"),
+            "a `$$` before no bound name stays as written"
+        );
+    }
+
     /// A `pick` whose text itself starts with `$` writes it `$$`: one `$`
     /// is a bound name, two are a literal `$`.
     #[test]
