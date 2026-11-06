@@ -950,6 +950,61 @@ fn a_drive_server_exits_0_after_ended_and_ended_is_its_logs_last_line() {
     assert!(streamed.contains(r#""to":"ended""#), "{streamed}");
 }
 
+/// #1050's audit, finding 5: the native shell quits by posting `end` with
+/// its credential and waiting for serve to exit (no signal handler, #230).
+/// So `end` alone must leave the record written and the process gone.
+#[test]
+fn a_drive_server_ended_over_http_writes_its_record_and_exits() {
+    let tree = Dir::new("ended-record-tree");
+    let stub = Stub::serving(vec![Act::Raw(ANSWERED.to_vec())]).expect("loopback");
+    let regimen = commands_regimen(
+        "allowed_commands = []\n",
+        "isolation = \"none\"",
+        "[limits]\nmax_steps = 4\n",
+    );
+    let path = regimen.0.to_string_lossy().into_owned();
+    let auth = file_holding("auth", "author:s3cret\n");
+    let auth_path = auth.0.to_string_lossy().into_owned();
+    let record = file_holding("record", "");
+    let record_path = record.0.to_string_lossy().into_owned();
+    let mut served = start(
+        &stub.url(),
+        &[
+            "--regimen",
+            &path,
+            "--worktree",
+            &tree.path(),
+            "--auth-file",
+            &auth_path,
+            "--record",
+            &record_path,
+        ],
+    );
+    let address = served.listening.clone();
+    let reply = post_authed(&address, "/commands", r#"{"kind":"ask","text":"hi"}"#);
+    assert_eq!(status(&reply), 200, "{reply}");
+    events_authed(&address, |read| {
+        read.contains(r#""reason":"final""#) && read.contains(r#""to":"awaiting""#)
+    });
+    let reply = post_authed(&address, "/commands", r#"{"kind":"end"}"#);
+    assert_eq!(status(&reply), 200, "{reply}");
+    let deadline = Instant::now() + Duration::from_secs(10);
+    let exited = loop {
+        if let Some(exited) = served.child.try_wait().expect("the child is waited on") {
+            break Some(exited);
+        }
+        if Instant::now() >= deadline {
+            break None;
+        }
+        std::thread::sleep(Duration::from_millis(20));
+    };
+    assert_eq!(exited.and_then(|exited| exited.code()), Some(0), "serve did not exit");
+    let written = std::fs::read_to_string(&record_path).expect("the record");
+    assert!(!written.trim().is_empty(), "no record was written");
+    let _ = std::fs::remove_file(format!("{record_path}.receipt.json"));
+    let _ = std::fs::remove_file(format!("{record_path}.unspellable.json"));
+}
+
 #[test]
 fn a_drive_servers_log_file_is_the_events_stream_line_for_line() {
     let stub = Stub::serving(vec![Act::Raw(CAPTURED.to_vec())]).expect("loopback");

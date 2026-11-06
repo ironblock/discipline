@@ -448,7 +448,32 @@ fn page(drive: &str) -> Result<String, String> {
 
 #[cfg(test)]
 mod tests {
-    use super::{Auth, Drive, basic, chosen_auth, csp_admits, openable, remote};
+    use super::{Auth, Drive, basic, chosen_auth, command_request, csp_admits, openable, remote, running_turn, status_of};
+
+    /// #1050's audit, finding 5: the shell ends the session as the page
+    /// would, a `POST /commands` with the credential, before it lets serve go.
+    #[test]
+    fn the_shell_ends_the_session_with_a_command_as_the_page_sends_one() {
+        assert_eq!(
+            command_request("127.0.0.1:7801", Some("Basic YTpi"), r#"{"kind":"end"}"#),
+            "POST /commands HTTP/1.1\r\nHost: 127.0.0.1:7801\r\nAuthorization: Basic YTpi\r\n\
+             Content-Type: application/json\r\nContent-Length: 14\r\nConnection: close\r\n\r\n\
+             {\"kind\":\"end\"}"
+        );
+        assert!(!command_request("127.0.0.1:7801", None, "{}").contains("Authorization"));
+        assert_eq!(status_of("HTTP/1.1 409 Conflict\r\n\r\n{}"), Some(409));
+        assert_eq!(status_of("garbage"), None);
+    }
+
+    /// With a turn in flight `end` is refused (`in-flight`), so the shell
+    /// cancels the turn `/state` names as running, then ends.
+    #[test]
+    fn a_running_turn_is_read_from_the_state() {
+        assert_eq!(running_turn(r#"{"turn":{"number":3,"state":"running"}}"#), Some(3));
+        assert_eq!(running_turn(r#"{"turn":{"number":3,"state":"awaiting-approval"}}"#), Some(3));
+        assert_eq!(running_turn(r#"{"turn":{"number":3,"state":"settled","reason":"final"}}"#), None);
+        assert_eq!(running_turn(r#"{"session":"idle"}"#), None);
+    }
 
     /// #1050's audit, finding 19: a link in the page opens in the system's
     /// browser when it is the web's or mail's, and nothing else opens.
