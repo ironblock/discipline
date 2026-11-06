@@ -30,6 +30,12 @@
 //! alone, sends a system notification while that window is not focused, and
 //! a click on one brings the window forward.
 //!
+//! On macOS the window's title bar is an overlay: the page draws to the top
+//! edge, the traffic lights over its header's left end. The shell measures
+//! their right edge and tells the page (`?titlebar=<points>`), whose header
+//! clears it and is the window's drag region (`src/ui/titlebar.ts`), granted
+//! `core:window:allow-start-dragging` and nothing else new.
+//!
 //! The sidecar admits the webview's origin (`--allow-origin`), which `serve`
 //! answers across origins (#719's CORS), and it is killed when the app exits,
 //! by a quit or by a termination signal.
