@@ -1158,9 +1158,13 @@ export function fold(written: readonly LogLine[]): Session {
         if (proposal?.call === e.call) proposal = undefined;
         asked = undefined;
         // "keep" (v7's "continue") moves the phase with no meditation; "meditation" is followed by the meditation line,
-        // which moves it.
-        if (e.choice === 'keep' || e.choice === 'continue') phase = e.to;
-        if (e.phase_document) inForce = e.phase_document;
+        // which moves it -- and only then is the new phase's document in force, its moves and ground rules (#1050's page
+        // audit, F6). A move the phase makes leaves the model's last answer about one behind (F16).
+        if (e.choice === 'keep' || e.choice === 'continue') {
+          phase = e.to;
+          answered = undefined;
+          if (e.phase_document) inForce = e.phase_document;
+        }
         break;
       }
       // The two keys (#788): the model's proposal waits on the operator's ruling; the operator's, on the model's answer.
@@ -1185,7 +1189,10 @@ export function fold(written: readonly LogLine[]): Session {
       case 'meditation': {
         held = undefined;
         for (const call of e.pruned ?? []) replacedByMeditation.add(call);
-        if (e.phase) phase = e.phase.to;
+        if (e.phase) {
+          phase = e.phase.to;
+          answered = undefined;
+        }
         if (e.phase_document) inForce = e.phase_document;
         // What the model was sent after the meditation -- `diet`'s `meditation::render::refill`, whose output the record's head
         // check verifies: since #597 the head as it was and a user message carrying the render (and the tool outputs

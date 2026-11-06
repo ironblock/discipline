@@ -1,4 +1,4 @@
-import { createContext, useContext, useEffect, useRef, useState, useSyncExternalStore } from 'react';
+import { createContext, useContext, useEffect, useLayoutEffect, useRef, useState, useSyncExternalStore } from 'react';
 import type { ReactNode } from 'react';
 
 import { DEFAULT_PREFS, PREFS, PREF_LABELS, applies, modeOf, readPrefs, stillOf } from './prefs.ts';
@@ -88,6 +88,19 @@ export function Settings() {
       document.removeEventListener('keydown', escape);
     };
   }, [open]);
+  // Anchored to the button's right edge, the panel would run off the window's left when the header wraps it there: it
+  // anchors left then (#1050's page audit, F14).
+  const panel = useRef<HTMLDivElement>(null);
+  useLayoutEffect(() => {
+    const element = panel.current;
+    if (!open || !element) return;
+    element.style.left = '';
+    element.style.right = '';
+    if (element.getBoundingClientRect().left < 0) {
+      element.style.right = 'auto';
+      element.style.left = '0';
+    }
+  }, [open]);
   if (!onPrefs) return null;
   const set = <K extends PrefName>(name: K, value: Prefs[K]) => onPrefs({ ...prefs, [name]: value });
   return (
@@ -96,7 +109,7 @@ export function Settings() {
         settings
       </button>
       {open ? (
-        <div className="ex-settings__panel" id="ex-settings" role="group" aria-label="settings">
+        <div ref={panel} className="ex-settings__panel" id="ex-settings" role="group" aria-label="settings">
           {(Object.keys(PREFS) as PrefName[]).map((name) =>
             applies(name, prefs) ? (
               <div key={name} className="ex-settings__row">

@@ -136,6 +136,12 @@
   z-index: 3;
 }
 
+/* A popover open on the header -- the levers table, settings -- paints above the composer and the minimap, which
+   come later or stack higher (#1050's page audit, F7 and F14). */
+.ex-session__header:has(.ex-header__levers[open], .ex-settings__panel) {
+  z-index: 6;
+}
+
 .ex-session__main {
   display: flex;
   justify-content: center;
