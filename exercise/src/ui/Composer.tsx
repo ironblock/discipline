@@ -231,11 +231,46 @@ export function Composer({ state, link = 'live', phase, phases, dispatch, hint, 
   const onKey = (e: KeyboardEvent<HTMLTextAreaElement>) => {
     // Not while an input method is composing: that Enter picks a candidate.
     if (e.key === 'Enter' && !e.shiftKey && !e.nativeEvent.isComposing) void send(e);
-    if (e.key === 'Escape' && running && dispatch) {
-      e.preventDefault();
-      run({ kind: 'cancel' });
-    }
   };
+
+  // Esc, from anywhere on the page, arms a cancel of the running turn, and a second one sends it (the app audit's page
+  // walk, F5): a cancel throws the turn away, so it asks first, as end does (#289). Out of a turn, it disarms.
+  const [cancelling, setCancelling] = useState(false);
+  const cancelArmedAt = useRef(0);
+  useEffect(() => {
+    if (!running) setCancelling(false);
+  }, [running]);
+  useEffect(() => {
+    if (!running || !dispatch) return;
+    const escape = (e: globalThis.KeyboardEvent) => {
+      // An open dialog's Esc closes the dialog, and is no answer here.
+      if (e.key !== 'Escape' || e.isComposing || e.defaultPrevented || document.querySelector('dialog[open]')) return;
+      if (!cancelling) {
+        cancelArmedAt.current = performance.now();
+        return setCancelling(true);
+      }
+      if (performance.now() - cancelArmedAt.current < CONFIRM_AFTER_MS) return;
+      setCancelling(false);
+      void dispatch({ kind: 'cancel' }).then(answer);
+    };
+    document.addEventListener('keydown', escape);
+    return () => document.removeEventListener('keydown', escape);
+  });
+
+  // "/" outside a text field takes the focus to the ask box (F18): in a long session it is hundreds of tab stops away.
+  const input = useRef<HTMLTextAreaElement>(null);
+  useEffect(() => {
+    const slash = (e: globalThis.KeyboardEvent) => {
+      if (e.key !== '/' || e.metaKey || e.ctrlKey || e.altKey || e.defaultPrevented) return;
+      const at = e.target instanceof HTMLElement ? e.target : undefined;
+      if (at && (at.isContentEditable || ['INPUT', 'TEXTAREA', 'SELECT'].includes(at.tagName))) return;
+      if (!input.current || input.current.disabled) return;
+      e.preventDefault();
+      input.current.focus();
+    };
+    document.addEventListener('keydown', slash);
+    return () => document.removeEventListener('keydown', slash);
+  }, []);
 
   return (
     <form
@@ -326,6 +361,7 @@ export function Composer({ state, link = 'live', phase, phases, dispatch, hint, 
         </ul>
       ) : null}
       <textarea
+        ref={input}
         className="ex-composer__input"
         value={draft}
         onChange={(e) => setDraft(e.target.value)}
@@ -342,7 +378,9 @@ export function Composer({ state, link = 'live', phase, phases, dispatch, hint, 
             ? 'reconnecting to the drive · your draft is kept'
             : link === 'lost'
               ? 'the connection to the drive is lost · your draft is kept'
-              : (refusal ?? (state === 'capture' ? CAPTURE_LINE[capturing] : STATE_LINE[state]))}
+              : cancelling
+                ? 'cancel the turn? esc again'
+                : (refusal ?? (state === 'capture' ? CAPTURE_LINE[capturing] : STATE_LINE[state]))}
         </span>
         <span className="ex-composer__spacer" />
         {/* As `diet` takes it: only while awaiting. Leaving the button, or the composer leaving idle, disarms it. */}

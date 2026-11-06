@@ -73,6 +73,13 @@ export function ForkAction({ at, label }: { readonly at: LoggedText; readonly la
   const [refused, setRefused] = useState<string>();
   const close = () => setOpen(false);
   const dialog = useModal(open, close);
+  // The pinned ask opened to its whole text, to read before it is sent (the app audit's page walk, F4).
+  const [reading, setReading] = useState<string>();
+  // `showModal()` focuses the first control, a pinned ask, where an Enter would send it; "your own words" takes it.
+  const own = useRef<HTMLTextAreaElement>(null);
+  useEffect(() => {
+    if (open) own.current?.focus();
+  }, [open]);
   if (!act || !moment.onTrunk(at.seq)) return null;
   const { first, more } = pickerAsks();
   const send = async (command: Command) => {
@@ -85,10 +92,23 @@ export function ForkAction({ at, label }: { readonly at: LoggedText; readonly la
   };
   const pinned = (ask: ForkAsk) => (
     <li key={ask.name}>
-      <button type="button" className="ex-gesture__ask" aria-label={`Fork at ${label} asking ${ask.name}`} onClick={() => void send({ kind: 'fork', at: at.seq, ask: ask.name })}>
+      <button
+        type="button"
+        className="ex-gesture__ask"
+        aria-label={`Fork at ${label} asking ${ask.name}`}
+        aria-expanded={reading === ask.name}
+        onClick={() => setReading(reading === ask.name ? undefined : ask.name)}
+      >
         <span className="ex-gesture__ask-name">{ask.name}</span>
-        <span className="ex-gesture__ask-text">{ask.text.trim()}</span>
+        <span className="ex-gesture__ask-text" data-whole={reading === ask.name ? '' : undefined}>
+          {ask.text.trim()}
+        </span>
       </button>
+      {reading === ask.name ? (
+        <button type="button" className="ex-gesture__send" aria-label={`Ask ${ask.name} at ${label}`} onClick={() => void send({ kind: 'fork', at: at.seq, ask: ask.name })}>
+          ask this
+        </button>
+      ) : null}
     </li>
   );
   const submit = (e: FormEvent) => {
@@ -97,7 +117,8 @@ export function ForkAction({ at, label }: { readonly at: LoggedText; readonly la
   };
   // Return asks; Shift-Return is a new line.
   const keys = (e: KeyboardEvent<HTMLTextAreaElement>) => {
-    if (e.key === 'Enter' && !e.shiftKey) submit(e);
+    // Not while an input method is composing: that Enter picks a candidate (the app audit, 22).
+    if (e.key === 'Enter' && !e.shiftKey && !e.nativeEvent.isComposing) submit(e);
   };
   return (
     <>
@@ -109,6 +130,7 @@ export function ForkAction({ at, label }: { readonly at: LoggedText; readonly la
         disabled={!moment.awaiting}
         onClick={() => {
           setRefused(undefined);
+          setReading(undefined);
           setOpen(true);
         }}
       >
@@ -127,7 +149,7 @@ export function ForkAction({ at, label }: { readonly at: LoggedText; readonly la
             ) : null}
             <label className="ex-gesture__own">
               your own words
-              <textarea aria-label={`Your own question at ${label}`} value={text} autoFocus onChange={(e) => setText(e.target.value)} onKeyDown={keys} />
+              <textarea ref={own} aria-label={`Your own question at ${label}`} value={text} onChange={(e) => setText(e.target.value)} onKeyDown={keys} />
             </label>
             <div className="ex-gesture__row">
               <button type="submit" aria-label={`Ask at ${label}`} disabled={text.trim() === ''}>

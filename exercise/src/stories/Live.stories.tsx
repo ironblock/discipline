@@ -1134,7 +1134,9 @@ export const ServedForkAtAStep: Story = {
     // What it sends is shown beside its name.
     await expect(pinned.textContent).toContain('Pause.');
     posted.length = 0;
+    // A card opens to its whole ask, and sends from its own button (the app audit's page walk, F4).
     await userEvent.click(pinned);
+    await userEvent.click(await page.findByRole('button', { name: 'Ask GOTCHAS at step 7' }, slow));
     await waitFor(async () => expect(posted).toEqual([{ kind: 'fork', at: 9, ask: 'GOTCHAS' }]), slow);
     await waitFor(async () => expect(page.queryByRole('button', { name: 'Fork at step 7 asking GOTCHAS' })).toBeNull(), slow);
     await cornerClick(page.getByRole('button', { name: 'Fork at step 7' }));
@@ -1239,6 +1241,10 @@ export const ServedCorrectionChips: Story = {
     await userEvent.click(page.getByRole('button', { name: 'Accept: The model would replace your entry with: d2' }));
     await waitFor(async () => expect(posted).toEqual([{ kind: 'correction', refused: 15, answer: 'accept' }]), slow);
     posted.length = 0;
+    // Retire asks first, and a second press after the question could be read retires (F11).
+    await userEvent.click(page.getByRole('button', { name: 'Retire d2' }));
+    await expect(posted).toEqual([]);
+    await new Promise((resolve) => setTimeout(resolve, 600));
     await userEvent.click(page.getByRole('button', { name: 'Retire d2' }));
     await waitFor(async () => expect(posted).toEqual([{ kind: 'retire-entry', id: 'd2' }]), slow);
   },
@@ -1474,6 +1480,7 @@ export const AuditForkRefusalResetsOnOpen: Story = {
     await waitFor(async () => expect(says(canvasElement)).toBe('your turn'));
     await cornerClick(await page.findByRole('button', { name: 'Fork at step 7' }));
     await userEvent.click(await page.findByRole('button', { name: 'Fork at step 7 asking GOTCHAS' }, slow));
+    await userEvent.click(await page.findByRole('button', { name: 'Ask GOTCHAS at step 7' }, slow));
     await page.findByRole('alert', undefined, slow);
     await userEvent.click(page.getByRole('button', { name: 'cancel' }));
     await cornerClick(page.getByRole('button', { name: 'Fork at step 7' }));
