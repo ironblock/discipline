@@ -5,6 +5,7 @@ import type { Levers, Session } from '../session/fold.ts';
 import { Settings } from './Prefs.tsx';
 import { Segments } from './Segments.tsx';
 import { laneStyle } from './sets.ts';
+import { capturingOf, stateWord } from './stateWords.ts';
 import type { Room, Surface } from './surface.tsx';
 import './header.css';
 
@@ -116,7 +117,7 @@ export function SessionHeader({ session, link = 'live', linkWhy, surface, room =
         </span>
       ) : null}
       <span className="ex-header__state" data-state={session.state}>
-        {session.state}
+        {stateWord(session.state, capturingOf(session))}
       </span>
       {onSurface ? (
         <>

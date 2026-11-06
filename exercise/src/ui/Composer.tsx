@@ -7,6 +7,8 @@ import { Phases } from './Phases.tsx';
 import type { PhaseMove } from './Phases.tsx';
 import { Segments } from './Segments.tsx';
 import { refusalOf } from './sets.ts';
+import { CAPTURE_LINE } from './stateWords.ts';
+import type { Capturing } from './stateWords.ts';
 import './panel.css';
 import './composer.css';
 
@@ -46,6 +48,8 @@ export interface ComposerProps {
   readonly noMeditation?: string;
   /** A meditation held for the operator (#150's gate): the changes its reconcile left unaddressed, each with its entry's text. */
   readonly held?: { readonly unaddressed: readonly { readonly id: string; readonly text: string }[] };
+  /** What a capture runs (the app audit, finding 13): the state line says it. Absent: an interview. */
+  readonly capturing?: Capturing;
 }
 
 const DISPOSITIONS: readonly Disposition[] = ['keep', 'drop', 'park'];
@@ -70,7 +74,7 @@ const STATE_LINE: Readonly<Record<SessionState, string>> = {
 /** How long the question "end the session?" shows before a press answers it. */
 const CONFIRM_AFTER_MS = 500;
 
-export function Composer({ state, link = 'live', phase, phases, dispatch, hint, upload, tangents = false, tangent, foreground = false, nearTimeout = false, proposal, phaseDocument, asked, answered, startable, unilateral = true, noMeditation, held }: ComposerProps) {
+export function Composer({ state, link = 'live', phase, phases, dispatch, hint, upload, tangents = false, tangent, foreground = false, nearTimeout = false, proposal, phaseDocument, asked, answered, startable, unilateral = true, noMeditation, held, capturing = 'interview' }: ComposerProps) {
   // Ending a tangent (#608): the operator rules on each of its entries, keep by default, then closes it.
   const [closing, setClosing] = useState(false);
   const [rulings, setRulings] = useState<Readonly<Record<string, Disposition>>>({});
@@ -85,11 +89,17 @@ export function Composer({ state, link = 'live', phase, phases, dispatch, hint, 
   // The operator's mark on the next ask: the scope answer (#453). It rides on that ask only, and clears once taken.
   const [scoping, setScoping] = useState(false);
   const [refusal, setRefusal] = useState<string | undefined>();
-  const next = phases[phases.indexOf(phase) + 1] ?? phases.find((p) => p !== phase) ?? phase;
-  const [to, setTo] = useState(next);
-  // The phase moved (#733): the move offered is the new phase's next, and nothing else resets -- not the draft, the
-  // attachments or the scope mark, which a remount per phase used to lose.
-  useEffect(() => setTo(next), [next]);
+  // A refusal says why the last command was not taken; once the session's state moves, the state line says what it is now.
+  useEffect(() => setRefusal(undefined), [state]);
+  // Where a refill goes (the app audit, finding 1): '' stays in the phase, and is the default; a move is picked.
+  const [to, setTo] = useState('');
+  // The phase moved (#733): the refill stays again, and nothing else resets -- not the draft, the attachments or the
+  // scope mark, which a remount per phase used to lose.
+  useEffect(() => setTo(''), [phase]);
+  // The moves a refill may name: the graph's from here, where the operator may move alone (#788); else none.
+  const moves = unilateral ? phases.filter((p) => p !== phase) : [];
+  // An ask out and not yet answered (the app audit, finding 9): a second Enter sends nothing until it is.
+  const sending = useRef(false);
   // Ending cannot be taken back: the first press asks, a second one sends (#289) -- a second the person chose after
   // seeing the question, not the other half of a double click or a held key.
   const [ending, setEnding] = useState(false);
@@ -175,9 +185,15 @@ export function Composer({ state, link = 'live', phase, phases, dispatch, hint, 
 
   const send = async (e?: FormEvent) => {
     e?.preventDefault();
-    if (!dispatch || !idle || draft.trim() === '' || uploading > 0) return;
+    if (!dispatch || !idle || draft.trim() === '' || uploading > 0 || sending.current) return;
     const files = attached.map((a) => a.sha256);
-    const ack = await dispatch({ kind: 'ask', text: draft.trim(), ...(scoping ? { scoping: true as const } : {}), ...(files.length > 0 ? { files } : {}) });
+    sending.current = true;
+    let ack: Ack;
+    try {
+      ack = await dispatch({ kind: 'ask', text: draft.trim(), ...(scoping ? { scoping: true as const } : {}), ...(files.length > 0 ? { files } : {}) });
+    } finally {
+      sending.current = false;
+    }
     answer(ack);
     if (ack.ok) {
       setDraft('');
@@ -301,7 +317,7 @@ export function Composer({ state, link = 'live', phase, phases, dispatch, hint, 
             ? 'reconnecting to the drive · your draft is kept'
             : link === 'lost'
               ? 'the connection to the drive is lost · your draft is kept'
-              : (refusal ?? STATE_LINE[state])}
+              : (refusal ?? (state === 'capture' ? CAPTURE_LINE[capturing] : STATE_LINE[state]))}
         </span>
         <span className="ex-composer__spacer" />
         {/* As `diet` takes it: only while awaiting. Leaving the button, or the composer leaving idle, disarms it. */}
@@ -322,19 +338,18 @@ export function Composer({ state, link = 'live', phase, phases, dispatch, hint, 
         </span>
         <span className="ex-composer__meditation">
           {/* The moves the graph allows from here (#563); with none -- no graph, or the last phase -- a refill names no phase. */}
-          {phases.length > 0 ? (
+          {moves.length > 0 ? (
             <>
               <span className="ex-composer__label" aria-hidden="true">move to</span>
               <select aria-label="move to" value={to} onChange={(e) => setTo(e.target.value)} disabled={!idle}>
-                {phases
-                  .filter((p) => p !== phase)
-                  .map((p) => (
-                    <option key={p}>{p}</option>
-                  ))}
+                <option value="">stay in {phase || 'this phase'}</option>
+                {moves.map((p) => (
+                  <option key={p}>{p}</option>
+                ))}
               </select>
             </>
           ) : null}
-          <button type="button" disabled={!idle || !dispatch} onClick={() => run(phases.length > 0 ? { kind: 'meditation', to } : { kind: 'meditation' })}>
+          <button type="button" disabled={!idle || !dispatch} onClick={() => run(to !== '' && moves.includes(to) ? { kind: 'meditation', to } : { kind: 'meditation' })}>
             refill
           </button>
         </span>
