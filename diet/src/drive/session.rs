@@ -15295,7 +15295,7 @@ fn pool_refusal(state: &State, to: Option<&str>) -> Option<Refusal> {
 
 /// Why a declared meditation's move to `to` is refused, if it is: a move
 /// the operator takes alone, so refused where `operator_unilateral` is off
-/// as [`Session::move_phase`] refuses one (#1050's audit, finding 1); else
+/// as [`Session::move_phase`] refuses one (the app audit, finding 1); else
 /// the graph's refusal.
 /// A session with no interview has no phase graph, and is refused as the
 /// graph refuses (`no-phase-graph`).
@@ -34556,7 +34556,7 @@ pub(in crate::drive) mod tests {
     /// refuses is refused with the graph's reason, logged; with no phase
     /// named the session stays where it is; and the projection rebuilds the
     /// refilled head.
-    /// #1050's audit, finding 1: where `operator_unilateral` is off, a
+    /// the app audit, finding 1: where `operator_unilateral` is off, a
     /// declared meditation that names a phase is a move the operator takes
     /// alone, and is refused as `move_phase` refuses one; with no phase
     /// named, the meditation stays, and is taken.
