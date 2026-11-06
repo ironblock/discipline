@@ -662,7 +662,7 @@ mod tests {
         running_turn, shell_page, status_of,
     };
 
-    /// the app audit, finding 6: the window opens at once on the page's
+    /// The app audit, finding 6: the window opens at once on the page's
     /// "starting serve…", and a failure is said there, its reason in the URL.
     #[test]
     fn the_shells_own_page_says_starting_and_why_a_start_failed() {
@@ -676,7 +676,7 @@ mod tests {
         );
     }
 
-    /// the app audit, finding 5: the shell ends the session as the page
+    /// The app audit, finding 5: the shell ends the session as the page
     /// would, a `POST /commands` with the credential, before it lets serve go.
     #[test]
     fn the_shell_ends_the_session_with_a_command_as_the_page_sends_one() {
@@ -710,7 +710,7 @@ mod tests {
         assert_eq!(running_turn(r#"{"session":"idle"}"#), None);
     }
 
-    /// the app audit, finding 19: a link in the page opens in the system's
+    /// The app audit, finding 19: a link in the page opens in the system's
     /// browser when it is the web's or mail's, and nothing else opens.
     #[test]
     fn a_link_opens_outside_only_for_the_web_and_mail() {
@@ -734,7 +734,7 @@ mod tests {
         }
     }
 
-    /// the app audit, finding 23: the page reaches the sidecar only where
+    /// The app audit, finding 23: the page reaches the sidecar only where
     /// its CSP's `connect-src` admits, so an address it does not is refused
     /// at start, not met as an unreachable drive.
     #[test]
