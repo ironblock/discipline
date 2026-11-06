@@ -400,6 +400,23 @@ fn derived(lines: &[Map<String, Value>], priming: Option<&str>) -> Result<Derive
         .filter(|line| text(line, "kind") == Some("wrap.accepted"))
         .filter_map(|line| text(line, "entry"))
         .collect();
+    // The operator's entries a retire names, which their keep or edit binds
+    // by the entry's own id, and the retire picks by that name: their text
+    // may not pick them alone.
+    let retired: BTreeSet<&str> = lines
+        .iter()
+        .filter(|line| {
+            text(line, "kind") == Some("patch")
+                && text(line, "lane") == Some("operator")
+                && text(line, "op") == Some("retire")
+        })
+        .filter_map(|line| {
+            line.get("entry")
+                .and_then(Value::as_object)
+                .and_then(|entry| text(entry, "id"))
+        })
+        .collect();
+    let mut bound: BTreeSet<&str> = BTreeSet::new();
     let mut shadows: Vec<u64> = Vec::new();
     let mut refusals: Vec<u64> = Vec::new();
 
@@ -562,31 +579,47 @@ fn derived(lines: &[Map<String, Value>], priming: Option<&str>) -> Result<Derive
                 match text(line, "op") {
                     Some("add") => {
                         let entry = entry.ok_or_else(|| refused(line, "its entry is missing"))?;
-                        if !text(entry, "id").is_some_and(|id| wrapping.contains(id)) {
-                            steps.push(keep_step(before, entry, line)?);
+                        let id = text(entry, "id").unwrap_or_default();
+                        if !wrapping.contains(id) {
+                            let mut step = keep_step(before, entry, line)?;
+                            if retired.contains(id) {
+                                step["as"] = json!(id);
+                                bound.insert(id);
+                            }
+                            steps.push(step);
                         }
                     }
                     Some("retire") => {
                         let id = entry
                             .and_then(|entry| text(entry, "id"))
                             .unwrap_or_default();
+                        let pick = if bound.contains(id) {
+                            format!("${id}")
+                        } else {
+                            live.pick(id, line)?
+                        };
                         steps.push(json!({
                             "step": "retire",
-                            "pick": live.pick(id, line)?,
+                            "pick": pick,
                             "place": {"between": true},
                         }));
                     }
                     Some("supersede") => {
                         let old = text(line, "supersedes").unwrap_or_default();
-                        let new = entry
-                            .and_then(|entry| text(entry, "text"))
-                            .unwrap_or_default();
-                        steps.push(json!({
+                        let new = entry.and_then(|entry| text(entry, "id"));
+                        let mut step = json!({
                             "step": "edit",
                             "pick": live.pick(old, line)?,
-                            "text": new,
+                            "text": entry
+                                .and_then(|entry| text(entry, "text"))
+                                .unwrap_or_default(),
                             "place": {"between": true},
-                        }));
+                        });
+                        if let Some(new) = new.filter(|new| retired.contains(new)) {
+                            step["as"] = json!(new);
+                            bound.insert(new);
+                        }
+                        steps.push(step);
                     }
                     op => {
                         return Err(refused(
@@ -1345,7 +1378,24 @@ mod tests {
                     json!({"kind": "patch", "lane": "operator", "op": "retire",
                            "entry": {"id": "operator-6", "text": "a note"}}),
                 ],
-                vec![keep, json!({"step": "retire", "pick": "a note"})],
+                vec![
+                    json!({"step": "keep", "from": {"call": "call-1"}, "span": "a note", "as": "operator-6"}),
+                    json!({"step": "retire", "pick": "$operator-6"}),
+                ],
+            ),
+            (
+                "a retire of an entry whose text another live entry holds",
+                vec![
+                    json!({"kind": "patch", "lane": "mechanical", "op": "add",
+                           "entry": {"id": "mechanical/notes.md", "text": "files: a note"}}),
+                    kept("a note", "tool-result"),
+                    json!({"kind": "patch", "lane": "operator", "op": "retire",
+                           "entry": {"id": "operator-6", "text": "a note"}}),
+                ],
+                vec![
+                    json!({"step": "keep", "from": {"call": "call-1"}, "span": "a note", "as": "operator-6"}),
+                    json!({"step": "retire", "pick": "$operator-6"}),
+                ],
             ),
         ];
         let mut wrong = Vec::new();

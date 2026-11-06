@@ -18,7 +18,11 @@ approval_policy = "approvals are off: every command runs without a gate decision
 tool_surface = "standard"
 mechanical_capture = "on"
 
-interview_warrant = ["read", "scoping", "evidence", "trouble", "open"]
+# Four warrants fork on their own; `open` shadows, offered as a chip the operator accepts (#1031). It fired once as a
+# live warrant, so the example still shows every other one firing by itself (the app audit's page walk, F20).
+interview_warrant = ["read", "scoping", "evidence", "trouble"]
+interview_shadow = ["open"]
+interview_shadow_offer = "chips"
 interview_cadence = "per_class"
 interview_timing = "during_turn"
 interview_skip_self_recorded = "off"
