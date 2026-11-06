@@ -71,11 +71,13 @@ const replayPayload: Plugin = {
   },
 };
 
-// One config for the app (`pnpm dev`), Storybook and Vitest. Two test
+// One config for the app (`pnpm dev`), Storybook and Vitest. Three test
 // projects: every story that is not tagged `!test` is a browser test
-// (`storybook`), and every `*.test.ts` is a plain unit test in Node (`unit`)
+// (`storybook`); every `*.test.ts` is a plain unit test in Node (`unit`)
 // -- the fold, the transports, the layout maths: cases that are sequences,
-// not pictures.
+// not pictures; and every `*.browser.test.tsx` drives a component with the
+// browser's own clicks and keys (`browser`), which a story's synthetic
+// events are not.
 export default defineConfig(({ mode }) => ({
   plugins: [react(), ...(mode === 'replay' ? [replayPayload] : [])],
   // The replay and the app build both resolve every asset and route against the page, never the origin root (#716):
@@ -97,6 +99,21 @@ export default defineConfig(({ mode }) => ({
       {
         extends: true,
         test: { name: 'unit', include: ['src/**/*.test.ts'], environment: 'node' },
+      },
+      {
+        // A component under a real browser's own clicks, focus and selection (#1050's audit): what a synthetic event
+        // cannot show, such as a selection a focus moves.
+        extends: true,
+        test: {
+          name: 'browser',
+          include: ['src/**/*.browser.test.tsx'],
+          browser: {
+            enabled: true,
+            headless: true,
+            provider: playwright({}),
+            instances: [{ browser: 'chromium' }],
+          },
+        },
       },
       {
         extends: true,
