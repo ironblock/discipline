@@ -3,7 +3,7 @@ import { createContext, useContext, useState } from 'react';
 import type { Ack, Decision, Prompt } from '../drive/transport.ts';
 import type { ToolNode } from '../session/fold.ts';
 import { SegmentList } from './GateSegments.tsx';
-import { heldOf } from './sets.ts';
+import { heldOf, refusalOf } from './sets.ts';
 import './approval.css';
 
 /**
@@ -83,7 +83,7 @@ export function ApprovalPrompt({ prompt, decide }: { readonly prompt: Prompt; re
         ))}
         {refused !== undefined ? (
           <span className="ex-approval__refused" role="status">
-            not taken: {refused}
+            {refusalOf(refused).known ? refusalOf(refused).label : `not taken: ${refused}`}
           </span>
         ) : null}
       </div>

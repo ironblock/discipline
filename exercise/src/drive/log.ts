@@ -111,8 +111,11 @@ export type ForkOutcome = Open<'value' | 'decline' | 'mimicry' | 'unparseable' |
 /** A change to working memory: `diet`'s ops, ruled on #117 (naming 4). */
 export type PatchOp = Open<'add' | 'supersede' | 'resolve' | 'retire' | 'park' | 'edit'>;
 
-/** How an entry was known -- `authority`, ruled on #117 (naming 5). */
-export type Authority = Open<'stated' | 'extracted' | 'observed' | 'arm'>;
+/**
+ * How an entry was known: diet's `entry.authority` (log v31, v39; `V0.AUTHORITIES`), or, in a recording placed in the
+ * surface's older shape (#374, `projection.ts`'s `shapes`), the patch's own `authority`, ruled on #117 (naming 5).
+ */
+export type Authority = Open<V0.Authority | 'stated' | 'extracted' | 'arm'>;
 
 /** Why a meditation fired: the format's words (log v6, #493), open. A served session writes only `operator`. */
 export type MeditationReason = Open<V0.MeditationReason>;
@@ -274,36 +277,24 @@ export interface ForkSettled extends At {
   readonly passed_over?: readonly V0.PassedOverRegion[];
 }
 
-export interface Entry {
-  /** Working memory's own id for the entry. */
-  readonly id: string;
-  readonly category?: string;
-  /** Who vouches for a self-capture note (log v31, contract set c3): `observed` or `self-stated`; or `user-stated` (log v39, #1050). */
-  readonly authority?: 'observed' | 'user-stated' | 'self-stated';
-  /** What an operator's keep kept from (log v39, #1050). */
-  readonly kept_from?: 'ask' | 'tool-result' | 'answer';
-  readonly text: string;
-}
+/** A union's members each without `K`: `Omit` over a union keeps only the keys every member has. */
+type OmitEach<T, K extends PropertyKey> = T extends unknown ? Omit<T, K> : never;
 
-/** A change to working memory, from the fork that produced it. */
-export interface Patch extends At {
-  readonly kind: 'patch';
-  /** The `seq` of the `fork` that produced it; absent for the trunk's own change, which names its `lane` (#627). */
-  readonly fork?: number;
-  /** The trunk's lane that made it, when no fork did (log v7, #627): today always `self-capture`. */
-  readonly lane?: string;
+/** A working-memory entry, as a `patch` carries it: diet's (generated, so a rename fails `tsc`), its sets open. */
+export type Entry = Readonly<Omit<V0.PatchEntry, 'authority' | 'kept_from'>> & {
+  /** Who vouches for it (log v31, v39): `observed`, `self-stated` or `user-stated` for a note; `operator` for a keep. */
+  readonly authority?: Open<V0.Authority>;
+  /** What an operator's keep kept from (log v39, #1050). */
+  readonly kept_from?: Open<V0.KeptFrom>;
+};
+
+/** A change to working memory: diet's line (generated, so a rename fails `tsc`), from the fork or the trunk's lane that made it. */
+export type Patch = Readonly<OmitEach<V0.PatchLine, 'op' | 'entry'>> & {
   readonly op: PatchOp;
   readonly entry: Entry;
-  /** For `supersede`: the entry this one replaces. */
-  readonly supersedes?: string;
+  /** How the entry was known, in a recording placed in the surface's older shape (#374): diet writes it on the entry. */
   readonly authority?: Authority;
-  /** The tangent open when it was made (log v7, #608): the entry is that tangent's, to be ruled on at its close. */
-  readonly tangent?: string;
-  /** On a merged `add` (log v8, `note_dedupe`, #872): the live note of its kind it was merged into, as similar. With `cosine`. */
-  readonly merged?: string;
-  /** Their TF-IDF cosine, four decimals as diet wrote it. With `merged`. */
-  readonly cosine?: string;
-}
+};
 
 /** The operator opened a tangent (log v7, #608): the trunk as it stood is the point a close rolls back to. */
 export type TangentOpen = V0.TangentOpenLine;
@@ -380,6 +371,8 @@ export type RequestRetried = V0.RequestRetriedLine;
 /** A trunk request held until the forks in flight settled, its prompt and the clamp's floor not fitting beside them
  * (v8, #782). Folded, not yet drawn: the kitchen sink writes one since its window grew (#931). */
 export type TrunkWaited = V0.TrunkWaitedLine;
+/** A trunk request's output cap clamped to fit beside the forks in flight (v8, #782). Folded, not yet drawn. */
+export type TrunkClamped = V0.TrunkClampedLine;
 /** A scenario runner's grade of an attempt, at the operator's word and never sent to the model (v18, #942). Folded,
  * not yet drawn. */
 export type Grade = V0.GradeLine;
@@ -427,6 +420,7 @@ export type LogLine =
   | Grade
   | MeditationSkipped
   | TrunkWaited
+  | TrunkClamped
   | WarrantGated
   | Flag
   | PatchRefused
@@ -441,6 +435,10 @@ export type LogLine =
 export type PhaseRuled = V0.PhaseRuledLine;
 
 export type Kind = LogLine['kind'];
+
+/** A kind diet's bindings name that is no line here (#1050's audit, finding 8): `tsc` fails while there is one. */
+type Unread = Exclude<V0.Kind, Kind>;
+export const EVERY_KIND_READ: [Unread] extends [never] ? true : Unread = true;
 
 /** The line of one kind. */
 export type LineOf<K extends Kind> = Extract<LogLine, { readonly kind: K }>;

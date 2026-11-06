@@ -12,7 +12,7 @@
  * node waits on, which is what the gaps overlay outlines.
  */
 
-import type { Approval, Authority, FailReason, FileRef, ForkLane, ForkOutcome, IsolationWord, Lane, LineOf, LogLine, Need, NetworkWord, Open, PatchOp, MeditationReason, SettleReason, Timings, Tool, ToolOutcome, ToolRefusal } from '../drive/log.ts';
+import type { Approval, Authority, FailReason, FileRef, ForkLane, ForkOutcome, IsolationWord, Lane, LineOf, LogLine, Need, NetworkWord, Open, Patch, PatchOp, MeditationReason, SettleReason, Timings, Tool, ToolOutcome, ToolRefusal } from '../drive/log.ts';
 import { needsOf } from '../drive/log.ts';
 import { receiptOf } from './receipt.ts';
 import type { Receipt } from './receipt.ts';
@@ -687,6 +687,11 @@ function generation(g: GenerationBuilder, unnamed: number): Generation {
 }
 
 /** A call's arguments read as the object a tool takes; a text that does not read as one (yet) is no arguments. */
+/** How a patch's entry was known: on the entry, as diet writes it (log v31), or on the patch, in the surface's older shape (#374). */
+function authorityOf(patch: Patch): Authority | undefined {
+  return patch.entry.authority ?? patch.authority;
+}
+
 function objectOf(text: string): Readonly<Record<string, unknown>> {
   try {
     const value: unknown = JSON.parse(text);
@@ -995,7 +1000,8 @@ export function fold(written: readonly LogLine[]): Session {
         const old = entries.get(target);
         const base = {
           ...(e.entry.category !== undefined ? { category: e.entry.category } : {}),
-          ...(e.authority !== undefined ? { authority: e.authority } : {}),
+          // diet writes it on the entry (log v31); a recording in the surface's older shape, on the patch (#374).
+          ...(authorityOf(e) !== undefined ? { authority: authorityOf(e) } : {}),
           text: e.entry.text,
           by: id(e.seq),
           seq: e.seq,
@@ -1089,6 +1095,9 @@ export function fold(written: readonly LogLine[]): Session {
         break;
       // A trunk request held for the forks in flight (#782): its wait, drawn on no node yet.
       case 'trunk.waited':
+        break;
+      // A trunk request's output cap clamped beside the forks in flight (#782): drawn on no node yet.
+      case 'trunk.clamped':
         break;
       // A step's warrant-gate decision (#850): one line per probe, onto the step it decided (#862).
       case 'warrant.gated':
@@ -1528,7 +1537,7 @@ export function fold(written: readonly LogLine[]): Session {
           ...(p.entry.category !== undefined ? { category: p.entry.category } : {}),
           text: p.entry.text,
           ...(p.supersedes ? { supersedes: p.supersedes } : {}),
-          ...(p.authority ? { authority: p.authority } : {}),
+          ...(authorityOf(p) !== undefined ? { authority: authorityOf(p) } : {}),
           ...(p.op === 'add' && p.merged !== undefined && p.cosine !== undefined ? { merged: { into: p.merged, cosine: p.cosine } } : {}),
           ...provenance(p),
         }),
