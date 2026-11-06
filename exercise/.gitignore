@@ -11,3 +11,6 @@ test-results/
 src/gate/wasm/
 # tsc -b writes its build cache beside the config: built every run, never committed.
 *.tsbuildinfo
+# What a failing browser test leaves (vitest's browser project): screenshots and attachments, never committed.
+.vitest-attachments/
+__screenshots__/
