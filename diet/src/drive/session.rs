@@ -34550,13 +34550,7 @@ pub(in crate::drive) mod tests {
         reads_whole(&session);
     }
 
-    /// #563: a served session opens in its graph's first phase and logs the
-    /// graph; a meditation that names a move the graph allows moves, the refill
-    /// renders the new phase, and the meditation line says from and to; a move it
-    /// refuses is refused with the graph's reason, logged; with no phase
-    /// named the session stays where it is; and the projection rebuilds the
-    /// refilled head.
-    /// the app audit, finding 1: where `operator_unilateral` is off, a
+    /// The app audit, finding 1: where `operator_unilateral` is off, a
     /// declared meditation that names a phase is a move the operator takes
     /// alone, and is refused as `move_phase` refuses one; with no phase
     /// named, the meditation stays, and is taken.
@@ -34589,6 +34583,12 @@ pub(in crate::drive) mod tests {
             .expect("a meditation that stays");
     }
 
+    /// #563: a served session opens in its graph's first phase and logs the
+    /// graph; a meditation that names a move the graph allows moves, the refill
+    /// renders the new phase, and the meditation line says from and to; a move it
+    /// refuses is refused with the graph's reason, logged; with no phase
+    /// named the session stays where it is; and the projection rebuilds the
+    /// refilled head.
     #[test]
     #[allow(clippy::too_many_lines)]
     fn a_served_meditation_moves_between_the_phases_its_graph_allows() {
