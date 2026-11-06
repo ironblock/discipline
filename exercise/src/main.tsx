@@ -3,7 +3,8 @@ import { createRoot } from 'react-dom/client';
 
 import { App } from './App.tsx';
 import { driveBase } from './drive/base.ts';
-import { credentialedWeb, shellAuthorization } from './drive/credential.ts';
+import { credentialedWeb, shellCredential } from './drive/credential.ts';
+import { shellPage } from './drive/shellPage.ts';
 import { SESSIONS } from './drive/sessions.ts';
 import type { SessionName } from './drive/sessions.ts';
 import './theme/tokens.css';
@@ -29,15 +30,33 @@ const overrides = Object.fromEntries(Object.keys(PREFS).map((name) => [name, par
 const root = document.getElementById('root');
 if (!root) throw new Error('index.html has no #root');
 
-// The native shell holds the drive's credential and hands it over here, never in a URL (#719, `drive/credential.ts`);
-// in a browser there is none, and Vite's proxy presents it.
-const authorization = drive ? await shellAuthorization() : undefined;
-const web = authorization ? credentialedWeb(authorization) : undefined;
+/** Say TEXT in the window in place of the app: the shell's start, or why it has no drive (the app audit, finding 6). */
+function say(text: string, role: 'status' | 'alert'): void {
+  const said = document.createElement('p');
+  said.setAttribute('role', role);
+  said.className = 'ex-shell-page';
+  said.textContent = text;
+  root!.replaceChildren(said);
+}
 
-createRoot(root).render(
-  <StrictMode>
-    <Preferred overrides={overrides}>
-      <App speed={speed} drive={drive} base={base} {...(web ? { web } : {})} {...(recording ? { recording } : {})} />
-    </Preferred>
-  </StrictMode>,
-);
+const shell = shellPage(window.location.search);
+if (shell?.kind === 'starting') say('starting serve…', 'status');
+else if (shell?.kind === 'failed') say(shell.why, 'alert');
+else await mount();
+
+/** The app, on its drive; or, when the shell will not hand over the credential, why. */
+async function mount(): Promise<void> {
+  // The native shell holds the drive's credential and hands it over here, never in a URL (#719, `drive/credential.ts`);
+  // in a browser there is none, and Vite's proxy presents it. A shell that will not hand it over is said so (the app audit).
+  const credential = drive ? await shellCredential() : {};
+  if ('why' in credential) return say(credential.why, 'alert');
+  const web = credential.authorization ? credentialedWeb(credential.authorization) : undefined;
+
+  createRoot(root!).render(
+    <StrictMode>
+      <Preferred overrides={overrides}>
+        <App speed={speed} drive={drive} base={base} {...(web ? { web } : {})} {...(recording ? { recording } : {})} />
+      </Preferred>
+    </StrictMode>,
+  );
+}

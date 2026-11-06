@@ -36,8 +36,11 @@
 
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
+use std::io::{Read as _, Write as _};
+use std::net::TcpStream;
 use std::path::PathBuf;
-use std::sync::Mutex;
+use std::sync::{Arc, Condvar, Mutex};
+use std::time::{Duration, Instant};
 
 use base64::Engine as _;
 
@@ -57,11 +60,27 @@ enum Drive {
     Profile(String),
 }
 
-/// The sidecar, held so it is killed when the app exits.
-struct Sidecar(Mutex<Option<CommandChild>>);
+/// The sidecar, held so its session is ended when the app exits.
+struct Sidecar(Mutex<Option<Held>>);
 
-/// The `Authorization` value for the drive, when it asks for one.
-struct Credential(Option<String>);
+/// A running sidecar: the process, where it listens, and whether it has
+/// exited, set when its output says so.
+struct Held {
+    child: CommandChild,
+    listening: String,
+    exited: Arc<(Mutex<bool>, Condvar)>,
+}
+
+/// How long a quit waits for serve to end its session and exit before it is
+/// killed (the app audit, finding 5).
+const QUIT_WAIT: Duration = Duration::from_secs(10);
+
+/// The `Authorization` value for the drive, when it asks for one: held once
+/// the drive's start has read it, after the window opened.
+struct Credential(Mutex<Option<String>>);
+
+/// Set when the app quits: a sidecar's exit then is the quit's, not news.
+static QUITTING: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
 
 /// The keychain item's service; its account is the profile.
 const KEYCHAIN_SERVICE: &str = "app.discipline.exercise";
@@ -78,7 +97,7 @@ enum Auth {
 #[tauri::command]
 #[allow(clippy::needless_pass_by_value)] // a command takes its state by value
 fn drive_authorization(credential: tauri::State<'_, Credential>) -> Option<String> {
-    credential.0.clone()
+    credential.0.lock().ok().and_then(|held| held.clone())
 }
 
 /// A system notification of `title` and `body`, from the page's own window
@@ -117,15 +136,16 @@ fn main() {
         .plugin(tauri_plugin_shell::init())
         .plugin(tauri_plugin_notification::init())
         .manage(Sidecar(Mutex::new(None)))
+        .manage(Credential(Mutex::new(None)))
         .invoke_handler(tauri::generate_handler![drive_authorization, notify])
         .setup(|app| {
             // A start that cannot drive says why and exits, as a refused
             // flag does, rather than panicking; a sidecar it started goes too.
             if let Err(why) = start(app) {
                 if let Ok(mut held) = app.state::<Sidecar>().0.lock()
-                    && let Some(child) = held.take()
+                    && let Some(held) = held.take()
                 {
-                    let _ = child.kill();
+                    let _ = held.child.kill();
                 }
                 eprintln!("exercise: {why}");
                 std::process::exit(1);
@@ -140,9 +160,16 @@ fn main() {
     app.run(|handle, event| {
         if let RunEvent::Exit = event
             && let Ok(mut held) = handle.state::<Sidecar>().0.lock()
-            && let Some(child) = held.take()
+            && let Some(held) = held.take()
         {
-            let _ = child.kill();
+            QUITTING.store(true, std::sync::atomic::Ordering::SeqCst);
+            let authorization = handle
+                .state::<Credential>()
+                .0
+                .lock()
+                .ok()
+                .and_then(|held| held.clone());
+            quit(held, authorization.as_deref());
         }
     });
 }
@@ -161,7 +188,40 @@ fn start(app: &mut tauri::App) -> Result<(), String> {
         .notification()
         .on_action(move |_| bring_forward(&clicked))
         .map_err(|why| why.to_string())?;
-    let settings = settings(&handle)?;
+    // The window opens at once (the app audit, finding 6), on the shell's own
+    // page saying the start; then it shows the drive's page, or why there is
+    // none, rather than a stderr no one launched from Finder sees.
+    WebviewWindowBuilder::new(
+        app,
+        "main",
+        WebviewUrl::App(shell_page("starting", None)?.into()),
+    )
+    .title("exercise")
+    .inner_size(1280.0, 860.0)
+    // A link in model output opens in the system's browser when it is the
+    // web's or mail's (the app audit, finding 19); no window ever opens here.
+    .on_new_window(|url, _| {
+        if openable(&url) {
+            let _ = tauri_plugin_opener::open_url(url.as_str(), None::<&str>);
+        }
+        tauri::webview::NewWindowResponse::Deny
+    })
+    .build()
+    .map_err(|why| why.to_string())?;
+    std::thread::spawn(move || {
+        let shown = drive_page(&handle).unwrap_or_else(|why| {
+            eprintln!("exercise: {why}");
+            shell_page("failed", Some(&why)).unwrap_or_default()
+        });
+        show(&handle, &shown);
+    });
+    Ok(())
+}
+
+/// The drive found, its credential held, the sidecar started when it is one:
+/// the drive's page.
+fn drive_page(handle: &AppHandle) -> Result<String, String> {
+    let settings = settings(handle)?;
     let drive = setting(settings.as_ref())?;
     // The credential's text, `user:password`, and how the sidecar is given it.
     let (pair, auth) = match auth(settings.as_ref())? {
@@ -181,7 +241,9 @@ fn start(app: &mut tauri::App) -> Result<(), String> {
                 .ok_or_else(|| "the credential is not user:password, as serve reads it".to_owned())
         })
         .transpose()?;
-    app.manage(Credential(credential));
+    if let Ok(mut held) = handle.state::<Credential>().0.lock() {
+        *held = credential;
+    }
     let drive = match drive {
         Drive::Remote(url) => url,
         Drive::Profile(profile) => {
@@ -190,19 +252,35 @@ fn start(app: &mut tauri::App) -> Result<(), String> {
                 (Some(Auth::Keychain), Some(pair)) => Some(Given::Stdin(pair)),
                 _ => None,
             };
-            let (url, child) = sidecar(&handle, &profile, given)?;
-            if let Ok(mut held) = handle.state::<Sidecar>().0.lock() {
-                *held = Some(child);
+            let (url, held) = sidecar(handle, &profile, given)?;
+            if let Ok(mut slot) = handle.state::<Sidecar>().0.lock() {
+                *slot = Some(held);
             }
             url
         }
     };
-    WebviewWindowBuilder::new(app, "main", WebviewUrl::App(page(&drive)?.into()))
-        .title("exercise")
-        .inner_size(1280.0, 860.0)
-        .build()
-        .map_err(|why| why.to_string())?;
-    Ok(())
+    page(&drive)
+}
+
+/// Show the page at RELATIVE, the bundle's, in the main window.
+fn show(handle: &AppHandle, relative: &str) {
+    if let Some(window) = handle.get_webview_window("main")
+        && let Ok(base) = window.url()
+        && let Ok(url) = base.join(relative)
+    {
+        let _ = window.navigate(url);
+    }
+}
+
+/// The shell's own page (`src/drive/shellPage.ts`): `starting`, or `failed`
+/// with why.
+fn shell_page(kind: &str, why: Option<&str>) -> Result<String, String> {
+    let mut url = Url::parse("tauri://localhost/index.html").map_err(|why| why.to_string())?;
+    url.query_pairs_mut().append_pair("shell", kind);
+    if let Some(why) = why {
+        url.query_pairs_mut().append_pair("why", why);
+    }
+    Ok(format!("index.html?{}", url.query().unwrap_or_default()))
 }
 
 /// settings.json in the app's config directory, when there is one.
@@ -350,11 +428,7 @@ enum Given<'a> {
 /// `serve --profile <profile>` as the sidecar, admitting the webview's
 /// origin, with the shell's credential when it has one; its URL, from the
 /// first line it prints, and the process.
-fn sidecar(
-    app: &AppHandle,
-    profile: &str,
-    given: Option<Given>,
-) -> Result<(String, CommandChild), String> {
+fn sidecar(app: &AppHandle, profile: &str, given: Option<Given>) -> Result<(String, Held), String> {
     let mut args = vec!["serve", "--profile", profile, "--allow-origin", ORIGIN];
     match given {
         Some(Given::File(file)) => args.extend(["--auth-file", file]),
@@ -384,17 +458,61 @@ fn sidecar(
                 else {
                     return Err(format!("serve's first line names no address: {first}"));
                 };
+                // The page reaches serve only where its CSP admits (finding 23).
+                if !csp_admits(listening) {
+                    let _ = child.kill();
+                    return Err(format!(
+                        "serve listens on {listening}, which the page's CSP does not admit: \
+                         give the profile --listen 127.0.0.1"
+                    ));
+                }
                 let url = format!("http://{listening}/");
+                let exited = Arc::new((Mutex::new(false), Condvar::new()));
+                let told = Arc::clone(&exited);
+                let shown = app.clone();
                 // What serve says after its first line goes to the shell's
-                // own stderr, so the channel never fills.
+                // own stderr, so the channel never fills; its exit is told to
+                // a quit waiting on it.
                 tauri::async_runtime::spawn(async move {
                     while let Some(event) = events.recv().await {
-                        if let CommandEvent::Stderr(line) | CommandEvent::Stdout(line) = event {
-                            eprintln!("serve: {}", String::from_utf8_lossy(&line).trim_end());
+                        match event {
+                            CommandEvent::Stderr(line) | CommandEvent::Stdout(line) => {
+                                eprintln!("serve: {}", String::from_utf8_lossy(&line).trim_end());
+                            }
+                            CommandEvent::Terminated(ended) => {
+                                eprintln!("serve: exited ({:?})", ended.code);
+                                // Outside a quit, the window says the drive is gone and why.
+                                if !QUITTING.load(std::sync::atomic::Ordering::SeqCst) {
+                                    let code = ended.code.map_or_else(
+                                        || "a signal".to_owned(),
+                                        |code| format!("code {code}"),
+                                    );
+                                    if let Ok(page) = shell_page(
+                                        "failed",
+                                        Some(&format!("serve exited ({code})")),
+                                    ) {
+                                        show(&shown, &page);
+                                    }
+                                }
+                                let (gone, changed) = &*told;
+                                if let Ok(mut gone) = gone.lock() {
+                                    *gone = true;
+                                }
+                                changed.notify_all();
+                            }
+                            _ => {}
                         }
                     }
                 });
-                return Ok((url, child));
+                let listening = listening.to_owned();
+                return Ok((
+                    url,
+                    Held {
+                        child,
+                        listening,
+                        exited,
+                    },
+                ));
             }
             CommandEvent::Stderr(line) => {
                 eprintln!("serve: {}", String::from_utf8_lossy(&line).trim_end());
@@ -408,6 +526,128 @@ fn sidecar(
     Err("serve's output closed before it listened".to_owned())
 }
 
+/// The app is quitting (the app audit, finding 5): end the session as the
+/// page would -- `end`, and with a turn in flight, a cancel of it first --
+/// then wait for serve to write its record and exit, and kill it only if it
+/// has not within [`QUIT_WAIT`]. No signal handler: #230's ruling.
+fn quit(held: Held, authorization: Option<&str>) {
+    let deadline = Instant::now() + QUIT_WAIT;
+    while Instant::now() < deadline {
+        match exchange(
+            &held.listening,
+            &command_request(&held.listening, authorization, r#"{"kind":"end"}"#),
+        )
+        .as_deref()
+        .and_then(status_of)
+        {
+            Some(409) => {
+                let state = exchange(
+                    &held.listening,
+                    &get_request(&held.listening, authorization, "/state"),
+                );
+                if let Some(turn) = state
+                    .as_deref()
+                    .and_then(|reply| reply.split_once("\r\n\r\n"))
+                    .and_then(|(_, body)| running_turn(body))
+                {
+                    let cancel = format!(r#"{{"kind":"cancel","turn":{turn}}}"#);
+                    let _ = exchange(
+                        &held.listening,
+                        &command_request(&held.listening, authorization, &cancel),
+                    );
+                }
+                std::thread::sleep(Duration::from_millis(200));
+            }
+            _ => break,
+        }
+    }
+    let (gone, changed) = &*held.exited;
+    let left = deadline.saturating_duration_since(Instant::now());
+    let exited = gone
+        .lock()
+        .ok()
+        .and_then(|guard| changed.wait_timeout_while(guard, left, |gone| !*gone).ok())
+        .is_some_and(|(gone, _)| *gone);
+    if !exited {
+        let _ = held.child.kill();
+    }
+}
+
+/// A `POST /commands` of `body`, with the credential when there is one, as
+/// the page sends a command.
+fn command_request(listening: &str, authorization: Option<&str>, body: &str) -> String {
+    let credential = authorization
+        .map(|value| format!("Authorization: {value}\r\n"))
+        .unwrap_or_default();
+    format!(
+        "POST /commands HTTP/1.1\r\nHost: {listening}\r\n{credential}Content-Type: application/json\r\n\
+         Content-Length: {}\r\nConnection: close\r\n\r\n{body}",
+        body.len()
+    )
+}
+
+/// A `GET` of `path`, with the credential when there is one.
+fn get_request(listening: &str, authorization: Option<&str>, path: &str) -> String {
+    let credential = authorization
+        .map(|value| format!("Authorization: {value}\r\n"))
+        .unwrap_or_default();
+    format!("GET {path} HTTP/1.1\r\nHost: {listening}\r\n{credential}Connection: close\r\n\r\n")
+}
+
+/// One request to serve on loopback, and its whole reply; none when serve
+/// does not answer within a second or two.
+fn exchange(listening: &str, request: &str) -> Option<String> {
+    let mut stream = TcpStream::connect(listening).ok()?;
+    stream.set_read_timeout(Some(Duration::from_secs(2))).ok()?;
+    stream
+        .set_write_timeout(Some(Duration::from_secs(1)))
+        .ok()?;
+    stream.write_all(request.as_bytes()).ok()?;
+    let mut reply = Vec::new();
+    let _ = stream.read_to_end(&mut reply);
+    Some(String::from_utf8_lossy(&reply).into_owned())
+}
+
+/// An HTTP reply's status code.
+fn status_of(reply: &str) -> Option<u16> {
+    reply
+        .strip_prefix("HTTP/1.1 ")?
+        .split(' ')
+        .next()?
+        .parse()
+        .ok()
+}
+
+/// The turn `GET /state` says is running, or waits on an approval: what a
+/// quit cancels so that `end` is taken.
+fn running_turn(body: &str) -> Option<u64> {
+    let state: serde_json::Value = serde_json::from_str(body).ok()?;
+    let turn = state.get("turn")?;
+    if matches!(
+        turn.get("state")?.as_str()?,
+        "running" | "awaiting-approval"
+    ) {
+        turn.get("number")?.as_u64()
+    } else {
+        None
+    }
+}
+
+/// Whether a link the page opens goes to the system's browser: the web's
+/// and mail's alone (the app audit, finding 19).
+fn openable(url: &Url) -> bool {
+    matches!(url.scheme(), "http" | "https" | "mailto")
+}
+
+/// Whether the page's CSP (`connect-src`, `tauri.conf.json`) admits a drive
+/// at `listening`, serve's `host:port`: loopback by name or by 127.0.0.1
+/// (the app audit, finding 23).
+fn csp_admits(listening: &str) -> bool {
+    listening.rsplit_once(':').is_some_and(|(host, port)| {
+        matches!(host, "127.0.0.1" | "localhost") && port.parse::<u16>().is_ok()
+    })
+}
+
 /// The bundle's page, told its drive by `?drive=<url>`.
 fn page(drive: &str) -> Result<String, String> {
     let mut url = Url::parse("tauri://localhost/index.html").map_err(|why| why.to_string())?;
@@ -417,7 +657,95 @@ fn page(drive: &str) -> Result<String, String> {
 
 #[cfg(test)]
 mod tests {
-    use super::{Auth, Drive, basic, chosen_auth, remote};
+    use super::{
+        Auth, Drive, basic, chosen_auth, command_request, csp_admits, openable, remote,
+        running_turn, shell_page, status_of,
+    };
+
+    /// The app audit, finding 6: the window opens at once on the page's
+    /// "starting serve…", and a failure is said there, its reason in the URL.
+    #[test]
+    fn the_shells_own_page_says_starting_and_why_a_start_failed() {
+        assert_eq!(
+            shell_page("starting", None).as_deref(),
+            Ok("index.html?shell=starting")
+        );
+        assert_eq!(
+            shell_page("failed", Some("serve exited (code 1)")).as_deref(),
+            Ok("index.html?shell=failed&why=serve+exited+%28code+1%29")
+        );
+    }
+
+    /// The app audit, finding 5: the shell ends the session as the page
+    /// would, a `POST /commands` with the credential, before it lets serve go.
+    #[test]
+    fn the_shell_ends_the_session_with_a_command_as_the_page_sends_one() {
+        assert_eq!(
+            command_request("127.0.0.1:7801", Some("Basic YTpi"), r#"{"kind":"end"}"#),
+            "POST /commands HTTP/1.1\r\nHost: 127.0.0.1:7801\r\nAuthorization: Basic YTpi\r\n\
+             Content-Type: application/json\r\nContent-Length: 14\r\nConnection: close\r\n\r\n\
+             {\"kind\":\"end\"}"
+        );
+        assert!(!command_request("127.0.0.1:7801", None, "{}").contains("Authorization"));
+        assert_eq!(status_of("HTTP/1.1 409 Conflict\r\n\r\n{}"), Some(409));
+        assert_eq!(status_of("garbage"), None);
+    }
+
+    /// With a turn in flight `end` is refused (`in-flight`), so the shell
+    /// cancels the turn `/state` names as running, then ends.
+    #[test]
+    fn a_running_turn_is_read_from_the_state() {
+        assert_eq!(
+            running_turn(r#"{"turn":{"number":3,"state":"running"}}"#),
+            Some(3)
+        );
+        assert_eq!(
+            running_turn(r#"{"turn":{"number":3,"state":"awaiting-approval"}}"#),
+            Some(3)
+        );
+        assert_eq!(
+            running_turn(r#"{"turn":{"number":3,"state":"settled","reason":"final"}}"#),
+            None
+        );
+        assert_eq!(running_turn(r#"{"session":"idle"}"#), None);
+    }
+
+    /// The app audit, finding 19: a link in the page opens in the system's
+    /// browser when it is the web's or mail's, and nothing else opens.
+    #[test]
+    fn a_link_opens_outside_only_for_the_web_and_mail() {
+        for opened in [
+            "https://docs.example/page",
+            "http://localhost:5173/",
+            "mailto:someone@example.com",
+        ] {
+            let url = tauri::Url::parse(opened).expect("a URL");
+            assert!(openable(&url), "{opened}");
+        }
+        for kept in [
+            "file:///etc/hosts",
+            "javascript:alert(1)",
+            "tauri://localhost/index.html",
+            "data:text/html,hi",
+            "ssh://example.com",
+        ] {
+            let url = tauri::Url::parse(kept).expect("a URL");
+            assert!(!openable(&url), "{kept}");
+        }
+    }
+
+    /// The app audit, finding 23: the page reaches the sidecar only where
+    /// its CSP's `connect-src` admits, so an address it does not is refused
+    /// at start, not met as an unreachable drive.
+    #[test]
+    fn the_sidecar_is_reached_only_where_the_csp_admits() {
+        for admitted in ["127.0.0.1:7801", "localhost:7801"] {
+            assert!(csp_admits(admitted), "{admitted}");
+        }
+        for refused in ["[::1]:7801", "0.0.0.0:7801", "drive.example:7801"] {
+            assert!(!csp_admits(refused), "{refused}");
+        }
+    }
 
     #[test]
     fn the_credential_is_named_by_the_keychain_or_a_file_never_both() {

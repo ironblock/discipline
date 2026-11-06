@@ -12,6 +12,7 @@ This crate is its own Cargo workspace, outside the repository's, so CI's cargo n
 | `tauri-build` | `=2.7.3` | 2026-10-14 |
 | `tauri-plugin-shell` | `=2.5.0` | 2026-10-10 |
 | `tauri-plugin-notification` | `=2.7.0` | 2026-10-14 |
+| `tauri-plugin-opener` | `=2.7.2` | 2026-10-14 |
 | `ctrlc` (`termination`) | `=3.5.2` | 2026-02-10 |
 | `base64` | `=0.23.1` | 2026-08-04 |
 | `security-framework` (macOS only) | `=3.7.0` | 2026-02-20 |
@@ -70,6 +71,12 @@ When the session begins to wait on the operator, the page asks the shell to tell
 - the model's phase proposal (#651): *the model proposes a phase move*, with its from and to.
 
 Each is told once, as it begins.
+
+## Links
+
+A link in model output opens in the system's browser when it is http, https or mailto (`on_new_window`, the app audit); anything else, and any new window, is refused. The opener is called from Rust alone: the page is granted none of its commands.
+
+A profile whose serve listens anywhere but `127.0.0.1` or `localhost` is refused at start, since the page's CSP connects nowhere else.
 
 ## Attachments
 
