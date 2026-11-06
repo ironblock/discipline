@@ -122,6 +122,7 @@ What the deny list does:
 - A `$job` anywhere in a reply is the last background job id (`bg_` and eight hex digits) the request carries: what `task_stop` names, which no script can know ahead of the run.
 - A `$entry:<call>/<field>` anywhere in a reply is the last record entry id for that call and field the request carries, read from the request's decoded text: `r`, the seq diet built it at, then `/<call>/<field>`, as `resolve_entry` names it. A line logged earlier moves the seq, so a reply names the entry by its call and field instead. With none in the request, it stays as written.
 - A `$operator-entry` anywhere in a reply is the last operator entry id the request carries, `operator-` and the seq serve coined it at, for the same reason. The trunk sees working memory, and so those ids, only in a refill's render: a reply that names one follows a meditation. With none in the request, it stays as written.
+- A placeholder doubled is that text itself, written once: `$$job` is `$job`, `$$entry:call-1/note` is `$entry:call-1/note`. A `$$` before no placeholder (a shell's `$$`, ast-grep's `$$$A`) stays as written. This is the format's one escape rule, also used by `pick` and `where`.
 - `prompt_tokens` (optional) is the prompt the reply's usage reports, in tokens; absent, the canned server's 600. A trunk that large is what a budget meditation measures.
 - On a hosted substrate (`server_kind = "api"`, #555) a reply may also say what only that wire carries; any other substrate refuses the run:
   - `thinking` (optional): the thinking before the answer, sent as a thinking block with a constructed signature;
@@ -170,7 +171,7 @@ What the deny list does:
 
 - After each admitted ask, meditation or refill, the runner waits until `GET /state` is `idle`.
 - `patience` (optional) on a step it waits after -- an ask to be admitted, a `fork`, a `suggestion` that accepts, `declare-meditation`, `refill-anyway`, `rule-phase`, `start-phase`, `propose-phase` or `move-phase` -- is how long, in whole seconds above 0, that wait may take before the drive fails; absent, 900. A live re-fire whose turns run long names one, and always a number: a hung run still ends. Any other step refuses it.
-- `pick` names a live entry, read from `GET /memory`: a number is its place in id order, and text is the first entry whose content holds it. `"$name"` is the entry a step earlier in the run bound to `name` with `as`, its id never written down. Text that itself starts with `$` is written with it doubled: `"$$HOME is unset"` picks the entry holding `$HOME is unset`.
+- `pick` names a live entry, read from `GET /memory`: a number is its place in id order, and text is the first entry whose content holds it. `"$name"` is the entry a step earlier in the run bound to `name` with `as`, its id never written down. Text that itself starts with `$` is written with it doubled: `"$$HOME is unset"` picks the entry holding `$HOME is unset`. This is the same escape as in replies and `where`.
 - `at` and `from` name a logged line by what it is, read back from `GET /line/<seq>`, never by its seq: `{"call": <id>}` is the last result of the call with that id, and `{"answer": <text>}` the last answer, the trunk's or a fork's, whose text holds it.
 - A gesture serve refuses fails its step, naming serve's refusal.
 - `place` (optional, an object) on any step is for a reader. The runner never reads it. An operator script writes it (below).
@@ -239,7 +240,7 @@ A `grade` step comes right after the admitted `ask` of its task. That ask asks t
 `{"expect": KIND, "where": {KEY: TEXT, "KEY~": TEXT}, "at_least": N, "name": NAME, "after": NAME}`
 
 - **`expect`:** a line of this kind.
-- **`where`:** each field equals the text (`KEY`) or holds it (`KEY~`). A `$name` in the text is the entry bound to that name.
+- **`where`:** each field equals the text (`KEY`) or holds it (`KEY~`). A `$name` in the text is the entry bound to that name. A `$$name` is the text `$name` itself. A `$$` before no bound name stays as written.
 - **`at_least`:** how many lines must match (default 1).
 - **`name`:** a name for this expectation's first match.
 - **`after`:** a later expectation counts only the lines after the first match of the expectation that `after` names.
