@@ -158,12 +158,20 @@ What the deny list does:
 | `move-phase` | `to`, `meditate`? | moves the phase on the operator's word alone |
 | `open-tangent` | `id` | opens a tangent |
 | `close-tangent` | `each` | closes the open tangent, ruling `keep`, `drop` or `park` on every live entry born under it |
+| `fork` | `at`, `ask` or `text` | forks at the line `at` names, with a pinned ask by name or the operator's own words, and waits for it to settle |
+| `keep` | `from`, `span`, `tag`?, `as`? | keeps `span` of the line `from` names, exactly as logged; the entry is bound to `as` |
+| `wrap` | `call`, `from`, `span` | wraps the result of the call with id `call` with `span` of the line `from` names: the result itself, or an answer |
+| `suggestion` | `answer` | `accept` or `reject` the first shadow offered and not yet answered; an accept fires its fork, which the runner waits on |
+| `correction` | `answer` | `accept` or `reject` the first refused change to an operator entry not yet answered |
+| `retire` | `pick` | retires the operator's entry `pick` names |
 | `wait` | `until`, `timeout`?, `where`? | `GET /wait` for `idle` or a line's kind, after the last command; with `where`, as an expectation's, a line of the kind that does not match is waited past |
 | `end` | | |
 
 - After each admitted ask, meditation or refill, the runner waits until `GET /state` is `idle`.
-- `patience` (optional) on a step it waits after -- an ask to be admitted, `declare-meditation`, `refill-anyway`, `rule-phase`, `start-phase`, `propose-phase` or `move-phase` -- is how long, in whole seconds above 0, that wait may take before the drive fails; absent, 900. A live re-fire whose turns run long names one, and always a number: a hung run still ends. Any other step refuses it.
+- `patience` (optional) on a step it waits after -- an ask to be admitted, a `fork`, a `suggestion` that accepts, `declare-meditation`, `refill-anyway`, `rule-phase`, `start-phase`, `propose-phase` or `move-phase` -- is how long, in whole seconds above 0, that wait may take before the drive fails; absent, 900. A live re-fire whose turns run long names one, and always a number: a hung run still ends. Any other step refuses it.
 - `pick` names a live entry, read from `GET /memory`: a number is its place in id order, and text is the first entry whose content holds it.
+- `at` and `from` name a logged line by what it is, read back from `GET /line/<seq>`, never by its seq: `{"call": <id>}` is the last result of the call with that id, and `{"answer": <text>}` the last answer, the trunk's or a fork's, whose text holds it.
+- A gesture serve refuses fails its step, naming serve's refusal.
 - `place` (optional, an object) on any step is for a reader. The runner never reads it. An operator script writes it (below).
 
 ## Answering through a tool (#971)

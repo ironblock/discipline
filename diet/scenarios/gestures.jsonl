@@ -1,0 +1,22 @@
+{"scenario":"gestures","regimen":"gestures.toml","head":"../drive/heads/floor.md","seed":{"notes.md":"gestures.notes.md"}}
+{"reply":{"when":"Read notes.md","text":"Reading it.","calls":[{"id":"call-1","name":"bash","arguments":"{\"command\": \"cat notes.md\"}"}]}}
+{"reply":{"when":"a note","text":"Read it. It holds a note."}}
+{"reply":{"when":"What is in it?","text":"It holds a note.\n\nAlso: ports."}}
+{"reply":{"when":"You just read a document","text":"LEARNED: notes.md holds a note\nEVIDENCE: a note\nSTUCK: NONE"}}
+{"reply":{"when":"Is the note settled","text":"It is.","calls":[{"id":"call-v1","name":"resolve_entry","arguments":"{\"entry\": \"operator-15\", \"verdict\": \"done\"}"}]}}
+{"reply":{"when":"refused","text":"Left as it is."}}
+{"step":"ask","text":"Read notes.md."}
+{"step":"keep","from":{"call":"call-1"},"span":"a note","tag":"notes","as":"kept"}
+{"step":"fork","at":{"call":"call-1"},"text":"What is in it?"}
+{"step":"wrap","call":"call-1","from":{"answer":"Also: ports."},"span":"It holds a note."}
+{"step":"suggestion","answer":"accept"}
+{"step":"ask","text":"Is the note settled?"}
+{"step":"correction","answer":"reject"}
+{"step":"retire","pick":"It holds a note."}
+{"step":"end"}
+{"expect":"fork","where":{"why":"operator"}}
+{"expect":"wrapped"}
+{"expect":"suggestion","where":{"outcome":"accepted"}}
+{"expect":"patch.refused","where":{"entry":"operator-15"}}
+{"expect":"correction","where":{"outcome":"rejected"}}
+{"expect":"patch","where":{"op":"retire","entry.id":"operator-23"}}
