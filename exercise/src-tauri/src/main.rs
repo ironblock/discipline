@@ -163,7 +163,12 @@ fn main() {
             && let Some(held) = held.take()
         {
             QUITTING.store(true, std::sync::atomic::Ordering::SeqCst);
-            let authorization = handle.state::<Credential>().0.lock().ok().and_then(|held| held.clone());
+            let authorization = handle
+                .state::<Credential>()
+                .0
+                .lock()
+                .ok()
+                .and_then(|held| held.clone());
             quit(held, authorization.as_deref());
         }
     });
@@ -186,19 +191,23 @@ fn start(app: &mut tauri::App) -> Result<(), String> {
     // The window opens at once (the app audit, finding 6), on the shell's own
     // page saying the start; then it shows the drive's page, or why there is
     // none, rather than a stderr no one launched from Finder sees.
-    WebviewWindowBuilder::new(app, "main", WebviewUrl::App(shell_page("starting", None)?.into()))
-        .title("exercise")
-        .inner_size(1280.0, 860.0)
-        // A link in model output opens in the system's browser when it is the
-        // web's or mail's (the app audit, finding 19); no window ever opens here.
-        .on_new_window(|url, _| {
-            if openable(&url) {
-                let _ = tauri_plugin_opener::open_url(url.as_str(), None::<&str>);
-            }
-            tauri::webview::NewWindowResponse::Deny
-        })
-        .build()
-        .map_err(|why| why.to_string())?;
+    WebviewWindowBuilder::new(
+        app,
+        "main",
+        WebviewUrl::App(shell_page("starting", None)?.into()),
+    )
+    .title("exercise")
+    .inner_size(1280.0, 860.0)
+    // A link in model output opens in the system's browser when it is the
+    // web's or mail's (the app audit, finding 19); no window ever opens here.
+    .on_new_window(|url, _| {
+        if openable(&url) {
+            let _ = tauri_plugin_opener::open_url(url.as_str(), None::<&str>);
+        }
+        tauri::webview::NewWindowResponse::Deny
+    })
+    .build()
+    .map_err(|why| why.to_string())?;
     std::thread::spawn(move || {
         let shown = drive_page(&handle).unwrap_or_else(|why| {
             eprintln!("exercise: {why}");
@@ -419,11 +428,7 @@ enum Given<'a> {
 /// `serve --profile <profile>` as the sidecar, admitting the webview's
 /// origin, with the shell's credential when it has one; its URL, from the
 /// first line it prints, and the process.
-fn sidecar(
-    app: &AppHandle,
-    profile: &str,
-    given: Option<Given>,
-) -> Result<(String, Held), String> {
+fn sidecar(app: &AppHandle, profile: &str, given: Option<Given>) -> Result<(String, Held), String> {
     let mut args = vec!["serve", "--profile", profile, "--allow-origin", ORIGIN];
     match given {
         Some(Given::File(file)) => args.extend(["--auth-file", file]),
@@ -478,8 +483,14 @@ fn sidecar(
                                 eprintln!("serve: exited ({:?})", ended.code);
                                 // Outside a quit, the window says the drive is gone and why.
                                 if !QUITTING.load(std::sync::atomic::Ordering::SeqCst) {
-                                    let code = ended.code.map_or_else(|| "a signal".to_owned(), |code| format!("code {code}"));
-                                    if let Ok(page) = shell_page("failed", Some(&format!("serve exited ({code})"))) {
+                                    let code = ended.code.map_or_else(
+                                        || "a signal".to_owned(),
+                                        |code| format!("code {code}"),
+                                    );
+                                    if let Ok(page) = shell_page(
+                                        "failed",
+                                        Some(&format!("serve exited ({code})")),
+                                    ) {
                                         show(&shown, &page);
                                     }
                                 }
@@ -494,7 +505,14 @@ fn sidecar(
                     }
                 });
                 let listening = listening.to_owned();
-                return Ok((url, Held { child, listening, exited }));
+                return Ok((
+                    url,
+                    Held {
+                        child,
+                        listening,
+                        exited,
+                    },
+                ));
             }
             CommandEvent::Stderr(line) => {
                 eprintln!("serve: {}", String::from_utf8_lossy(&line).trim_end());
@@ -515,12 +533,28 @@ fn sidecar(
 fn quit(held: Held, authorization: Option<&str>) {
     let deadline = Instant::now() + QUIT_WAIT;
     while Instant::now() < deadline {
-        match exchange(&held.listening, &command_request(&held.listening, authorization, r#"{"kind":"end"}"#)).as_deref().and_then(status_of) {
+        match exchange(
+            &held.listening,
+            &command_request(&held.listening, authorization, r#"{"kind":"end"}"#),
+        )
+        .as_deref()
+        .and_then(status_of)
+        {
             Some(409) => {
-                let state = exchange(&held.listening, &get_request(&held.listening, authorization, "/state"));
-                if let Some(turn) = state.as_deref().and_then(|reply| reply.split_once("\r\n\r\n")).and_then(|(_, body)| running_turn(body)) {
+                let state = exchange(
+                    &held.listening,
+                    &get_request(&held.listening, authorization, "/state"),
+                );
+                if let Some(turn) = state
+                    .as_deref()
+                    .and_then(|reply| reply.split_once("\r\n\r\n"))
+                    .and_then(|(_, body)| running_turn(body))
+                {
                     let cancel = format!(r#"{{"kind":"cancel","turn":{turn}}}"#);
-                    let _ = exchange(&held.listening, &command_request(&held.listening, authorization, &cancel));
+                    let _ = exchange(
+                        &held.listening,
+                        &command_request(&held.listening, authorization, &cancel),
+                    );
                 }
                 std::thread::sleep(Duration::from_millis(200));
             }
@@ -542,7 +576,9 @@ fn quit(held: Held, authorization: Option<&str>) {
 /// A `POST /commands` of `body`, with the credential when there is one, as
 /// the page sends a command.
 fn command_request(listening: &str, authorization: Option<&str>, body: &str) -> String {
-    let credential = authorization.map(|value| format!("Authorization: {value}\r\n")).unwrap_or_default();
+    let credential = authorization
+        .map(|value| format!("Authorization: {value}\r\n"))
+        .unwrap_or_default();
     format!(
         "POST /commands HTTP/1.1\r\nHost: {listening}\r\n{credential}Content-Type: application/json\r\n\
          Content-Length: {}\r\nConnection: close\r\n\r\n{body}",
@@ -552,7 +588,9 @@ fn command_request(listening: &str, authorization: Option<&str>, body: &str) -> 
 
 /// A `GET` of `path`, with the credential when there is one.
 fn get_request(listening: &str, authorization: Option<&str>, path: &str) -> String {
-    let credential = authorization.map(|value| format!("Authorization: {value}\r\n")).unwrap_or_default();
+    let credential = authorization
+        .map(|value| format!("Authorization: {value}\r\n"))
+        .unwrap_or_default();
     format!("GET {path} HTTP/1.1\r\nHost: {listening}\r\n{credential}Connection: close\r\n\r\n")
 }
 
@@ -561,7 +599,9 @@ fn get_request(listening: &str, authorization: Option<&str>, path: &str) -> Stri
 fn exchange(listening: &str, request: &str) -> Option<String> {
     let mut stream = TcpStream::connect(listening).ok()?;
     stream.set_read_timeout(Some(Duration::from_secs(2))).ok()?;
-    stream.set_write_timeout(Some(Duration::from_secs(1))).ok()?;
+    stream
+        .set_write_timeout(Some(Duration::from_secs(1)))
+        .ok()?;
     stream.write_all(request.as_bytes()).ok()?;
     let mut reply = Vec::new();
     let _ = stream.read_to_end(&mut reply);
@@ -570,7 +610,12 @@ fn exchange(listening: &str, request: &str) -> Option<String> {
 
 /// An HTTP reply's status code.
 fn status_of(reply: &str) -> Option<u16> {
-    reply.strip_prefix("HTTP/1.1 ")?.split(' ').next()?.parse().ok()
+    reply
+        .strip_prefix("HTTP/1.1 ")?
+        .split(' ')
+        .next()?
+        .parse()
+        .ok()
 }
 
 /// The turn `GET /state` says is running, or waits on an approval: what a
@@ -578,7 +623,10 @@ fn status_of(reply: &str) -> Option<u16> {
 fn running_turn(body: &str) -> Option<u64> {
     let state: serde_json::Value = serde_json::from_str(body).ok()?;
     let turn = state.get("turn")?;
-    if matches!(turn.get("state")?.as_str()?, "running" | "awaiting-approval") {
+    if matches!(
+        turn.get("state")?.as_str()?,
+        "running" | "awaiting-approval"
+    ) {
         turn.get("number")?.as_u64()
     } else {
         None
@@ -595,9 +643,9 @@ fn openable(url: &Url) -> bool {
 /// at `listening`, serve's `host:port`: loopback by name or by 127.0.0.1
 /// (the app audit, finding 23).
 fn csp_admits(listening: &str) -> bool {
-    listening
-        .rsplit_once(':')
-        .is_some_and(|(host, port)| matches!(host, "127.0.0.1" | "localhost") && port.parse::<u16>().is_ok())
+    listening.rsplit_once(':').is_some_and(|(host, port)| {
+        matches!(host, "127.0.0.1" | "localhost") && port.parse::<u16>().is_ok()
+    })
 }
 
 /// The bundle's page, told its drive by `?drive=<url>`.
@@ -609,13 +657,19 @@ fn page(drive: &str) -> Result<String, String> {
 
 #[cfg(test)]
 mod tests {
-    use super::{Auth, Drive, basic, chosen_auth, command_request, csp_admits, openable, remote, running_turn, shell_page, status_of};
+    use super::{
+        Auth, Drive, basic, chosen_auth, command_request, csp_admits, openable, remote,
+        running_turn, shell_page, status_of,
+    };
 
     /// the app audit, finding 6: the window opens at once on the page's
     /// "starting serve…", and a failure is said there, its reason in the URL.
     #[test]
     fn the_shells_own_page_says_starting_and_why_a_start_failed() {
-        assert_eq!(shell_page("starting", None).as_deref(), Ok("index.html?shell=starting"));
+        assert_eq!(
+            shell_page("starting", None).as_deref(),
+            Ok("index.html?shell=starting")
+        );
         assert_eq!(
             shell_page("failed", Some("serve exited (code 1)")).as_deref(),
             Ok("index.html?shell=failed&why=serve+exited+%28code+1%29")
@@ -641,9 +695,18 @@ mod tests {
     /// cancels the turn `/state` names as running, then ends.
     #[test]
     fn a_running_turn_is_read_from_the_state() {
-        assert_eq!(running_turn(r#"{"turn":{"number":3,"state":"running"}}"#), Some(3));
-        assert_eq!(running_turn(r#"{"turn":{"number":3,"state":"awaiting-approval"}}"#), Some(3));
-        assert_eq!(running_turn(r#"{"turn":{"number":3,"state":"settled","reason":"final"}}"#), None);
+        assert_eq!(
+            running_turn(r#"{"turn":{"number":3,"state":"running"}}"#),
+            Some(3)
+        );
+        assert_eq!(
+            running_turn(r#"{"turn":{"number":3,"state":"awaiting-approval"}}"#),
+            Some(3)
+        );
+        assert_eq!(
+            running_turn(r#"{"turn":{"number":3,"state":"settled","reason":"final"}}"#),
+            None
+        );
         assert_eq!(running_turn(r#"{"session":"idle"}"#), None);
     }
 
