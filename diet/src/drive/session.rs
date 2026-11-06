@@ -4447,9 +4447,11 @@ impl<S: Streaming + 'static> Session<S> {
     ///
     /// # Errors
     ///
-    /// As [`Self::declare_meditation`], and [`Refusal::NoPhaseGraph`],
-    /// [`Refusal::NotAPhase`], [`Refusal::AlreadyInPhase`] or
-    /// [`Refusal::NoPhaseEdge`] for a move the graph refuses.
+    /// As [`Self::declare_meditation`]; [`Refusal::NotUnilateral`] for a
+    /// move where the operator may not move alone; and
+    /// [`Refusal::NoPhaseGraph`], [`Refusal::NotAPhase`],
+    /// [`Refusal::AlreadyInPhase`] or [`Refusal::NoPhaseEdge`] for a move
+    /// the graph refuses.
     pub fn declare_meditation_to(
         &self,
         gap: Option<IdleGap>,
@@ -4478,7 +4480,7 @@ impl<S: Streaming + 'static> Session<S> {
             // close restores (#22).
             Settlement::Awaiting if state.tangent.is_some() => Some(Refusal::TangentOpen),
             Settlement::Awaiting if nothing_to_refill(&state) => Some(Refusal::NothingToMeditate),
-            Settlement::Awaiting => to.and_then(|to| graph_refusal(&state, to)),
+            Settlement::Awaiting => to.and_then(|to| move_refusal(&state, to)),
         };
         if let Some(because) = because {
             let refused = state.refuse(CommandKind::DeclareMeditation, because);
@@ -15287,7 +15289,20 @@ fn pool_refusal(state: &State, to: Option<&str>) -> Option<Refusal> {
     } else if nothing_to_refill(state) {
         Some(Refusal::NothingToMeditate)
     } else {
-        to.and_then(|to| graph_refusal(state, to))
+        to.and_then(|to| move_refusal(state, to))
+    }
+}
+
+/// Why a declared meditation's move to `to` is refused, if it is: a move
+/// the operator takes alone, so refused where `operator_unilateral` is off
+/// as [`Session::move_phase`] refuses one (#1050's audit, finding 1); else
+/// the graph's refusal.
+/// A session with no interview has no phase graph, and is refused as the
+/// graph refuses (`no-phase-graph`).
+fn move_refusal(state: &State, to: &str) -> Option<Refusal> {
+    match &state.interview {
+        Some(interview) if !interview.operator_unilateral => Some(Refusal::NotUnilateral),
+        _ => graph_refusal(state, to),
     }
 }
 
