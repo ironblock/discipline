@@ -233,7 +233,9 @@ export const AuditMemorySaysEachEntry: Story = {
     const opacity = (e: HTMLElement) => Number(getComputedStyle(e.querySelector('.ex-memory__text')!).opacity);
     for (const e of resolved) await expect(opacity(e)).toBeLessThan(1);
     for (const e of live) await expect(opacity(e)).toBe(1);
-    const unsourced = entries.filter((e) => (e.querySelector('.ex-memory__source')?.textContent ?? '') === '').map((e) => e.id);
+    // An entry you kept says so by its authority, "kept by you", in place of the source word `operator`.
+    const said = (e: HTMLElement) => e.querySelector('.ex-memory__source')?.textContent ?? (e.querySelector('.ex-memory__authority')?.textContent === 'kept by you' ? 'kept by you' : '');
+    const unsourced = entries.filter((e) => said(e) === '').map((e) => e.id);
     await expect(unsourced).toEqual([]);
   },
 };

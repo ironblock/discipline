@@ -159,7 +159,8 @@ pub enum Pick {
     Index(usize),
     /// The first live entry whose content holds this text.
     Containing(String),
-    /// The entry a step bound to this name with `as` (`"$name"`).
+    /// The entry a step bound to this name with `as` (`"$name"`; `"$$..."`
+    /// is text starting with a literal `$`).
     Bound(String),
 }
 
@@ -1712,6 +1713,10 @@ impl Fields {
             Some(Value::Integer(n)) => usize::try_from(n)
                 .map(Pick::Index)
                 .map_err(|_| self.wrong("`pick` 0 or more")),
+            // Two `$` are a literal one: text that itself starts with `$`.
+            Some(Value::String(text)) if text.starts_with("$$") => {
+                Ok(Pick::Containing(text[1..].to_owned()))
+            }
             Some(Value::String(text)) if text.len() > 1 && text.starts_with('$') => {
                 Ok(Pick::Bound(text[1..].to_owned()))
             }
@@ -4937,6 +4942,24 @@ mod tests {
             Some(Err(_))
         ));
         assert_eq!(Pick::Index(0).bound_in(&bound), None);
+    }
+
+    /// A `pick` whose text itself starts with `$` writes it `$$`: one `$`
+    /// is a bound name, two are a literal `$`.
+    #[test]
+    fn a_pick_writes_a_literal_dollar_doubled() {
+        let header = r#"{"scenario":"s","regimen":"r.toml","head":"h.md"}"#;
+        let read = parse(&format!(
+            "{header}\n{}\n",
+            r#"{"step":"retire","pick":"$$HOME is unset in the sandbox"}"#
+        ))
+        .expect("it reads");
+        assert_eq!(
+            read.steps,
+            vec![Step::Retire {
+                pick: Pick::Containing("$HOME is unset in the sandbox".to_owned())
+            }]
+        );
     }
 
     /// A step that waits for the session to settle takes its own

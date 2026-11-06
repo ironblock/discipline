@@ -170,7 +170,7 @@ What the deny list does:
 
 - After each admitted ask, meditation or refill, the runner waits until `GET /state` is `idle`.
 - `patience` (optional) on a step it waits after -- an ask to be admitted, a `fork`, a `suggestion` that accepts, `declare-meditation`, `refill-anyway`, `rule-phase`, `start-phase`, `propose-phase` or `move-phase` -- is how long, in whole seconds above 0, that wait may take before the drive fails; absent, 900. A live re-fire whose turns run long names one, and always a number: a hung run still ends. Any other step refuses it.
-- `pick` names a live entry, read from `GET /memory`: a number is its place in id order, and text is the first entry whose content holds it. `"$name"` is the entry a step earlier in the run bound to `name` with `as`, its id never written down.
+- `pick` names a live entry, read from `GET /memory`: a number is its place in id order, and text is the first entry whose content holds it. `"$name"` is the entry a step earlier in the run bound to `name` with `as`, its id never written down. Text that itself starts with `$` is written with it doubled: `"$$HOME is unset"` picks the entry holding `$HOME is unset`.
 - `at` and `from` name a logged line by what it is, read back from `GET /line/<seq>`, never by its seq: `{"call": <id>}` is the last result of the call with that id, and `{"answer": <text>}` the last answer, the trunk's or a fork's, whose text holds it.
 - A gesture serve refuses fails its step, naming serve's refusal.
 - `place` (optional, an object) on any step is for a reader. The runner never reads it. An operator script writes it (below).
@@ -268,7 +268,7 @@ Beside it the command writes:
 - **Background jobs are waited for.** A job that ended between turns, before the next move, becomes a `wait` for its `background.ended`.
 - **The head is what the replay's start begins from.** The instruction files' render (#559) and the fork ask set's priming (#598) come off it, since the replay's start adds them again from its worktree and its regimen. The report names the instruction files the run read, which the replay's worktree must hold.
 - **A gesture names its lines as the runner finds them, never by a seq.**
-  - A keep's `from` is the last call whose result holds its span, by the call's id, or `{"answer": <span>}`.
+  - A keep's `from` is the last call whose result holds its span, by the call's id, or `{"answer": <span>}`. A derived keep's source is the last line of its kind holding its span; the log does not record the original. The replay must give the same entry (its text, `kept_from` and tag), and that is what the operator lines compare.
   - A fork's or a wrap's line is a call by its id, or an answer by its whole text. That line must be the last of its id, or the last answer holding its text.
   - A retire picks its entry by the name its keep or edit bound (`as`), which is the entry's id in the log. An entry no step wrote is picked by its text, as an edit's is.
   - An accepted suggestion's fork is no step of its own, nor is a wrap's entry.
