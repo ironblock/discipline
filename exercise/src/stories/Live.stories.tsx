@@ -13,6 +13,7 @@ import recalledNote from '../../../diet/formats/log/fixtures/valid/a-v7-recall-a
 import refillMessage from '../../../diet/formats/log/fixtures/valid/a-v7-seam-whose-refill-is-a-message.jsonl?raw';
 import leversDeclared from '../../../diet/formats/log/fixtures/valid/a-v7-session-declaring-its-levers.jsonl?raw';
 import selfCapturePatch from '../../../diet/formats/log/fixtures/valid/a-v7-self-capture-patch-named-by-its-lane.jsonl?raw';
+import keptFromAsk from '../../../diet/formats/log/fixtures/valid/a-v39-note-vouched-user-stated-and-a-keep-from-the-ask.jsonl?raw';
 import overflowInferred from '../../../diet/formats/log/fixtures/valid/a-v7-overflow-told-from-the-prompts-size.jsonl?raw';
 import windowMeditation from '../../../diet/formats/log/fixtures/valid/a-v7-window-seam-under-the-turn-it-makes-fit.jsonl?raw';
 import pruneMeditation from '../../../diet/formats/log/fixtures/valid/a-v7-prune-applied-at-the-turns-seam.jsonl?raw';
@@ -658,6 +659,26 @@ export const ServedSelfCapturedEntry: Story = {
     });
     await expect(entry.querySelector('.ex-memory__source')?.textContent).toBe('self-capture');
     await expect(entry.querySelector('.ex-memory__text')?.textContent).toContain('The parser drops blank lines');
+  },
+};
+
+/**
+ * `?drive`, log v39: an entry the operator kept says so once. "kept by you" is its authority, so the source word
+ * `operator` would only say it again; another lane's entry keeps its source word.
+ */
+export const ServedOperatorEntrySaysItsYoursOnce: Story = {
+  name: '?drive: an entry you kept says "kept by you" once, with no source word beside it',
+  args: { drive: true, web: serving(keptFromAsk) },
+  play: async ({ canvasElement }) => {
+    const yours = await waitFor(async () => {
+      const found = canvasElement.querySelector<HTMLElement>('.ex-memory__entry[data-lane="operator"]');
+      await expect(found).not.toBeNull();
+      return found!;
+    });
+    await expect(yours.querySelector('.ex-memory__authority')?.textContent).toBe('kept by you');
+    await expect(yours.querySelector('.ex-memory__source')).toBeNull();
+    const theirs = canvasElement.querySelector<HTMLElement>('.ex-memory__entry[data-lane="self-capture"]');
+    await expect(theirs?.querySelector('.ex-memory__source')?.textContent).toBe('self-capture');
   },
 };
 
