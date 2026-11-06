@@ -68,7 +68,7 @@ export function SessionHeader({ session, link = 'live', linkWhy, onReconnect, su
           <dl>
             {Object.entries(session.levers.table).map(([lever, state]) => (
               <div key={lever} data-lever-row={lever} data-undeclared={state === 'undeclared' ? '' : undefined}>
-                {/* As the start row spells it, which is what an operator checks against (#1050's page audit, F7). */}
+                {/* As the start row spells it, which is what an operator checks against (the app audit's page walk, F7). */}
                 <dt>{lever}</dt>
                 <dd>{state}</dd>
               </div>

@@ -5,7 +5,7 @@ import { placed } from '../drive/recorded.ts';
 import { fold } from './fold.ts';
 
 /**
- * The phase control's facts, folded from the kitchen sink's own log at every line (#1050's page audit, F6 and F16):
+ * The phase control's facts, folded from the kitchen sink's own log at every line (the app audit's page walk, F6 and F16):
  * the phase, its moves and ground rules, and the model's last answer agree with each other at every moment.
  */
 const LOG = placed(AUTHORED['kitchen-sink']);

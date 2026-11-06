@@ -5,7 +5,7 @@
   padding: 1rem;
   border: 1px solid var(--rule);
   border-radius: var(--radius);
-  /* The theme's own panel fill, as settings has it (#1050's page audit, F15), never the system canvas. */
+  /* The theme's own panel fill, as settings has it (the app audit's page walk, F15), never the system canvas. */
   background-color: var(--page);
   background-image: var(--glass-overlay);
   color: var(--ink);

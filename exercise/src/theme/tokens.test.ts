@@ -5,7 +5,7 @@ import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
 
 /**
- * Every custom property a stylesheet reads is one something declares (#1050's page audit, F15): a stylesheet's own,
+ * Every custom property a stylesheet reads is one something declares (the app audit's page walk, F15): a stylesheet's own,
  * a theme's, or one the page sets inline. A `var(--x)` no one declares falls back to the browser's defaults -- the
  * gesture dialogs drew on the system canvas, in every theme -- and nothing else would say so.
  */

@@ -89,7 +89,7 @@ export function Settings() {
     };
   }, [open]);
   // Anchored to the button's right edge, the panel would run off the window's left when the header wraps it there: it
-  // anchors left then (#1050's page audit, F14).
+  // anchors left then (the app audit's page walk, F14).
   const panel = useRef<HTMLDivElement>(null);
   useLayoutEffect(() => {
     const element = panel.current;

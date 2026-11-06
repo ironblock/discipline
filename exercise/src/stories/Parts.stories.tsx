@@ -830,7 +830,7 @@ export const MeditationRefill: Story = {
   },
 };
 
-/** The kitchen sink's every refill (#1050's page audit, F13): a pre-warm whose timings carry no `prompt_ms` says no NaN. */
+/** The kitchen sink's every refill (the app audit's page walk, F13): a pre-warm whose timings carry no `prompt_ms` says no NaN. */
 export const MeditationKitchenSinkRefills: Story = {
   name: 'Meditation · every kitchen-sink refill, timed or not',
   render: () => (

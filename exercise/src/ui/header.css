@@ -201,7 +201,7 @@
   padding: 0.6rem 0.8rem;
   border: 1px solid var(--glass-rim, var(--rule));
   border-radius: var(--radius);
-  /* Opaque, as settings is, and all of it reachable (#1050's page audit, F7): it scrolls within the window, above the
+  /* Opaque, as settings is, and all of it reachable (the app audit's page walk, F7): it scrolls within the window, above the
      composer that would otherwise cover its lower rows. */
   background-color: var(--page);
   background-image: var(--glass-overlay);
