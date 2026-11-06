@@ -200,6 +200,14 @@ fn start(app: &mut tauri::App) -> Result<(), String> {
     WebviewWindowBuilder::new(app, "main", WebviewUrl::App(page(&drive)?.into()))
         .title("exercise")
         .inner_size(1280.0, 860.0)
+        // A link in model output opens in the system's browser when it is the
+        // web's or mail's (#1050's audit, finding 19); no window ever opens here.
+        .on_new_window(|url, _| {
+            if openable(&url) {
+                let _ = tauri_plugin_opener::open_url(url.as_str(), None::<&str>);
+            }
+            tauri::webview::NewWindowResponse::Deny
+        })
         .build()
         .map_err(|why| why.to_string())?;
     Ok(())
@@ -384,6 +392,14 @@ fn sidecar(
                 else {
                     return Err(format!("serve's first line names no address: {first}"));
                 };
+                // The page reaches serve only where its CSP admits (finding 23).
+                if !csp_admits(listening) {
+                    let _ = child.kill();
+                    return Err(format!(
+                        "serve listens on {listening}, which the page's CSP does not admit: \
+                         give the profile --listen 127.0.0.1"
+                    ));
+                }
                 let url = format!("http://{listening}/");
                 // What serve says after its first line goes to the shell's
                 // own stderr, so the channel never fills.
@@ -406,6 +422,21 @@ fn sidecar(
         }
     }
     Err("serve's output closed before it listened".to_owned())
+}
+
+/// Whether a link the page opens goes to the system's browser: the web's
+/// and mail's alone (#1050's audit, finding 19).
+fn openable(url: &Url) -> bool {
+    matches!(url.scheme(), "http" | "https" | "mailto")
+}
+
+/// Whether the page's CSP (`connect-src`, `tauri.conf.json`) admits a drive
+/// at `listening`, serve's `host:port`: loopback by name or by 127.0.0.1
+/// (#1050's audit, finding 23).
+fn csp_admits(listening: &str) -> bool {
+    listening
+        .rsplit_once(':')
+        .is_some_and(|(host, port)| matches!(host, "127.0.0.1" | "localhost") && port.parse::<u16>().is_ok())
 }
 
 /// The bundle's page, told its drive by `?drive=<url>`.
