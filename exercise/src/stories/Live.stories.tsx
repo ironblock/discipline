@@ -1591,3 +1591,71 @@ export const AuditReasoningOnlyStepKeeps: Story = {
     await expect(await page.findByRole('button', { name: 'Keep from step 7' }, { timeout: 5_000 })).toBeInTheDocument();
   },
 };
+
+// ---------------------------------------------------------------- the app audit's page walk (F8, F9, F10, F17)
+
+/** F9: a correction says which entry it would change and what the entry says now; the entry's marker counts them all. */
+export const AuditCorrectionNamesItsEntry: Story = {
+  name: 'audit F9: a correction names its entry and current text, and the marker counts every one',
+  args: { drive: true, web: posting(correcting) },
+  play: async ({ canvasElement }) => {
+    const page = within(canvasElement.ownerDocument.body);
+    const slow = { timeout: 5_000 };
+    await waitFor(async () => expect(says(canvasElement)).toBe('your turn'));
+    const chip = (await page.findAllByRole('button', { name: /^Accept: / }, slow))[0]!.closest('li')!;
+    await expect(chip.textContent).toContain('#d2');
+    await expect(chip.textContent).toContain('a tracker for one team');
+    const entry = canvasElement.querySelector('[id="memory/d2"]')!;
+    await expect(entry.querySelector('.ex-memory__waiting')?.textContent).toBe('2 corrections waiting');
+    await expect(entry.querySelectorAll('.ex-memory__waiting a')).toHaveLength(2);
+  },
+};
+
+/** F10: the operator's own fork opens with its question and answer showing: it is what they forked to read. */
+export const AuditOwnForkOpens: Story = {
+  name: 'audit F10: your own fork’s answer shows unfolded',
+  args: { drive: true, web: posting(open(gestures)) },
+  play: async ({ canvasElement }) => {
+    await waitFor(async () => expect(says(canvasElement)).toBe('your turn'));
+    const branch = canvasElement.querySelector('.ex-branch')!;
+    await expect(branch.querySelector('.ex-branch__why')?.getAttribute('aria-expanded')).toBe('true');
+    await expect(branch.textContent).toContain('What is in it?');
+    await expect(branch.textContent).toContain('It holds a note.');
+  },
+};
+
+/** The wrap fixture as it stood before the wrap: the operator's fork answered, cut at the result. */
+const beforeTheWrap = wrapped
+  .trimEnd()
+  .split('\n')
+  .filter((line) => (JSON.parse(line) as { seq: number }).seq <= 21)
+  .join('\n');
+
+/** F17: the wrap dialog names the result it replaces and says it wraps once, from the next request. */
+export const AuditWrapNamesItsResult: Story = {
+  name: 'audit F17: the wrap dialog names its result and says a result wraps once',
+  args: { drive: true, web: posting(beforeTheWrap) },
+  play: async ({ canvasElement }) => {
+    const page = within(canvasElement.ownerDocument.body);
+    const slow = { timeout: 5_000 };
+    await waitFor(async () => expect(says(canvasElement)).toBe('your turn'));
+    await cornerClick(await page.findByRole('button', { name: /^Wrap from fork / }, slow));
+    const title = (await page.findByRole('heading', { name: /^wrap / }, slow)).textContent ?? '';
+    await expect(title).toContain('call-1');
+    await expect(title).toContain('cat notes.md');
+    await expect(title).toContain('once');
+  },
+};
+
+/** F17: once wrapped, the result shows the span the model now sees there, and the fork's answer offers no second wrap. */
+export const AuditWrappedShowsItsSpan: Story = {
+  name: 'audit F17: a wrapped result shows its span, and is offered no second wrap',
+  args: { drive: true, web: posting(open(wrapped)) },
+  play: async ({ canvasElement }) => {
+    const page = within(canvasElement.ownerDocument.body);
+    await waitFor(async () => expect(says(canvasElement)).toBe('your turn'));
+    const tool = canvasElement.querySelector('.ex-trunk [data-tone="tool"]')!;
+    await expect(tool.querySelector('.ex-tool__wrapped-span')?.textContent).toBe('It holds a note.');
+    await expect(page.queryByRole('button', { name: /^Wrap from fork / })).toBeNull();
+  },
+};

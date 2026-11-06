@@ -78,6 +78,30 @@ test('F5: Esc while a turn runs arms a cancel, from anywhere on the page; a seco
   await expect.poll(() => sent.map((c) => c.kind)).toEqual(['cancel']);
 });
 
+test('F5: an armed cancel lets go after a few seconds, so a later Esc only arms it again', async () => {
+  const sent = await mount((post) => <Composer state="turn" phase="spec" phases={PHASES} dispatch={post} />);
+  (document.activeElement as HTMLElement | null)?.blur();
+  await userEvent.keyboard('{Escape}');
+  await expect.poll(() => document.querySelector('.ex-composer__state')?.textContent).toBe('cancel the turn? esc again');
+  await new Promise((resolve) => setTimeout(resolve, 4_000));
+  await expect.poll(() => document.querySelector('.ex-composer__state')?.textContent).toBe('working · esc cancels');
+  await userEvent.keyboard('{Escape}');
+  await settle();
+  expect(sent).toEqual([]);
+});
+
+test('F5: an armed cancel lets go on any other key', async () => {
+  const sent = await mount((post) => <Composer state="turn" phase="spec" phases={PHASES} dispatch={post} />);
+  (document.activeElement as HTMLElement | null)?.blur();
+  await userEvent.keyboard('{Escape}');
+  await settle();
+  await userEvent.keyboard('a');
+  await expect.poll(() => document.querySelector('.ex-composer__state')?.textContent).toBe('working · esc cancels');
+  await userEvent.keyboard('{Escape}');
+  await settle();
+  expect(sent).toEqual([]);
+});
+
 test('F11: retire on an entry of yours asks first; a second press retires it', async () => {
   const session = fold(gestures.trimEnd().split('\n').map((line) => respelled(JSON.parse(line) as LogLine)));
   const entry = session.memory.find((e) => e.lane === 'operator');

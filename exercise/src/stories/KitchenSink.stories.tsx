@@ -219,3 +219,21 @@ export const AuditSettingsInView: Story = {
     await expect(onTop(panel, rect.right - 8, rect.top + rect.height / 2)).toBe(true);
   },
 };
+
+// ---------------------------------------------------------------- the app audit's page walk (F8)
+
+/** F8: a resolved entry looks other than a live one, and every entry says where it came from, a fork's included. */
+export const AuditMemorySaysEachEntry: Story = {
+  name: 'audit F8: resolved entries look resolved, and every entry has its source word',
+  play: async ({ canvasElement }) => {
+    const entries = [...canvasElement.querySelectorAll<HTMLElement>('.ex-memory__entry')];
+    const resolved = entries.filter((e) => e.dataset['state'] === 'resolved');
+    const live = entries.filter((e) => e.dataset['state'] === 'live');
+    await expect(resolved.length).toBeGreaterThan(0);
+    const opacity = (e: HTMLElement) => Number(getComputedStyle(e.querySelector('.ex-memory__text')!).opacity);
+    for (const e of resolved) await expect(opacity(e)).toBeLessThan(1);
+    for (const e of live) await expect(opacity(e)).toBe(1);
+    const unsourced = entries.filter((e) => (e.querySelector('.ex-memory__source')?.textContent ?? '') === '').map((e) => e.id);
+    await expect(unsourced).toEqual([]);
+  },
+};
