@@ -285,6 +285,31 @@ export const ItsReceipt: Story = {
   },
 };
 
+/**
+ * The minimap is the column scaled down, one scale for both axes: at the drive's start, its one message -- the system
+ * prompt, collapsed in the trunk -- is a block as tall for its width on the map as in the trunk, not the whole rail.
+ */
+export const MinimapAtTheStart: Story = {
+  name: '5a · the minimap at the start: a block keeps its message’s shape',
+  args: { t: 0 },
+  play: async ({ canvasElement }) => {
+    const map = canvasElement.querySelector<HTMLElement>('.ex-minimap');
+    await expect(map).not.toBeNull();
+    const source = canvasElement.querySelector<HTMLElement>('.ex-trunk .ex-block[data-tone="system"]');
+    await expect(source).not.toBeNull();
+    const mark = await waitFor(() => {
+      const found = map!.querySelector<HTMLElement>('.ex-mm__trunk[data-tone="system"]');
+      if (!found) throw new Error('no system mark yet');
+      return found;
+    });
+    const aspect = (el: HTMLElement) => {
+      const box = el.getBoundingClientRect();
+      return box.height / box.width;
+    };
+    await waitFor(() => expect(aspect(mark) / aspect(source!)).toBeCloseTo(1, 1));
+  },
+};
+
 /** In daylight the minimap's slivers are lighter: visible, not heavy -- grey on white weighs more than light on black. */
 export const MinimapInDaylight: Story = {
   name: '5b · the minimap in daylight',
