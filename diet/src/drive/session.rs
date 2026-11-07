@@ -34620,6 +34620,186 @@ pub(in crate::drive) mod tests {
         }
     }
 
+    /// An interview under the starter phase library (#787), opening in `phase`.
+    fn in_the_starter_library_at(phase: &str) -> Interview {
+        Interview {
+            phases: crate::meditation::phase::PhaseGraph::from_library(
+                &crate::meditation::library::Library::starter(),
+                phase,
+            )
+            .expect("the starter library has the phase"),
+            ..interviewing(&[])
+        }
+    }
+
+    /// What a carry's start names (#948), for #1071's tests.
+    fn carried_from(meditation_seq: u64) -> log::CarriedFrom {
+        log::CarriedFrom {
+            log_sha256: "c".repeat(64),
+            meditation_seq,
+            trunk_sha256: "d".repeat(64),
+            object_sha256: None,
+            worktree: None,
+            variant_sha256: None,
+            rerooted: None,
+        }
+    }
+
+    /// The phase a session's start opens in, and its document (#563, #787).
+    fn opened_in(session: &Session<Canned>) -> (Option<String>, Option<log::PhaseDocument>) {
+        let state = session.shared.lock();
+        let Some(Logged {
+            event:
+                Event::Started {
+                    phases,
+                    phase_document,
+                    ..
+                },
+            ..
+        }) = state.log.first()
+        else {
+            panic!("a start line");
+        };
+        (
+            phases.as_ref().map(|(_, _, first)| first.clone()),
+            phase_document.clone(),
+        )
+    }
+
+    /// The last meditation's seq in `lines`.
+    fn last_meditation(lines: &[log::Line]) -> u64 {
+        lines
+            .iter()
+            .rev()
+            .find(|line| matches!(line.event, log::Event::Meditation { .. }))
+            .expect("a meditation")
+            .seq
+    }
+
+    /// #1071: a carry of a meditation that moved orient to plan opens in
+    /// plan, read from the carried log: its first request is the request the
+    /// original session sent next, byte for byte -- plan's rules in the
+    /// refill, and no orient note on the ask -- and its start names plan.
+    #[test]
+    fn a_carried_session_opens_in_the_phase_its_meditation_moved_to() {
+        let original = Session::open_with(
+            Canned::new(vec![deltas(&["oriented"]), deltas(&["planned"])]),
+            template(),
+            None,
+            None,
+            None,
+            Some(in_the_starter_library_at("orient")),
+        );
+        original.ask("look around", None).expect("accepted");
+        let _ = wait_until(&original, "turn one", settled);
+        original
+            .declare_meditation_to(None, Some("plan"))
+            .expect("orient to plan is allowed");
+        let refilled = original.trunk();
+        let sent_before = original.shared.transport.sent().len();
+        original.ask("make the plan", None).expect("accepted");
+        let log = wait_until(&original, "turn two", |log| {
+            log.iter()
+                .filter(|l| matches!(l.event, Event::TurnSettled { .. }))
+                .count()
+                == 2
+        });
+        let sent = original.shared.transport.sent();
+        assert_eq!(sent.len(), sent_before + 1, "turn two's one request");
+        let next = sent.last().expect("turn two's request").clone();
+        let lines: Vec<log::Line> = log.iter().map(line_of).collect();
+        let seq = last_meditation(&lines);
+        let phase = crate::drive::carry::carried_phase(&lines, seq);
+        assert_eq!(phase.as_deref(), Some("plan"));
+
+        let carried = Session::open_with(
+            Canned::new(vec![deltas(&["planned"])]),
+            template(),
+            None,
+            None,
+            None,
+            Some(in_the_starter_library_at("orient")),
+        )
+        .with_carry(Carry {
+            trunk: refilled,
+            object: None,
+            from: carried_from(seq),
+            source: None,
+            phase,
+        })
+        .expect("it carries");
+        assert_eq!(
+            opened_in(&carried),
+            (Some("plan".to_owned()), Some(starter_document("plan")))
+        );
+        carried.ask("make the plan", None).expect("accepted");
+        let log = wait_until(&carried, "the carried turn", settled);
+        assert_eq!(carried.shared.transport.sent(), [next]);
+        assert_eq!(phase_notes(&log), Vec::new(), "no orient note on the ask");
+    }
+
+    /// #1071: a meditation that moved no phase carries the phase the log
+    /// last records -- here plan, moved to with `keep` before it.
+    #[test]
+    fn a_carried_meditation_that_stayed_carries_the_phase_the_log_last_records() {
+        let (session, _) = proposing_in(
+            in_the_starter_library_at("orient"),
+            "plan",
+            vec![deltas(&["planned"])],
+        );
+        session
+            .ratify_phase("call-p", PhaseChoice::Keep)
+            .expect("ruled");
+        session.declare_meditation(None).expect("a meditation that stays");
+        let lines: Vec<log::Line> = session.events_from(0).iter().map(line_of).collect();
+        assert_eq!(
+            crate::drive::carry::carried_phase(&lines, last_meditation(&lines)).as_deref(),
+            Some("plan")
+        );
+    }
+
+    /// #1071: a carried log that records no phase opens in the regimen's
+    /// starting phase, as before, and its start names that phase, its rules
+    /// a note due on the first ask.
+    #[test]
+    fn a_carried_log_with_no_phase_opens_in_the_starting_phase_and_says_so() {
+        let original = Session::open_with(
+            Canned::new(vec![deltas(&["oriented"])]),
+            template(),
+            None,
+            None,
+            None,
+            Some(interviewing(&[])),
+        );
+        original.ask("look around", None).expect("accepted");
+        let _ = wait_until(&original, "turn one", settled);
+        original.declare_meditation(None).expect("a meditation");
+        let lines: Vec<log::Line> = original.events_from(0).iter().map(line_of).collect();
+        let phase = crate::drive::carry::carried_phase(&lines, last_meditation(&lines));
+        assert_eq!(phase, None);
+        let carried = Session::open_with(
+            Canned::new(vec![]),
+            template(),
+            None,
+            None,
+            None,
+            Some(in_the_starter_library_at("orient")),
+        )
+        .with_carry(Carry {
+            trunk: original.trunk(),
+            object: None,
+            from: carried_from(last_meditation(&lines)),
+            source: None,
+            phase,
+        })
+        .expect("it carries");
+        assert_eq!(
+            opened_in(&carried),
+            (Some("orient".to_owned()), Some(starter_document("orient")))
+        );
+        assert!(carried.shared.lock().phase_note_due.is_some());
+    }
+
     /// An interview under the starter phase library (#787), opening in `plan`.
     fn in_the_starter_library() -> Interview {
         Interview {
