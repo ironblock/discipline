@@ -86,7 +86,35 @@ pub fn read(log: &Path, sealed: &[String]) -> Result<Carry, String> {
             rerooted: None,
         },
         source: (!source.is_empty()).then_some(source),
+        phase: carried_phase(&lines, seq),
     })
+}
+
+/// The phase a carried session is in after the meditation at `seq` (#1071):
+/// that meditation's move's `to`, when it moved; else the last phase the log
+/// records up to it -- the start's opening phase, a starting phase the
+/// operator chose, a move kept with no meditation, an earlier meditation's
+/// move. None when the log records none, and the carry opens in the
+/// regimen's starting phase.
+#[must_use]
+pub fn carried_phase(lines: &[log::Line], seq: u64) -> Option<String> {
+    lines
+        .iter()
+        .take_while(|line| line.seq <= seq)
+        .fold(None, |phase, line| match &line.event {
+            Event::SessionStart {
+                opening_phase: Some(opening),
+                ..
+            } => Some(opening.clone()),
+            Event::PhaseStarted { phase: started, .. } => Some(started.clone()),
+            Event::PhaseRuled { choice, to, .. } if choice == "keep" || choice == "continue" => {
+                Some(to.clone())
+            }
+            Event::Meditation {
+                phase: Some(moved), ..
+            } => Some(moved.to.clone()),
+            _ => phase,
+        })
 }
 
 /// The carry rerooted into this session's worktree (#948, log v28): every
@@ -387,6 +415,7 @@ mod tests {
                 rerooted: None,
             },
             source: None,
+            phase: None,
         };
         let roots = [
             (format!("/private{old}"), format!("/private{new}")),

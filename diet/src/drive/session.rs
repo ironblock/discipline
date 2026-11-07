@@ -3711,6 +3711,9 @@ pub struct Carry {
     pub from: log::CarriedFrom,
     /// The carried files under the run's sealed paths, when there are any.
     pub source: Option<Vec<String>>,
+    /// The phase the carried session was in after its meditation (#1071),
+    /// when its log records one.
+    pub phase: Option<String>,
 }
 
 /// An interactive session on one trunk.
@@ -3994,6 +3997,27 @@ impl<S: Streaming + 'static> Session<S> {
                 .first()
                 .and_then(|first| crate::drive::regimen::nonce_in(&first.content));
             state.trunk = carry.trunk;
+            // The phase the carried session was in (#1071), when the graph
+            // has it: its rules ride in the carried refill, so no note is due
+            // unless that refill has no system prompt to hold them. With none
+            // carried, the starting phase and its note, as before.
+            let known = |state: &State, phase: &str| {
+                state.interview.as_ref().is_some_and(|interview| {
+                    interview.phases.phases().iter().any(|name| name == phase)
+                })
+            };
+            if let Some(phase) = carry.phase.filter(|phase| known(&state, phase)) {
+                state.phase = Some(phase);
+                state.phase_note_due = if state.phase_document().is_some()
+                    && crate::meditation::render::carries_ground_rules(&state.trunk)
+                {
+                    None
+                } else {
+                    state.phase_note()
+                };
+            }
+            let opened_in = state.phase.clone();
+            let opened_document = state.phase_document();
             match (&carry.object, state.interview.as_mut()) {
                 (Some(dump), Some(interview)) => {
                     let threshold = interview.object.similar().map(str::to_owned);
@@ -4021,6 +4045,8 @@ impl<S: Streaming + 'static> Session<S> {
                         carried_from,
                         carried_source,
                         head_nonce,
+                        phases,
+                        phase_document,
                         ..
                     },
                 ..
@@ -4029,6 +4055,11 @@ impl<S: Streaming + 'static> Session<S> {
                 *carried_from = Some(carry.from);
                 *carried_source = carry.source;
                 *head_nonce = carried_nonce;
+                // The start names the phase the session opens in (#1071).
+                if let (Some((_, _, first)), Some(phase)) = (phases.as_mut(), opened_in) {
+                    *first = phase;
+                    *phase_document = opened_document;
+                }
             }
         }
         Ok(self)
@@ -33831,6 +33862,7 @@ pub(in crate::drive) mod tests {
                 object: None,
                 from: from.clone(),
                 source: Some(vec!["src/scene-core.ts".to_owned()]),
+                phase: None,
             })
             .expect("it carries");
         let state = session.shared.lock();
@@ -33884,6 +33916,7 @@ pub(in crate::drive) mod tests {
                     object: None,
                     from: from.clone(),
                     source: None,
+                    phase: None,
                 })
                 .expect("it carries")
         };
@@ -34676,19 +34709,59 @@ pub(in crate::drive) mod tests {
             .seq
     }
 
+    /// A self-capturing session's interview and shape under `interview`'s
+    /// phases (#1071): what an original and its carry both open with.
+    fn capturing_under(mut interview: Interview) -> (Interview, RequestShape) {
+        interview.rules = Vec::new();
+        interview.self_capture = Some(crate::capture::tools::Cadence::DEFAULT);
+        let mut shape = template();
+        declare_self_capture(&mut shape, Some(&interview));
+        (interview, shape)
+    }
+
+    /// A first turn that records a fact, so a meditation has working memory
+    /// to refill from.
+    fn noting_turn() -> Vec<Vec<Step>> {
+        const SAID: &str = "The schema has two tables.";
+        vec![
+            vec![
+                Step::Delta(SAID.to_owned()),
+                Step::call(
+                    0,
+                    "call-f",
+                    "update_record",
+                    &serde_json::json!({ "field": "fact", "content": SAID }).to_string(),
+                ),
+            ],
+            deltas(&["noted"]),
+        ]
+    }
+
+    /// The working object's dump, as a meditation keeps it (#948).
+    fn dumped(session: &Session<Canned>) -> Option<String> {
+        let state = session.shared.lock();
+        state
+            .interview
+            .as_ref()
+            .map(|interview| interview.object.dump())
+    }
+
     /// #1071: a carry of a meditation that moved orient to plan opens in
     /// plan, read from the carried log: its first request is the request the
     /// original session sent next, byte for byte -- plan's rules in the
     /// refill, and no orient note on the ask -- and its start names plan.
     #[test]
     fn a_carried_session_opens_in_the_phase_its_meditation_moved_to() {
+        let (interview, shape) = capturing_under(in_the_starter_library_at("orient"));
+        let mut acts = noting_turn();
+        acts.push(deltas(&["planned"]));
         let original = Session::open_with(
-            Canned::new(vec![deltas(&["oriented"]), deltas(&["planned"])]),
-            template(),
+            Canned::new(acts),
+            shape.clone(),
             None,
             None,
             None,
-            Some(in_the_starter_library_at("orient")),
+            Some(interview.clone()),
         );
         original.ask("look around", None).expect("accepted");
         let _ = wait_until(&original, "turn one", settled);
@@ -34696,6 +34769,7 @@ pub(in crate::drive) mod tests {
             .declare_meditation_to(None, Some("plan"))
             .expect("orient to plan is allowed");
         let refilled = original.trunk();
+        let object = dumped(&original);
         let sent_before = original.shared.transport.sent().len();
         original.ask("make the plan", None).expect("accepted");
         let log = wait_until(&original, "turn two", |log| {
@@ -34714,15 +34788,15 @@ pub(in crate::drive) mod tests {
 
         let carried = Session::open_with(
             Canned::new(vec![deltas(&["planned"])]),
-            template(),
+            shape,
             None,
             None,
             None,
-            Some(in_the_starter_library_at("orient")),
+            Some(interview),
         )
         .with_carry(Carry {
             trunk: refilled,
-            object: None,
+            object,
             from: carried_from(seq),
             source: None,
             phase,
@@ -34750,7 +34824,9 @@ pub(in crate::drive) mod tests {
         session
             .ratify_phase("call-p", PhaseChoice::Keep)
             .expect("ruled");
-        session.declare_meditation(None).expect("a meditation that stays");
+        session
+            .declare_meditation(None)
+            .expect("a meditation that stays");
         let lines: Vec<log::Line> = session.events_from(0).iter().map(line_of).collect();
         assert_eq!(
             crate::drive::carry::carried_phase(&lines, last_meditation(&lines)).as_deref(),
@@ -34763,32 +34839,35 @@ pub(in crate::drive) mod tests {
     /// a note due on the first ask.
     #[test]
     fn a_carried_log_with_no_phase_opens_in_the_starting_phase_and_says_so() {
+        let (interview, shape) = capturing_under(interviewing(&[]));
         let original = Session::open_with(
-            Canned::new(vec![deltas(&["oriented"])]),
-            template(),
+            Canned::new(noting_turn()),
+            shape,
             None,
             None,
             None,
-            Some(interviewing(&[])),
+            Some(interview),
         );
         original.ask("look around", None).expect("accepted");
         let _ = wait_until(&original, "turn one", settled);
         original.declare_meditation(None).expect("a meditation");
         let lines: Vec<log::Line> = original.events_from(0).iter().map(line_of).collect();
-        let phase = crate::drive::carry::carried_phase(&lines, last_meditation(&lines));
+        let seq = last_meditation(&lines);
+        let phase = crate::drive::carry::carried_phase(&lines, seq);
         assert_eq!(phase, None);
+        let (interview, shape) = capturing_under(in_the_starter_library_at("orient"));
         let carried = Session::open_with(
             Canned::new(vec![]),
-            template(),
+            shape,
             None,
             None,
             None,
-            Some(in_the_starter_library_at("orient")),
+            Some(interview),
         )
         .with_carry(Carry {
             trunk: original.trunk(),
-            object: None,
-            from: carried_from(last_meditation(&lines)),
+            object: dumped(&original),
+            from: carried_from(seq),
             source: None,
             phase,
         })
