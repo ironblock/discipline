@@ -1,3 +1,6 @@
+import { useContext } from 'react';
+import type { CSSProperties } from 'react';
+
 import logoDark from '../../../logo/logo-dark.svg?url';
 import logoLight from '../../../logo/logo-light.svg?url';
 import type { Link } from '../drive/transport.ts';
@@ -6,6 +9,7 @@ import { Settings } from './Prefs.tsx';
 import { Segments } from './Segments.tsx';
 import { laneStyle } from './sets.ts';
 import { capturingOf, stateWord } from './stateWords.ts';
+import { Titlebar } from './titlebar.ts';
 import type { Room, Surface } from './surface.tsx';
 import './header.css';
 
@@ -47,8 +51,11 @@ const LEVERS: readonly { readonly lever: Exclude<keyof Levers, 'table'>; readonl
 export function SessionHeader({ session, link = 'live', linkWhy, onReconnect, surface, room = 'whole', onSurface }: SessionHeaderProps) {
   const unavailable = CURTAIN.filter((c) => (room === 'bars' && c === 'open') || (room === 'none' && c !== 'closed'));
   const drawn = !surface.curtain || room === 'none' ? 'closed' : surface.condensed === true || room === 'bars' ? 'condensed' : 'open';
+  // Under the macOS shell's overlay title bar the header is the window's drag region, clear of the traffic lights.
+  const titlebar = useContext(Titlebar);
+  const overlay = titlebar === undefined ? {} : { 'data-tauri-drag-region': '', 'data-titlebar': '', style: { '--ex-titlebar-inset': `${titlebar}px` } as CSSProperties };
   return (
-    <header className="ex-header">
+    <header className="ex-header" {...overlay}>
       {/* The repository's logo (logo/), as it ships: one file per mode, the one the surface's own mode asks for shown. */}
       <span className="ex-header__logo">
         <img className="ex-header__logo-img" data-for="dark" src={logoDark} alt="Discipline" />

@@ -16,6 +16,7 @@ This crate is its own Cargo workspace, outside the repository's, so CI's cargo n
 | `ctrlc` (`termination`) | `=3.5.2` | 2026-02-10 |
 | `base64` | `=0.23.1` | 2026-08-04 |
 | `security-framework` (macOS only) | `=3.7.0` | 2026-02-20 |
+| `objc2-app-kit` (macOS only; the version Tauri builds with, for the overlay title bar's measured inset) | `=0.3.2` | 2025-10-04 |
 | `tauri-cli` (`cargo install tauri-cli --version 2.12.3 --locked`) | `2.12.3` | 2026-10-14 |
 
 `Cargo.lock` pins the rest. Each needs Rust 1.90 or newer.

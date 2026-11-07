@@ -11,6 +11,7 @@ import './theme/tokens.css';
 import './theme/themes/index.ts';
 import { PREFS } from './ui/prefs.ts';
 import { Preferred } from './ui/Prefs.tsx';
+import { Titlebar, titlebarInset } from './ui/titlebar.ts';
 
 // `?speed=4` plays the session four times as fast; `?session=first-drive`
 // replays a recorded session instead of the canned one (`kitchen-sink`, an
@@ -55,7 +56,10 @@ async function mount(): Promise<void> {
   createRoot(root!).render(
     <StrictMode>
       <Preferred overrides={overrides}>
-        <App speed={speed} drive={drive} base={base} {...(web ? { web } : {})} {...(recording ? { recording } : {})} />
+        {/* The macOS shell's overlay title bar: the traffic lights' edge it measured (`?titlebar=`); none in a browser. */}
+        <Titlebar.Provider value={titlebarInset(window.location.search)}>
+          <App speed={speed} drive={drive} base={base} {...(web ? { web } : {})} {...(recording ? { recording } : {})} />
+        </Titlebar.Provider>
       </Preferred>
     </StrictMode>,
   );
