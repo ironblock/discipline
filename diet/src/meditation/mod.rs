@@ -1534,13 +1534,14 @@ mod tests {
         // The frame is prompt text and prompt text is judgment-as-data, so it
         // belongs to the maintainer. Renders under one frame have to be told
         // from renders under another, or the two get compared as though they
-        // were the same regime: frame 1 (#1050) carries each entry's source.
+        // were the same regime: frame 1 (#1050) carries each entry's source,
+        // frame 2 (#1086) the legend and only the sources it doesn't name.
         let object = three_facts();
         assert!(
-            render::render(&object, None).contains("frame_version: 1\n"),
+            render::render(&object, None).contains("frame_version: 2\n"),
             "the prompt says which frame built it"
         );
-        assert_eq!(render::FRAME_VERSION, "1");
+        assert_eq!(render::FRAME_VERSION, "2");
 
         let mut object = object;
         let mut controller = Controller::open(
@@ -1554,7 +1555,7 @@ mod tests {
             .expect("nothing folds")
             .expect("a meditation");
         assert_eq!(
-            meditation.frame_version, "1",
+            meditation.frame_version, "2",
             "and so does the record of it"
         );
     }
@@ -1754,8 +1755,13 @@ mod tests {
         // worth a hundred bytes of slack. This is the binding form.
         for object in [three_facts(), WorkingObject::open(regime())] {
             let rendered = render::render(&object, Some("plan"));
+            // The entries, after the heading and frame 2's legend (#1086).
             let (_, working_set) = rendered
-                .split_once(render::WORKING_SET_HEADER)
+                .split_once(&format!(
+                    "{}{}\n",
+                    render::WORKING_SET_HEADER,
+                    render::LEGEND
+                ))
                 .expect("the render has a working set");
             assert_eq!(
                 render::working_set_bytes(&object),

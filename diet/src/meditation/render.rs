@@ -28,7 +28,34 @@ use crate::object::WorkingObject;
 /// from what -- between its id and its text, and a keep's tag after the
 /// source. Every render before it said `placeholder`, the frame no one had
 /// authored, with the id and the text alone.
-pub const FRAME_VERSION: &str = "1";
+///
+/// `2` (#1086, the maintainer's legend form): one legend line under the
+/// working set's heading names the default source, [`DEFAULT_SOURCE`], and a
+/// line with that source carries no cell -- unless a live note checks it,
+/// when its cell carries the check. Every other line keeps frame 1's. The
+/// full column stays off the trunk: [`render_columns`], and the object's
+/// dump, from which mining computes it.
+pub const FRAME_VERSION: &str = "2";
+
+/// The source frame 2 leaves unmarked (#1086): fixed, not chosen per render,
+/// so the legend means the same at every refill -- the harness's mechanical
+/// entries, most of a recorded refill's lines.
+pub const DEFAULT_SOURCE: &str = "the harness noted, from your commands";
+
+/// Frame 2's legend line (#1086), under the working set's heading: what an
+/// unmarked line's source is. A draft; the words are the maintainer's.
+pub const LEGEND: &str =
+    "A line with no source between its id and its text: the harness noted, from your commands.";
+
+/// Which frame a render is built in (#1086): the trunk's, or frame 1's full
+/// column.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Frame {
+    /// Frame 1 (#1050): every line its source.
+    Columns,
+    /// Frame 2: the legend, the default source unmarked.
+    Legend,
+}
 
 /// What the render does past its budget (#565).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -103,6 +130,14 @@ pub fn render(object: &WorkingObject, phase: Option<&str>) -> String {
     rendered(object, phase, None).text
 }
 
+/// [`render`] in frame 1's full column (#1050, #1086): every line its
+/// source, the default included, and no legend -- what the trunk's frame 2
+/// leaves out, for a view or a reader off the trunk.
+#[must_use]
+pub fn render_columns(object: &WorkingObject, phase: Option<&str>) -> String {
+    framed(Frame::Columns, object, phase, None, &Marks::new()).text
+}
+
 /// What a note's line carries after its text (#150): the operator's
 /// markers, by entry -- [`EDITED`], and [`flagged`] for each flag.
 pub type Marks = std::collections::BTreeMap<crate::object::EntryId, String>;
@@ -137,16 +172,33 @@ pub fn rendered_marked(
     budget: Option<Budget>,
     marks: &Marks,
 ) -> Rendered {
-    let head = head(object, phase);
+    framed(Frame::Legend, object, phase, budget, marks)
+}
+
+/// [`rendered_marked`] in `frame` (#1086).
+#[allow(clippy::too_many_lines)]
+fn framed(
+    frame: Frame,
+    object: &WorkingObject,
+    phase: Option<&str>,
+    budget: Option<Budget>,
+    marks: &Marks,
+) -> Rendered {
+    let head = head(object, phase, frame);
     let mark = |id: &crate::object::EntryId| marks.get(id).map_or("", String::as_str);
-    let line = |entry: &crate::object::Entry, content: &str| {
-        format!(
-            "{}\t{}\t{}{}\n",
+    let line = |entry: &crate::object::Entry, content: &str| match cell_in(object, entry, frame) {
+        Some(cell) => format!(
+            "{}\t{cell}\t{}{}\n",
             one_line(entry.id.as_str()),
-            source_in(object, entry),
             one_line(content),
             mark(&entry.id)
-        )
+        ),
+        None => format!(
+            "{}\t{}{}\n",
+            one_line(entry.id.as_str()),
+            one_line(content),
+            mark(&entry.id)
+        ),
     };
     let over = budget.map_or(OverBudget::Tier, |budget| budget.over);
     // The render with `reduced` shortened or elided, and how many were.
@@ -257,7 +309,7 @@ fn estimate(text: &str) -> u64 {
 
 /// The render's header: the regime, the phase, the frame, and the working
 /// set's heading.
-fn head(object: &WorkingObject, phase: Option<&str>) -> String {
+fn head(object: &WorkingObject, phase: Option<&str>, frame: Frame) -> String {
     let regime = object.regime();
     let mut out = String::new();
 
@@ -275,10 +327,24 @@ fn head(object: &WorkingObject, phase: Option<&str>) -> String {
     // shape as much as anything.
     out.push_str(phase.unwrap_or("-"));
     out.push_str("\nframe_version: ");
-    out.push_str(FRAME_VERSION);
+    out.push_str(match frame {
+        Frame::Columns => "1",
+        Frame::Legend => FRAME_VERSION,
+    });
     out.push_str("\n\n");
     out.push_str(WORKING_SET_HEADER);
+    if frame == Frame::Legend {
+        out.push_str(LEGEND);
+        out.push('\n');
+    }
     out
+}
+
+/// An entry's source cell in `frame` (#1086): frame 1's always; frame 2's
+/// none for the default source unchecked.
+fn cell_in(object: &WorkingObject, entry: &crate::object::Entry, frame: Frame) -> Option<String> {
+    let cell = source_in(object, entry);
+    (frame == Frame::Columns || cell != DEFAULT_SOURCE).then_some(cell)
 }
 
 /// The working record's live entries, one `<id>\t<content>` line each:
@@ -615,6 +681,8 @@ pub fn one_line(text: &str) -> String {
 /// be sent.
 #[must_use]
 pub fn working_set_bytes(object: &WorkingObject) -> u64 {
+    // Frame 2's legend line is the heading's, not an entry's (#1086): the
+    // trigger measures the entries, and an empty object is 0, as before.
     let mut total: u64 = 0;
     for entry in object.live() {
         // Measured through the same escaping the render uses, and counting
@@ -628,11 +696,12 @@ pub fn working_set_bytes(object: &WorkingObject) -> u64 {
         // Nothing here can reach it -- an object of eighteen exabytes is not
         // a thing -- and saturating is still the right floor for a number
         // that decides a trigger.
+        let cell = cell_in(object, entry, Frame::Legend).map_or(0, |cell| cell.len() as u64 + 1);
         total = total
             .saturating_add(one_line(entry.id.as_str()).len() as u64)
-            .saturating_add(source_in(object, entry).len() as u64)
+            .saturating_add(cell)
             .saturating_add(one_line(&entry.content).len() as u64)
-            .saturating_add(3);
+            .saturating_add(2);
     }
     total
 }
@@ -1004,7 +1073,7 @@ mod refutation_tests {
 
 #[cfg(test)]
 mod source_tests {
-    use super::{render, source};
+    use super::{render, render_columns, source};
     use crate::object::{EntryId, KeptFrom, Origin, Patch, Provenance, Vouched, WorkingObject};
 
     fn regime() -> crate::formats::record::Regime {
@@ -1088,12 +1157,12 @@ mod source_tests {
         object
     }
 
-    /// #1050: each entry's line is its id, its source in the maintainer's
-    /// phrase -- a keep's tag in brackets after -- and its text; the header
-    /// names frame 1.
+    /// #1050: in frame 1's full column each entry's line is its id, its
+    /// source in the maintainer's phrase -- a keep's tag in brackets after --
+    /// and its text; the header names frame 1.
     #[test]
     fn each_entry_renders_its_source_between_its_id_and_its_text() {
-        let text = render(&every_source(), None);
+        let text = render_columns(&every_source(), None);
         assert!(text.contains("frame_version: 1\n"), "{text}");
         for line in [
             "a-kept-ask\tuser said\tentry 0\n",
