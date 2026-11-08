@@ -34834,6 +34834,58 @@ pub(in crate::drive) mod tests {
         );
     }
 
+    /// #1071: a carried phase the regimen's graph lacks is refused, naming
+    /// the phase and the graph, rather than dropped for the starting phase;
+    /// a session with no phase graph has nothing to restore, and carries.
+    #[test]
+    fn a_carried_phase_the_graph_lacks_is_refused_and_no_graph_carries() {
+        let carry = || Carry {
+            trunk: vec![crate::client::shape::Message::new(
+                crate::client::shape::Role::System,
+                "you are the trunk",
+            )],
+            object: None,
+            from: carried_from(16),
+            source: None,
+            phase: Some("nowhere".to_owned()),
+        };
+        let (interview, shape) = capturing_under(in_the_starter_library_at("orient"));
+        let refused = Session::open_with(
+            Canned::new(vec![]),
+            shape,
+            None,
+            None,
+            None,
+            Some(interview),
+        )
+        .with_carry(carry())
+        .err()
+        .expect("refused");
+        assert!(refused.contains("`nowhere`"), "{refused}");
+        assert!(
+            refused.contains("orient") && refused.contains("plan"),
+            "{refused}"
+        );
+        let (interview, shape) = capturing_under(interviewing(&[]));
+        assert!(
+            Session::open_with(
+                Canned::new(vec![]),
+                shape,
+                None,
+                None,
+                None,
+                Some(interview)
+            )
+            .with_carry(carry())
+            .is_ok()
+        );
+        assert!(
+            Session::open_with(Canned::new(vec![]), template(), None, None, None, None)
+                .with_carry(carry())
+                .is_ok()
+        );
+    }
+
     /// #1071: a carried log that records no phase opens in the regimen's
     /// starting phase, as before, and its start names that phase, its rules
     /// a note due on the first ask.
