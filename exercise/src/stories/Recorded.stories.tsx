@@ -1,5 +1,6 @@
 import type { Meta, StoryObj } from '@storybook/react-vite';
 import { useState } from 'react';
+import type { CSSProperties } from 'react';
 import { expect, userEvent, waitFor } from 'storybook/test';
 
 import { PHASES } from '../App.tsx';
@@ -307,6 +308,53 @@ export const MinimapAtTheStart: Story = {
       return box.height / box.width;
     };
     await waitFor(() => expect(aspect(mark) / aspect(source!)).toBeCloseTo(1, 1));
+  },
+};
+
+/**
+ * On the whole drive -- far taller than the map at its one scale -- the map keeps each block's shape, as VS Code's
+ * proportional minimap does, and scrolls in step with the page: the lens sits over the very blocks the page shows.
+ */
+export const MinimapScrollsWithThePage: Story = {
+  name: '5c · the minimap on a long drive: no squash, and it scrolls with the page',
+  // A wider map, so the drive at its one scale is several times the map's height (at the rail's own width the two
+  // scales nearly agree on this viewport, and a squash would hide inside the tolerance).
+  render: ({ t, curtain, gaps, condensed = false }) => (
+    <div style={{ '--minimap-width': '120px' } as CSSProperties}>
+      <SessionView session={fold(recordedAt(RECORDINGS['first-drive'], t))} surface={{ curtain, gaps, condensed }} composer={{ phases: PHASES }} />
+    </div>
+  ),
+  play: async ({ canvasElement }) => {
+    const map = canvasElement.querySelector<HTMLElement>('.ex-minimap')!;
+    await expect(map).not.toBeNull();
+    const aspect = (el: Element) => {
+      const box = el.getBoundingClientRect();
+      return box.height / box.width;
+    };
+    const system = canvasElement.querySelector<HTMLElement>('.ex-trunk .ex-block[data-tone="system"]')!;
+    const systemMark = await waitFor(() => {
+      const found = map.querySelector<HTMLElement>('.ex-mm__trunk[data-tone="system"]');
+      if (!found) throw new Error('no system mark yet');
+      return found;
+    });
+    window.scrollTo({ top: 0 });
+    await waitFor(() => expect(aspect(systemMark) / aspect(system)).toBeCloseTo(1, 1));
+    // Halfway down the drive: the block at the middle of the view is drawn under the lens where the page shows it.
+    window.scrollTo({ top: (document.documentElement.scrollHeight - window.innerHeight) / 2 });
+    const band = canvasElement.querySelector('.ex-session__header')!.getBoundingClientRect().bottom;
+    const middle = (band + window.innerHeight) / 2;
+    const blocks = [...canvasElement.querySelectorAll<HTMLElement>('.ex-trunk .ex-block, .ex-trunk .ex-turnend')];
+    const at = blocks.findIndex((b) => b.getBoundingClientRect().top <= middle && b.getBoundingClientRect().bottom >= middle);
+    await expect(at).toBeGreaterThanOrEqual(0);
+    const block = blocks[at]!;
+    await waitFor(() => {
+      const mark = map.querySelectorAll<HTMLElement>('.ex-mm__trunk')[at]!;
+      const lensTop = map.querySelector('.ex-mm__lens')!.getBoundingClientRect().top;
+      const scale = mark.getBoundingClientRect().height / block.getBoundingClientRect().height;
+      const drawn = mark.getBoundingClientRect().top - lensTop;
+      const shown = (block.getBoundingClientRect().top - band) * scale;
+      expect(Math.abs(drawn - shown)).toBeLessThan(3);
+    });
   },
 };
 
