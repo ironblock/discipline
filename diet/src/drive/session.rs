@@ -4001,12 +4001,24 @@ impl<S: Streaming + 'static> Session<S> {
             // has it: its rules ride in the carried refill, so no note is due
             // unless that refill has no system prompt to hold them. With none
             // carried, the starting phase and its note, as before.
-            let known = |state: &State, phase: &str| {
-                state.interview.as_ref().is_some_and(|interview| {
-                    interview.phases.phases().iter().any(|name| name == phase)
-                })
-            };
-            if let Some(phase) = carry.phase.filter(|phase| known(&state, phase)) {
+            // A carried phase the graph lacks is refused, never dropped for
+            // the starting phase (#1071); with no graph there is nothing to
+            // restore.
+            let graph: Vec<String> = state
+                .interview
+                .as_ref()
+                .map(|interview| interview.phases.phases().to_vec())
+                .unwrap_or_default();
+            let carried = carry.phase.filter(|_| !graph.is_empty());
+            if let Some(phase) = &carried
+                && !graph.contains(phase)
+            {
+                return Err(format!(
+                    "the carried phase `{phase}` is not in this regimen's phase graph ({})",
+                    graph.join(", ")
+                ));
+            }
+            if let Some(phase) = carried {
                 state.phase = Some(phase);
                 state.phase_note_due = if state.phase_document().is_some()
                     && crate::meditation::render::carries_ground_rules(&state.trunk)
@@ -34850,7 +34862,7 @@ pub(in crate::drive) mod tests {
             phase: Some("nowhere".to_owned()),
         };
         let (interview, shape) = capturing_under(in_the_starter_library_at("orient"));
-        let refused = Session::open_with(
+        let Err(refused) = Session::open_with(
             Canned::new(vec![]),
             shape,
             None,
@@ -34858,9 +34870,9 @@ pub(in crate::drive) mod tests {
             None,
             Some(interview),
         )
-        .with_carry(carry())
-        .err()
-        .expect("refused");
+        .with_carry(carry()) else {
+            panic!("refused");
+        };
         assert!(refused.contains("`nowhere`"), "{refused}");
         assert!(
             refused.contains("orient") && refused.contains("plan"),
