@@ -2,9 +2,8 @@
  * The minimap's geometry: pure, so it is tested without a layout engine.
  * `Minimap.tsx` measures the page and hands the numbers in here.
  *
- * Everything is in fractions of the stage's height (0..1), so nothing crosses
- * between the page's pixels and the map's: the map multiplies by its own
- * height when it draws.
+ * `onMap`, `lens` and `jump` are in fractions of the stage's height (0..1);
+ * `picture` is in the map's own pixels, at one scale for both axes.
  */
 
 /** A measured span of the stage, in page pixels from the stage's top. */
@@ -20,14 +19,39 @@ export function onMap(span: Span, stageHeight: number, min = 0): { readonly top:
 }
 
 /**
- * The height the map's picture spans, in stage pixels: what `onMap` divides by. The map draws the column at one scale
- * for both axes -- a trunk mark's width over the trunk's -- so each block keeps its message's shape, and a short
- * column fills only the top of the map. A column whose picture at that scale is taller than the map is fitted to the
- * map's height instead, as the map always drew it: still one scale for every block, each squashed alike.
+ * The map's picture of the stage, as VS Code's proportional minimap draws its editor (`minimap.ts`'s
+ * `MinimapLayout.create`), in map pixels: one `scale` for both axes -- a trunk mark's width over the trunk's -- so
+ * every block keeps its message's shape, never squashed; the `lens` over the band the page shows; and the `offset` the
+ * map's content is scrolled by. A stage whose picture fits the map is drawn from its top, unscrolled. A taller one
+ * scrolls in step with the page: the lens sits at the same relative place in the map as the view does in the stage --
+ * VS Code's `sliderTop = scrollTop * computedSliderRatio` -- and the content scrolls so the lens covers exactly what
+ * the page shows. `stageTop`, `viewTop` and `viewBottom` are as `lens` takes them; `ratio` is how far the lens moves
+ * for each pixel the page scrolls, for `dragged`.
  */
-export function pictured(stageHeight: number, columnWidth: number, markWidth: number, mapHeight: number): number {
-  if (columnWidth <= 0 || markWidth <= 0 || mapHeight <= 0) return stageHeight;
-  return Math.max(stageHeight, (mapHeight * columnWidth) / markWidth);
+export interface Picture {
+  readonly scale: number;
+  readonly offset: number;
+  readonly lens: { readonly top: number; readonly height: number };
+  readonly ratio: number;
+}
+
+export function picture(stageHeight: number, columnWidth: number, markWidth: number, mapHeight: number, stageTop: number, viewTop: number, viewBottom: number): Picture {
+  const scale = columnWidth > 0 && markWidth > 0 ? markWidth / columnWidth : stageHeight > 0 ? mapHeight / stageHeight : 1;
+  const from = clamp(viewTop - stageTop, 0, Math.max(0, stageHeight));
+  const to = clamp(viewBottom - stageTop, 0, Math.max(0, stageHeight));
+  const height = Math.max(0, to - from) * scale;
+  const content = stageHeight * scale;
+  if (content <= mapHeight) return { scale, offset: 0, lens: { top: from * scale, height }, ratio: scale };
+  // The page can scroll the stage through `travel`; the lens moves through the map's height less its own.
+  const travel = Math.max(1, stageHeight - (viewBottom - viewTop));
+  const ratio = Math.max(0, mapHeight - height) / travel;
+  const top = clamp(from * ratio, 0, Math.max(0, mapHeight - height));
+  return { scale, offset: clamp(from * scale - top, 0, content - mapHeight), lens: { top, height }, ratio };
+}
+
+/** How far the page scrolls for a drag of the lens by `delta` map pixels: VS Code's `delta / computedSliderRatio`. */
+export function dragged(at: Picture, delta: number): number {
+  return at.ratio > 0 ? delta / at.ratio : 0;
 }
 
 /**

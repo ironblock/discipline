@@ -1,7 +1,8 @@
 import { memo, useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import type { PointerEvent, RefObject } from 'react';
 
-import { jump, lens, onMap, pictured } from './minimap.ts';
+import { dragged, jump, picture } from './minimap.ts';
+import type { Picture } from './minimap.ts';
 import { laneStyle } from './sets.ts';
 import './minimap.css';
 
@@ -17,17 +18,25 @@ interface Mark {
 
 interface Measured {
   readonly marks: readonly Mark[];
-  /** The stage's height the map pictures (`pictured`): the stage's own, or more when it is short. */
+  /** The stage's height, and the widths `picture` scales by: the trunk's, and a trunk mark's. */
   readonly height: number;
-  /** The stage's own height over that: how much of the map the stage fills, 1 once it is fitted. */
-  readonly fill: number;
+  readonly column: number;
+  readonly mark: number;
 }
+
+/** No picture yet: nothing measured. */
+const UNMEASURED: Picture = { scale: 0, offset: 0, lens: { top: 0, height: 0 }, ratio: 0 };
 
 /**
  * The whole session at a glance, down the left edge: every trunk message and
  * every side call as a sliver in its own colour, each refill as a line across,
  * whatever went wrong as a tick in its alarm colour, what is running now lit,
- * and a lens over what is in view. Press or drag to go there.
+ * and a lens over what is in view. Press to go there; drag the lens to scroll.
+ *
+ * It draws as VS Code's proportional minimap does (`picture`): one scale for
+ * both axes, so a block keeps its message's shape; a session taller than the
+ * map scrolls in step with the page, the lens at the page's relative place
+ * over the blocks the page shows.
  *
  * It draws what the page has laid out -- it measures the stage, it does not
  * re-derive the layout -- and reads only what blocks already say about
@@ -37,10 +46,13 @@ export function Minimap({ stage, revision, curtain }: { readonly stage: RefObjec
   const map = useRef<HTMLDivElement>(null);
   // A trunk mark's width, measured, never derived from the stylesheet's percentages.
   const probe = useRef<HTMLSpanElement>(null);
-  const [measured, setMeasured] = useState<Measured>({ marks: [], height: 0, fill: 1 });
-  // How much of the map the stage fills, for the lens and a press, which run apart from a re-render.
-  const fill = useRef(1);
-  const [view, setView] = useState({ top: 0, height: 1 });
+  const [measured, setMeasured] = useState<Measured>({ marks: [], height: 0, column: 0, mark: 0 });
+  // The geometry and the picture, for a scroll and a press, which run apart from a re-render.
+  const geometry = useRef(measured);
+  const [view, setView] = useState<Picture>(UNMEASURED);
+  const shown = useRef<Picture>(UNMEASURED);
+  // A lens drag: where the pointer and the page were when it began.
+  const drag = useRef<{ readonly y: number; readonly scroll: number } | null>(null);
   const frame = useRef(0);
 
   // The header and the composer bound what is in view. Found once and kept: this runs every frame of a
@@ -63,8 +75,10 @@ export function Minimap({ stage, revision, curtain }: { readonly stage: RefObjec
     if (!root) return;
     const rect = root.getBoundingClientRect();
     const { top, bottom } = band();
-    const seen = lens(rect.top, rect.height, top, bottom);
-    setView({ top: seen.top * fill.current, height: seen.height * fill.current });
+    const { height, column, mark } = geometry.current;
+    const next = picture(height, column, mark, map.current?.clientHeight ?? 0, rect.top, top, bottom);
+    shown.current = next;
+    setView(next);
   }, [stage, band]);
 
   const remeasure = useCallback(() => {
@@ -72,8 +86,8 @@ export function Minimap({ stage, revision, curtain }: { readonly stage: RefObjec
     frame.current = requestAnimationFrame(() => {
       const root = stage.current;
       if (!root) return;
-      const next = measure(root, map.current, probe.current);
-      fill.current = next.fill;
+      const next = measure(root, probe.current);
+      geometry.current = next;
       setMeasured(next);
       look();
     });
@@ -88,7 +102,7 @@ export function Minimap({ stage, revision, curtain }: { readonly stage: RefObjec
     if (!root) return;
     const observer = new ResizeObserver(remeasure);
     observer.observe(root);
-    // The map's own height sets how much of a short stage it pictures.
+    // The map's own height sets how far a long stage's picture scrolls.
     if (map.current) observer.observe(map.current);
     // One look a frame, however many scroll events the frame had.
     const onScroll = () => {
@@ -105,14 +119,26 @@ export function Minimap({ stage, revision, curtain }: { readonly stage: RefObjec
     };
   }, [stage, remeasure, look]);
 
-  const go = (e: PointerEvent<HTMLDivElement>) => {
+  // A press goes to the point under it, centred, as VS Code's fill mode does -- then, held, drags the lens from
+  // there; a press on the lens drags it as it stands. A drag moves the page by the lens's ratio (`dragged`).
+  const press = (e: PointerEvent<HTMLDivElement>) => {
     const root = stage.current;
     const box = map.current?.getBoundingClientRect();
-    if (!root || !box || box.height <= 0) return;
-    const rect = root.getBoundingClientRect();
-    const { top, bottom } = band();
-    const at = (e.clientY - box.top) / box.height / fill.current;
-    window.scrollTo({ top: jump(at, window.scrollY, rect.top, rect.height, top, bottom) });
+    const at = shown.current;
+    if (!root || !box || box.height <= 0 || at.scale <= 0) return;
+    const y = e.clientY - box.top;
+    if (y < at.lens.top || y > at.lens.top + at.lens.height) {
+      const rect = root.getBoundingClientRect();
+      const { top, bottom } = band();
+      const point = (y + at.offset) / at.scale / Math.max(1, rect.height);
+      window.scrollTo({ top: jump(point, window.scrollY, rect.top, rect.height, top, bottom) });
+    }
+    drag.current = { y: e.clientY, scroll: window.scrollY };
+  };
+  const move = (e: PointerEvent<HTMLDivElement>) => {
+    const from = drag.current;
+    if (!from) return;
+    window.scrollTo({ top: Math.max(0, from.scroll + dragged(shown.current, e.clientY - from.y)) });
   };
 
   return (
@@ -123,15 +149,22 @@ export function Minimap({ stage, revision, curtain }: { readonly stage: RefObjec
       aria-hidden="true"
       onPointerDown={(e) => {
         e.currentTarget.setPointerCapture(e.pointerId);
-        go(e);
+        press(e);
       }}
-      onPointerMove={(e) => {
-        if (e.currentTarget.hasPointerCapture(e.pointerId)) go(e);
+      onPointerMove={move}
+      onPointerUp={() => {
+        drag.current = null;
+      }}
+      onPointerCancel={() => {
+        drag.current = null;
       }}
     >
       <span className="ex-mm__probe" ref={probe} />
-      <Marks measured={measured} />
-      <span className="ex-mm__lens" style={{ top: `${view.top * 100}%`, height: `${view.height * 100}%` }} />
+      {/* The picture scrolls by its offset; the marks inside move only when the page is re-measured (scripts/perf.mjs). */}
+      <div className="ex-mm__picture" style={{ transform: `translateY(${-view.offset}px)` }}>
+        <Marks measured={measured} scale={view.scale} />
+      </div>
+      <span className="ex-mm__lens" style={{ top: `${view.lens.top}px`, height: `${view.lens.height}px` }} />
     </div>
   );
 }
@@ -140,9 +173,9 @@ export function Minimap({ stage, revision, curtain }: { readonly stage: RefObjec
  * The marks, apart from the lens: a scroll moves only the lens, and must not
  * re-render every sliver of a long session with it (scripts/perf.mjs).
  */
-const Marks = memo(function Marks({ measured }: { readonly measured: Measured }) {
+const Marks = memo(function Marks({ measured, scale }: { readonly measured: Measured; readonly scale: number }) {
   return measured.marks.map((mark, i) => {
-    const at = onMap(mark, measured.height);
+    const at = { top: mark.top * scale, height: mark.height * scale };
     return (
       <span
         key={i}
@@ -150,13 +183,13 @@ const Marks = memo(function Marks({ measured }: { readonly measured: Measured })
         data-tone={mark.tone}
         data-alarm={mark.alarm}
         data-live={mark.live ? '' : undefined}
-        style={{ ...laneStyle(mark.lane), top: `${at.top * 100}%`, height: `${at.height * 100}%` }}
+        style={{ ...laneStyle(mark.lane), top: `${at.top}px`, height: `${at.height}px` }}
       />
     );
   });
 });
 
-function measure(stage: HTMLElement, map: HTMLElement | null, probe: HTMLElement | null): Measured {
+function measure(stage: HTMLElement, probe: HTMLElement | null): Measured {
   const base = stage.getBoundingClientRect();
   const span = (el: Element) => {
     const r = el.getBoundingClientRect();
@@ -179,6 +212,5 @@ function measure(stage: HTMLElement, map: HTMLElement | null, probe: HTMLElement
     marks.push({ kind: 'lane', ...span(el), ...(lane ? { lane } : {}), ...(alarm ? { alarm } : {}), live });
   }
   const column = stage.querySelector('.ex-trunk')?.getBoundingClientRect().width ?? 0;
-  const height = pictured(base.height, column, probe?.getBoundingClientRect().width ?? 0, map?.clientHeight ?? 0);
-  return { marks, height, fill: height > 0 ? base.height / height : 1 };
+  return { marks, height: base.height, column, mark: probe?.getBoundingClientRect().width ?? 0 };
 }
