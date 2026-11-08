@@ -27030,12 +27030,9 @@ pub(in crate::drive) mod tests {
     #[test]
     fn an_unreachable_classifier_falls_back_to_the_patterns_and_says_why() {
         let tree = scratch("warrant-gate-fallback");
-        let port = std::net::TcpListener::bind("127.0.0.1:0")
-            .expect("a port")
-            .local_addr()
-            .expect("an address")
-            .port();
-        let session = classifier_gated(&tree, &format!("http://127.0.0.1:{port}"), "missing.md");
+        // Nothing can listen on port 0: a freed port could be taken by a
+        // test running beside this one, and answer.
+        let session = classifier_gated(&tree, "http://127.0.0.1:0", "missing.md");
         session.ask("look around", None).expect("accepted");
         let log = wait_until(&session, "the turn and its forks", |log| {
             settled(log) && fork_outcomes(log).len() >= 3
@@ -27085,12 +27082,8 @@ pub(in crate::drive) mod tests {
         });
         let lines: Vec<log::Line> = recorded.iter().map(line_of).collect();
         let tree_again = scratch("warrant-gate-replayed");
-        let port = std::net::TcpListener::bind("127.0.0.1:0")
-            .expect("a port")
-            .local_addr()
-            .expect("an address")
-            .port();
-        let replay = classifier_gated(&tree_again, &format!("http://127.0.0.1:{port}"), "notes.md");
+        // Nothing can listen on port 0, as above.
+        let replay = classifier_gated(&tree_again, "http://127.0.0.1:0", "notes.md");
         replay.replaying_gates(recorded_gates(&lines));
         replay.ask("look around", None).expect("accepted");
         let log = wait_until(&replay, "the replay", |log| {

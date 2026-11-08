@@ -1534,13 +1534,10 @@ threshold = 0.8
                 "0.5",
             )]
         };
-        // Nothing listens: bind, take the port, and let it go.
-        let port = std::net::TcpListener::bind("127.0.0.1:0")
-            .expect("a port")
-            .local_addr()
-            .expect("an address")
-            .port();
-        let gone = classifier_at(&format!("http://127.0.0.1:{port}"), probes());
+        // Nothing can listen on port 0, so a connect there fails at once on
+        // every platform; a port bound and let go could be taken by a test
+        // running beside this one, and answer.
+        let gone = classifier_at("http://127.0.0.1:0", probes());
         assert!(matches!(
             gate(&gone, &windows, None),
             Gated::Fallback { reason, .. } if reason.starts_with("unreachable")
