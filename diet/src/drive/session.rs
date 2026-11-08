@@ -3711,6 +3711,9 @@ pub struct Carry {
     pub from: log::CarriedFrom,
     /// The carried files under the run's sealed paths, when there are any.
     pub source: Option<Vec<String>>,
+    /// The phase the carried session was in after its meditation (#1071),
+    /// when its log records one.
+    pub phase: Option<String>,
 }
 
 /// An interactive session on one trunk.
@@ -3994,6 +3997,39 @@ impl<S: Streaming + 'static> Session<S> {
                 .first()
                 .and_then(|first| crate::drive::regimen::nonce_in(&first.content));
             state.trunk = carry.trunk;
+            // The phase the carried session was in (#1071), when the graph
+            // has it: its rules ride in the carried refill, so no note is due
+            // unless that refill has no system prompt to hold them. With none
+            // carried, the starting phase and its note, as before.
+            // A carried phase the graph lacks is refused, never dropped for
+            // the starting phase (#1071); with no graph there is nothing to
+            // restore.
+            let graph: Vec<String> = state
+                .interview
+                .as_ref()
+                .map(|interview| interview.phases.phases().to_vec())
+                .unwrap_or_default();
+            let carried = carry.phase.filter(|_| !graph.is_empty());
+            if let Some(phase) = &carried
+                && !graph.contains(phase)
+            {
+                return Err(format!(
+                    "the carried phase `{phase}` is not in this regimen's phase graph ({})",
+                    graph.join(", ")
+                ));
+            }
+            if let Some(phase) = carried {
+                state.phase = Some(phase);
+                state.phase_note_due = if state.phase_document().is_some()
+                    && crate::meditation::render::carries_ground_rules(&state.trunk)
+                {
+                    None
+                } else {
+                    state.phase_note()
+                };
+            }
+            let opened_in = state.phase.clone();
+            let opened_document = state.phase_document();
             match (&carry.object, state.interview.as_mut()) {
                 (Some(dump), Some(interview)) => {
                     let threshold = interview.object.similar().map(str::to_owned);
@@ -4021,6 +4057,8 @@ impl<S: Streaming + 'static> Session<S> {
                         carried_from,
                         carried_source,
                         head_nonce,
+                        phases,
+                        phase_document,
                         ..
                     },
                 ..
@@ -4029,6 +4067,11 @@ impl<S: Streaming + 'static> Session<S> {
                 *carried_from = Some(carry.from);
                 *carried_source = carry.source;
                 *head_nonce = carried_nonce;
+                // The start names the phase the session opens in (#1071).
+                if let (Some((_, _, first)), Some(phase)) = (phases.as_mut(), opened_in) {
+                    *first = phase;
+                    *phase_document = opened_document;
+                }
             }
         }
         Ok(self)
@@ -33831,6 +33874,7 @@ pub(in crate::drive) mod tests {
                 object: None,
                 from: from.clone(),
                 source: Some(vec!["src/scene-core.ts".to_owned()]),
+                phase: None,
             })
             .expect("it carries");
         let state = session.shared.lock();
@@ -33884,6 +33928,7 @@ pub(in crate::drive) mod tests {
                     object: None,
                     from: from.clone(),
                     source: None,
+                    phase: None,
                 })
                 .expect("it carries")
         };
@@ -34618,6 +34663,284 @@ pub(in crate::drive) mod tests {
                     .collect::<Vec<_>>()
             );
         }
+    }
+
+    /// An interview under the starter phase library (#787), opening in `phase`.
+    fn in_the_starter_library_at(phase: &str) -> Interview {
+        Interview {
+            phases: crate::meditation::phase::PhaseGraph::from_library(
+                &crate::meditation::library::Library::starter(),
+                phase,
+            )
+            .expect("the starter library has the phase"),
+            ..interviewing(&[])
+        }
+    }
+
+    /// What a carry's start names (#948), for #1071's tests.
+    fn carried_from(meditation_seq: u64) -> log::CarriedFrom {
+        log::CarriedFrom {
+            log_sha256: "c".repeat(64),
+            meditation_seq,
+            trunk_sha256: "d".repeat(64),
+            object_sha256: None,
+            worktree: None,
+            variant_sha256: None,
+            rerooted: None,
+        }
+    }
+
+    /// The phase a session's start opens in, and its document (#563, #787).
+    fn opened_in(session: &Session<Canned>) -> (Option<String>, Option<log::PhaseDocument>) {
+        let state = session.shared.lock();
+        let Some(Logged {
+            event:
+                Event::Started {
+                    phases,
+                    phase_document,
+                    ..
+                },
+            ..
+        }) = state.log.first()
+        else {
+            panic!("a start line");
+        };
+        (
+            phases.as_ref().map(|(_, _, first)| first.clone()),
+            phase_document.clone(),
+        )
+    }
+
+    /// The last meditation's seq in `lines`.
+    fn last_meditation(lines: &[log::Line]) -> u64 {
+        lines
+            .iter()
+            .rev()
+            .find(|line| matches!(line.event, log::Event::Meditation { .. }))
+            .expect("a meditation")
+            .seq
+    }
+
+    /// A self-capturing session's interview and shape under `interview`'s
+    /// phases (#1071): what an original and its carry both open with.
+    fn capturing_under(mut interview: Interview) -> (Interview, RequestShape) {
+        interview.rules = Vec::new();
+        interview.self_capture = Some(crate::capture::tools::Cadence::DEFAULT);
+        let mut shape = template();
+        declare_self_capture(&mut shape, Some(&interview));
+        (interview, shape)
+    }
+
+    /// A first turn that records a fact, so a meditation has working memory
+    /// to refill from.
+    fn noting_turn() -> Vec<Vec<Step>> {
+        const SAID: &str = "The schema has two tables.";
+        vec![
+            vec![
+                Step::Delta(SAID.to_owned()),
+                Step::call(
+                    0,
+                    "call-f",
+                    "update_record",
+                    &serde_json::json!({ "field": "fact", "content": SAID }).to_string(),
+                ),
+            ],
+            deltas(&["noted"]),
+        ]
+    }
+
+    /// The working object's dump, as a meditation keeps it (#948).
+    fn dumped(session: &Session<Canned>) -> Option<String> {
+        let state = session.shared.lock();
+        state
+            .interview
+            .as_ref()
+            .map(|interview| interview.object.dump())
+    }
+
+    /// #1071: a carry of a meditation that moved orient to plan opens in
+    /// plan, read from the carried log: its first request is the request the
+    /// original session sent next, byte for byte -- plan's rules in the
+    /// refill, and no orient note on the ask -- and its start names plan.
+    #[test]
+    fn a_carried_session_opens_in_the_phase_its_meditation_moved_to() {
+        let (interview, shape) = capturing_under(in_the_starter_library_at("orient"));
+        let mut acts = noting_turn();
+        acts.push(deltas(&["planned"]));
+        let original = Session::open_with(
+            Canned::new(acts),
+            shape.clone(),
+            None,
+            None,
+            None,
+            Some(interview.clone()),
+        );
+        original.ask("look around", None).expect("accepted");
+        let _ = wait_until(&original, "turn one", settled);
+        original
+            .declare_meditation_to(None, Some("plan"))
+            .expect("orient to plan is allowed");
+        let refilled = original.trunk();
+        let object = dumped(&original);
+        let sent_before = original.shared.transport.sent().len();
+        original.ask("make the plan", None).expect("accepted");
+        let log = wait_until(&original, "turn two", |log| {
+            log.iter()
+                .filter(|l| matches!(l.event, Event::TurnSettled { .. }))
+                .count()
+                == 2
+        });
+        let sent = original.shared.transport.sent();
+        assert_eq!(sent.len(), sent_before + 1, "turn two's one request");
+        let next = sent.last().expect("turn two's request").clone();
+        let lines: Vec<log::Line> = log.iter().map(line_of).collect();
+        let seq = last_meditation(&lines);
+        let phase = crate::drive::carry::carried_phase(&lines, seq);
+        assert_eq!(phase.as_deref(), Some("plan"));
+
+        let carried = Session::open_with(
+            Canned::new(vec![deltas(&["planned"])]),
+            shape,
+            None,
+            None,
+            None,
+            Some(interview),
+        )
+        .with_carry(Carry {
+            trunk: refilled,
+            object,
+            from: carried_from(seq),
+            source: None,
+            phase,
+        })
+        .expect("it carries");
+        assert_eq!(
+            opened_in(&carried),
+            (Some("plan".to_owned()), Some(starter_document("plan")))
+        );
+        carried.ask("make the plan", None).expect("accepted");
+        let log = wait_until(&carried, "the carried turn", settled);
+        assert_eq!(carried.shared.transport.sent(), [next]);
+        assert_eq!(phase_notes(&log), Vec::new(), "no orient note on the ask");
+    }
+
+    /// #1071: a meditation that moved no phase carries the phase the log
+    /// last records -- here plan, moved to with `keep` before it.
+    #[test]
+    fn a_carried_meditation_that_stayed_carries_the_phase_the_log_last_records() {
+        let (session, _) = proposing_in(
+            in_the_starter_library_at("orient"),
+            "plan",
+            vec![deltas(&["planned"])],
+        );
+        session
+            .ratify_phase("call-p", PhaseChoice::Keep)
+            .expect("ruled");
+        session
+            .declare_meditation(None)
+            .expect("a meditation that stays");
+        let lines: Vec<log::Line> = session.events_from(0).iter().map(line_of).collect();
+        assert_eq!(
+            crate::drive::carry::carried_phase(&lines, last_meditation(&lines)).as_deref(),
+            Some("plan")
+        );
+    }
+
+    /// #1071: a carried phase the regimen's graph lacks is refused, naming
+    /// the phase and the graph, rather than dropped for the starting phase;
+    /// a session with no phase graph has nothing to restore, and carries.
+    #[test]
+    fn a_carried_phase_the_graph_lacks_is_refused_and_no_graph_carries() {
+        let carry = || Carry {
+            trunk: vec![crate::client::shape::Message::new(
+                crate::client::shape::Role::System,
+                "you are the trunk",
+            )],
+            object: None,
+            from: carried_from(16),
+            source: None,
+            phase: Some("nowhere".to_owned()),
+        };
+        let (interview, shape) = capturing_under(in_the_starter_library_at("orient"));
+        let Err(refused) = Session::open_with(
+            Canned::new(vec![]),
+            shape,
+            None,
+            None,
+            None,
+            Some(interview),
+        )
+        .with_carry(carry()) else {
+            panic!("refused");
+        };
+        assert!(refused.contains("`nowhere`"), "{refused}");
+        assert!(
+            refused.contains("orient") && refused.contains("plan"),
+            "{refused}"
+        );
+        let (interview, shape) = capturing_under(interviewing(&[]));
+        assert!(
+            Session::open_with(
+                Canned::new(vec![]),
+                shape,
+                None,
+                None,
+                None,
+                Some(interview)
+            )
+            .with_carry(carry())
+            .is_ok()
+        );
+        assert!(
+            Session::open_with(Canned::new(vec![]), template(), None, None, None, None)
+                .with_carry(carry())
+                .is_ok()
+        );
+    }
+
+    /// #1071: a carried log that records no phase opens in the regimen's
+    /// starting phase, as before, and its start names that phase, its rules
+    /// a note due on the first ask.
+    #[test]
+    fn a_carried_log_with_no_phase_opens_in_the_starting_phase_and_says_so() {
+        let (interview, shape) = capturing_under(interviewing(&[]));
+        let original = Session::open_with(
+            Canned::new(noting_turn()),
+            shape,
+            None,
+            None,
+            None,
+            Some(interview),
+        );
+        original.ask("look around", None).expect("accepted");
+        let _ = wait_until(&original, "turn one", settled);
+        original.declare_meditation(None).expect("a meditation");
+        let lines: Vec<log::Line> = original.events_from(0).iter().map(line_of).collect();
+        let seq = last_meditation(&lines);
+        let phase = crate::drive::carry::carried_phase(&lines, seq);
+        assert_eq!(phase, None);
+        let (interview, shape) = capturing_under(in_the_starter_library_at("orient"));
+        let carried = Session::open_with(
+            Canned::new(vec![]),
+            shape,
+            None,
+            None,
+            None,
+            Some(interview),
+        )
+        .with_carry(Carry {
+            trunk: original.trunk(),
+            object: dumped(&original),
+            from: carried_from(seq),
+            source: None,
+            phase,
+        })
+        .expect("it carries");
+        assert_eq!(
+            opened_in(&carried),
+            (Some("orient".to_owned()), Some(starter_document("orient")))
+        );
+        assert!(carried.shared.lock().phase_note_due.is_some());
     }
 
     /// An interview under the starter phase library (#787), opening in `plan`.
