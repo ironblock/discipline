@@ -1017,7 +1017,7 @@ mod source_tests {
 
     /// An object of one entry per source #1050 names, each written by its
     /// lane, with the origin a keep or a note's authority gives it.
-    fn every_source() -> WorkingObject {
+    pub(super) fn every_source() -> WorkingObject {
         let mut object = WorkingObject::open(regime());
         let entries: &[(&str, &str, Option<Origin>)] = &[
             (
@@ -1178,5 +1178,106 @@ mod source_tests {
         let read = WorkingObject::from_dump(regime(), &object.dump()).expect("it reads");
         assert_eq!(read.dump(), object.dump());
         assert_eq!(render(&read, None), render(&object, None));
+    }
+}
+
+#[cfg(test)]
+mod legend_tests {
+    use super::source_tests::every_source;
+    use super::{DEFAULT_SOURCE, LEGEND, WORKING_SET_HEADER, render, render_columns, source};
+    use crate::object::{EntryId, Patch, Provenance, WorkingObject};
+
+    /// `every_source`, with a second line the harness wrote: a mixed object,
+    /// most of whose sources are not the default and two of which are.
+    fn mixed() -> WorkingObject {
+        let mut object = every_source();
+        object
+            .apply(&Patch::Add {
+                id: EntryId::new("m-mechanical").expect("an id"),
+                content: "entry 12".to_owned(),
+                provenance: Provenance {
+                    turn: 2,
+                    lane: "mechanical".to_owned(),
+                    fork: None,
+                    tangent: None,
+                    index: 0,
+                },
+            })
+            .expect("it applies");
+        object
+    }
+
+    /// #1086: frame 2 names the default source once, in the legend right
+    /// under the working set's heading, and leaves exactly the lines with
+    /// that source unmarked; every other line keeps its #1050 phrase.
+    #[test]
+    fn frame_two_marks_only_the_lines_whose_source_is_not_the_default() {
+        let object = mixed();
+        let text = render(&object, None);
+        assert!(text.contains("frame_version: 2\n"), "{text}");
+        assert_eq!(text.matches(LEGEND).count(), 1, "{text}");
+        assert!(
+            text.contains(&format!("{WORKING_SET_HEADER}{LEGEND}\n")),
+            "{text}"
+        );
+        let mut defaults = 0;
+        for entry in object.live() {
+            let cell = source(entry);
+            let line = if cell == DEFAULT_SOURCE {
+                defaults += 1;
+                format!("{}\t{}\n", entry.id.as_str(), entry.content)
+            } else {
+                format!("{}\t{cell}\t{}\n", entry.id.as_str(), entry.content)
+            };
+            assert!(text.contains(&line), "{line:?} in\n{text}");
+        }
+        assert_eq!(defaults, 2, "the fixture has two default-source lines");
+        assert!(!text.contains(&format!("\t{DEFAULT_SOURCE}\t")), "{text}");
+    }
+
+    /// #1086: a default-source line a live note checks against tool output
+    /// keeps its cell, carrying the check.
+    #[test]
+    fn a_default_line_with_a_live_check_keeps_its_cell() {
+        let mut object = mixed();
+        object
+            .confirm(
+                &EntryId::new("d-observed").expect("an id"),
+                &EntryId::new("k-mechanical").expect("an id"),
+            )
+            .expect("it confirms");
+        let text = render(&object, None);
+        assert!(
+            text.contains(&format!(
+                "k-mechanical\t{DEFAULT_SOURCE}, checked by d-observed\tentry 10\n"
+            )),
+            "{text}"
+        );
+        assert!(text.contains("m-mechanical\tentry 12\n"), "{text}");
+    }
+
+    /// #1086: frame 2 is frame 1 with the default cells removed, and the
+    /// legend under the working set's heading: nothing else moves.
+    #[test]
+    fn frame_two_is_frame_one_without_the_default_cells_plus_the_legend() {
+        let mut object = mixed();
+        object
+            .confirm(
+                &EntryId::new("d-observed").expect("an id"),
+                &EntryId::new("k-mechanical").expect("an id"),
+            )
+            .expect("it confirms");
+        for phase in [None, Some("plan")] {
+            let one = render_columns(&object, phase);
+            assert!(one.contains("frame_version: 1\n"), "{one}");
+            let expected = one
+                .replace("frame_version: 1\n", "frame_version: 2\n")
+                .replace(
+                    WORKING_SET_HEADER,
+                    &format!("{WORKING_SET_HEADER}{LEGEND}\n"),
+                )
+                .replace(&format!("\t{DEFAULT_SOURCE}\t"), "\t");
+            assert_eq!(render(&object, phase), expected);
+        }
     }
 }
