@@ -32,9 +32,9 @@ use crate::object::WorkingObject;
 /// `2` (#1086, the maintainer's legend form): one legend line under the
 /// working set's heading names the default source, [`DEFAULT_SOURCE`], and a
 /// line with that source carries no cell -- unless a live note checks it,
-/// when its cell carries the check. Every other line keeps frame 1's. The
-/// full column stays off the trunk: [`render_columns`], and the object's
-/// dump, from which mining computes it.
+/// when its cell carries the check. Every other line keeps frame 1's. Off
+/// the trunk the column is the object's dump's, from which mining computes
+/// it, and [`source`] gives every entry's phrase, the default included.
 pub const FRAME_VERSION: &str = "2";
 
 /// The source frame 2 leaves unmarked (#1086): fixed, not chosen per render,
@@ -46,16 +46,6 @@ pub const DEFAULT_SOURCE: &str = "the harness noted, from your commands";
 /// unmarked line's source is. A draft; the words are the maintainer's.
 pub const LEGEND: &str =
     "A line with no source between its id and its text: the harness noted, from your commands.";
-
-/// Which frame a render is built in (#1086): the trunk's, or frame 1's full
-/// column.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum Frame {
-    /// Frame 1 (#1050): every line its source.
-    Columns,
-    /// Frame 2: the legend, the default source unmarked.
-    Legend,
-}
 
 /// What the render does past its budget (#565).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -130,14 +120,6 @@ pub fn render(object: &WorkingObject, phase: Option<&str>) -> String {
     rendered(object, phase, None).text
 }
 
-/// [`render`] in frame 1's full column (#1050, #1086): every line its
-/// source, the default included, and no legend -- what the trunk's frame 2
-/// leaves out, for a view or a reader off the trunk.
-#[must_use]
-pub fn render_columns(object: &WorkingObject, phase: Option<&str>) -> String {
-    framed(Frame::Columns, object, phase, None, &Marks::new()).text
-}
-
 /// What a note's line carries after its text (#150): the operator's
 /// markers, by entry -- [`EDITED`], and [`flagged`] for each flag.
 pub type Marks = std::collections::BTreeMap<crate::object::EntryId, String>;
@@ -172,33 +154,19 @@ pub fn rendered_marked(
     budget: Option<Budget>,
     marks: &Marks,
 ) -> Rendered {
-    framed(Frame::Legend, object, phase, budget, marks)
-}
-
-/// [`rendered_marked`] in `frame` (#1086).
-#[allow(clippy::too_many_lines)]
-fn framed(
-    frame: Frame,
-    object: &WorkingObject,
-    phase: Option<&str>,
-    budget: Option<Budget>,
-    marks: &Marks,
-) -> Rendered {
-    let head = head(object, phase, frame);
+    let head = head(object, phase);
     let mark = |id: &crate::object::EntryId| marks.get(id).map_or("", String::as_str);
-    let line = |entry: &crate::object::Entry, content: &str| match cell_in(object, entry, frame) {
-        Some(cell) => format!(
-            "{}\t{cell}\t{}{}\n",
+    // Frame 2 (#1086): the source cell, and its tab, unless the legend says it.
+    let line = |entry: &crate::object::Entry, content: &str| {
+        let cell = cell(object, entry)
+            .map(|cell| format!("{cell}\t"))
+            .unwrap_or_default();
+        format!(
+            "{}\t{cell}{}{}\n",
             one_line(entry.id.as_str()),
             one_line(content),
             mark(&entry.id)
-        ),
-        None => format!(
-            "{}\t{}{}\n",
-            one_line(entry.id.as_str()),
-            one_line(content),
-            mark(&entry.id)
-        ),
+        )
     };
     let over = budget.map_or(OverBudget::Tier, |budget| budget.over);
     // The render with `reduced` shortened or elided, and how many were.
@@ -309,7 +277,7 @@ fn estimate(text: &str) -> u64 {
 
 /// The render's header: the regime, the phase, the frame, and the working
 /// set's heading.
-fn head(object: &WorkingObject, phase: Option<&str>, frame: Frame) -> String {
+fn head(object: &WorkingObject, phase: Option<&str>) -> String {
     let regime = object.regime();
     let mut out = String::new();
 
@@ -327,24 +295,18 @@ fn head(object: &WorkingObject, phase: Option<&str>, frame: Frame) -> String {
     // shape as much as anything.
     out.push_str(phase.unwrap_or("-"));
     out.push_str("\nframe_version: ");
-    out.push_str(match frame {
-        Frame::Columns => "1",
-        Frame::Legend => FRAME_VERSION,
-    });
+    out.push_str(FRAME_VERSION);
     out.push_str("\n\n");
     out.push_str(WORKING_SET_HEADER);
-    if frame == Frame::Legend {
-        out.push_str(LEGEND);
-        out.push('\n');
-    }
+    out.push_str(LEGEND);
+    out.push('\n');
     out
 }
 
-/// An entry's source cell in `frame` (#1086): frame 1's always; frame 2's
-/// none for the default source unchecked.
-fn cell_in(object: &WorkingObject, entry: &crate::object::Entry, frame: Frame) -> Option<String> {
-    let cell = source_in(object, entry);
-    (frame == Frame::Columns || cell != DEFAULT_SOURCE).then_some(cell)
+/// An entry's source cell (#1086): [`source_in`], or none when that is
+/// exactly the default source -- the legend says it.
+fn cell(object: &WorkingObject, entry: &crate::object::Entry) -> Option<String> {
+    Some(source_in(object, entry)).filter(|cell| cell != DEFAULT_SOURCE)
 }
 
 /// The working record's live entries, one `<id>\t<content>` line each:
@@ -696,7 +658,7 @@ pub fn working_set_bytes(object: &WorkingObject) -> u64 {
         // Nothing here can reach it -- an object of eighteen exabytes is not
         // a thing -- and saturating is still the right floor for a number
         // that decides a trigger.
-        let cell = cell_in(object, entry, Frame::Legend).map_or(0, |cell| cell.len() as u64 + 1);
+        let cell = cell(object, entry).map_or(0, |cell| cell.len() as u64 + 1);
         total = total
             .saturating_add(one_line(entry.id.as_str()).len() as u64)
             .saturating_add(cell)
@@ -1073,7 +1035,7 @@ mod refutation_tests {
 
 #[cfg(test)]
 mod source_tests {
-    use super::{render, render_columns, source};
+    use super::{render, source};
     use crate::object::{EntryId, KeptFrom, Origin, Patch, Provenance, Vouched, WorkingObject};
 
     fn regime() -> crate::formats::record::Regime {
@@ -1157,13 +1119,13 @@ mod source_tests {
         object
     }
 
-    /// #1050: in frame 1's full column each entry's line is its id, its
-    /// source in the maintainer's phrase -- a keep's tag in brackets after --
-    /// and its text; the header names frame 1.
+    /// #1050: each entry's line is its id, its source in the maintainer's
+    /// phrase -- a keep's tag in brackets after -- and its text; since frame
+    /// 2 (#1086) the default source's lines carry none, the legend saying it.
     #[test]
     fn each_entry_renders_its_source_between_its_id_and_its_text() {
-        let text = render_columns(&every_source(), None);
-        assert!(text.contains("frame_version: 1\n"), "{text}");
+        let text = render(&every_source(), None);
+        assert!(text.contains("frame_version: 2\n"), "{text}");
         for line in [
             "a-kept-ask\tuser said\tentry 0\n",
             "b-kept-tool\tuser kept, from tool output [port]\tentry 1\n",
@@ -1175,7 +1137,7 @@ mod source_tests {
             "h-interview\tyou said, when asked\tentry 7\n",
             "i-audit\tyou said, when asked\tentry 8\n",
             "j-refutation\tyou said, when asked\tentry 9\n",
-            "k-mechanical\tthe harness noted, from your commands\tentry 10\n",
+            "k-mechanical\tentry 10\n",
             "l-edited\tuser said\tentry 11\n",
         ] {
             assert!(text.contains(line), "{line:?} in\n{text}");
@@ -1253,7 +1215,7 @@ mod source_tests {
 #[cfg(test)]
 mod legend_tests {
     use super::source_tests::every_source;
-    use super::{DEFAULT_SOURCE, LEGEND, WORKING_SET_HEADER, render, render_columns, source};
+    use super::{DEFAULT_SOURCE, LEGEND, WORKING_SET_HEADER, render, source, source_in};
     use crate::object::{EntryId, Patch, Provenance, WorkingObject};
 
     /// `every_source`, with a second line the harness wrote: a mixed object,
@@ -1277,8 +1239,10 @@ mod legend_tests {
     }
 
     /// #1086: frame 2 names the default source once, in the legend right
-    /// under the working set's heading, and leaves exactly the lines with
-    /// that source unmarked; every other line keeps its #1050 phrase.
+    /// under the working set's heading, and each line is `{id}\t{text}` when
+    /// its [`source_in`] is exactly the default phrase, else
+    /// `{id}\t{source_in}\t{text}`; the dump keeps every entry's origin and
+    /// provenance, and [`source`] still names the default.
     #[test]
     fn frame_two_marks_only_the_lines_whose_source_is_not_the_default() {
         let object = mixed();
@@ -1291,7 +1255,7 @@ mod legend_tests {
         );
         let mut defaults = 0;
         for entry in object.live() {
-            let cell = source(entry);
+            let cell = source_in(&object, entry);
             let line = if cell == DEFAULT_SOURCE {
                 defaults += 1;
                 format!("{}\t{}\n", entry.id.as_str(), entry.content)
@@ -1302,6 +1266,23 @@ mod legend_tests {
         }
         assert_eq!(defaults, 2, "the fixture has two default-source lines");
         assert!(!text.contains(&format!("\t{DEFAULT_SOURCE}\t")), "{text}");
+        // Off the trunk: the phrase, and the dump's origin and provenance.
+        let mechanical = object
+            .live()
+            .find(|entry| entry.id.as_str() == "k-mechanical")
+            .expect("held");
+        assert_eq!(source(mechanical), DEFAULT_SOURCE);
+        let dump = object.dump();
+        assert!(
+            dump.contains("k-mechanical") && dump.contains("mechanical"),
+            "{dump}"
+        );
+        let read = WorkingObject::from_dump(object.regime().clone(), &dump).expect("it reads");
+        assert_eq!(
+            render(&read, None),
+            text,
+            "the dump carries what the render is computed from"
+        );
     }
 
     /// #1086: a default-source line a live note checks against tool output
@@ -1323,30 +1304,5 @@ mod legend_tests {
             "{text}"
         );
         assert!(text.contains("m-mechanical\tentry 12\n"), "{text}");
-    }
-
-    /// #1086: frame 2 is frame 1 with the default cells removed, and the
-    /// legend under the working set's heading: nothing else moves.
-    #[test]
-    fn frame_two_is_frame_one_without_the_default_cells_plus_the_legend() {
-        let mut object = mixed();
-        object
-            .confirm(
-                &EntryId::new("d-observed").expect("an id"),
-                &EntryId::new("k-mechanical").expect("an id"),
-            )
-            .expect("it confirms");
-        for phase in [None, Some("plan")] {
-            let one = render_columns(&object, phase);
-            assert!(one.contains("frame_version: 1\n"), "{one}");
-            let expected = one
-                .replace("frame_version: 1\n", "frame_version: 2\n")
-                .replace(
-                    WORKING_SET_HEADER,
-                    &format!("{WORKING_SET_HEADER}{LEGEND}\n"),
-                )
-                .replace(&format!("\t{DEFAULT_SOURCE}\t"), "\t");
-            assert_eq!(render(&object, phase), expected);
-        }
     }
 }
