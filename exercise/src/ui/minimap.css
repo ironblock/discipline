@@ -1,6 +1,6 @@
 /*
- * The minimap: a narrow rail down the left edge, the session scaled to it
- * at one scale for both axes, fitted to its height once the session is taller. Trunk slivers on the left of it, side calls on the right (behind
+ * The minimap: a narrow rail down the left edge, the session drawn at one
+ * scale for both axes, scrolling with the page once it is taller than the rail. Trunk slivers on the left of it, side calls on the right (behind
  * the curtain), refills across, alarms over everything.
  */
 .ex-minimap {
@@ -18,10 +18,18 @@
   overflow: hidden;
 }
 
-.ex-minimap > span {
+.ex-minimap > span,
+.ex-mm__picture > span {
   position: absolute;
   min-height: 2px;
   border-radius: 1px;
+}
+
+/* The picture of the stage, at one scale for both axes, scrolled by its offset (Minimap.tsx). */
+.ex-mm__picture {
+  position: absolute;
+  inset: 0;
+  will-change: transform;
 }
 
 .ex-mm__trunk,
@@ -68,14 +76,14 @@
 }
 
 /* Running now: lit. */
-.ex-minimap > [data-live] {
+.ex-mm__picture > [data-live] {
   background: var(--c);
   box-shadow: 0 0 6px var(--c);
 }
 
 /* Something went wrong: a tick in its alarm colour, over its sliver, the full width -- haloed in the
    page's colour, so it stands off whatever sliver it crosses, however bright. */
-.ex-minimap > [data-alarm]::after {
+.ex-mm__picture > [data-alarm]::after {
   content: '';
   position: absolute;
   left: -3px;
@@ -87,7 +95,7 @@
   box-shadow: 0 0 0 1px var(--page);
 }
 
-.ex-minimap > [data-alarm='bad']::after {
+.ex-mm__picture > [data-alarm='bad']::after {
   background: var(--bad);
   box-shadow: 0 0 0 1px var(--page), 0 0 4px var(--bad);
 }

@@ -355,6 +355,17 @@ export const MinimapScrollsWithThePage: Story = {
       const shown = (block.getBoundingClientRect().top - band) * scale;
       expect(Math.abs(drawn - shown)).toBeLessThan(3);
     });
+    // A drag on the lens scrolls the page down by the lens's ratio, many page pixels for each map pixel.
+    const before = window.scrollY;
+    const lensBox = map.querySelector('.ex-mm__lens')!.getBoundingClientRect();
+    const x = lensBox.left + lensBox.width / 2;
+    const y = lensBox.top + lensBox.height / 2;
+    await userEvent.pointer([
+      { keys: '[MouseLeft>]', target: map, coords: { clientX: x, clientY: y } },
+      { target: map, coords: { clientX: x, clientY: y + 20 } },
+      { keys: '[/MouseLeft]', target: map, coords: { clientX: x, clientY: y + 20 } },
+    ]);
+    await waitFor(() => expect(window.scrollY - before).toBeGreaterThan(20 * 4));
   },
 };
 

@@ -1,21 +1,12 @@
 import { describe, expect, it } from 'vitest';
 
-import { dragged, jump, lens, onMap, picture, pictured } from './minimap.ts';
+import { dragged, jump, lens, onMap, picture } from './minimap.ts';
 
 describe('the minimap geometry', () => {
   it('places a span by its share of the stage, never thinner than the minimum', () => {
     expect(onMap({ top: 500, height: 100 }, 1000)).toEqual({ top: 0.5, height: 0.1 });
     expect(onMap({ top: 990, height: 1 }, 10_000, 0.002)).toEqual({ top: 0.099, height: 0.002 });
     expect(onMap({ top: 20, height: 10 }, 0, 0.002)).toEqual({ top: 0, height: 0.002 });
-  });
-
-  it('pictures the column at one scale for both axes, fitted to the map once it is taller', () => {
-    // A trunk 760 wide drawn 200 wide: a map 800 tall pictures 3,040 of the stage, so a 500-tall start fills its top.
-    expect(pictured(500, 760, 200, 800)).toBe(3040);
-    // A column taller than that is fitted to the map: the stage's own height, as before.
-    expect(pictured(50_000, 760, 200, 800)).toBe(50_000);
-    // Nothing measured yet: the stage's height.
-    expect(pictured(500, 0, 200, 800)).toBe(500);
   });
 
   it('shows the lens where the visible band crosses the stage', () => {
