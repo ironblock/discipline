@@ -28,7 +28,20 @@ use crate::object::WorkingObject;
 /// from what -- between its id and its text, and a keep's tag after the
 /// source. Every render before it said `placeholder`, the frame no one had
 /// authored, with the id and the text alone.
-pub const FRAME_VERSION: &str = "1";
+///
+/// `2` (#1086): a line whose source is the default, [`DEFAULT_SOURCE`],
+/// carries no cell -- unless a live note checks it, when its cell carries
+/// the check. Every other line keeps frame 1's. There is no legend line (the
+/// maintainer's ruling, 2026-11-09). Off the trunk the column is the
+/// object's dump's, from which mining computes it, and [`source`] gives
+/// every entry's phrase, the default included.
+pub const FRAME_VERSION: &str = "2";
+
+/// The source frame 2 leaves unmarked (#1086): fixed, not chosen per render,
+/// so an unmarked line means the same at every refill -- the harness's
+/// mechanical entries, most of a recorded refill's lines. Still the
+/// [`source_in`] value, and the full column in the page and the log.
+pub const DEFAULT_SOURCE: &str = "the harness noted, from your commands";
 
 /// What the render does past its budget (#565).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -139,11 +152,14 @@ pub fn rendered_marked(
 ) -> Rendered {
     let head = head(object, phase);
     let mark = |id: &crate::object::EntryId| marks.get(id).map_or("", String::as_str);
+    // Frame 2 (#1086): the source cell, and its tab, unless it is the default.
     let line = |entry: &crate::object::Entry, content: &str| {
+        let cell = cell(object, entry)
+            .map(|cell| format!("{cell}\t"))
+            .unwrap_or_default();
         format!(
-            "{}\t{}\t{}{}\n",
+            "{}\t{cell}{}{}\n",
             one_line(entry.id.as_str()),
-            source_in(object, entry),
             one_line(content),
             mark(&entry.id)
         )
@@ -279,6 +295,12 @@ fn head(object: &WorkingObject, phase: Option<&str>) -> String {
     out.push_str("\n\n");
     out.push_str(WORKING_SET_HEADER);
     out
+}
+
+/// An entry's source cell (#1086): [`source_in`], or none when that is
+/// exactly the default source.
+fn cell(object: &WorkingObject, entry: &crate::object::Entry) -> Option<String> {
+    Some(source_in(object, entry)).filter(|cell| cell != DEFAULT_SOURCE)
 }
 
 /// The working record's live entries, one `<id>\t<content>` line each:
@@ -615,6 +637,8 @@ pub fn one_line(text: &str) -> String {
 /// be sent.
 #[must_use]
 pub fn working_set_bytes(object: &WorkingObject) -> u64 {
+    // The entries' lines and nothing else -- frame 2 has no legend line (the
+    // maintainer's ruling, 2026-11-09) -- so an empty object is 0.
     let mut total: u64 = 0;
     for entry in object.live() {
         // Measured through the same escaping the render uses, and counting
@@ -628,11 +652,12 @@ pub fn working_set_bytes(object: &WorkingObject) -> u64 {
         // Nothing here can reach it -- an object of eighteen exabytes is not
         // a thing -- and saturating is still the right floor for a number
         // that decides a trigger.
+        let cell = cell(object, entry).map_or(0, |cell| cell.len() as u64 + 1);
         total = total
             .saturating_add(one_line(entry.id.as_str()).len() as u64)
-            .saturating_add(source_in(object, entry).len() as u64)
+            .saturating_add(cell)
             .saturating_add(one_line(&entry.content).len() as u64)
-            .saturating_add(3);
+            .saturating_add(2);
     }
     total
 }
@@ -1017,7 +1042,7 @@ mod source_tests {
 
     /// An object of one entry per source #1050 names, each written by its
     /// lane, with the origin a keep or a note's authority gives it.
-    fn every_source() -> WorkingObject {
+    pub(super) fn every_source() -> WorkingObject {
         let mut object = WorkingObject::open(regime());
         let entries: &[(&str, &str, Option<Origin>)] = &[
             (
@@ -1089,12 +1114,12 @@ mod source_tests {
     }
 
     /// #1050: each entry's line is its id, its source in the maintainer's
-    /// phrase -- a keep's tag in brackets after -- and its text; the header
-    /// names frame 1.
+    /// phrase -- a keep's tag in brackets after -- and its text; since frame
+    /// 2 (#1086) the default source's lines carry none.
     #[test]
     fn each_entry_renders_its_source_between_its_id_and_its_text() {
         let text = render(&every_source(), None);
-        assert!(text.contains("frame_version: 1\n"), "{text}");
+        assert!(text.contains("frame_version: 2\n"), "{text}");
         for line in [
             "a-kept-ask\tuser said\tentry 0\n",
             "b-kept-tool\tuser kept, from tool output [port]\tentry 1\n",
@@ -1106,7 +1131,7 @@ mod source_tests {
             "h-interview\tyou said, when asked\tentry 7\n",
             "i-audit\tyou said, when asked\tentry 8\n",
             "j-refutation\tyou said, when asked\tentry 9\n",
-            "k-mechanical\tthe harness noted, from your commands\tentry 10\n",
+            "k-mechanical\tentry 10\n",
             "l-edited\tuser said\tentry 11\n",
         ] {
             assert!(text.contains(line), "{line:?} in\n{text}");
@@ -1178,5 +1203,143 @@ mod source_tests {
         let read = WorkingObject::from_dump(regime(), &object.dump()).expect("it reads");
         assert_eq!(read.dump(), object.dump());
         assert_eq!(render(&read, None), render(&object, None));
+    }
+}
+
+#[cfg(test)]
+mod frame_two_tests {
+    use super::source_tests::every_source;
+    use super::{DEFAULT_SOURCE, WORKING_SET_HEADER, render, source, source_in, working_set_bytes};
+    use crate::object::{EntryId, Patch, Provenance, WorkingObject};
+
+    /// `every_source`, with a second line the harness wrote: a mixed object,
+    /// most of whose sources are not the default and two of which are.
+    fn mixed() -> WorkingObject {
+        let mut object = every_source();
+        object
+            .apply(&Patch::Add {
+                id: EntryId::new("m-mechanical").expect("an id"),
+                content: "entry 12".to_owned(),
+                provenance: Provenance {
+                    turn: 2,
+                    lane: "mechanical".to_owned(),
+                    fork: None,
+                    tangent: None,
+                    index: 0,
+                },
+            })
+            .expect("it applies");
+        object
+    }
+
+    /// #1086: each frame-2 line is `{id}\t{text}` when
+    /// its [`source_in`] is exactly the default phrase, else
+    /// `{id}\t{source_in}\t{text}`; the dump keeps every entry's origin and
+    /// provenance, and [`source`] still names the default.
+    #[test]
+    fn frame_two_marks_only_the_lines_whose_source_is_not_the_default() {
+        let object = mixed();
+        let text = render(&object, None);
+        assert!(text.contains("frame_version: 2\n"), "{text}");
+        let mut defaults = 0;
+        for entry in object.live() {
+            let cell = source_in(&object, entry);
+            let line = if cell == DEFAULT_SOURCE {
+                defaults += 1;
+                format!("{}\t{}\n", entry.id.as_str(), entry.content)
+            } else {
+                format!("{}\t{cell}\t{}\n", entry.id.as_str(), entry.content)
+            };
+            assert!(text.contains(&line), "{line:?} in\n{text}");
+        }
+        assert_eq!(defaults, 2, "the fixture has two default-source lines");
+        assert!(!text.contains(&format!("\t{DEFAULT_SOURCE}\t")), "{text}");
+        // Off the trunk: the phrase, and the dump's origin and provenance.
+        let mechanical = object
+            .live()
+            .find(|entry| entry.id.as_str() == "k-mechanical")
+            .expect("held");
+        assert_eq!(source(mechanical), DEFAULT_SOURCE);
+        let dump = object.dump();
+        assert!(
+            dump.contains("k-mechanical") && dump.contains("mechanical"),
+            "{dump}"
+        );
+        let read = WorkingObject::from_dump(object.regime().clone(), &dump).expect("it reads");
+        assert_eq!(
+            render(&read, None),
+            text,
+            "the dump carries what the render is computed from"
+        );
+    }
+
+    /// The maintainer's ruling, 2026-11-09: no legend line. In every frame-2
+    /// render the working set's heading is followed straight by the first
+    /// entry's line (or by nothing, for an empty object), and the old legend's
+    /// words appear nowhere.
+    #[test]
+    fn no_frame_two_render_carries_a_legend_line() {
+        for object in [
+            mixed(),
+            every_source(),
+            WorkingObject::open(every_source().regime().clone()),
+        ] {
+            for phase in [None, Some("plan")] {
+                let text = render(&object, phase);
+                assert!(text.contains("frame_version: 2\n"), "{text}");
+                assert!(
+                    !text.contains("A line with no source"),
+                    "the old legend's words: {text}"
+                );
+                let (_, working_set) = text
+                    .split_once(WORKING_SET_HEADER)
+                    .expect("the render has a working set");
+                match object.live().next() {
+                    Some(first) => assert!(
+                        working_set.starts_with(&format!("{}\t", first.id.as_str())),
+                        "the heading is followed by the first entry's line: {text}"
+                    ),
+                    None => assert_eq!(working_set, "", "{text}"),
+                }
+            }
+        }
+    }
+
+    /// The maintainer's ruling, 2026-11-09: `working_set_bytes` counts exactly
+    /// the bytes after the heading -- the entries' lines, default-source lines
+    /// without a cell, and no legend.
+    #[test]
+    fn the_working_set_bytes_are_the_lines_after_the_heading_and_nothing_else() {
+        let object = mixed();
+        let text = render(&object, None);
+        let (_, working_set) = text
+            .split_once(WORKING_SET_HEADER)
+            .expect("the render has a working set");
+        assert_eq!(
+            working_set_bytes(&object),
+            working_set.len() as u64,
+            "{text}"
+        );
+    }
+
+    /// #1086: a default-source line a live note checks against tool output
+    /// keeps its cell, carrying the check.
+    #[test]
+    fn a_default_line_with_a_live_check_keeps_its_cell() {
+        let mut object = mixed();
+        object
+            .confirm(
+                &EntryId::new("d-observed").expect("an id"),
+                &EntryId::new("k-mechanical").expect("an id"),
+            )
+            .expect("it confirms");
+        let text = render(&object, None);
+        assert!(
+            text.contains(&format!(
+                "k-mechanical\t{DEFAULT_SOURCE}, checked by d-observed\tentry 10\n"
+            )),
+            "{text}"
+        );
+        assert!(text.contains("m-mechanical\tentry 12\n"), "{text}");
     }
 }

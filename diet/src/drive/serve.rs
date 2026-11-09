@@ -4023,6 +4023,46 @@ mod tests {
         assert_eq!(get_json(&plain, "/refill-preview").0, 404);
     }
 
+    /// #1086: `/refill-preview` is the next refill's render, byte for byte:
+    /// the meditation logs the same render, and the trunk's request carries
+    /// it -- frame 2, with no legend line (the maintainer's ruling,
+    /// 2026-11-09).
+    #[test]
+    fn the_refill_preview_is_the_next_refills_render_byte_for_byte() {
+        let (session, server) = serve_interviewing(vec![deltas(&["The port is 5182."])], |_| {});
+        session.ask("which port?", None).expect("accepted");
+        let log = wait_until(&session, "the turn", settled);
+        let answered = log
+            .iter()
+            .find(|logged| matches!(logged.event, Event::Answered { .. }))
+            .map(|logged| logged.seq)
+            .expect("an answer");
+        session.keep(answered, "port is 5182", None).expect("kept");
+        let (code, preview) = get_json(&server, "/refill-preview");
+        assert_eq!(code, 200, "{preview}");
+        let previewed = preview["render"].as_str().expect("a render").to_owned();
+        assert!(previewed.contains("frame_version: 2\n"), "{previewed}");
+        assert!(
+            !previewed.contains("A line with no source"),
+            "no legend line (the maintainer's ruling, 2026-11-09): {previewed}"
+        );
+        session.declare_meditation(None).expect("a meditation");
+        let rendered = session
+            .events_from(0)
+            .iter()
+            .rev()
+            .find_map(|logged| match &logged.event {
+                Event::Meditated { render, .. } => Some(render.clone()),
+                _ => None,
+            })
+            .expect("the meditation's render");
+        assert_eq!(rendered, previewed);
+        assert_eq!(
+            session.trunk().last(),
+            Some(&crate::meditation::render::refill_message(&previewed))
+        );
+    }
+
     /// #1038: while the shadows are hidden, `/events` and `/line/<seq>`
     /// leave `fork.shadowed` out of the live operator's view; the log keeps
     /// it.
