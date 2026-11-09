@@ -29,23 +29,19 @@ use crate::object::WorkingObject;
 /// source. Every render before it said `placeholder`, the frame no one had
 /// authored, with the id and the text alone.
 ///
-/// `2` (#1086, the maintainer's legend form): one legend line under the
-/// working set's heading names the default source, [`DEFAULT_SOURCE`], and a
-/// line with that source carries no cell -- unless a live note checks it,
-/// when its cell carries the check. Every other line keeps frame 1's. Off
-/// the trunk the column is the object's dump's, from which mining computes
-/// it, and [`source`] gives every entry's phrase, the default included.
+/// `2` (#1086): a line whose source is the default, [`DEFAULT_SOURCE`],
+/// carries no cell -- unless a live note checks it, when its cell carries
+/// the check. Every other line keeps frame 1's. There is no legend line (the
+/// maintainer's ruling, 2026-11-09). Off the trunk the column is the
+/// object's dump's, from which mining computes it, and [`source`] gives
+/// every entry's phrase, the default included.
 pub const FRAME_VERSION: &str = "2";
 
 /// The source frame 2 leaves unmarked (#1086): fixed, not chosen per render,
-/// so the legend means the same at every refill -- the harness's mechanical
-/// entries, most of a recorded refill's lines.
+/// so an unmarked line means the same at every refill -- the harness's
+/// mechanical entries, most of a recorded refill's lines. Still the
+/// [`source_in`] value, and the full column in the page and the log.
 pub const DEFAULT_SOURCE: &str = "the harness noted, from your commands";
-
-/// Frame 2's legend line (#1086), under the working set's heading: what an
-/// unmarked line's source is. A draft; the words are the maintainer's.
-pub const LEGEND: &str =
-    "A line with no source between its id and its text: the harness noted, from your commands.";
 
 /// What the render does past its budget (#565).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -156,7 +152,7 @@ pub fn rendered_marked(
 ) -> Rendered {
     let head = head(object, phase);
     let mark = |id: &crate::object::EntryId| marks.get(id).map_or("", String::as_str);
-    // Frame 2 (#1086): the source cell, and its tab, unless the legend says it.
+    // Frame 2 (#1086): the source cell, and its tab, unless it is the default.
     let line = |entry: &crate::object::Entry, content: &str| {
         let cell = cell(object, entry)
             .map(|cell| format!("{cell}\t"))
@@ -298,13 +294,11 @@ fn head(object: &WorkingObject, phase: Option<&str>) -> String {
     out.push_str(FRAME_VERSION);
     out.push_str("\n\n");
     out.push_str(WORKING_SET_HEADER);
-    out.push_str(LEGEND);
-    out.push('\n');
     out
 }
 
 /// An entry's source cell (#1086): [`source_in`], or none when that is
-/// exactly the default source -- the legend says it.
+/// exactly the default source.
 fn cell(object: &WorkingObject, entry: &crate::object::Entry) -> Option<String> {
     Some(source_in(object, entry)).filter(|cell| cell != DEFAULT_SOURCE)
 }
@@ -643,8 +637,8 @@ pub fn one_line(text: &str) -> String {
 /// be sent.
 #[must_use]
 pub fn working_set_bytes(object: &WorkingObject) -> u64 {
-    // Frame 2's legend line is the heading's, not an entry's (#1086): the
-    // trigger measures the entries, and an empty object is 0, as before.
+    // The entries' lines and nothing else -- frame 2 has no legend line (the
+    // maintainer's ruling, 2026-11-09) -- so an empty object is 0.
     let mut total: u64 = 0;
     for entry in object.live() {
         // Measured through the same escaping the render uses, and counting
@@ -1121,7 +1115,7 @@ mod source_tests {
 
     /// #1050: each entry's line is its id, its source in the maintainer's
     /// phrase -- a keep's tag in brackets after -- and its text; since frame
-    /// 2 (#1086) the default source's lines carry none, the legend saying it.
+    /// 2 (#1086) the default source's lines carry none.
     #[test]
     fn each_entry_renders_its_source_between_its_id_and_its_text() {
         let text = render(&every_source(), None);
@@ -1213,11 +1207,9 @@ mod source_tests {
 }
 
 #[cfg(test)]
-mod legend_tests {
+mod frame_two_tests {
     use super::source_tests::every_source;
-    use super::{
-        DEFAULT_SOURCE, LEGEND, WORKING_SET_HEADER, render, source, source_in, working_set_bytes,
-    };
+    use super::{DEFAULT_SOURCE, WORKING_SET_HEADER, render, source, source_in, working_set_bytes};
     use crate::object::{EntryId, Patch, Provenance, WorkingObject};
 
     /// `every_source`, with a second line the harness wrote: a mixed object,
@@ -1240,8 +1232,7 @@ mod legend_tests {
         object
     }
 
-    /// #1086: frame 2 names the default source once, in the legend right
-    /// under the working set's heading, and each line is `{id}\t{text}` when
+    /// #1086: each frame-2 line is `{id}\t{text}` when
     /// its [`source_in`] is exactly the default phrase, else
     /// `{id}\t{source_in}\t{text}`; the dump keeps every entry's origin and
     /// provenance, and [`source`] still names the default.
@@ -1250,11 +1241,6 @@ mod legend_tests {
         let object = mixed();
         let text = render(&object, None);
         assert!(text.contains("frame_version: 2\n"), "{text}");
-        assert_eq!(text.matches(LEGEND).count(), 1, "{text}");
-        assert!(
-            text.contains(&format!("{WORKING_SET_HEADER}{LEGEND}\n")),
-            "{text}"
-        );
         let mut defaults = 0;
         for entry in object.live() {
             let cell = source_in(&object, entry);

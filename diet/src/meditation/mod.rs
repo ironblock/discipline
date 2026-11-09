@@ -1535,7 +1535,7 @@ mod tests {
         // belongs to the maintainer. Renders under one frame have to be told
         // from renders under another, or the two get compared as though they
         // were the same regime: frame 1 (#1050) carries each entry's source,
-        // frame 2 (#1086) the legend and only the sources it doesn't name.
+        // frame 2 (#1086) only the sources that aren't the default.
         let object = three_facts();
         assert!(
             render::render(&object, None).contains("frame_version: 2\n"),
