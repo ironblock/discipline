@@ -1215,7 +1215,9 @@ mod source_tests {
 #[cfg(test)]
 mod legend_tests {
     use super::source_tests::every_source;
-    use super::{DEFAULT_SOURCE, LEGEND, WORKING_SET_HEADER, render, source, source_in};
+    use super::{
+        DEFAULT_SOURCE, LEGEND, WORKING_SET_HEADER, render, source, source_in, working_set_bytes,
+    };
     use crate::object::{EntryId, Patch, Provenance, WorkingObject};
 
     /// `every_source`, with a second line the harness wrote: a mixed object,
@@ -1282,6 +1284,55 @@ mod legend_tests {
             render(&read, None),
             text,
             "the dump carries what the render is computed from"
+        );
+    }
+
+    /// The maintainer's ruling, 2026-11-09: no legend line. In every frame-2
+    /// render the working set's heading is followed straight by the first
+    /// entry's line (or by nothing, for an empty object), and the old legend's
+    /// words appear nowhere.
+    #[test]
+    fn no_frame_two_render_carries_a_legend_line() {
+        for object in [
+            mixed(),
+            every_source(),
+            WorkingObject::open(every_source().regime().clone()),
+        ] {
+            for phase in [None, Some("plan")] {
+                let text = render(&object, phase);
+                assert!(text.contains("frame_version: 2\n"), "{text}");
+                assert!(
+                    !text.contains("A line with no source"),
+                    "the old legend's words: {text}"
+                );
+                let (_, working_set) = text
+                    .split_once(WORKING_SET_HEADER)
+                    .expect("the render has a working set");
+                match object.live().next() {
+                    Some(first) => assert!(
+                        working_set.starts_with(&format!("{}\t", first.id.as_str())),
+                        "the heading is followed by the first entry's line: {text}"
+                    ),
+                    None => assert_eq!(working_set, "", "{text}"),
+                }
+            }
+        }
+    }
+
+    /// The maintainer's ruling, 2026-11-09: `working_set_bytes` counts exactly
+    /// the bytes after the heading -- the entries' lines, default-source lines
+    /// without a cell, and no legend.
+    #[test]
+    fn the_working_set_bytes_are_the_lines_after_the_heading_and_nothing_else() {
+        let object = mixed();
+        let text = render(&object, None);
+        let (_, working_set) = text
+            .split_once(WORKING_SET_HEADER)
+            .expect("the render has a working set");
+        assert_eq!(
+            working_set_bytes(&object),
+            working_set.len() as u64,
+            "{text}"
         );
     }
 

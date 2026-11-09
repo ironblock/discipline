@@ -4025,7 +4025,8 @@ mod tests {
 
     /// #1086: `/refill-preview` is the next refill's render, byte for byte:
     /// the meditation logs the same render, and the trunk's request carries
-    /// it -- frame 2, its legend included.
+    /// it -- frame 2, with no legend line (the maintainer's ruling,
+    /// 2026-11-09).
     #[test]
     fn the_refill_preview_is_the_next_refills_render_byte_for_byte() {
         let (session, server) = serve_interviewing(vec![deltas(&["The port is 5182."])], |_| {});
@@ -4040,9 +4041,10 @@ mod tests {
         let (code, preview) = get_json(&server, "/refill-preview");
         assert_eq!(code, 200, "{preview}");
         let previewed = preview["render"].as_str().expect("a render").to_owned();
+        assert!(previewed.contains("frame_version: 2\n"), "{previewed}");
         assert!(
-            previewed.contains(crate::meditation::render::LEGEND),
-            "{previewed}"
+            !previewed.contains("A line with no source"),
+            "no legend line (the maintainer's ruling, 2026-11-09): {previewed}"
         );
         session.declare_meditation(None).expect("a meditation");
         let rendered = session

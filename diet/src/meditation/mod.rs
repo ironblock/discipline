@@ -1755,13 +1755,10 @@ mod tests {
         // worth a hundred bytes of slack. This is the binding form.
         for object in [three_facts(), WorkingObject::open(regime())] {
             let rendered = render::render(&object, Some("plan"));
-            // The entries, after the heading and frame 2's legend (#1086).
+            // The entries, straight after the heading: frame 2 has no legend
+            // line (the maintainer's ruling, 2026-11-09).
             let (_, working_set) = rendered
-                .split_once(&format!(
-                    "{}{}\n",
-                    render::WORKING_SET_HEADER,
-                    render::LEGEND
-                ))
+                .split_once(render::WORKING_SET_HEADER)
                 .expect("the render has a working set");
             assert_eq!(
                 render::working_set_bytes(&object),
