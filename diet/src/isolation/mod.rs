@@ -3187,6 +3187,24 @@ mod tests {
             .collect()
     }
 
+    /// A native file watcher (`FSEvents`, as Vite's `fsevents` uses) needs
+    /// its service: without it the watcher starts and never sees an edit,
+    /// so a dev server keeps serving what it read first. Every read mode
+    /// gets it; fseventsd delivers only the events of paths the sandbox can
+    /// read (measured 2026-11-10: nothing from a denied dir, nor from
+    /// outside a narrow read set).
+    #[test]
+    fn every_seatbelt_profile_lets_a_watcher_reach_fsevents() {
+        const LOOKUP: &str = "(allow mach-lookup (global-name \"com.apple.FSEvents\"))\n";
+        for reads in [Reads::Listed, Reads::All] {
+            let profile = Seatbelt::profile(&Policy {
+                reads,
+                ..shaped(Network::None, Vec::new())
+            });
+            assert!(profile.contains(LOOKUP), "{reads:?}: {profile}");
+        }
+    }
+
     #[test]
     fn the_seatbelt_profile_is_exactly_what_the_policy_declares() {
         let runner = Confinement::Sandbox(Backend::Seatbelt(Seatbelt::at(PathBuf::from(
@@ -3212,6 +3230,7 @@ mod tests {
 (allow signal (target same-sandbox))
 (allow sysctl-read)
 (allow mach-lookup (global-name "com.apple.system.opendirectoryd.libinfo"))
+(allow mach-lookup (global-name "com.apple.FSEvents"))
 (allow file-read-metadata
   (literal "/private") (literal "/private/var")
   (subpath "/private/var/select")
