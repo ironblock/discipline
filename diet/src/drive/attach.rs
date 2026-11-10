@@ -9,8 +9,8 @@
 //! # The path rule
 //!
 //! A candidate is a whitespace-separated token of the ask, trimmed of
-//! surrounding quotes and backticks and of trailing punctuation, that ends
-//! in `.png`, any case ([`candidates`]). Its `~` is the drive's `HOME`
+//! surrounding quotes, backticks and brackets and of trailing punctuation,
+//! that ends in `.png`, any case ([`candidates`]). Its `~` is the drive's `HOME`
 //! ([`home_expanded`], the policy's own expansion); a relative path is
 //! resolved against the worktree, and refused when there is none. The file
 //! must lie inside the regimen's read scope ([`readable`]) -- never a
@@ -80,8 +80,9 @@ const READ_PATIENCE: Duration = Duration::from_secs(10);
 /// The eight bytes every PNG begins with (the PNG specification, 5.2).
 const SIGNATURE: &[u8] = b"\x89PNG\r\n\x1a\n";
 
-/// What surrounds a path in prose: trimmed from both ends of a token.
-const QUOTES: &[char] = &['"', '\'', '`'];
+/// What opens a path in prose: trimmed from the start of a token. The
+/// quotes close it too ([`TRAILING`]), and each bracket's mate is there.
+const LEADING: &[char] = &['"', '\'', '`', '(', '[', '{'];
 
 /// What follows a path in prose: trimmed from the end of a token.
 const TRAILING: &[char] = &['"', '\'', '`', '.', ',', ';', ':', '!', '?', ')', ']', '}'];
@@ -231,7 +232,7 @@ pub fn uploaded(bytes: Vec<u8>, recording: Option<&Path>) -> Result<Upload, (Che
 #[must_use]
 pub fn candidates(text: &str) -> Vec<&str> {
     text.split_whitespace()
-        .map(|token| token.trim_start_matches(QUOTES).trim_end_matches(TRAILING))
+        .map(|token| token.trim_start_matches(LEADING).trim_end_matches(TRAILING))
         .filter(|token| {
             token.len() > EXTENSION.len()
                 && token
@@ -945,6 +946,12 @@ pub(in crate::drive) mod tests {
             ["./shots/a.PNG", "b.png", "~/x.png", "z.png"]
         );
         assert!(candidates("no picture here.").is_empty());
+        // A path in brackets, as prose puts one: its opening bracket comes
+        // off as its closing one does.
+        assert_eq!(
+            candidates("the frame (~/shots/round2.png) and [b.png], {c.png}"),
+            ["~/shots/round2.png", "b.png", "c.png"]
+        );
     }
 
     #[test]
