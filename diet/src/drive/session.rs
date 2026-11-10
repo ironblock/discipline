@@ -34817,6 +34817,125 @@ pub(in crate::drive) mod tests {
         assert_eq!(phase_notes(&log), Vec::new(), "no orient note on the ask");
     }
 
+    /// A served session under the starter library whose working object's
+    /// regime is at `dogma_version`, meditated from orient into plan and
+    /// asked once after (#1093): the request turn two sent, its log, and the
+    /// session, for the tests binding each refill field to its state.
+    fn refilled_into_plan(dogma_version: u32) -> (RequestShape, Vec<log::Line>, Session<Canned>) {
+        let (mut interview, shape) = capturing_under(in_the_starter_library_at("orient"));
+        interview.object = WorkingObject::open(crate::formats::record::Regime {
+            dogma_version,
+            ..regime()
+        });
+        let mut acts = noting_turn();
+        acts.push(deltas(&["planned"]));
+        let session =
+            Session::open_with(Canned::new(acts), shape, None, None, None, Some(interview));
+        session.ask("look around", None).expect("accepted");
+        let _ = wait_until(&session, "turn one", settled);
+        session
+            .declare_meditation_to(None, Some("plan"))
+            .expect("orient to plan is allowed");
+        session.ask("make the plan", None).expect("accepted");
+        let log = wait_until(&session, "turn two", |log| {
+            log.iter()
+                .filter(|l| matches!(l.event, Event::TurnSettled { .. }))
+                .count()
+                == 2
+        });
+        let sent = session
+            .shared
+            .transport
+            .sent()
+            .last()
+            .expect("turn two's request")
+            .clone();
+        let lines = log.iter().map(line_of).collect();
+        (sent, lines, session)
+    }
+
+    /// The refill's render in `sent`: the message its header opens.
+    fn refill_render(sent: &RequestShape) -> &str {
+        sent.messages
+            .iter()
+            .map(|message| message.content.as_str())
+            .find(|content| content.contains("# regime\n"))
+            .expect("the refill's render")
+    }
+
+    /// The last meditation line in `lines`.
+    fn meditation_line(lines: &[log::Line]) -> &log::Event {
+        lines
+            .iter()
+            .rev()
+            .map(|line| &line.event)
+            .find(|event| matches!(event, log::Event::Meditation { .. }))
+            .expect("a meditation")
+    }
+
+    /// #1093: the refill's `dogma_version` is the working object's regime's,
+    /// read from the session -- at a version no default is, so a header that
+    /// wrote a constant could not match it.
+    #[test]
+    fn a_refills_dogma_version_is_the_working_objects_regimes() {
+        let (sent, _, session) = refilled_into_plan(7);
+        let held = session
+            .shared
+            .lock()
+            .interview
+            .as_ref()
+            .expect("working memory")
+            .object
+            .regime()
+            .dogma_version;
+        assert_eq!(held, 7);
+        let render = refill_render(&sent);
+        assert!(
+            render.contains(&format!("# regime\ndogma_version: {held}\nphase: ")),
+            "{render}"
+        );
+    }
+
+    /// #1093: the refill's `frame_version` is the frame its meditation line
+    /// logs, the version a reader of the log reads the render under.
+    #[test]
+    fn a_refills_frame_version_is_the_frame_its_meditation_logs() {
+        let (sent, lines, _) = refilled_into_plan(0);
+        let log::Event::Meditation { frame, .. } = meditation_line(&lines) else {
+            unreachable!("found as a meditation");
+        };
+        let render = refill_render(&sent);
+        assert!(
+            render.contains(&format!("\nframe_version: {frame}\n\n# working set\n")),
+            "{render}"
+        );
+    }
+
+    /// #1093: the sentence naming the moves, closing the refill's system
+    /// message, is the moves out of the phase the session is in, from that
+    /// phase's document in the regimen's graph -- the document its meditation
+    /// line logs.
+    #[test]
+    fn a_refills_moves_are_the_moves_of_the_phase_the_session_is_in() {
+        let (sent, lines, session) = refilled_into_plan(0);
+        let phase = session.shared.lock().phase.clone().expect("a phase");
+        assert_eq!(phase, "plan");
+        let log::Event::Meditation { phase_document, .. } = meditation_line(&lines) else {
+            unreachable!("found as a meditation");
+        };
+        let document = phase_document.as_ref().expect("a phase document");
+        assert_eq!(*document, starter_document(&phase));
+        let moves = crate::meditation::render::phase_moves(&document.name, &document.transitions)
+            .expect("plan has moves");
+        let system = &sent.messages[0];
+        assert_eq!(system.role, Role::System);
+        assert!(
+            system.content.ends_with(&format!("\n\n{moves}")),
+            "{}",
+            system.content
+        );
+    }
+
     /// #1071: a meditation that moved no phase carries the phase the log
     /// last records -- here plan, moved to with `keep` before it.
     #[test]
