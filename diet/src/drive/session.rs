@@ -15596,7 +15596,12 @@ fn settle_fork<S>(
             } else if operator_fork(&state.log, fork) {
                 // The operator's fork writes nothing (#1021): its answer is
                 // logged and shown, and the operator keeps what they want.
-                log::ForkOutcome::Value
+                // One with no text, a call alone, gave no answer.
+                if text.trim().is_empty() {
+                    log::ForkOutcome::Failed
+                } else {
+                    log::ForkOutcome::Value
+                }
             } else if tools && (refuting || !pinned_fork(&state.log, fork)) {
                 let (outcome, lines) = captured(state, &calls, (turn, request), fork);
                 patches = lines;
@@ -29911,6 +29916,39 @@ pub(in crate::drive) mod tests {
             "its answer is logged"
         );
         assert_eq!(session.shared.lock().settlement, Settlement::Awaiting);
+        reads_whole(&session);
+    }
+
+    /// The operator's fork that answers with a call and no text gave no
+    /// answer: its call runs nothing, and it settles `failed`, never
+    /// `value`, which says an answer came back.
+    #[test]
+    fn the_operators_fork_that_answers_with_only_a_call_settles_failed() {
+        let session = Session::open_with(
+            Canned::new([deltas(&["The schema has two tables."])]),
+            template(),
+            None,
+            None,
+            None,
+            Some(interviewing(&[])),
+        )
+        .forking_through(Canned::new([vec![Step::call(
+            0,
+            "f-1",
+            "read",
+            r#"{"path":"schema.sql"}"#,
+        )]]));
+        session.ask("what is the schema?", None).expect("accepted");
+        wait_until(&session, "the turn", settled);
+        session
+            .fork(None, &OperatorAsk::Text("Why two tables?".to_owned()))
+            .expect("forked");
+        operator_forked(&session);
+        let log = session.events_from(0);
+        assert_eq!(
+            fork_settled(&log),
+            (log::ForkOutcome::Failed, vec!["read".to_owned()])
+        );
         reads_whole(&session);
     }
 
