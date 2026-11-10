@@ -77,11 +77,13 @@ start() {
 # operator's cwd, and --workspace refused it with "Access denied" and exit 0).
   # Start it from the worktree root, so the model's `--filePath shots/x.png`
   # means <worktree>/shots/x.png. A model in a subdirectory still needs an
-  # absolute path.
+  # absolute path. A dev server's WebSocket (Vite's HMR) needs its own ws://
+  # pattern: an http:// one does not cover it (measured 2026-11-10).
   (cd "$WT" && cdt start --headless=false \
     --userDataDir "$PROFILE" --logFile "$RUN/daemon.log" \
     --workspace "$WT" \
     --allowedUrlPattern 'http://localhost:*/*' --allowedUrlPattern 'http://127.0.0.1:*/*' \
+    --allowedUrlPattern 'ws://localhost:*/*' --allowedUrlPattern 'ws://127.0.0.1:*/*' \
     --categoryExtensions=false --no-performance-crux >/dev/null)
   rc=$?
   [ $rc -eq 0 ] || die "chrome-devtools start exited $rc (see $RUN/daemon.log)"

@@ -8,6 +8,7 @@
 #     {"message":"Took a screenshot of the current page's viewport.\nSaved screenshot to <daemon temp>/chrome-devtools-mcp-XXXXXX/screenshot.png."}
 # Each case: `shot` exits 0, the PNG is <run>/shots/<name>.png byte for byte, and nothing is left in the daemon's
 # temp dir or under shots/. A message naming a file outside a chrome-devtools-mcp-* dir is refused and moves nothing.
+# And `start` passes a ws:// --allowedUrlPattern beside each http:// one.
 # Exit 0 when every case holds; prints each case's verdict.
 set -u
 HERE=$(cd "$(dirname "$0")" && pwd)
@@ -19,6 +20,7 @@ cat > "$WORK/bin/chrome-devtools" <<'EOF'
 # The fake CLI: `status` says the daemon runs; `take_screenshot` answers as FAKE_SHOT says.
 case $1 in
   status) echo "chrome-devtools-mcp daemon is running. pid=1 socket=/nonexistent startDate=now" ;;
+  start) shift; printf '%s\n' "$@" > "$FAKE_START_ARGS" ;;
   take_screenshot)
     case $FAKE_SHOT in
       inline)
@@ -38,6 +40,9 @@ case $1 in
 esac
 EOF
 chmod +x "$WORK/bin/chrome-devtools"
+# `start` backgrounds caffeinate; the fake one exits at once.
+printf '#!/bin/bash\nexit 0\n' > "$WORK/bin/caffeinate"
+chmod +x "$WORK/bin/caffeinate"
 export PATH="$WORK/bin:$PATH"
 
 fail=0
@@ -62,4 +67,20 @@ case_ saved 0 PNG-saved
 case_ stray 1 ""
 # The stray file is the fake daemon's, not the script's: it must still be there, untouched.
 if [ "$(cat "$WORK/daemon-tmp-stray/not-ours.png" 2>/dev/null)" = PNG-stray ]; then echo "ok   stray left alone"; else echo "FAIL stray moved"; fail=1; fi
+# `start` lets the page reach a dev server's WebSocket (Vite's HMR) on the
+# hosts it lets the page load from: an http:// pattern alone blocks ws://
+# (measured 2026-11-10, CLI 1.10.1: a page's WebSocket to the server that
+# served it errors with only the http:// patterns, and opens with the ws://
+# ones beside them).
+mkdir -p "$WORK/run-start" "$WORK/wt-start"
+FAKE_START_ARGS="$WORK/start-args" T1_BROWSER_NO_DOWNLOAD_PIN=1 \
+  bash "$HERE/t1-browser.sh" start "$WORK/run-start" "$WORK/wt-start" > "$WORK/run-start/out" 2>&1
+got=$?
+patterns=$(grep -A1 -x -e '--allowedUrlPattern' "$WORK/start-args" 2>/dev/null | grep -v -x -e '--allowedUrlPattern' -e '--')
+want=$(printf '%s\n' 'http://localhost:*/*' 'http://127.0.0.1:*/*' 'ws://localhost:*/*' 'ws://127.0.0.1:*/*')
+if [ "$got" = 0 ] && [ "$(sort <<<"$patterns")" = "$(sort <<<"$want")" ]; then
+  echo "ok   start allows ws:// beside http://"
+else
+  echo "FAIL start (exit $got) allowed: $(tr "\n" " " <<<"$patterns"): $(cat "$WORK/run-start/out")"; fail=1
+fi
 exit $fail
