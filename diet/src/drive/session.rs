@@ -29914,6 +29914,39 @@ pub(in crate::drive) mod tests {
         reads_whole(&session);
     }
 
+    /// The operator's fork that answers with a call and no text gave no
+    /// answer: its call runs nothing, and it settles `failed`, never
+    /// `value`, which says an answer came back.
+    #[test]
+    fn the_operators_fork_that_answers_with_only_a_call_settles_failed() {
+        let session = Session::open_with(
+            Canned::new([deltas(&["The schema has two tables."])]),
+            template(),
+            None,
+            None,
+            None,
+            Some(interviewing(&[])),
+        )
+        .forking_through(Canned::new([vec![Step::call(
+            0,
+            "f-1",
+            "read",
+            r#"{"path":"schema.sql"}"#,
+        )]]));
+        session.ask("what is the schema?", None).expect("accepted");
+        wait_until(&session, "the turn", settled);
+        session
+            .fork(None, &OperatorAsk::Text("Why two tables?".to_owned()))
+            .expect("forked");
+        operator_forked(&session);
+        let log = session.events_from(0);
+        assert_eq!(
+            fork_settled(&log),
+            (log::ForkOutcome::Failed, vec!["read".to_owned()])
+        );
+        reads_whole(&session);
+    }
+
     /// #1038: the operator's fork in their own words is logged `ask:
     /// operator-text`, so a reader can tell it from an automatic fork's
     /// generic ask.
