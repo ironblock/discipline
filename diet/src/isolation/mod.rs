@@ -3187,7 +3187,7 @@ mod tests {
             .collect()
     }
 
-    /// A native file watcher (FSEvents, as Vite's `fsevents` uses) needs
+    /// A native file watcher (`FSEvents`, as Vite's `fsevents` uses) needs
     /// its service: without it the watcher starts and never sees an edit,
     /// so a dev server keeps serving what it read first. Every read mode
     /// gets it; fseventsd delivers only the events of paths the sandbox can
