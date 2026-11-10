@@ -1843,6 +1843,9 @@ mod tests {
         assert_eq!(at(&manual, "interview_shadow_offer"), "chips");
         // Dedupe off for the manual drive (the maintainer, 2026-11-03).
         assert_eq!(at(&manual, "note_dedupe"), "off");
+        // #1050 item 3: its interview answers through the record tools, in t3.
+        assert_eq!(at(&manual, "capture_modality"), "tools");
+        assert!(at(&manual, "fork_asks").starts_with("t3:"));
         let offer =
             |text: &str| serve_levers(&regimen::parse(text).expect("a regimen"), (8192, "default"));
         assert_eq!(

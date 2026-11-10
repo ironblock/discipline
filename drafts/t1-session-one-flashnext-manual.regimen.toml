@@ -13,7 +13,11 @@
 # - self-capture under contract set c3 (#1016): a note in the model's own words, always kept, observed or
 #   self-stated;
 # - `note_dedupe = "off"`: the maintainer's ruling of 2026-11-03, on a judged sample of merges on one model line
-#   that found most wrong at tfidf 0.40 (2026-11-03).
+#   that found most wrong at tfidf 0.40 (2026-11-03);
+# - the interview answers through the record tools (#1050 item 3, the maintainer's "Yes"): `capture_modality =
+#   "tools"` with fork ask set `t3`, `t2` with the tools route's imperative (dogma 16). As `t2` does, `t3` wraps each
+#   ask in `<interview>` tags, and the system prompt carries t2's priming paragraph, saying what the tags mean, from
+#   the session's start.
 # Everything else is that draft's, and its header's notes hold here too.
 arm = "t1-session-one-flashnext-manual"
 dogma_version = 0
@@ -54,8 +58,8 @@ interview_timing = "gap"
 interview_shadow = ["read", "evidence", "trouble", "open"]
 interview_shadow_offer = "chips"
 mechanical_capture = "on"
-capture_modality = "fields"
-fork_asks = "v4"
+capture_modality = "tools"
+fork_asks = "t3"
 warrant_gate = "regex"
 refutation_interview = "off"
 fork_delivery = "meditation"
