@@ -24,7 +24,9 @@
 //!   holds it ([`Session::memory`]): the live entries, or every one with
 //!   `?all`, in the object's own dump shape.
 //! * `POST /commands` takes `{"kind": <command>, ...}`. A refusal is `409`
-//!   with its tag, and the session has logged it (D8). An ask may carry
+//!   with its tag, and the session has logged it (D8). A malformed command
+//!   is `400`, logging nothing; one carrying keys its kind does not take
+//!   names them, `{"stray_keys": [...]}`. An ask may carry
 //!   `"scoping": true`, the operator's mark that warrants the capture gap's
 //!   fork (#374); its `ask` line carries it.
 //! * `POST /approve` takes `{"call": <id>, "scope": once|session|workspace|
@@ -785,7 +787,7 @@ impl<S: Streaming + 'static> Serving<S> {
             return;
         };
         let Some(command) = Command::from_object(&object) else {
-            return respond(stream, 400, &empty());
+            return respond(stream, 400, &malformed(&object));
         };
         let (status, reply) = self.run(command);
         respond(stream, status, &Value::Object(reply));
@@ -1310,60 +1312,8 @@ impl Command {
     /// one that kind takes.
     #[allow(clippy::too_many_lines)]
     fn from_object(object: &BTreeMap<String, Value>) -> Option<Posted> {
-        let Some(Value::String(kind)) = object.get("kind") else {
-            return None;
-        };
-        let kind = current(kind);
-        let kind = CommandKind::ALL
-            .iter()
-            .copied()
-            .find(|candidate| candidate.tag() == kind)?;
-        // Any command may carry the idle gap it ended (#117, D13 (c)).
-        let takes: &[&str] = match kind {
-            CommandKind::Ask => &["kind", "text", "idle_gap", "scoping", "files", "task"],
-            CommandKind::Cancel => &["kind", "turn", "idle_gap"],
-            CommandKind::DeclareMeditation => &["kind", "idle_gap", "phase"],
-            CommandKind::End => &["kind", "idle_gap"],
-            // No idle gap (#22): a tangent's open and close end none.
-            CommandKind::OpenTangent => &["kind", "id"],
-            CommandKind::CloseTangent => &["kind", "dispositions"],
-            // #614: moving the running call ends no idle gap either; nor
-            // does #150's refill-anyway, the held meditation being the one.
-            CommandKind::Background | CommandKind::RefillAnyway => &["kind"],
-            // #124: the proposal's call and the operator's choice; a ruling
-            // ends no idle gap.
-            CommandKind::RatifyPhase => &["kind", "call", "choice", "note"],
-            // #150: the entry and the operator's text; an edit or a flag
-            // ends no idle gap.
-            CommandKind::EditEntry => &["kind", "id", "content", "note"],
-            // #1050: so does the operator's retire of their own entry.
-            CommandKind::FlagEntry | CommandKind::RetireEntry => &["kind", "id", "note"],
-            // #788: the operator's phase commands; none ends an idle gap.
-            CommandKind::StartPhase => &["kind", "phase", "note"],
-            CommandKind::ProposePhase | CommandKind::MovePhase => {
-                &["kind", "to", "meditate", "note"]
-            }
-            // #1021: the operator's keep ends no idle gap.
-            CommandKind::Keep => &["kind", "from", "span", "start", "end", "tag", "note"],
-            // #1021: the operator's fork ends no idle gap.
-            CommandKind::Fork => &["kind", "at", "ask", "text", "note"],
-            // #1031: the answer to a shadow's suggestion ends no idle gap.
-            CommandKind::Suggestion => &["kind", "shadow", "answer", "note"],
-            // #1030: the operator's wrap ends no idle gap.
-            CommandKind::Wrap => &["kind", "call", "from", "span", "note"],
-            // #1050: a correction's answer and a retire end no idle gap.
-            CommandKind::Correction => &["kind", "refused", "answer", "note"],
-            // #942: a runner's grade ends no idle gap.
-            CommandKind::Grade => &[
-                "kind",
-                "task",
-                "attempt",
-                "attempts",
-                "right",
-                "timed_out",
-                "check_sha256",
-            ],
-        };
+        let kind = posted_kind(object)?;
+        let takes = takes(kind);
         if object.keys().any(|key| !takes.contains(&key.as_str())) {
             return None;
         }
@@ -1659,6 +1609,95 @@ fn idle_gap(value: &Value) -> Option<IdleGap> {
 }
 
 /// A `400`'s body for an ask whose named PNG cannot be attached (#372):
+/// The command a posted body's `kind` names, a retired spelling read as its
+/// current one.
+fn posted_kind(object: &BTreeMap<String, Value>) -> Option<CommandKind> {
+    let Some(Value::String(kind)) = object.get("kind") else {
+        return None;
+    };
+    let kind = current(kind);
+    CommandKind::ALL
+        .iter()
+        .copied()
+        .find(|candidate| candidate.tag() == kind)
+}
+
+/// The keys a command of `kind` takes, `kind` among them.
+#[allow(clippy::too_many_lines)]
+fn takes(kind: CommandKind) -> &'static [&'static str] {
+    // Any command may carry the idle gap it ended (#117, D13 (c)).
+    match kind {
+        CommandKind::Ask => &["kind", "text", "idle_gap", "scoping", "files", "task"],
+        CommandKind::Cancel => &["kind", "turn", "idle_gap"],
+        CommandKind::DeclareMeditation => &["kind", "idle_gap", "phase"],
+        CommandKind::End => &["kind", "idle_gap"],
+        // No idle gap (#22): a tangent's open and close end none.
+        CommandKind::OpenTangent => &["kind", "id"],
+        CommandKind::CloseTangent => &["kind", "dispositions"],
+        // #614: moving the running call ends no idle gap either; nor
+        // does #150's refill-anyway, the held meditation being the one.
+        CommandKind::Background | CommandKind::RefillAnyway => &["kind"],
+        // #124: the proposal's call and the operator's choice; a ruling
+        // ends no idle gap.
+        CommandKind::RatifyPhase => &["kind", "call", "choice", "note"],
+        // #150: the entry and the operator's text; an edit or a flag
+        // ends no idle gap.
+        CommandKind::EditEntry => &["kind", "id", "content", "note"],
+        // #1050: so does the operator's retire of their own entry.
+        CommandKind::FlagEntry | CommandKind::RetireEntry => &["kind", "id", "note"],
+        // #788: the operator's phase commands; none ends an idle gap.
+        CommandKind::StartPhase => &["kind", "phase", "note"],
+        CommandKind::ProposePhase | CommandKind::MovePhase => &["kind", "to", "meditate", "note"],
+        // #1021: the operator's keep ends no idle gap.
+        CommandKind::Keep => &["kind", "from", "span", "start", "end", "tag", "note"],
+        // #1021: the operator's fork ends no idle gap.
+        CommandKind::Fork => &["kind", "at", "ask", "text", "note"],
+        // #1031: the answer to a shadow's suggestion ends no idle gap.
+        CommandKind::Suggestion => &["kind", "shadow", "answer", "note"],
+        // #1030: the operator's wrap ends no idle gap.
+        CommandKind::Wrap => &["kind", "call", "from", "span", "note"],
+        // #1050: a correction's answer and a retire end no idle gap.
+        CommandKind::Correction => &["kind", "refused", "answer", "note"],
+        // #942: a runner's grade ends no idle gap.
+        CommandKind::Grade => &[
+            "kind",
+            "task",
+            "attempt",
+            "attempts",
+            "right",
+            "timed_out",
+            "check_sha256",
+        ],
+    }
+}
+
+/// The keys of a posted command that its kind does not take, in key order;
+/// none when no known `kind` names it.
+fn stray_keys(object: &BTreeMap<String, Value>) -> Vec<String> {
+    let Some(kind) = posted_kind(object) else {
+        return Vec::new();
+    };
+    let takes = takes(kind);
+    object
+        .keys()
+        .filter(|key| !takes.contains(&key.as_str()))
+        .cloned()
+        .collect()
+}
+
+/// A malformed command's `400` body: `{"stray_keys": [...]}` naming each
+/// key its kind does not take, or `{}` when every key is one it takes.
+fn malformed(object: &BTreeMap<String, Value>) -> Value {
+    let stray = stray_keys(object);
+    if stray.is_empty() {
+        return empty();
+    }
+    Value::Object(BTreeMap::from([(
+        "stray_keys".to_owned(),
+        Value::Array(stray.into_iter().map(Value::String).collect()),
+    )]))
+}
+
 /// `{"unattachable": {"path", "check", "reason"}}` -- the path as named, the
 /// check it failed, one of [`attach::Check`]'s words, and a sentence. Nothing
 /// was logged, copied or sent.
