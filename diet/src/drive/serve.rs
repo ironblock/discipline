@@ -3781,6 +3781,33 @@ mod tests {
         ));
     }
 
+    /// A command carrying a key its kind does not take is `400`, and the
+    /// reply names each such key, so a driver sees what to drop: a `note`
+    /// on a cancel or a declared meditation, which take none.
+    #[test]
+    fn a_command_with_a_key_its_kind_does_not_take_is_400_naming_the_key() {
+        let (session, server) = serve(Canned::new([]), quick());
+        for (json, stray) in [
+            (
+                r#"{"kind":"cancel","note":"why"}"#,
+                r#"{"stray_keys":["note"]}"#,
+            ),
+            (
+                r#"{"kind":"declare-meditation","note":"why"}"#,
+                r#"{"stray_keys":["note"]}"#,
+            ),
+            (
+                r#"{"kind":"ask","text":"x","also":1,"zed":2}"#,
+                r#"{"stray_keys":["also","zed"]}"#,
+            ),
+        ] {
+            let reply = post(&server, json, "");
+            assert_eq!(status(&reply), 400, "{json}: {reply}");
+            assert_eq!(body(&reply), stray, "{json}");
+        }
+        assert_eq!(session.events_from(0).len(), 1, "nothing was logged");
+    }
+
     #[test]
     fn a_malformed_command_is_400_and_not_logged() {
         let (session, server) = serve(Canned::new([]), quick());
