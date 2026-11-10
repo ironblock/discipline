@@ -57,6 +57,15 @@
 //!   and DNS plus HTTPS under `network = "host"` all still worked on the Mac
 //!   Pro (macOS 26.6.2); what failed was naming: `id` and `ls -l` printed
 //!   numeric ids. That one service is what remains.
+//! - `mach-lookup` of **`com.apple.FSEvents`**, the file-event service a
+//!   native watcher subscribes to (Vite through `fsevents`). Without it the
+//!   watcher starts, reports no error, and never sees an edit, so a dev
+//!   server keeps serving its first transform (measured 2026-11-10, Vite
+//!   6.4.3 with `fsevents` 2.3.3: stale 3 of 3 without the lookup, fresh 3
+//!   of 3 with it). fseventsd delivers a sandboxed client only the events
+//!   of paths it may read: watching `/` or a denied dir's parent, no event
+//!   arrived for a file changed in a denied dir, under either read mode,
+//!   nor, under `listed`, for one outside the readable set.
 //! - Reads: `/`, `/usr`, `/bin`, `/sbin`, `/System`, `/Library`,
 //!   `/private/etc`, `/private/var/db/dyld`, `/private/var/db/timezone`,
 //!   `/private/var/db/xcode_select_link`, `/dev`, the `/etc`, `/var` and
@@ -158,6 +167,7 @@ const HEAD: &str = r#"(version 1)
 (allow signal (target same-sandbox))
 (allow sysctl-read)
 (allow mach-lookup (global-name "com.apple.system.opendirectoryd.libinfo"))
+(allow mach-lookup (global-name "com.apple.FSEvents"))
 "#;
 
 /// The system paths a command reads.
