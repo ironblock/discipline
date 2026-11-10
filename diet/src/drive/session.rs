@@ -29489,6 +29489,36 @@ pub(in crate::drive) mod tests {
             .expect("the line")
     }
 
+    /// A fork's answer cut at its output cap is a keep's source, as a whole
+    /// answer is: the operator keeps a span of what arrived.
+    #[test]
+    fn a_span_of_a_fork_answer_cut_at_its_cap_can_be_kept() {
+        let session = Session::open_with(
+            Canned::new([deltas(&["The schema has two tables."])]),
+            template(),
+            None,
+            None,
+            None,
+            Some(interviewing(&[])),
+        )
+        .forking_through(Canned::new([vec![
+            Step::Delta("Orders change often, so they live apart from".to_owned()),
+            Step::FinishReason("length".to_owned()),
+        ]]));
+        session.ask("what is the schema?", None).expect("accepted");
+        wait_until(&session, "the turn", settled);
+        session
+            .fork(None, &OperatorAsk::Text("Why two tables?".to_owned()))
+            .expect("forked");
+        let log = wait_until(&session, "the fork to settle", |log| {
+            !fork_outcomes(log).is_empty()
+        });
+        let capped = seq_of(&log, |event| matches!(event, Event::Capped { .. }));
+        session
+            .keep(capped, "Orders change often", None)
+            .expect("kept");
+    }
+
     /// #1037: the operator's note on a gesture is logged immediately before
     /// the gesture's outcome; a refused gesture's note is dropped, and the
     /// next gesture carries none of it.
