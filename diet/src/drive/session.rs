@@ -33547,6 +33547,15 @@ pub(in crate::drive) mod tests {
         );
         assert_eq!(fork_settled(&log), (log::ForkOutcome::Unparseable, Some(1)));
         assert!(patches(&log).is_empty());
+        // #1094: the settled line names the tool of the call that ran
+        // nothing, not merely how many.
+        let written = log
+            .iter()
+            .find(|logged| matches!(logged.event, Event::ForkSettled { .. }))
+            .map(|logged| log::render(&line_of(logged)))
+            .expect("a fork.settled");
+        assert!(written.contains(r#""not_run_tools":["bash"]"#), "{written}");
+        assert!(!written.contains(r#""not_run":"#), "{written}");
     }
 
     /// #610: the modality is `fields` unless the regimen says `tools`, and

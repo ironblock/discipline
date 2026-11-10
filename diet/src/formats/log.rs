@@ -11112,16 +11112,94 @@ mod tests {
         assert!(refused.why.contains("v8"), "{refused}");
     }
 
-    /// #583, #878, #904, #555, #931, #936, #910, #942, #926, #932, #948, #971, #1016, #1021,
-    /// #1022, #1031, #1030, #1037, #1038, #1050: this module writes v42.
+    /// The v36 fixture with its one `fork.settled` replaced by `settled`,
+    /// declaring `version` (#1094).
+    fn fork_settled_at(version: i64, settled: &str) -> String {
+        const V36: &str =
+            include_str!("../../formats/log/fixtures/valid/a-v36-operator-note-and-guarded.jsonl");
+        const SETTLED: &str = r#"{"fork":17,"kind":"fork.settled","outcome":"value","passed_over":[{"tag":"DECISION:","text":"one table","why":"guarded"}],"seq":21,"t":18}"#;
+        assert!(V36.contains(SETTLED), "the fixture's fork.settled moved");
+        V36.replace(r#""version":36"#, &format!(r#""version":{version}"#))
+            .replace(SETTLED, settled)
+    }
+
+    /// The one `fork.settled` of `lines`, as the writer writes it.
+    fn settled_as_written(lines: &[Line]) -> String {
+        lines
+            .iter()
+            .find(|line| matches!(line.event, Event::ForkSettled { .. }))
+            .map(super::render)
+            .expect("a fork.settled")
+    }
+
+    /// #1094: a v43 `fork.settled` names the tool of each call that ran
+    /// nothing, in call order, and is written back as read.
     #[test]
-    fn this_module_writes_v42_and_reads_every_version_before_it() {
-        assert_eq!(super::VERSION, 42);
+    fn a_v43_fork_settled_names_the_tools_of_its_calls_that_ran_nothing() {
+        const SETTLED: &str = r#"{"fork":17,"kind":"fork.settled","not_run_tools":["bash","read_file"],"outcome":"value","seq":21,"t":18}"#;
+        let lines = super::parse(&fork_settled_at(43, SETTLED)).expect("a v43 log");
+        assert_eq!(settled_as_written(&lines), SETTLED);
+    }
+
+    /// #1094: a v43 `fork.settled` whose every call ran writes the list
+    /// empty: the key is required from v43, so `[]` and "unknown" differ.
+    #[test]
+    fn a_v43_fork_settled_whose_calls_all_ran_writes_an_empty_list() {
+        const SETTLED: &str = r#"{"fork":17,"kind":"fork.settled","not_run_tools":[],"outcome":"value","seq":21,"t":18}"#;
+        let lines = super::parse(&fork_settled_at(43, SETTLED)).expect("a v43 log");
+        assert_eq!(settled_as_written(&lines), SETTLED);
+    }
+
+    /// #1094: v43 replaced the count with the list, so a v43 line carrying
+    /// `not_run` is refused.
+    #[test]
+    fn a_v43_fork_settled_carrying_not_run_is_refused() {
+        let refused = super::parse(&fork_settled_at(
+            43,
+            r#"{"fork":17,"kind":"fork.settled","not_run":1,"not_run_tools":["bash"],"outcome":"value","seq":21,"t":18}"#,
+        ))
+        .expect_err("v42's count in a v43 log");
+        assert!(
+            refused.why.contains("`not_run`, which v43 replaced with `not_run_tools`"),
+            "{refused}"
+        );
+    }
+
+    /// #1094: `not_run_tools` is required from v43; a v43 line without it
+    /// is refused.
+    #[test]
+    fn a_v43_fork_settled_without_not_run_tools_is_refused() {
+        let refused = super::parse(&fork_settled_at(
+            43,
+            r#"{"fork":17,"kind":"fork.settled","outcome":"value","seq":21,"t":18}"#,
+        ))
+        .expect_err("a v43 fork.settled with no list");
+        assert!(
+            refused.why.contains("`not_run_tools`, required from v43"),
+            "{refused}"
+        );
+    }
+
+    /// #1094: a v42 `fork.settled` counting its calls that ran nothing still
+    /// reads, the count as written and no list beside it.
+    #[test]
+    fn a_v42_fork_settled_counting_its_calls_that_ran_nothing_still_reads() {
+        const SETTLED: &str =
+            r#"{"fork":17,"kind":"fork.settled","not_run":2,"outcome":"value","seq":21,"t":18}"#;
+        let lines = super::parse(&fork_settled_at(42, SETTLED)).expect("a v42 log");
+        assert_eq!(settled_as_written(&lines), SETTLED);
+    }
+
+    /// #583, #878, #904, #555, #931, #936, #910, #942, #926, #932, #948, #971, #1016, #1021,
+    /// #1022, #1031, #1030, #1037, #1038, #1050, #1094: this module writes v43.
+    #[test]
+    fn this_module_writes_v43_and_reads_every_version_before_it() {
+        assert_eq!(super::VERSION, 43);
         assert_eq!(
             super::READS,
             &[
                 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22,
-                23, 24, 25, 26, 27, 28, 29, 30, 31, 32, 33, 34, 35, 36, 37, 38, 39, 40, 41, 42
+                23, 24, 25, 26, 27, 28, 29, 30, 31, 32, 33, 34, 35, 36, 37, 38, 39, 40, 41, 42, 43
             ]
         );
     }
