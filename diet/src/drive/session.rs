@@ -10394,18 +10394,22 @@ fn operator_fork(log: &[Logged], fork: u64) -> bool {
 }
 
 /// The texts of the logged line `from` a keep may keep from (#1021): an
-/// ask, an answer or a step's text as written, with an answer's or a step's
+/// ask, an answer (one cut at its cap included) or a step's text as written, with an answer's or a step's
 /// reasoning (#1037), or a tool result as shown.
 fn keep_source(state: &State, from: u64) -> Option<Vec<&str>> {
     let logged = state.log.iter().find(|logged| logged.seq == from)?;
     match &logged.event {
         Event::Asked { text, .. } => Some(vec![text.as_str()]),
         // A step's or an answer's words, and its reasoning (#1037): a fork's
-        // right answer may be only in what it reasoned.
+        // right answer may be only in what it reasoned. An answer cut at its
+        // output cap is a source too, of what arrived.
         Event::Answered {
             text, reasoning, ..
         }
         | Event::Called {
+            text, reasoning, ..
+        }
+        | Event::Capped {
             text, reasoning, ..
         } => Some(
             std::iter::once(text.as_str())
@@ -29492,6 +29496,36 @@ pub(in crate::drive) mod tests {
             .find(|logged| pick(&logged.event))
             .map(|logged| logged.seq)
             .expect("the line")
+    }
+
+    /// A fork's answer cut at its output cap is a keep's source, as a whole
+    /// answer is: the operator keeps a span of what arrived.
+    #[test]
+    fn a_span_of_a_fork_answer_cut_at_its_cap_can_be_kept() {
+        let session = Session::open_with(
+            Canned::new([deltas(&["The schema has two tables."])]),
+            template(),
+            None,
+            None,
+            None,
+            Some(interviewing(&[])),
+        )
+        .forking_through(Canned::new([vec![
+            Step::Delta("Orders change often, so they live apart from".to_owned()),
+            Step::FinishReason("length".to_owned()),
+        ]]));
+        session.ask("what is the schema?", None).expect("accepted");
+        wait_until(&session, "the turn", settled);
+        session
+            .fork(None, &OperatorAsk::Text("Why two tables?".to_owned()))
+            .expect("forked");
+        let log = wait_until(&session, "the fork to settle", |log| {
+            !fork_outcomes(log).is_empty()
+        });
+        let capped = seq_of(&log, |event| matches!(event, Event::Capped { .. }));
+        session
+            .keep(capped, "Orders change often", None)
+            .expect("kept");
     }
 
     /// #1037: the operator's note on a gesture is logged immediately before
