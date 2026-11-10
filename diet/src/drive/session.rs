@@ -15596,7 +15596,12 @@ fn settle_fork<S>(
             } else if operator_fork(&state.log, fork) {
                 // The operator's fork writes nothing (#1021): its answer is
                 // logged and shown, and the operator keeps what they want.
-                log::ForkOutcome::Value
+                // One with no text, a call alone, gave no answer.
+                if text.trim().is_empty() {
+                    log::ForkOutcome::Failed
+                } else {
+                    log::ForkOutcome::Value
+                }
             } else if tools && (refuting || !pinned_fork(&state.log, fork)) {
                 let (outcome, lines) = captured(state, &calls, (turn, request), fork);
                 patches = lines;
