@@ -10287,7 +10287,12 @@ fn forked_at(
             .iter()
             .rev()
             .find_map(|logged| match &logged.event {
-                Event::Answered { request, .. } => {
+                // A turn's last response: its answer, or -- when the turn
+                // ended in a call, a phase proposal -- the response that
+                // made it.
+                Event::Answered { request, .. }
+                | Event::Called { request, .. }
+                | Event::Capped { request, .. } => {
                     trunk_turn(*request).map(|turn| (turn, *request))
                 }
                 _ => None,
