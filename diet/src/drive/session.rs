@@ -10287,7 +10287,12 @@ fn forked_at(
             .iter()
             .rev()
             .find_map(|logged| match &logged.event {
-                Event::Answered { request, .. } => {
+                // A turn's last response: its answer, or -- when the turn
+                // ended in a call, a phase proposal -- the response that
+                // made it.
+                Event::Answered { request, .. }
+                | Event::Called { request, .. }
+                | Event::Capped { request, .. } => {
                     trunk_turn(*request).map(|turn| (turn, *request))
                 }
                 _ => None,
@@ -29950,6 +29955,47 @@ pub(in crate::drive) mod tests {
             (log::ForkOutcome::Failed, vec!["read".to_owned()])
         );
         reads_whole(&session);
+    }
+
+    /// The operator's fork with no `at` follows the last settled turn, also
+    /// when that turn ended in a response that made a call (a phase
+    /// proposal) and so logged no `Answered`: its line names that turn and
+    /// that response's request, not an earlier turn's answer.
+    #[test]
+    fn the_operators_fork_follows_a_turn_that_ended_in_a_call() {
+        let session = two_keys(
+            vec![
+                deltas(&["The schema has two tables."]),
+                proposing_step().remove(0),
+            ],
+            false,
+        )
+        .forking_through(Canned::new([deltas(&["Because orders change."])]));
+        session.ask("what is the schema?", None).expect("accepted");
+        wait_until(&session, "the first turn", |log| turns_settled(log) == 1);
+        session.ask("plan it", None).expect("accepted");
+        let log = wait_until(&session, "the second turn", |log| turns_settled(log) == 2);
+        let last = log
+            .iter()
+            .rev()
+            .find_map(|logged| match &logged.event {
+                Event::Requested {
+                    lane: Lane::Trunk,
+                    turn,
+                    ..
+                } => Some((*turn, logged.seq)),
+                _ => None,
+            })
+            .expect("a trunk request");
+        assert_eq!(last.0, 2);
+        session
+            .fork(None, &OperatorAsk::Text("Why build next?".to_owned()))
+            .expect("forked");
+        let (forked, _, _) = operator_forked(&session);
+        let Event::Forked { of_turn, at, .. } = forked else {
+            unreachable!("a fork line");
+        };
+        assert_eq!((of_turn, at), last);
     }
 
     /// #1038: the operator's fork in their own words is logged `ask:
