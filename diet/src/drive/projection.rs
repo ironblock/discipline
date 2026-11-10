@@ -3714,6 +3714,7 @@ mod tests {
             refused: None,
             pool: None,
             not_run: None,
+            not_run_tools: Some(Vec::new()),
             passed_over: Vec::new(),
         });
         events.extend(["d1", "d2", "d3"].map(|id| patch(8, id)));
@@ -3730,6 +3731,7 @@ mod tests {
             refused: None,
             pool: None,
             not_run: None,
+            not_run_tools: Some(Vec::new()),
             passed_over: Vec::new(),
         });
         let lines = numbered(events);
