@@ -945,6 +945,12 @@ pub(in crate::drive) mod tests {
             ["./shots/a.PNG", "b.png", "~/x.png", "z.png"]
         );
         assert!(candidates("no picture here.").is_empty());
+        // A path in brackets, as prose puts one: its opening bracket comes
+        // off as its closing one does.
+        assert_eq!(
+            candidates("the frame (~/shots/round2.png) and [b.png], {c.png}"),
+            ["~/shots/round2.png", "b.png", "c.png"]
+        );
     }
 
     #[test]
