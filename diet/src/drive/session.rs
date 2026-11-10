@@ -25363,6 +25363,85 @@ pub(in crate::drive) mod tests {
         tidy(&[&tree]);
     }
 
+    /// An entry the mechanical lane wrote first carries the default source,
+    /// and frame 2 renders such a line with no source cell: the model learns
+    /// that source from the id alone. So the served lane must mint only
+    /// `mechanical/` ids (`MECHANICAL_ID`) -- a path read, written, edited
+    /// or listed, and a file deleted and written again (`#2`, `#3`) -- or a
+    /// line with no cell would carry an id that does not say where it came
+    /// from. The known path that would break this if it were ever wired into
+    /// a served session is `capture::mechanical::Lane::patches` (through
+    /// `Lane::apply_to`), which writes lane `mechanical` under ids built
+    /// from the tool call's event: `<event>/cwd`, `<event>/read:<path>`,
+    /// `<event>/ran`.
+    #[test]
+    fn the_served_mechanical_lane_mints_only_mechanical_ids() {
+        let first_lane_mechanical = |session: &Session<Canned>| -> Vec<String> {
+            let state = session.shared.lock();
+            let object = &state.interview.as_ref().expect("memory").object;
+            object
+                .entries()
+                .filter(|entry| {
+                    entry.provenances.first().is_some_and(|provenance| {
+                        provenance.lane == crate::capture::mechanical::LANE
+                    })
+                })
+                .map(|entry| entry.id.as_str().to_owned())
+                .collect()
+        };
+
+        let tree = scratch("mechanical-ids-touch");
+        let session = touching(&tree, true);
+        session.ask("look around", None).expect("accepted");
+        wait_until(&session, "the turn", settled);
+        let touched = first_lane_mechanical(&session);
+        tidy(&[&tree]);
+
+        let tree = scratch("mechanical-ids-reborn");
+        std::fs::write(tree.join("gen.txt"), "x\n").expect("a file");
+        let mut tools = tools(
+            Confinement::Unconfined,
+            &tree,
+            &["cat", "rm", "echo"],
+            None,
+            Decider::Decline,
+        );
+        tools.approvals_off = true;
+        let mut interview = interviewing(&[log::Warrant::Scoping]);
+        interview.mechanical_capture = true;
+        let session = Session::open_with(
+            Canned::new([
+                vec![bash("c1", "cat gen.txt")],
+                vec![bash("c2", "rm gen.txt")],
+                vec![bash("c3", "echo y > gen.txt")],
+                deltas(&["done"]),
+            ]),
+            looping(),
+            None,
+            Some(tools),
+            None,
+            Some(interview),
+        );
+        session.ask("regenerate it", None).expect("accepted");
+        wait_until(&session, "the turn", settled);
+        let reborn = first_lane_mechanical(&session);
+        tidy(&[&tree]);
+
+        for (case, ids, at_least) in [("touched", &touched, 3), ("reborn", &reborn, 2)] {
+            assert!(
+                ids.len() >= at_least,
+                "{case}: the lane wrote entries, so the check is not vacuous: {ids:?}"
+            );
+            for id in ids {
+                assert!(
+                    id.starts_with(MECHANICAL_ID),
+                    "{case}: an entry the mechanical lane wrote first has id {id:?}, \
+                     not under {MECHANICAL_ID:?}"
+                );
+            }
+        }
+    }
+
     /// #784: off, the default, nothing is written.
     #[test]
     fn mechanical_capture_off_writes_nothing() {
