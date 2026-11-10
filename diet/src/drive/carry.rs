@@ -333,6 +333,11 @@ mod tests {
                 if value["kind"] == "session.start" {
                     value["version"] = serde_json::json!(log::VERSION);
                 }
+                // From v43 a fork's settled line names its not-run calls'
+                // tools, `[]` when every call ran (#1094).
+                if value["kind"] == "fork.settled" && value.get("not_run_tools").is_none() {
+                    value["not_run_tools"] = serde_json::json!([]);
+                }
                 if value["kind"] == "meditation" {
                     value["trunk_sha256"] = serde_json::json!(sha256);
                     value["restored_files"] = serde_json::json!(restored);

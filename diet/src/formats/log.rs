@@ -268,6 +268,16 @@
 //! log that declares 28 or less and carries it is refused. For a reader of
 //! earlier logs, the migration is nothing: no session declared one.
 //!
+//! v43 (#1094) names the tools of a fork's calls that ran nothing: a
+//! `fork.settled` line's `not_run_tools` is the tool each such call named,
+//! in call order, where v8 to v42 wrote only their count as `not_run`.
+//! `not_run_tools` is required from v43 -- the validator enforces it, the
+//! schema declaring it optional because `fork.settled` is older than the
+//! key -- and is `[]` when every call ran. A log that declares 42 or less
+//! and carries it is refused, and so is one that declares 43 or more and
+//! carries `not_run` or lacks `not_run_tools`. For a reader of earlier logs,
+//! the migration is nothing: their `not_run` reads as written.
+//!
 //! v42 (#1050) carries a note's check: a `patch` entry's `confirms`
 //! names the entry an `observed` note checks against tool output (c4's
 //! `confirms`). It is refused in a log that declares 41 or less. For a
@@ -477,12 +487,12 @@ use super::record::vocabulary;
 struct LogParser;
 
 /// The version this module writes, as `session.start` states it.
-pub const VERSION: i64 = 42;
+pub const VERSION: i64 = 43;
 
 /// Every version this module reads.
 pub const READS: &[i64] = &[
     0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25,
-    26, 27, 28, 29, 30, 31, 32, 33, 34, 35, 36, 37, 38, 39, 40, 41, 42,
+    26, 27, 28, 29, 30, 31, 32, 33, 34, 35, 36, 37, 38, 39, 40, 41, 42, 43,
 ];
 
 /// How recent an input event must be, at the moment a turn settles, for the
@@ -2018,11 +2028,18 @@ pub enum Event {
         trailer: Option<String>,
         /// What a fork refused for the pool did not fit beside (v8, #782).
         pool: Option<PoolRoom>,
-        /// The calls the fork made that ran nothing (v8, #806): every call
-        /// but a record tool's (`update_record`, `resolve_entry`), each on its
-        /// `tool_call` line. A fork runs nothing it calls; absent when it
-        /// made no such call.
+        /// How many calls the fork made that ran nothing (v8 to v42, #806):
+        /// every call but a record tool's (`update_record`, `resolve_entry`),
+        /// each on its `tool_call` line; absent when it made no such call.
+        /// Read from a log that declares 42 or less; v43 writes
+        /// `not_run_tools` in its place.
         not_run: Option<u64>,
+        /// The tool each call the fork made that ran nothing named, in call
+        /// order (v43, #1094): the calls v8's `not_run` counted. Required
+        /// from v43 -- the validator enforces it -- and written `[]` when
+        /// every call ran; `None` only on a line from a log that declares 42
+        /// or less.
+        not_run_tools: Option<Vec<String>>,
         /// Each region of a fields-route answer that wrote nothing, its text
         /// as written (v33, #1022); empty, and absent from the line, when
         /// every region wrote or there was no such answer.
@@ -4481,8 +4498,30 @@ fn check(lines: &[Line]) -> Result<(), LogError> {
                 fork,
                 outcome,
                 passed_over,
+                not_run,
+                not_run_tools,
                 ..
             } => {
+                // v43 replaced the count with the tools it counted, and
+                // requires the list (#1094).
+                if declared >= 43 && not_run.is_some() {
+                    return Err(at(
+                        index,
+                        format!(
+                            "a `fork.settled` carries `not_run`, which v43 replaced with \
+                             `not_run_tools`, and this log declares v{declared}"
+                        ),
+                    ));
+                }
+                if declared >= 43 && not_run_tools.is_none() {
+                    return Err(at(
+                        index,
+                        format!(
+                            "a `fork.settled` lacks `not_run_tools`, required from v43, and \
+                             this log declares v{declared}"
+                        ),
+                    ));
+                }
                 // What the guard refused, recorded as written (v36, #1037).
                 if declared < 36
                     && passed_over
@@ -5242,6 +5281,7 @@ fn from_object(object: &BTreeMap<String, Value>) -> Result<Line, String> {
                 _ => None,
             },
             not_run: fields.optional_count("not_run")?,
+            not_run_tools: fields.optional_strings("not_run_tools")?,
             passed_over: match object.get("passed_over") {
                 None => Vec::new(),
                 Some(_) => fields.passed_over("passed_over")?,
@@ -6808,6 +6848,18 @@ const fn must_v8(key: &'static str, holds: Holds) -> Field {
     }
 }
 
+/// A key that arrived in v43, optional in the schema (#1094): a kind older
+/// than its key cannot declare it required there, so a key the validator
+/// requires from v43 is declared here.
+const fn may_v43(key: &'static str, holds: Holds) -> Field {
+    Field {
+        key,
+        holds,
+        required: false,
+        since: 43,
+    }
+}
+
 /// A key that arrived in v30, optional wherever its object is written.
 const fn may_v30(key: &'static str, holds: Holds) -> Field {
     Field {
@@ -7713,6 +7765,7 @@ pub fn schema(kind: Kind) -> &'static [Field] {
                 may_v8("beside_tokens", Count),
                 may_v8("fork_tokens", Count),
                 may_v8("not_run", Count),
+                may_v43("not_run_tools", Holds::Strings),
                 may_v33("passed_over", Holds::PassedOverRegions),
             ];
             F
@@ -9074,6 +9127,7 @@ fn to_value(line: &Line) -> Value {
             trailer,
             pool,
             not_run,
+            not_run_tools,
             passed_over,
         } => {
             put("fork", count(*fork));
@@ -9099,6 +9153,12 @@ fn to_value(line: &Line) -> Value {
             }
             if let Some(calls) = not_run {
                 put("not_run", count(*calls));
+            }
+            if let Some(tools) = not_run_tools {
+                put(
+                    "not_run_tools",
+                    Value::Array(tools.iter().map(|tool| text(tool)).collect()),
+                );
             }
             if let Some(room) = pool {
                 put("window", count(room.window));
@@ -11160,7 +11220,9 @@ mod tests {
         ))
         .expect_err("v42's count in a v43 log");
         assert!(
-            refused.why.contains("`not_run`, which v43 replaced with `not_run_tools`"),
+            refused
+                .why
+                .contains("`not_run`, which v43 replaced with `not_run_tools`"),
             "{refused}"
         );
     }
@@ -11633,7 +11695,8 @@ mod tests {
                 wall_ms: Some(480),
                 refused: None,
                 pool: None,
-                not_run: Some(1),
+                not_run: None,
+                not_run_tools: Some(vec!["bash".to_owned()]),
                 passed_over: vec![
                     PassedOver {
                         why: "untagged".to_owned(),
@@ -12006,6 +12069,7 @@ mod tests {
                 refused: None,
                 pool: None,
                 not_run: None,
+                not_run_tools: Some(Vec::new()),
                 passed_over: Vec::new(),
             },
             Event::Suggestion {

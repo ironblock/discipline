@@ -747,8 +747,9 @@ pub enum Event {
         trailer: Option<String>,
         /// What a fork refused for the pool did not fit beside (#782).
         pool: Option<log::PoolRoom>,
-        /// The calls the fork made that ran nothing (#806).
-        not_run: Option<u64>,
+        /// The tool of each call the fork made that ran nothing, in call
+        /// order (#806, #1094): empty when every call ran.
+        not_run: Vec<String>,
         /// Each region of its fields-route answer that wrote nothing, as
         /// written (#1022).
         passed_over: Vec<log::PassedOver>,
@@ -5550,7 +5551,7 @@ impl<S: Streaming + 'static> Session<S> {
                 wall_ms: None,
                 refused: None,
                 pool: None,
-                not_run: None,
+                not_run: Vec::new(),
                 passed_over: Vec::new(),
             });
             operator_fork_over(&mut state);
@@ -6702,7 +6703,8 @@ pub fn line_of(logged: &Logged) -> log::Line {
         } => log::Event::ForkSettled {
             passed_over: passed_over.clone(),
             pool: *pool,
-            not_run: *not_run,
+            not_run: None,
+            not_run_tools: Some(not_run.clone()),
             fork: *fork,
             outcome: *outcome,
             prompt_tokens: *prompt_tokens,
@@ -10077,7 +10079,7 @@ impl Event {
             refused: None,
             trailer: None,
             pool: None,
-            not_run: None,
+            not_run: Vec::new(),
             passed_over: Vec::new(),
         }
     }
@@ -13922,7 +13924,7 @@ fn fire_on<S>(
             wall_ms: None,
             refused: Some(REFUSED_POOL.to_owned()),
             pool: room,
-            not_run: None,
+            not_run: Vec::new(),
             passed_over: Vec::new(),
         });
         return None;
@@ -15265,7 +15267,7 @@ fn fire_cut<S>(shared: &Shared<S>, state: &mut State, cut: Cut) -> Launched {
             wall_ms: None,
             refused: Some(REFUSED_POOL.to_owned()),
             pool: room,
-            not_run: None,
+            not_run: Vec::new(),
             passed_over: Vec::new(),
         });
         return Launched::Gone;
@@ -15547,17 +15549,14 @@ fn settle_fork<S>(
     let tools = tools || refuting;
     // What a fork calls runs nothing (#806); a record tool's call is read
     // as its answer, as a refutation fork's own tool's is, and every other
-    // is counted on its settled line.
-    let not_run = u64::try_from(
-        calls
-            .iter()
-            .filter(|call| {
-                !record_tool(call) && (!refuting || call.name != crate::dogma::refutation::NAME)
-            })
-            .count(),
-    )
-    .ok()
-    .filter(|calls| *calls > 0);
+    // is named on its settled line (#1094).
+    let not_run: Vec<String> = calls
+        .iter()
+        .filter(|call| {
+            !record_tool(call) && (!refuting || call.name != crate::dogma::refutation::NAME)
+        })
+        .map(|call| call.name.clone())
+        .collect();
     let reasoning = Some(reasoning).filter(|thought| !thought.is_empty());
     let mut patches = Vec::new();
     let mut trailer = None;
@@ -15608,7 +15607,7 @@ fn settle_fork<S>(
                 // a fork that fired a pinned ask, which asks for text
                 // (#1052).
                 let recorded = calls.iter().any(record_tool);
-                let prose = if text.trim().is_empty() && (recorded || not_run.is_some()) {
+                let prose = if text.trim().is_empty() && (recorded || !not_run.is_empty()) {
                     None
                 } else {
                     // What trails the last field is no field (levers run A).
@@ -19879,7 +19878,7 @@ pub(in crate::drive) mod tests {
                 wall_ms: Some(480),
                 refused: None,
                 pool: None,
-                not_run: None,
+                not_run: Vec::new(),
                 passed_over: Vec::new(),
             },
             Event::Patched {
@@ -20558,6 +20557,7 @@ pub(in crate::drive) mod tests {
                 refused: None,
                 pool: None,
                 not_run: None,
+                not_run_tools: Some(Vec::new()),
                 passed_over: Vec::new(),
             },
             log::Event::Patch {
@@ -33443,12 +33443,12 @@ pub(in crate::drive) mod tests {
 
     /// The fork's settled line: its outcome and the calls it ran nothing
     /// for.
-    fn fork_settled(log: &[Logged]) -> (log::ForkOutcome, Option<u64>) {
+    fn fork_settled(log: &[Logged]) -> (log::ForkOutcome, Vec<String>) {
         log.iter()
             .find_map(|logged| match &logged.event {
                 Event::ForkSettled {
                     outcome, not_run, ..
-                } => Some((*outcome, *not_run)),
+                } => Some((*outcome, not_run.clone())),
                 _ => None,
             })
             .expect("a fork.settled")
@@ -33483,7 +33483,7 @@ pub(in crate::drive) mod tests {
             settled(log) && !fork_outcomes(log).is_empty()
         });
         reads_whole(&session);
-        assert_eq!(fork_settled(&log), (log::ForkOutcome::Value, None));
+        assert_eq!(fork_settled(&log), (log::ForkOutcome::Value, Vec::new()));
         assert_eq!(called_names(&log), ["update_record"]);
         let recorded = captures(&log);
         assert_eq!(recorded.len(), 1, "{recorded:?}");
@@ -33516,7 +33516,7 @@ pub(in crate::drive) mod tests {
             settled(log) && !fork_outcomes(log).is_empty()
         });
         reads_whole(&session);
-        assert_eq!(fork_settled(&log), (log::ForkOutcome::Value, None));
+        assert_eq!(fork_settled(&log), (log::ForkOutcome::Value, Vec::new()));
         assert_eq!(patches(&log).len(), 2, "{:?}", patches(&log));
         let held = session.shared.lock();
         let object = &held.interview.as_ref().expect("working memory").object;
@@ -33545,7 +33545,10 @@ pub(in crate::drive) mod tests {
                 .any(|logged| matches!(logged.event, Event::ToolCalled(_))),
             "nothing a fork calls runs"
         );
-        assert_eq!(fork_settled(&log), (log::ForkOutcome::Unparseable, Some(1)));
+        assert_eq!(
+            fork_settled(&log),
+            (log::ForkOutcome::Unparseable, vec!["bash".to_owned()])
+        );
         assert!(patches(&log).is_empty());
         // #1094: the settled line names the tool of the call that ran
         // nothing, not merely how many.
