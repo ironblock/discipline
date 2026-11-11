@@ -2783,6 +2783,23 @@ pub(in crate::drive) mod tests {
         );
     }
 
+    /// What a timed background session sends (`tools_timed`, live serve's
+    /// surface) names `task_stop` as a tool, in the maintainer's words, with
+    /// a timeout or with none.
+    #[test]
+    fn a_timed_background_bash_names_task_stop_as_a_tool() {
+        const LINE: &str = "- With `is_background: true` the call returns at once with the job's \
+             id, its output file and its status file, and the command keeps running, with no \
+             timeout. To stop it, call the `task_stop` tool with the job's id: it is a tool, not \
+             a shell command. When the job ends a notification says so.";
+        for timeout in [None, Some(120_000)] {
+            let tools = ToolSurface::Bash.tools_timed(true, timeout);
+            let description = tools[0].description.clone().expect("a description");
+            assert!(description.contains(LINE), "{description}");
+            assert!(!description.contains("`task_stop` stops it"), "{description}");
+        }
+    }
+
     #[test]
     fn the_bash_tool_before_its_description_is_i0s() {
         let tool = bash_tool_before_its_description();
