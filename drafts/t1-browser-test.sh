@@ -8,7 +8,7 @@
 #     {"message":"Took a screenshot of the current page's viewport.\nSaved screenshot to <daemon temp>/chrome-devtools-mcp-XXXXXX/screenshot.png."}
 # Each case: `shot` exits 0, the PNG is <run>/shots/<name>.png byte for byte, and nothing is left in the daemon's
 # temp dir or under shots/. A message naming a file outside a chrome-devtools-mcp-* dir is refused and moves nothing.
-# And `start` passes a ws:// --allowedUrlPattern beside each http:// one.
+# And `start` passes a ws:// --allowedUrlPattern beside each http:// one; `restart` reuses the run's session id.
 # Exit 0 when every case holds; prints each case's verdict.
 set -u
 HERE=$(cd "$(dirname "$0")" && pwd)
@@ -19,8 +19,16 @@ cat > "$WORK/bin/chrome-devtools" <<'EOF'
 #!/bin/bash
 # The fake CLI: `status` says the daemon runs; `take_screenshot` answers as FAKE_SHOT says.
 case $1 in
-  status) echo "chrome-devtools-mcp daemon is running. pid=1 socket=/nonexistent startDate=now" ;;
-  start) shift; printf '%s\n' "$@" > "$FAKE_START_ARGS" ;;
+  status)
+    # FAKE_DOWN names a marker: the daemon is down until a `start` makes it.
+    if [ -z "${FAKE_DOWN:-}" ] || [ -e "$FAKE_DOWN" ]; then
+      echo "chrome-devtools-mcp daemon is running. pid=1 socket=/nonexistent startDate=now"
+    else
+      echo "chrome-devtools-mcp daemon is not running."
+    fi ;;
+  start) shift; printf '%s\n' "$@" > "$FAKE_START_ARGS"
+    if [ -n "${FAKE_START_SID:-}" ]; then printf '%s\n' "$CD4A_INTERNAL_DAEMON_SESSION_ID" > "$FAKE_START_SID"; fi
+    if [ -n "${FAKE_DOWN:-}" ]; then touch "$FAKE_DOWN"; fi ;;
   take_screenshot)
     case $FAKE_SHOT in
       inline)
@@ -82,5 +90,25 @@ if [ "$got" = 0 ] && [ "$(sort <<<"$patterns")" = "$(sort <<<"$want")" ]; then
   echo "ok   start allows ws:// beside http://"
 else
   echo "FAIL start (exit $got) allowed: $(tr "\n" " " <<<"$patterns"): $(cat "$WORK/run-start/out")"; fail=1
+fi
+# `restart` brings a stopped daemon back under the run's own session id, so the socket the regimen names (browser.env
+# line 1) is the one it listens on again; `start` would mint a new one.
+mkdir -p "$WORK/run-restart"
+printf 'SID=the-runs-session\nXDG=\nSOCKET=/nonexistent\nWT=%s\nPROFILE=%s\n' "$WORK/wt-start" "$WORK/run-restart/chrome-profile" > "$WORK/run-restart/browser.state"
+FAKE_DOWN="$WORK/restart-up" FAKE_START_ARGS="$WORK/restart-args" FAKE_START_SID="$WORK/restart-sid" \
+  bash "$HERE/t1-browser.sh" restart "$WORK/run-restart" > "$WORK/run-restart/out" 2>&1
+got=$?
+if [ "$got" = 0 ] && [ "$(cat "$WORK/restart-sid" 2>/dev/null)" = the-runs-session ] && grep -q '^SID=the-runs-session$' "$WORK/run-restart/browser.state"; then
+  echo "ok   restart reuses the run's session id"
+else
+  echo "FAIL restart (exit $got) started under: $(cat "$WORK/restart-sid" 2>/dev/null): $(cat "$WORK/run-restart/out")"; fail=1
+fi
+# And refuses while the daemon still runs: a second daemon on the profile is no restart.
+FAKE_START_ARGS="$WORK/restart-args2" bash "$HERE/t1-browser.sh" restart "$WORK/run-restart" > "$WORK/run-restart/out2" 2>&1
+got=$?
+if [ "$got" = 1 ] && [ ! -e "$WORK/restart-args2" ]; then
+  echo "ok   restart refuses a daemon still running"
+else
+  echo "FAIL restart of a running daemon (exit $got): $(cat "$WORK/run-restart/out2")"; fail=1
 fi
 exit $fail
