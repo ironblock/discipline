@@ -31387,6 +31387,99 @@ pub(in crate::drive) mod tests {
         tidy(&[&tree]);
     }
 
+    /// What a cut fork counts the trunk as holding of the pool while a turn
+    /// runs (#782, #826) is unchanged by a refill: the trunk still holds
+    /// its latest sized request until the next one is sized. `/state`'s
+    /// view of `sized` is `/state`'s alone, never the sizing's.
+    #[test]
+    fn a_refill_leaves_what_the_trunk_holds_of_the_pool_as_it_was() {
+        let tree = scratch("resident-after-a-refill");
+        std::fs::write(tree.join("notes.md"), "port 5182 is free\n").expect("a note");
+        let session = Session::open_with(
+            Canned::new(vec![
+                vec![bash("call-1", "cat notes.md")],
+                deltas(&["Read it."]),
+            ]),
+            looping(),
+            None,
+            Some(tools(
+                Confinement::Unconfined,
+                &tree,
+                &["cat"],
+                None,
+                Decider::Decline,
+            )),
+            None,
+            Some(interviewing(&[])),
+        );
+        session.ask("look", None).expect("accepted");
+        let log = wait_until(&session, "the turn", settled);
+        let called = seq_of(&log, |event| matches!(event, Event::ToolCalled(_)));
+        session
+            .keep(called, "port 5182 is free", None)
+            .expect("kept");
+        let mut state = session.shared.lock();
+        // As a mid-turn window refill finds it: the turn running.
+        state.settlement = Settlement::Turn;
+        let before = trunk_resident(&state);
+        assert_ne!(before, (0, 0), "a request was sized");
+        refill_trunk(
+            &session.shared.template,
+            &mut state,
+            (crate::meditation::Reason::Window, None),
+            None,
+        );
+        assert_eq!(trunk_resident(&state), before);
+        state.settlement = Settlement::Awaiting;
+        drop(state);
+        tidy(&[&tree]);
+    }
+
+    /// `/state`'s `sized` is the latest request's prompt: once a refill
+    /// replaced the trunk it sized, it describes no trunk, and is absent
+    /// until the next request is sized.
+    #[test]
+    fn state_leaves_sized_out_once_a_refill_replaced_the_trunk_it_sized() {
+        let tree = scratch("sized-after-a-refill");
+        std::fs::write(tree.join("notes.md"), "port 5182 is free\n").expect("a note");
+        let session = Session::open_with(
+            Canned::new(vec![
+                vec![bash("call-1", "cat notes.md")],
+                deltas(&["Read it."]),
+            ]),
+            looping(),
+            None,
+            Some(tools(
+                Confinement::Unconfined,
+                &tree,
+                &["cat"],
+                None,
+                Decider::Decline,
+            )),
+            None,
+            Some(interviewing(&[])),
+        );
+        let has_sized = |session: &Session<Canned>| match session.status() {
+            Value::Object(fields) => fields.contains_key("sized"),
+            _ => unreachable!("the status is an object"),
+        };
+        session.ask("look", None).expect("accepted");
+        let log = wait_until(&session, "the turn", settled);
+        assert!(has_sized(&session), "a request was sized");
+        let called = seq_of(&log, |event| matches!(event, Event::ToolCalled(_)));
+        session
+            .keep(called, "port 5182 is free", None)
+            .expect("kept");
+        session.declare_meditation(None).expect("admitted");
+        wait_until(&session, "the meditation", meditated);
+        assert!(
+            !has_sized(&session),
+            "the refill replaced the trunk it sized: {:?}",
+            session.status()
+        );
+        tidy(&[&tree]);
+    }
+
     /// #1021: a fork is refused while a turn is in flight, and at a line a
     /// meditation has since replaced on the trunk; the operator's kept
     /// entry rides the refill.
