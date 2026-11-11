@@ -268,6 +268,14 @@
 //! log that declares 28 or less and carries it is refused. For a reader of
 //! earlier logs, the migration is nothing: no session declared one.
 //!
+//! v44 withdraws a chip that can no longer be accepted: a `suggestion`
+//! line's `outcome` may be `withdrawn`, logged when the step the shadow
+//! would fork at left the trunk -- a refill or a tangent's close replaced
+//! it -- so that what the log offers is what the `suggestion` command
+//! admits. It is refused in a log that declares 43 or less, and on a
+//! `correction` line. For a reader of earlier logs, the migration is
+//! nothing: no session declared one.
+//!
 //! v43 (#1094) names the tools of a fork's calls that ran nothing: a
 //! `fork.settled` line's `not_run_tools` is the tool each such call named,
 //! in call order, where v8 to v42 wrote only their count as `not_run`.
@@ -487,12 +495,12 @@ use super::record::vocabulary;
 struct LogParser;
 
 /// The version this module writes, as `session.start` states it.
-pub const VERSION: i64 = 43;
+pub const VERSION: i64 = 44;
 
 /// Every version this module reads.
 pub const READS: &[i64] = &[
     0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25,
-    26, 27, 28, 29, 30, 31, 32, 33, 34, 35, 36, 37, 38, 39, 40, 41, 42, 43,
+    26, 27, 28, 29, 30, 31, 32, 33, 34, 35, 36, 37, 38, 39, 40, 41, 42, 43, 44,
 ];
 
 /// How recent an input event must be, at the moment a turn settles, for the
@@ -1050,6 +1058,11 @@ vocabulary! {
         Rejected => "rejected",
         /// Not answered before the turn moved on or the session ended.
         Unanswered => "unanswered",
+        /// Withdrawn unanswered (v44): the step it would fork at left the
+        /// trunk -- a refill or a tangent's close replaced it -- so it could
+        /// no longer be accepted. A suggestion's word only; a correction is
+        /// never withdrawn.
+        Withdrawn => "withdrawn",
     }
 }
 
@@ -4562,9 +4575,21 @@ fn check(lines: &[Line]) -> Result<(), LogError> {
                 shadow,
                 outcome,
                 fork,
-            } => suggestions
-                .answer(*shadow, *outcome, *fork)
-                .map_err(|why| at(index, why))?,
+            } => {
+                // A chip whose step left the trunk, withdrawn (v44).
+                if declared < 44 && *outcome == SuggestionOutcome::Withdrawn {
+                    return Err(at(
+                        index,
+                        format!(
+                            "a suggestion `withdrawn`, which arrived in v44, and this log \
+                             declares v{declared}"
+                        ),
+                    ));
+                }
+                suggestions
+                    .answer(*shadow, *outcome, *fork)
+                    .map_err(|why| at(index, why))?;
+            }
             Event::PatchRefused { .. } => {
                 corrections.refused.insert(line.seq);
             }
@@ -4572,9 +4597,17 @@ fn check(lines: &[Line]) -> Result<(), LogError> {
                 refused,
                 outcome,
                 entry,
-            } => corrections
-                .answer(*refused, *outcome, entry.as_deref())
-                .map_err(|why| at(index, why))?,
+            } => {
+                if *outcome == SuggestionOutcome::Withdrawn {
+                    return Err(at(
+                        index,
+                        "a correction `withdrawn`: only a suggestion is withdrawn".to_owned(),
+                    ));
+                }
+                corrections
+                    .answer(*refused, *outcome, entry.as_deref())
+                    .map_err(|why| at(index, why))?;
+            }
             Event::ForkSkipped {
                 call: Some(call), ..
             } if !captured.contains(call) => {
@@ -11253,15 +11286,17 @@ mod tests {
     }
 
     /// #583, #878, #904, #555, #931, #936, #910, #942, #926, #932, #948, #971, #1016, #1021,
-    /// #1022, #1031, #1030, #1037, #1038, #1050, #1094: this module writes v43.
+    /// #1022, #1031, #1030, #1037, #1038, #1050, #1094, and the withdrawn
+    /// chip: this module writes v44.
     #[test]
-    fn this_module_writes_v43_and_reads_every_version_before_it() {
-        assert_eq!(super::VERSION, 43);
+    fn this_module_writes_v44_and_reads_every_version_before_it() {
+        assert_eq!(super::VERSION, 44);
         assert_eq!(
             super::READS,
             &[
                 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22,
-                23, 24, 25, 26, 27, 28, 29, 30, 31, 32, 33, 34, 35, 36, 37, 38, 39, 40, 41, 42, 43
+                23, 24, 25, 26, 27, 28, 29, 30, 31, 32, 33, 34, 35, 36, 37, 38, 39, 40, 41, 42, 43,
+                44
             ]
         );
     }

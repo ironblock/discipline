@@ -3558,6 +3558,34 @@ impl State {
         self.push(Event::Settled { from, to });
     }
 
+    /// Each suggestion offered (#1031) whose step left the trunk -- one an
+    /// accept would be refused `not-on-the-trunk` -- withdrawn and logged
+    /// so (v44), so the log offers only what `suggestion` admits. Called
+    /// once a refill or a tangent's close has replaced the trunk.
+    fn withdraw_off_the_trunk(&mut self) {
+        let gone: Vec<u64> = self
+            .suggestions
+            .offered
+            .iter()
+            .filter(|(_, (at, _))| {
+                matches!(
+                    forked_at(self, Some(shadow_place(self, *at))),
+                    Err(Refusal::NotOnTheTrunk)
+                )
+            })
+            .map(|(shadow, _)| *shadow)
+            .collect();
+        for shadow in gone {
+            self.suggestions.offered.remove(&shadow);
+            self.suggestions.answered.insert(shadow);
+            self.push(Event::Suggestion {
+                shadow,
+                outcome: log::SuggestionOutcome::Withdrawn,
+                fork: None,
+            });
+        }
+    }
+
     /// Each suggestion (#1031) and correction (#1050) not yet answered,
     /// logged `unanswered`.
     fn unanswered(&mut self) {
@@ -4943,6 +4971,7 @@ impl<S: Streaming + 'static> Session<S> {
             prefix_intact: closed.prefix_intact,
             rolled_back,
         });
+        state.withdraw_off_the_trunk();
         drop(state);
         self.shared.changed.notify_all();
         Ok(())
@@ -5422,16 +5451,7 @@ impl<S: Streaming + 'static> Session<S> {
             offered: None,
             ..firing
         };
-        // Cut where a fork at the shadow's trunk request is: the line that
-        // answered that request, its calls or its words.
-        let place = state
-            .log
-            .iter()
-            .find(|logged| match &logged.event {
-                Event::Called { request, .. } | Event::Answered { request, .. } => *request == at,
-                _ => false,
-            })
-            .map_or(at, |logged| logged.seq);
+        let place = shadow_place(&state, at);
         self.operator_fork(
             state,
             (CommandKind::Suggestion, Some(place)),
@@ -9580,6 +9600,7 @@ fn refill_trunk(
 ) {
     let meditated = refilled(template, state, meditation, to, (&[], &[]), None);
     state.push(meditated);
+    state.withdraw_off_the_trunk();
 }
 
 /// [`refill_trunk`]'s refill, its line returned rather than logged, so a
@@ -10391,6 +10412,20 @@ fn operator_fork(log: &[Logged], fork: u64) -> bool {
     })
 }
 
+/// Where an accepted suggestion forks for a shadow at the trunk request
+/// `at` (#1031): the line that answered that request, its calls or its
+/// words, or the request itself when none has.
+fn shadow_place(state: &State, at: u64) -> u64 {
+    state
+        .log
+        .iter()
+        .find(|logged| match &logged.event {
+            Event::Called { request, .. } | Event::Answered { request, .. } => *request == at,
+            _ => false,
+        })
+        .map_or(at, |logged| logged.seq)
+}
+
 /// The texts of the logged line `from` a keep may keep from (#1021): an
 /// ask, an answer (one cut at its cap included) or a step's text as written, with an answer's or a step's
 /// reasoning (#1037), or a tool result as shown.
@@ -11132,6 +11167,7 @@ fn meditation_work<S: Streaming>(shared: &Shared<S>) {
     state.meditating = None;
     state.move_to(Settlement::Awaiting);
     state.push(meditated);
+    state.withdraw_off_the_trunk();
     if state.ending {
         state.ending = false;
         state.move_to(Settlement::Ended);
@@ -12390,6 +12426,7 @@ fn window_meditation(
         });
     }
     state.push(meditated);
+    state.withdraw_off_the_trunk();
     shape.messages.clone_from(&state.trunk);
     shape.messages.extend(own);
     shape.messages.extend(kept);
@@ -30984,6 +31021,56 @@ pub(in crate::drive) mod tests {
         assert!(
             !sent.contains("update_record") && !sent.contains("<interview>"),
             "{sent}"
+        );
+        reads_whole(&session);
+        tidy(&[&tree]);
+    }
+
+    /// A chip whose step a refill took off the trunk can no longer be
+    /// accepted, so it is no longer offered: once the refill is logged, a
+    /// `suggestion` line answers it, and an accept is refused as answered,
+    /// never `not-on-the-trunk` -- what the page and the log offer is what
+    /// `suggestion` admits.
+    #[test]
+    fn a_chip_whose_step_a_refill_replaced_is_answered_and_no_longer_offered() {
+        let tree = scratch("chip-off-the-trunk");
+        let session = offering(
+            &tree,
+            vec![
+                vec![bash("call-1", "cat notes.md")],
+                deltas(&["Read it. Next, I will write the schema."]),
+            ],
+            (&[log::Warrant::Read], true),
+            Vec::new(),
+        );
+        session.ask("look around", None).expect("accepted");
+        let log = wait_until(&session, "the turn and its gap", settled);
+        let (shadow, ..) = shadow_lines(&log)
+            .into_iter()
+            .find(|(_, why, ..)| *why == log::Warrant::Read)
+            .expect("a read shadow");
+        let called = seq_of(&log, |event| matches!(event, Event::ToolCalled(_)));
+        session.keep(called, "a note", None).expect("kept");
+        session.declare_meditation(None).expect("admitted");
+        let log = wait_until(&session, "the meditation", meditated);
+        let refilled = seq_of(&log, |event| matches!(event, Event::Meditated { .. }));
+        let answered: Vec<_> = log
+            .iter()
+            .filter_map(|logged| match &logged.event {
+                Event::Suggestion {
+                    shadow: answered,
+                    outcome,
+                    ..
+                } if *answered == shadow => Some((logged.seq, *outcome)),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(answered.len(), 1, "one answer to the chip: {answered:?}");
+        assert!(answered[0].0 > refilled, "answered after the refill");
+        assert_eq!(answered[0].1, log::SuggestionOutcome::Withdrawn);
+        assert_eq!(
+            session.suggestion(shadow, SuggestionAnswer::Accept),
+            Err(Rejected::Refused(Refusal::AnsweredAlready))
         );
         reads_whole(&session);
         tidy(&[&tree]);

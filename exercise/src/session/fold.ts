@@ -181,8 +181,8 @@ export interface Shadowed {
   readonly question?: string;
   /** Offered to the operator as a suggestion while driving (#1031): the start line's `interview_shadow_offer` is `chips`. */
   readonly offered: boolean;
-  /** How the operator answered it (#1031), once a `suggestion` line says: `unanswered` when the turn moved on first. */
-  readonly answer?: 'accepted' | 'rejected' | 'unanswered';
+  /** How the operator answered it (#1031), once a `suggestion` line says: `unanswered` when the turn moved on first, `withdrawn` when its step left the trunk (v44). */
+  readonly answer?: 'accepted' | 'rejected' | 'unanswered' | 'withdrawn';
 }
 
 /**
@@ -1147,8 +1147,11 @@ export function fold(written: readonly LogLine[]): Session {
         break;
       // The operator's answer to a correction's chip (#1050): on the chip, and its entry no longer waits.
       case 'correction': {
+        // Only a suggestion is withdrawn (v44): the reader refuses the word on a correction.
+        const outcome = e.outcome;
+        if (outcome === 'withdrawn') break;
         const at = correctionAt.get(e.refused);
-        if (at !== undefined) corrections.set(at, (corrections.get(at) ?? []).map((chip) => (chip.seq === e.refused ? { ...chip, answer: e.outcome } : chip)));
+        if (at !== undefined) corrections.set(at, (corrections.get(at) ?? []).map((chip) => (chip.seq === e.refused ? { ...chip, answer: outcome } : chip)));
         for (const [id, entry] of entries) {
           if (entry.waiting?.includes(e.refused)) entries.set(id, { ...entry, waiting: entry.waiting.filter((seq) => seq !== e.refused) });
         }
