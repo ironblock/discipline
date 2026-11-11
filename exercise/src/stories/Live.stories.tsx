@@ -1513,14 +1513,21 @@ export const AuditForkRefusalResetsOnOpen: Story = {
   },
 };
 
-/** Audit finding 10: while a turn runs, fork is offered disabled, as serve takes a fork only when the session awaits. */
-export const AuditForkWaitsForAwaiting: Story = {
-  name: 'audit 10: fork is disabled while a turn runs',
+/**
+ * Audit finding 10, as N4 changed it: while a turn runs, serve queues a fork for the turn's next step rather than refuse
+ * it, so fork is offered, saying it fires at the next step, and its dialog names that place rather than this block.
+ */
+export const AuditForkQueuesDuringATurn: Story = {
+  name: "audit 10: fork during a turn is queued for the turn's next step",
   args: { drive: true, web: posting(inTurn(gestures)) },
   play: async ({ canvasElement }) => {
     const page = within(canvasElement.ownerDocument.body);
     await waitFor(async () => expect(says(canvasElement)).toBe('working · esc cancels'));
-    await expect(await page.findByRole('button', { name: 'Fork at step 7' })).toBeDisabled();
+    const fork = await page.findByRole('button', { name: 'Fork at step 7' });
+    await expect(fork).toBeEnabled();
+    await expect(fork.getAttribute('title')).toMatch(/^fork at the turn's next step/);
+    await cornerClick(fork);
+    await expect((await page.findByRole('heading', { name: "fork at the turn's next step" })).textContent).toBe("fork at the turn's next step");
   },
 };
 

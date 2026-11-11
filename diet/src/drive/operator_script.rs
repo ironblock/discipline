@@ -20,7 +20,9 @@
 //! call by call, a tangent closed with more than one ruling, a meditation
 //! declared with a phase move, a refused command that is not an ask, a keep
 //! from an ask, a wrap that keeps nothing, a gesture whose line the runner
-//! would not find again, and a chip answered out of order.
+//! would not find again, a chip answered out of order, and a fork queued
+//! mid-turn that fired before the turn's next request (N4). One queued
+//! that fired at the gap derives as a fork posted then.
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::fmt;
@@ -641,6 +643,15 @@ fn derived(lines: &[Map<String, Value>], priming: Option<&str>) -> Result<Derive
             }
             "patch" => live.patched(line),
             "fork" if text(line, "why") == Some("operator") && !fired.contains(&seq) => {
+                // Queued mid-turn and fired at the next request boundary
+                // (N4): a scripted step runs once the session has settled.
+                if line.get("queued_at").is_some() && text(line, "timing") == Some("during_turn") {
+                    return Err(refused(
+                        line,
+                        "a fork queued mid-turn fired before the turn's next request: a \
+                         scripted step runs between turns",
+                    ));
+                }
                 let place = if let Some(cut) = line.get("cut").and_then(Value::as_u64) {
                     cut
                 } else {
@@ -1201,6 +1212,23 @@ mod tests {
         assert!(
             not_last.to_string().contains("not the last call of its id"),
             "{not_last}"
+        );
+        // N4: a fork queued mid-turn that fired at the next request boundary.
+        let boundary = refusal(&[
+            json!({"kind": "tool_call", "id": "c", "shown": "x"}),
+            json!({
+                "kind": "fork", "why": "operator", "ask": "operator-text", "question": "why?",
+                "at": 0, "cut": 1, "timing": "during_turn", "queued_at": 3,
+            }),
+        ]);
+        assert_eq!(
+            (boundary.seq, boundary.kind.as_deref()),
+            (Some(2), Some("fork")),
+            "{boundary}"
+        );
+        assert!(
+            boundary.to_string().contains("queued mid-turn"),
+            "{boundary}"
         );
     }
 

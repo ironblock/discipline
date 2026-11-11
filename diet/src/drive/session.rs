@@ -2962,6 +2962,10 @@ struct State {
     /// no queued fork is sent meanwhile, or it would take the room the trunk
     /// waits for.
     trunk_waiting: Option<Instant>,
+    /// The operator's fork posted while the turn ran (N4): fired at the
+    /// next request boundary, or at the gap if the turn ends first. One at
+    /// a time.
+    queued_fork: Option<QueuedFork>,
     /// The previous step's windows, for a classifier that scores them too.
     gate_previous: Option<crate::drive::warrant_gate::Windows>,
     /// A recorded run's gate decisions, by the step's trunk request `seq`:
@@ -3146,6 +3150,7 @@ impl State {
             move_after_turn: None,
             declared_after_pool: None,
             trunk_waiting: None,
+            queued_fork: None,
             gate_previous: None,
             gate_replay: None,
             refills: 0,
@@ -4403,6 +4408,7 @@ impl<S: Streaming + 'static> Session<S> {
                 (turn, seq),
                 firing,
                 (Some(shape.messages.clone()), Timing::Arrival, None),
+                None,
             )
         });
         // Pushed here, under the lock that admits the ask, and never on the
@@ -4444,9 +4450,12 @@ impl<S: Streaming + 'static> Session<S> {
                     if let Some((request, cancel)) = first {
                         call(&shared, &shape, &cancel, opening, turn, request);
                     }
+                    // A fork the operator queued, the turn over first (N4).
+                    queued_at_the_gap(&shared);
                     // A meditation the turn's end made due, queued for its audit
                     // or pre-warm (#504).
                     meditation_work(&shared);
+                    queued_at_the_gap(&shared);
                 }));
                 if let Err(payload) = outcome {
                     crashed(&shared, panic_message(payload.as_ref()));
@@ -5476,11 +5485,12 @@ impl<S: Streaming + 'static> Session<S> {
             ..firing
         };
         let place = shadow_place(&state, at);
-        self.operator_fork(
+        fire_operator_fork(
+            &self.shared,
             state,
             (CommandKind::Suggestion, Some(place)),
             Ok(firing),
-            Some(shadow),
+            (Some(shadow), None),
         )
         .map(Some)
     }
@@ -5501,107 +5511,35 @@ impl<S: Streaming + 'static> Session<S> {
     /// a line that is no step, tool result or trunk answer, or no trunk yet;
     /// and [`Refusal::NotOnTheTrunk`] for one a meditation replaced.
     pub fn fork(&self, at: Option<u64>, ask: &OperatorAsk) -> Result<Forking, Rejected> {
-        let state = self.shared.lock();
-        self.operator_fork(state, (CommandKind::Fork, at), operator_firing(ask), None)
-            .map(Forking::Fired)
-    }
-
-    /// The operator's fork (#1021) of `firing` at the logged line `at`, for
-    /// `command`; for an accepted suggestion (#1031), `shadow` names the
-    /// `fork.shadowed` line, answered by a `suggestion` line once the fork
-    /// is logged. Returns the fork's seq.
-    fn operator_fork(
-        &self,
-        mut state: MutexGuard<'_, State>,
-        (command, at): (CommandKind, Option<u64>),
-        firing: Result<Firing, Refusal>,
-        shadow: Option<u64>,
-    ) -> Result<u64, Rejected> {
-        let because = match state.settlement {
-            Settlement::Ended => Err(Refusal::Ended),
-            Settlement::Turn | Settlement::Capture => Err(Refusal::InFlight),
-            Settlement::Awaiting => {
-                firing.and_then(|firing| forked_at(&state, at).map(|place| (firing, place)))
-            }
-        };
-        let (firing, (_, request, cut, prefix)) = match because {
-            Ok(fired) => fired,
-            Err(because) => {
-                let refused = state.refuse(command, because);
-                drop(state);
-                self.shared.changed.notify_all();
-                return Err(Rejected::Refused(refused));
-            }
-        };
-        state.admit_within_the_gap();
-        state.move_to(Settlement::Capture);
-        // It follows the latest turn, whichever turn's step it is cut at.
-        let turn = state.turns;
-        let fired = fire_on(
+        let mut state = self.shared.lock();
+        // Posted while the turn runs, at the latest step, it waits for the
+        // next request boundary (N4); one at a time.
+        if state.settlement == Settlement::Turn && at.is_none() {
+            let queued = if state.queued_fork.is_some() {
+                Err(Refusal::InFlight)
+            } else {
+                operator_firing(ask)
+            };
+            return match queued {
+                Ok(firing) => {
+                    state.admit_within_the_gap();
+                    let posted_at = state.now();
+                    state.queued_fork = Some(QueuedFork { firing, posted_at });
+                    drop(state);
+                    self.shared.changed.notify_all();
+                    Ok(Forking::Queued)
+                }
+                Err(because) => Err(self.refused(state, CommandKind::Fork, because)),
+            };
+        }
+        fire_operator_fork(
             &self.shared,
-            &mut state,
-            (turn, request),
-            firing,
-            (Some(prefix), Timing::Gap, cut),
-        );
-        let fork = state
-            .log
-            .iter()
-            .rev()
-            .find(|logged| matches!(logged.event, Event::Forked { .. }))
-            .map_or(0, |logged| logged.seq);
-        if let Some(shadow) = shadow {
-            state.suggestions.offered.remove(&shadow);
-            state.suggestions.answered.insert(shadow);
-            state.push(Event::Suggestion {
-                shadow,
-                outcome: log::SuggestionOutcome::Accepted,
-                fork: Some(fork),
-            });
-        }
-        let Some(fired) = fired else {
-            // Refused unsent for the pool: settled already, the session back
-            // to awaiting.
-            operator_fork_over(&mut state);
-            drop(state);
-            self.shared.changed.notify_all();
-            return Ok(fork);
-        };
-        drop(state);
-        self.shared.changed.notify_all();
-        let shared = Arc::clone(&self.shared);
-        let spawned = std::thread::Builder::new()
-            .name("diet-operator-fork".to_owned())
-            .spawn(move || {
-                let run = stream_fork(&shared, &fired);
-                let mut state = shared.lock();
-                state.flight = None;
-                state.forking = None;
-                state.aside_sizing(|state| settle_fork(&shared, state, &fired, run));
-                operator_fork_over(&mut state);
-                drop(state);
-                shared.changed.notify_all();
-            });
-        if spawned.is_err() {
-            let mut state = self.shared.lock();
-            state.flight = None;
-            state.forking = None;
-            state.push(Event::ForkSettled {
-                trailer: None,
-                fork,
-                outcome: log::ForkOutcome::Failed,
-                prompt_tokens: None,
-                wall_ms: None,
-                refused: None,
-                pool: None,
-                not_run: Vec::new(),
-                passed_over: Vec::new(),
-            });
-            operator_fork_over(&mut state);
-            drop(state);
-            self.shared.changed.notify_all();
-        }
-        Ok(fork)
+            state,
+            (CommandKind::Fork, at),
+            operator_firing(ask),
+            (None, None),
+        )
+        .map(Forking::Fired)
     }
 
     /// Log a scenario runner's grade of the latest turn (#942): a `grade`
@@ -5952,14 +5890,17 @@ impl<S: Streaming + 'static> Session<S> {
     /// `unaddressed`; the prompt waiting on the operator, in `waiting`'s
     /// shape; the last refusal, its `seq`, `command` and `because`; the
     /// `corrections` not yet answered (#1050), by their `patch.refused`
-    /// lines' `seq`; the last `seq`; and whether it is `idle`: no turn running, nothing in
+    /// lines' `seq`; the operator's `queued_fork` waiting for the turn's
+    /// next request boundary (N4), its `question` and `posted_at`; the last
+    /// `seq`; and whether it is `idle`: no turn running, nothing in
     /// flight, nothing queued and no prompt waiting. And where the session
     /// is (#1037): its `phase`, the model's `proposal` awaiting a ruling --
     /// its `call`, `from` and `to` -- and the latest request's prompt as
     /// `sized`: its `prompt` tokens, its `output_cap` and the `window` it
     /// was sized against, until a refill or a tangent's close replaces the
     /// trunk it sized. `turn`, `approval`, `refusal`, `corrections`,
-    /// `phase`, `proposal` and `sized` are absent when there is none, as the
+    /// `queued_fork`, `phase`, `proposal` and `sized` are absent when there
+    /// is none, as the
     /// log leaves a key out.
     #[must_use]
     #[allow(clippy::too_many_lines)] // one object, written out key by key
@@ -6052,11 +5993,20 @@ impl<S: Streaming + 'static> Session<S> {
             ),
             ("idle", Value::Boolean(idle)),
         ];
+        // The operator's fork waiting for the turn's next boundary (N4):
+        // its question, and when it was posted on the log's clock.
+        let queued_fork = state.queued_fork.as_ref().map(|queued| {
+            object(vec![
+                ("question", text(&queued.firing.question)),
+                ("posted_at", number(queued.posted_at)),
+            ])
+        });
         for (key, value) in [
             ("turn", turn),
             ("approval", prompt),
             ("refusal", refusal),
             ("corrections", pending_corrections(&state)),
+            ("queued_fork", queued_fork),
         ]
         .into_iter()
         .chain(
@@ -6717,9 +6667,10 @@ pub fn line_of(logged: &Logged) -> log::Line {
             view_overridden,
             reserved,
             offered,
-            queued_at: _,
+            queued_at,
         } => log::Event::Fork {
             offered: offered.clone(),
+            queued_at: *queued_at,
             after_meditation: None,
             reserved: reserved.map(|(tokens, _)| tokens),
             prefix_shared: reserved.map(|(_, shared)| shared),
@@ -6759,6 +6710,7 @@ pub fn line_of(logged: &Logged) -> log::Line {
             chunk,
         } => log::Event::Fork {
             offered: None,
+            queued_at: None,
             chunk: *chunk,
             after_meditation: *after_meditation,
             lane: log::Lane::Audit,
@@ -8015,6 +7967,27 @@ fn run_calls<S: Streaming + 'static>(
     state.ran.clone_from(exchange);
     shape.messages.push(said);
     shape.messages.extend(results);
+    // The operator's fork queued while the step ran (N4), at this boundary:
+    // cut as the trunk stands after the step's results, answered before the
+    // next request is sent.
+    let mut state = boundary_fork(shared, state, (turn, request, last_line), shape, cancel);
+    if cancel.is_asked() {
+        // A stop that reached the fork stops the turn too, before its next
+        // request: the step joins the trunk, as a cancelled step's does.
+        state.flight = None;
+        state.trunk.extend(std::mem::take(exchange));
+        state.trunk_tokens = state.step_tokens.take();
+        state.ran.clear();
+        state.push(Event::TurnSettled {
+            turn,
+            reason: SettleReason::Cancelled,
+        });
+        turn_over(&shared.template, &mut state);
+        pool_after_the_turn(shared, &mut state);
+        drop(state);
+        shared.changed.notify_all();
+        return None;
+    }
     // The operator's wraps (#1030), at this boundary: the request in flight
     // stood as sent; the next one carries them.
     apply_wraps(&mut state, shape, Some(exchange), turn);
@@ -10320,6 +10293,14 @@ pub enum OperatorAsk {
     Text(String),
 }
 
+/// The operator's fork posted while a turn ran (N4): what it asks, and
+/// when it was posted, on the log's clock.
+#[derive(Debug, Clone)]
+struct QueuedFork {
+    firing: Firing,
+    posted_at: u64,
+}
+
 /// What became of the operator's fork as it was posted (N4).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Forking {
@@ -10558,6 +10539,181 @@ fn forked_at(
     let turn = trunk_turn(request).ok_or(Refusal::NotASource)?;
     let place = place.ok_or(Refusal::NotOnTheTrunk)?;
     Ok((turn, request, cut, state.trunk[..=place].to_vec()))
+}
+
+/// The operator's fork (#1021) of `firing` at the logged line `at`, for
+/// `command`; for an accepted suggestion (#1031), `shadow` names the
+/// `fork.shadowed` line, answered by a `suggestion` line once the fork is
+/// logged; for a fork queued while a turn ran (N4), `queued_at` is when it
+/// was posted, and it was admitted then. Returns the fork's seq.
+#[allow(clippy::too_many_lines)]
+fn fire_operator_fork<S: Streaming + 'static>(
+    shared: &Arc<Shared<S>>,
+    mut state: MutexGuard<'_, State>,
+    (command, at): (CommandKind, Option<u64>),
+    firing: Result<Firing, Refusal>,
+    (shadow, queued_at): (Option<u64>, Option<u64>),
+) -> Result<u64, Rejected> {
+    let because = match state.settlement {
+        Settlement::Ended => Err(Refusal::Ended),
+        Settlement::Turn | Settlement::Capture => Err(Refusal::InFlight),
+        Settlement::Awaiting => {
+            firing.and_then(|firing| forked_at(&state, at).map(|place| (firing, place)))
+        }
+    };
+    let (firing, (_, request, cut, prefix)) = match because {
+        Ok(fired) => fired,
+        Err(because) => {
+            let refused = state.refuse(command, because);
+            drop(state);
+            shared.changed.notify_all();
+            return Err(Rejected::Refused(refused));
+        }
+    };
+    if queued_at.is_none() {
+        state.admit_within_the_gap();
+    }
+    state.move_to(Settlement::Capture);
+    // It follows the latest turn, whichever turn's step it is cut at.
+    let turn = state.turns;
+    let fired = fire_on(
+        shared,
+        &mut state,
+        (turn, request),
+        firing,
+        (Some(prefix), Timing::Gap, cut),
+        queued_at,
+    );
+    let fork = state
+        .log
+        .iter()
+        .rev()
+        .find(|logged| matches!(logged.event, Event::Forked { .. }))
+        .map_or(0, |logged| logged.seq);
+    if let Some(shadow) = shadow {
+        state.suggestions.offered.remove(&shadow);
+        state.suggestions.answered.insert(shadow);
+        state.push(Event::Suggestion {
+            shadow,
+            outcome: log::SuggestionOutcome::Accepted,
+            fork: Some(fork),
+        });
+    }
+    let Some(fired) = fired else {
+        // Refused unsent for the pool: settled already, the session back
+        // to awaiting.
+        operator_fork_over(&mut state);
+        drop(state);
+        shared.changed.notify_all();
+        return Ok(fork);
+    };
+    drop(state);
+    shared.changed.notify_all();
+    let on_its_thread = Arc::clone(shared);
+    let spawned = std::thread::Builder::new()
+        .name("diet-operator-fork".to_owned())
+        .spawn(move || {
+            let shared = on_its_thread;
+            let run = stream_fork(&shared, &fired);
+            let mut state = shared.lock();
+            state.flight = None;
+            state.forking = None;
+            state.aside_sizing(|state| settle_fork(&shared, state, &fired, run));
+            operator_fork_over(&mut state);
+            drop(state);
+            shared.changed.notify_all();
+        });
+    if spawned.is_err() {
+        let mut state = shared.lock();
+        state.flight = None;
+        state.forking = None;
+        state.push(Event::ForkSettled {
+            trailer: None,
+            fork,
+            outcome: log::ForkOutcome::Failed,
+            prompt_tokens: None,
+            wall_ms: None,
+            refused: None,
+            pool: None,
+            not_run: Vec::new(),
+            passed_over: Vec::new(),
+        });
+        operator_fork_over(&mut state);
+        drop(state);
+        shared.changed.notify_all();
+    }
+    Ok(fork)
+}
+
+/// The operator's fork queued while the turn ran (N4), fired at the
+/// boundary between the step at trunk `request` and the next: cut at the
+/// step's last `tool_call` `cut`, the trunk as `shape` holds it now, on the
+/// turn's own thread, which waits for it. The turn's stop reaches it; its
+/// answer settles as any operator fork's does, and the turn's flight is
+/// restored. With none queued, nothing happens.
+fn boundary_fork<'a, S: Streaming + 'static>(
+    shared: &'a Arc<Shared<S>>,
+    mut state: MutexGuard<'a, State>,
+    (turn, request, cut): (u32, u64, u64),
+    shape: &RequestShape,
+    cancel: &Cancel,
+) -> MutexGuard<'a, State> {
+    let Some(QueuedFork { firing, posted_at }) = state.queued_fork.take() else {
+        return state;
+    };
+    let flight = state.flight.take();
+    let fired = fire_on(
+        shared,
+        &mut state,
+        (turn, request),
+        firing,
+        (Some(shape.messages.clone()), Timing::DuringTurn, Some(cut)),
+        Some(posted_at),
+    );
+    let Some(mut fired) = fired else {
+        // Refused unsent for the pool: settled already.
+        state.flight = flight;
+        return state;
+    };
+    // One stop for the fork and the turn it waits in.
+    fired.cancel = cancel.clone();
+    if let Some(forking) = state.flight.as_mut() {
+        forking.cancel = cancel.clone();
+    }
+    drop(state);
+    shared.changed.notify_all();
+    let run = stream_fork(shared, &fired);
+    let mut state = shared.lock();
+    state.flight = flight;
+    state.forking = None;
+    state.aside_sizing(|state| settle_fork(shared, state, &fired, run));
+    drop(state);
+    shared.changed.notify_all();
+    shared.lock()
+}
+
+/// The operator's fork queued while a turn ran (N4), the turn over before
+/// a boundary came: fired at the gap, as a fork posted then is, once the
+/// session awaits. Otherwise it stays queued for the next call.
+fn queued_at_the_gap<S: Streaming + 'static>(shared: &Arc<Shared<S>>) {
+    let mut state = shared.lock();
+    if state.settlement != Settlement::Awaiting
+        || state.meditation_pending.is_some()
+        || state.meditating.is_some()
+    {
+        return;
+    }
+    let Some(QueuedFork { firing, posted_at }) = state.queued_fork.take() else {
+        return;
+    };
+    // Refused -- no trunk answer to cut at -- it is logged as a refusal.
+    let _ = fire_operator_fork(
+        shared,
+        state,
+        (CommandKind::Fork, None),
+        Ok(firing),
+        (None, Some(posted_at)),
+    );
 }
 
 /// The operator's fork has settled (#1021): back to awaiting, or on to
@@ -14078,12 +14234,20 @@ fn fire<S>(
     at: u64,
     firing: Firing,
 ) -> Option<Fired> {
-    fire_on(shared, state, (turn, at), firing, (None, Timing::Gap, None))
+    fire_on(
+        shared,
+        state,
+        (turn, at),
+        firing,
+        (None, Timing::Gap, None),
+        None,
+    )
 }
 
 /// [`fire`], from `prefix` when given -- the trunk as an arrival fork sees
 /// it, the operator's message last (#904) -- else the trunk as the view
-/// shows it; its line saying `timing`.
+/// shows it; its line saying `timing`, and when the operator posted it if it
+/// was queued (N4).
 #[allow(clippy::too_many_lines)]
 fn fire_on<S>(
     shared: &Shared<S>,
@@ -14091,6 +14255,7 @@ fn fire_on<S>(
     (turn, at): (u32, u64),
     firing: Firing,
     (prefix, timing, cut): (Option<Vec<Message>>, Timing, Option<u64>),
+    queued_at: Option<u64>,
 ) -> Option<Fired> {
     let Firing {
         why,
@@ -14177,7 +14342,7 @@ fn fire_on<S>(
         view_overridden: None,
         reserved: None,
         offered,
-        queued_at: None,
+        queued_at,
     });
     // Beside the forks cut during the turn still in flight (#782), each
     // prompt holds its own part of the pool.
@@ -15464,6 +15629,7 @@ fn seated<S>(
 /// prefix -- the view it overrode named on its line. Refused unsent when the
 /// trunk's prompt, the forks' in flight and its own [`reservation`] leave
 /// the pool less than the clamp's floor, the numbers on its `fork.settled`.
+#[allow(clippy::too_many_lines)]
 fn fire_cut<S>(shared: &Shared<S>, state: &mut State, cut: Cut) -> Launched {
     let (role, declared, ceiling, sharing) = cut_terms(state, &shared.template);
     // Cut before a refill, its prefix is no longer the trunk's.
@@ -15602,6 +15768,8 @@ fn pool_fork<S: Streaming + 'static>(shared: &Arc<Shared<S>>, forked: &Fired) {
     if due {
         meditation_work(shared);
     }
+    // A fork the operator queued, the turn over now (N4).
+    queued_at_the_gap(shared);
 }
 
 /// Once no cut fork is in flight or queued and the gap's own forks are
@@ -20917,6 +21085,7 @@ pub(in crate::drive) mod tests {
                 reserved: None,
                 chunk: None,
                 offered: None,
+                queued_at: None,
             },
             log::Event::Request {
                 turn: 1,
@@ -21096,6 +21265,7 @@ pub(in crate::drive) mod tests {
                 reserved: None,
                 chunk: Some(1),
                 offered: None,
+                queued_at: None,
             },
             log::Event::Flag {
                 turn: 2,
@@ -32144,7 +32314,8 @@ pub(in crate::drive) mod tests {
         let session = wrapping(
             &tree,
             vec![
-                vec![Step::Hold(gate.clone()), bash("call-1", "cat notes.md")],
+                vec![bash("call-1", "cat notes.md")],
+                vec![Step::Hold(gate.clone()), bash("call-2", "cat notes.md")],
                 deltas(&["never sent"]),
             ],
             vec![deltas(&["It was cancelled."])],
@@ -32207,6 +32378,107 @@ pub(in crate::drive) mod tests {
             "its answer is logged"
         );
         assert_eq!(session.shared.lock().settlement, Settlement::Awaiting);
+        reads_whole(&session);
+        tidy(&[&tree]);
+    }
+
+    /// N4: a stop sent while the boundary's queued fork runs reaches the
+    /// fork and the turn: the fork settles `cancelled`, and the turn
+    /// settles `cancelled` with no next trunk request.
+    #[test]
+    fn a_stop_during_the_boundary_fork_stops_the_turn_too() {
+        let tree = scratch("fork-queued-stopped");
+        let (trunk_gate, fork_gate) = (Gate::new(), Gate::new());
+        let session = wrapping(
+            &tree,
+            vec![
+                vec![
+                    Step::Hold(trunk_gate.clone()),
+                    bash("call-1", "cat notes.md"),
+                ],
+                deltas(&["never sent"]),
+            ],
+            vec![vec![
+                Step::Hold(fork_gate.clone()),
+                Step::Delta("too late".to_owned()),
+            ]],
+        );
+        session.ask("look", None).expect("accepted");
+        assert!(
+            trunk_gate.wait_for_a_waiter(Duration::from_secs(10)),
+            "the step never reached the gate"
+        );
+        assert_eq!(
+            session.fork(None, &OperatorAsk::Text("why?".to_owned())),
+            Ok(Forking::Queued)
+        );
+        trunk_gate.open();
+        assert!(
+            fork_gate.wait_for_a_waiter(Duration::from_secs(10)),
+            "the queued fork never fired"
+        );
+        session.cancel(1, None).expect("stop asked");
+        fork_gate.open();
+        let log = wait_until(&session, "the turn", settled);
+        assert_eq!(fork_outcomes(&log), vec![log::ForkOutcome::Cancelled]);
+        assert!(log.iter().any(|logged| matches!(
+            logged.event,
+            Event::TurnSettled {
+                reason: SettleReason::Cancelled,
+                ..
+            }
+        )));
+        assert_eq!(
+            session.shared.transport.sent().len(),
+            1,
+            "no trunk request after the stop"
+        );
+        reads_whole(&session);
+        tidy(&[&tree]);
+    }
+
+    /// N4: a fork queued while the turn's first request runs, the turn
+    /// cancelled before any response: no trunk answer is left to cut at, so
+    /// at the gap it is refused `not-a-source`, logged, as a fork posted
+    /// then would be.
+    #[test]
+    fn a_fork_queued_before_any_response_is_refused_at_the_gap() {
+        let tree = scratch("fork-queued-nothing-to-cut");
+        let gate = Gate::new();
+        let session = wrapping(
+            &tree,
+            vec![vec![
+                Step::Hold(gate.clone()),
+                bash("call-1", "cat notes.md"),
+            ]],
+            Vec::new(),
+        );
+        session.ask("look", None).expect("accepted");
+        assert!(
+            gate.wait_for_a_waiter(Duration::from_secs(10)),
+            "the step never reached the gate"
+        );
+        assert_eq!(
+            session.fork(None, &OperatorAsk::Text("what happened?".to_owned())),
+            Ok(Forking::Queued)
+        );
+        session.cancel(1, None).expect("stop asked");
+        gate.open();
+        let log = wait_until(&session, "the refusal", |log| {
+            log.iter().any(|logged| {
+                logged.event
+                    == Event::Refused {
+                        command: CommandKind::Fork,
+                        because: Refusal::NotASource,
+                        during: Settlement::Awaiting,
+                    }
+            })
+        });
+        assert!(operator_forks(&log).is_empty());
+        let Value::Object(members) = session.status() else {
+            unreachable!("an object");
+        };
+        assert!(!members.contains_key("queued_fork"));
         reads_whole(&session);
         tidy(&[&tree]);
     }

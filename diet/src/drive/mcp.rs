@@ -474,7 +474,9 @@ fn later_tools() -> Vec<Value> {
              result or trunk answer the line `at` names, or at the trunk's end; asking a pinned \
              fork ask by its template's name (`ask`, e.g. GOTCHAS) or your own words (`text`), \
              one of the two. Its answer is logged and shown; it writes nothing to working \
-             memory. Answers the fork's seq.",
+             memory. Answers the fork's seq; posted while a turn runs with no `at`, it is \
+             queued (one at a time) and fires at the turn's next request boundary, or at the \
+             gap if the turn ends first, and answers `queued`.",
             object(
                 json!({
                     "at": integer("The seq of the line to fork at; the trunk's end when omitted."),
