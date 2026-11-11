@@ -1147,8 +1147,11 @@ export function fold(written: readonly LogLine[]): Session {
         break;
       // The operator's answer to a correction's chip (#1050): on the chip, and its entry no longer waits.
       case 'correction': {
+        // Only a suggestion is withdrawn (v44): the reader refuses the word on a correction.
+        const outcome = e.outcome;
+        if (outcome === 'withdrawn') break;
         const at = correctionAt.get(e.refused);
-        if (at !== undefined) corrections.set(at, (corrections.get(at) ?? []).map((chip) => (chip.seq === e.refused ? { ...chip, answer: e.outcome } : chip)));
+        if (at !== undefined) corrections.set(at, (corrections.get(at) ?? []).map((chip) => (chip.seq === e.refused ? { ...chip, answer: outcome } : chip)));
         for (const [id, entry] of entries) {
           if (entry.waiting?.includes(e.refused)) entries.set(id, { ...entry, waiting: entry.waiting.filter((seq) => seq !== e.refused) });
         }
