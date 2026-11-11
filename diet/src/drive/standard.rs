@@ -1286,6 +1286,49 @@ mod tests {
         let _ = std::fs::remove_dir_all(&tree);
     }
 
+    /// N8 (the maintainer, 2026-11-11): `edit` takes its file as `path`, the
+    /// name `read` and `write` use, as well as `file_path` (drive g: "params
+    /// must have required property 'file_path'"); the same file under both
+    /// is that file, and two different files are still refused.
+    #[test]
+    fn edit_takes_its_file_as_path_too_but_not_two_different_files() {
+        let tree = scratch("std-edit-path");
+        let tools = unconfined(&tree);
+        std::fs::write(tree.join("f.txt"), "one\n").expect("written");
+        std::fs::write(tree.join("g.txt"), "one\n").expect("written");
+        let edit = |args: serde_json::Value| call(EDIT, &args, &tools);
+        let done =
+            edit(serde_json::json!({"path": "f.txt", "old_string": "one", "new_string": "two"}));
+        assert!(
+            done.starts_with("The file: f.txt has been updated."),
+            "{done}"
+        );
+        assert_eq!(
+            std::fs::read_to_string(tree.join("f.txt")).expect("read"),
+            "two\n"
+        );
+        let both = edit(serde_json::json!({
+            "path": "f.txt", "file_path": "f.txt", "old_string": "two", "new_string": "three"
+        }));
+        assert!(
+            both.starts_with("The file: f.txt has been updated."),
+            "{both}"
+        );
+        let two = edit(serde_json::json!({
+            "path": "f.txt", "file_path": "g.txt", "old_string": "one", "new_string": "x"
+        }));
+        assert!(!two.contains("has been updated"), "{two}");
+        assert_eq!(
+            std::fs::read_to_string(tree.join("g.txt")).expect("read"),
+            "one\n"
+        );
+        assert_eq!(
+            edit(serde_json::json!({"old_string": "one", "new_string": "x"})),
+            "params must have required property 'file_path'"
+        );
+        let _ = std::fs::remove_dir_all(&tree);
+    }
+
     /// `edit` replaces one occurrence and shows Qwen Code's snippet; refuses,
     /// in Qwen Code's words, text not found, text found more than once
     /// without `replace_all`, and identical strings; replaces every one with

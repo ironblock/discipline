@@ -1827,6 +1827,32 @@ mod tests {
         );
     }
 
+    /// N8 (the maintainer, 2026-11-11): an optional argument given empty is
+    /// absent -- drive g's c4 note sent `"with": ""` beside its `content` and
+    /// was refused "no `replaces`" -- so the call is the plain note it is.
+    /// A required argument given empty is still that argument, and an
+    /// empty `replaces` beside a `with` still lacks its pair.
+    #[test]
+    fn an_empty_optional_argument_is_absent() {
+        let effect = note_c4(&[("content", "the dev server is on port 5182"), ("with", "")])
+            .expect("a plain note, its empty `with` absent");
+        assert_eq!(effect.replaces, None);
+        let [Patch::Add { content, .. }] = &effect.patches[..] else {
+            panic!("one add: {:?}", effect.patches);
+        };
+        assert_eq!(content, "the dev server is on port 5182");
+        assert!(
+            note_c4(&[("content", "a note"), ("supersedes", ""), ("confirms", "")]).is_ok(),
+            "empty `supersedes` and `confirms` are absent too"
+        );
+        assert_eq!(
+            note_c4(&[("supersedes", "e1"), ("replaces", ""), ("with", "b")])
+                .expect_err("still out of shape")
+                .to_string(),
+            "update_record: no `replaces`"
+        );
+    }
+
     /// #1050: a c4 note confirms an entry only when its quote is the turn's
     /// tool output.
     #[test]
