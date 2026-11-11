@@ -99,7 +99,6 @@
 {"step":"ask","text":"Write notes.md with the first decision, tighten it, then read it back."}
 {"step":"ask","text":"Make a tiny PNG with bash, then read it."}
 {"step":"ask","text":"What is in the picture I attached?","attach":["shot.png"]}
-{"step":"suggestion","answer":"reject"}
 {"step":"ask","text":"Find the decisions in the Markdown files."}
 {"step":"ask","text":"Show missing.txt."}
 {"step":"ask","text":"Build in the background, and start a watcher you then stop."}
@@ -123,6 +122,7 @@
 {"step":"fork","at":{"call":"call-rd2"},"text":"What does the side note ask?"}
 {"step":"wrap","call":"call-rd2","from":{"answer":"Nothing else."},"span":"To sort the list."}
 {"step":"ask","text":"Ready to build? Say if we should move on."}
+{"step":"suggestion","answer":"reject"}
 {"step":"rule-phase","call":"call-p2","choice":"stay"}
 {"step":"ask","text":"Build now? Say if we should move on."}
 {"step":"rule-phase","call":"call-p3","choice":"keep"}

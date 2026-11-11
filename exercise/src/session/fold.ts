@@ -181,8 +181,8 @@ export interface Shadowed {
   readonly question?: string;
   /** Offered to the operator as a suggestion while driving (#1031): the start line's `interview_shadow_offer` is `chips`. */
   readonly offered: boolean;
-  /** How the operator answered it (#1031), once a `suggestion` line says: `unanswered` when the turn moved on first. */
-  readonly answer?: 'accepted' | 'rejected' | 'unanswered';
+  /** How the operator answered it (#1031), once a `suggestion` line says: `unanswered` when the turn moved on first, `withdrawn` when its step left the trunk (v44). */
+  readonly answer?: 'accepted' | 'rejected' | 'unanswered' | 'withdrawn';
 }
 
 /**
