@@ -5908,15 +5908,17 @@ impl<S: Streaming + 'static> Session<S> {
     /// the meditation -- `none`, `capturing`, or `held` with what it left
     /// `unaddressed`; the prompt waiting on the operator, in `waiting`'s
     /// shape; the last refusal, its `seq`, `command` and `because`; the
-    /// last `seq`; and whether it is `idle`: no turn running, nothing in
+    /// `corrections` not yet answered (#1050), by their `patch.refused`
+    /// lines' `seq`; the last `seq`; and whether it is `idle`: no turn running, nothing in
     /// flight, nothing queued and no prompt waiting. And where the session
     /// is (#1037): its `phase`, the model's `proposal` awaiting a ruling --
     /// its `call`, `from` and `to` -- and the latest request's prompt as
     /// `sized`: its `prompt` tokens, its `output_cap` and the `window` it
-    /// was sized against. `turn`, `approval`, `refusal`, `phase`,
-    /// `proposal` and `sized` are absent when there is none, as the log
-    /// leaves a key out.
+    /// was sized against. `turn`, `approval`, `refusal`, `corrections`,
+    /// `phase`, `proposal` and `sized` are absent when there is none, as the
+    /// log leaves a key out.
     #[must_use]
+    #[allow(clippy::too_many_lines)] // one object, written out key by key
     pub fn status(&self) -> Value {
         let state = self.shared.lock();
         let (number, text, object) = (status_number, status_text, status_object);
@@ -6005,9 +6007,14 @@ impl<S: Streaming + 'static> Session<S> {
             ),
             ("idle", Value::Boolean(idle)),
         ];
-        for (key, value) in [("turn", turn), ("approval", prompt), ("refusal", refusal)]
-            .into_iter()
-            .chain(where_it_is(&state))
+        for (key, value) in [
+            ("turn", turn),
+            ("approval", prompt),
+            ("refusal", refusal),
+            ("corrections", pending_corrections(&state)),
+        ]
+        .into_iter()
+        .chain(where_it_is(&state))
         {
             if let Some(value) = value {
                 status.push((key, value));
@@ -12914,6 +12921,15 @@ fn status_object(pairs: Vec<(&str, Value)>) -> Value {
             .map(|(key, value)| (key.to_owned(), value))
             .collect(),
     )
+}
+
+/// The model's refused changes to the operator's entries not yet answered
+/// (#1050), by their `patch.refused` lines' `seq`, as `GET /state` lists
+/// them; `None` when none waits.
+fn pending_corrections(state: &State) -> Option<Value> {
+    let offered = &state.corrections.offered;
+    (!offered.is_empty())
+        .then(|| Value::Array(offered.keys().map(|seq| status_number(*seq)).collect()))
 }
 
 /// What `GET /state` reads off the log (#756).
