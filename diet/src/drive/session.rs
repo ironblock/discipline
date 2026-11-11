@@ -11333,6 +11333,11 @@ fn prewarm<'a, S: Streaming>(
     // the session sends has its line.
     let turn = state.turns;
     state.wrote_cache(&shape);
+    // Its measured prompt is paired with its own estimate, not the last
+    // trunk request's from before the refill, so the next trunk request is
+    // sized from it rather than from the pad. Its cap of one is not a sizing:
+    // `last_sized` stays the trunk's.
+    state.sent_estimate = Some(estimate_of(&shape));
     let request = state.push(Event::Requested {
         turn,
         lane: Lane::Warm,
@@ -26419,6 +26424,51 @@ pub(in crate::drive) mod tests {
             logged.event,
             Event::Answered { request, .. } if request == warm_request
         )));
+        reads_whole(&session);
+    }
+
+    /// A warmed meditation's measured prompt is paired with the warm's own
+    /// estimate, so the trunk request after it is sized from that measure
+    /// plus what was added since -- not from the estimate of the trunk before
+    /// the refill, which the shrunk prompt falls back to the pad against.
+    #[test]
+    fn the_ask_after_a_warmed_meditation_is_sized_from_the_warms_measure() {
+        let timed = |prompt: u64| {
+            Step::Timings(Timings {
+                prompt_n: Some(prompt),
+                cache_n: Some(0),
+                predicted_n: Some(1),
+                ..Timings::default()
+            })
+        };
+        let session = three_decisions_then(
+            |meditations| meditations.warm = true,
+            vec![
+                vec![Step::Delta("x".to_owned()), timed(412)],
+                vec![Step::Delta("next".to_owned()), timed(430)],
+            ],
+        );
+        session.declare_meditation(None).expect("admitted");
+        wait_until(&session, "the meditation", meditated);
+        let warmed = estimate_of(session.shared.transport.sent().last().expect("the warm"));
+        assert_eq!(
+            session.shared.lock().sizing().2,
+            Some((412, warmed)),
+            "the warm's measure is paired with its own estimate"
+        );
+        let asked = session.shared.transport.sent().len();
+        session.ask("and next?", None).expect("accepted");
+        wait_until(&session, "the ask to settle", |log| {
+            settled(log) && session.shared.transport.sent().len() > asked
+        });
+        let next = estimate_of(&session.shared.transport.sent()[asked]);
+        assert!(next >= warmed, "{next} < {warmed}");
+        let (prompt, _, _) = session.shared.lock().sizing().1.expect("sized");
+        assert_eq!(
+            prompt,
+            412 + (next - warmed),
+            "sized from the pad, not the warm"
+        );
         reads_whole(&session);
     }
 
