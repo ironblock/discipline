@@ -342,6 +342,8 @@ export interface BranchNode extends Provenance, Partial<Generation> {
   readonly at: string;
   /** The `tool_call` line it was cut at (log v32's `cut`, #1021), when it names one: what a wrap from its answer wraps. */
   readonly cut?: number;
+  /** When the operator posted it, on the session's clock, when it waited for the turn (log v46's `queued_at`, N4). */
+  readonly queuedAt?: number;
   readonly why: string;
   readonly question: string;
   /** AHEAD (`slots`): prefix tokens shared with the trunk; `diet`'s fork line does not say. */
@@ -1543,6 +1545,7 @@ export function fold(written: readonly LogLine[]): Session {
       slot,
       at,
       ...(fork.cut !== undefined ? { cut: fork.cut } : {}),
+      ...(fork.queued_at !== undefined ? { queuedAt: fork.queued_at } : {}),
       why: fork.why,
       question: fork.question,
       ...(fork.prefix_tokens !== undefined ? { prefixTokens: fork.prefix_tokens } : {}),

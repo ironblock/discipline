@@ -91,7 +91,7 @@ use std::time::{Duration, Instant};
 
 use super::attach::{self, Attaching, Unattachable, Upload};
 use super::session::{
-    CommandKind, GapEnd, IdleGap, Logged, Refusal, Rejected, Session, Settlement,
+    CommandKind, Forking, GapEnd, IdleGap, Logged, Refusal, Rejected, Session, Settlement,
 };
 use super::tool_loop::{Decision, Prompt};
 use crate::client::stream::Streaming;
@@ -1035,11 +1035,13 @@ impl<S: Streaming + 'static> Serving<S> {
     /// shadow's suggestion (#1031): accepted, the fork it fired.
     fn gesture(&self, command: Command) -> Result<BTreeMap<String, Value>, Rejected> {
         match command {
-            Command::Fork(at, ask) => self.session.fork(at, &ask).map(|fork| {
-                BTreeMap::from([(
+            // Posted while a turn runs (N4), it is queued: no line yet.
+            Command::Fork(at, ask) => self.session.fork(at, &ask).map(|forking| match forking {
+                Forking::Fired(fork) => BTreeMap::from([(
                     "fork".to_owned(),
                     Value::Integer(i64::try_from(fork).unwrap_or(i64::MAX)),
-                )])
+                )]),
+                Forking::Queued => BTreeMap::from([("queued".to_owned(), Value::Boolean(true))]),
             }),
             Command::Keep(from, Span::Exact(span), tag) => self
                 .session

@@ -467,3 +467,9 @@
   font: 14px / 1.6 var(--font-system);
   color: var(--ink-faint);
 }
+
+/* The operator's fork queued for the turn's next step (N4). */
+.ex-session__queued {
+  margin: 0 0 0.25rem;
+  color: var(--ink-muted);
+}

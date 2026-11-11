@@ -25,6 +25,15 @@ export function useGestures(): ((command: Command) => Promise<Ack>) | undefined 
  */
 export interface GestureMoment {
   readonly awaiting: boolean;
+  /**
+   * A turn runs (N4): a fork posted now is queued, and fires at the turn's next step -- after the running step's calls
+   * settle, before its next request -- cut at the latest step, wherever it was asked from.
+   */
+  readonly queueing?: boolean;
+  /** The question of the fork queued now, until it fires. */
+  readonly queued?: string;
+  /** A fork was queued, asking this. */
+  readonly onQueued?: (question: string) => void;
   readonly onTrunk: (seq: number) => boolean;
   /** Whether the result at a call's line can still be wrapped: a result wraps once (the app audit's page walk, F17). */
   readonly wrappable?: (call: number) => boolean;
@@ -38,6 +47,12 @@ export const GestureMomentContext = createContext<GestureMoment>({ awaiting: tru
 
 /** Why a fork waits, on its disabled control. */
 const FORK_WAITS = 'fork when the turn or fork settles';
+
+/** What a fork posted during a turn does (N4). */
+const FORK_QUEUES = "fork at the turn's next step: it fires once this step's calls finish, cut at the latest step";
+
+/** Why a fork waits while another is queued (N4): one at a time. */
+const queuedTitle = (question: string) => `a fork is queued for the next step: ${question}`;
 
 /** What a refused gesture says: its label, and the entry a refusal names. */
 function refusedOf(ack: Extract<Ack, { ok: false }>): string {
@@ -88,9 +103,15 @@ export function ForkAction({ at, label }: { readonly at: LoggedText; readonly la
   }, [open]);
   if (!act || !moment.onTrunk(at.seq)) return null;
   const { first, more } = pickerAsks();
-  const send = async (command: Command) => {
-    const ack = await act(command);
+  // During a turn, the fork is queued for its next step, cut at the latest step: it names no line (N4).
+  const queueing = !moment.awaiting && moment.queueing === true;
+  const takes = moment.awaiting || (queueing && moment.queued === undefined);
+  const place = queueing ? "the turn's next step" : label;
+  const send = async (command: Command, question: string) => {
+    const posted: Command = queueing && command.kind === 'fork' ? ('ask' in command ? { kind: 'fork', ask: command.ask } : { kind: 'fork', text: command.text }) : command;
+    const ack = await act(posted);
     if (ack.ok) {
+      if (ack.answer?.queued === true) moment.onQueued?.(question);
       setText('');
       setRefused(undefined);
       setOpen(false);
@@ -111,7 +132,7 @@ export function ForkAction({ at, label }: { readonly at: LoggedText; readonly la
         </span>
       </button>
       {reading === ask.name ? (
-        <button type="button" className="ex-gesture__send" aria-label={`Ask ${ask.name} at ${label}`} onClick={() => void send({ kind: 'fork', at: at.seq, ask: ask.name })}>
+        <button type="button" className="ex-gesture__send" aria-label={`Ask ${ask.name} at ${label}`} onClick={() => void send({ kind: 'fork', at: at.seq, ask: ask.name }, ask.name)}>
           ask this
         </button>
       ) : null}
@@ -119,7 +140,7 @@ export function ForkAction({ at, label }: { readonly at: LoggedText; readonly la
   );
   const submit = (e: FormEvent) => {
     e.preventDefault();
-    if (text.trim() !== '') void send({ kind: 'fork', at: at.seq, text: text.trim() });
+    if (text.trim() !== '') void send({ kind: 'fork', at: at.seq, text: text.trim() }, text.trim());
   };
   // Return asks; Shift-Return is a new line.
   const keys = (e: KeyboardEvent<HTMLTextAreaElement>) => {
@@ -132,8 +153,16 @@ export function ForkAction({ at, label }: { readonly at: LoggedText; readonly la
         type="button"
         className="ex-action"
         aria-label={`Fork at ${label}`}
-        title={moment.awaiting ? 'fork here: a pinned ask, or your own words -- it writes nothing to working memory' : FORK_WAITS}
-        disabled={!moment.awaiting}
+        title={
+          moment.awaiting
+            ? 'fork here: a pinned ask, or your own words -- it writes nothing to working memory'
+            : queueing
+              ? moment.queued !== undefined
+                ? queuedTitle(moment.queued)
+                : FORK_QUEUES
+              : FORK_WAITS
+        }
+        disabled={!takes}
         onClick={() => {
           setRefused(undefined);
           setReading(undefined);
@@ -145,7 +174,7 @@ export function ForkAction({ at, label }: { readonly at: LoggedText; readonly la
       <dialog ref={dialog} className="ex-gesture" aria-label={`Fork at ${label}`}>
         {open ? (
           <form onSubmit={submit}>
-            <h2 className="ex-gesture__title">fork at {label}</h2>
+            <h2 className="ex-gesture__title">fork at {place}</h2>
             <ul className="ex-gesture__asks">{first.map(pinned)}</ul>
             {more.length > 0 ? (
               <details className="ex-gesture__more">

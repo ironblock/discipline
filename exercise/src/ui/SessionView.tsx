@@ -230,6 +230,15 @@ export function SessionView({ session, link = 'live', linkWhy, onReconnect, surf
   }, [follow, running]);
   const now = follow && running ? session.now + (performance.now() - receivedAt) : session.now;
 
+  // The operator's fork queued for the turn's next step (N4): its question, how many queued forks had fired when it
+  // was posted, and the turn it was posted in. It waits until one more has fired; a session back at awaiting after
+  // that turn settled, with none fired, refused it at the gap.
+  const [queued, setQueued] = useState<{ readonly question: string; readonly fired: number; readonly settled?: number }>();
+  const queuedFired = [...session.branches.values()].flat().filter((b) => b.queuedAt !== undefined).length;
+  const waiting = queued !== undefined && queuedFired <= queued.fired && !(session.state === 'awaiting' && session.lastSettled !== queued.settled) ? queued : undefined;
+  useEffect(() => {
+    if (queued !== undefined && waiting === undefined) setQueued(undefined);
+  }, [queued, waiting]);
   const trunkOrder = session.eras.flatMap((era) => era.nodes.map((n) => n.id));
   // The trunk as mounted: its newest TRUNK_SHOWN blocks, and as many pages before them as the person asked for. A
   // three-hour session mounted every block it had (28.5k DOM nodes at 105k log lines), and every click waited on them.
@@ -279,6 +288,9 @@ export function SessionView({ session, link = 'live', linkWhy, onReconnect, surf
   const texts = new Map(session.memory.filter((e) => e.state === 'live').map((e) => [e.id, e.text] as const));
   const moment: GestureMoment = {
     awaiting: session.state === 'awaiting',
+    queueing: session.state === 'turn',
+    ...(waiting ? { queued: waiting.question } : {}),
+    onQueued: (question) => setQueued({ question, fired: queuedFired, ...(session.lastSettled !== undefined ? { settled: session.lastSettled } : {}) }),
     onTrunk: (seq) => onTrunk.has(seq),
     wrappable: (call) => results.get(call)?.wrapped !== true,
     resultOf: (call) => results.get(call)?.name,
@@ -702,6 +714,12 @@ export function SessionView({ session, link = 'live', linkWhy, onReconnect, surf
             {/* The composer: its own width from the trunk's left edge, whatever the lanes (--composer-width). */}
             <div ref={composerStrip} className="ex-session__composer" data-waiting={approving.waiting ? '' : undefined}>
               {approving.waiting && approving.decide ? <ApprovalPrompt key={`${approving.waiting.request}/${approving.waiting.id}`} prompt={approving.waiting} decide={approving.decide} /> : null}
+              {/* The fork the operator queued during the turn (N4), until it fires. */}
+              {waiting ? (
+                <p className="ex-session__queued" role="status">
+                  fork queued for the next step: {waiting.question}
+                </p>
+              ) : null}
               <Composer
                 state={session.state}
                 capturing={capturingOf(session)}

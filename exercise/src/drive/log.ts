@@ -257,6 +257,8 @@ export interface Fork extends At {
   readonly chunk?: number;
   /** The `tool_call` line it was cut at (log v32, #1021), when the operator forked at a tool result. */
   readonly cut?: number;
+  /** When the operator posted it, on the session's clock (log v46, N4): a fork queued while a turn ran. */
+  readonly queued_at?: number;
 }
 
 /** How a fork ended. */
