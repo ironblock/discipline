@@ -116,7 +116,7 @@
       "to": "turn"
     },
     {
-      "asks": "\n# operator messages\nThe operator's messages before context was compacted, verbatim, in the order they were sent:\n\n## turn 1\nwhat are we building\n",
+      "asks": "\n# user messages\nThe user's messages before context was compacted, verbatim, in the order they were sent:\n\n## turn 1\nwhat are we building\n",
       "at_turn": 2,
       "carried_entries": 1,
       "carried_turns": 0,

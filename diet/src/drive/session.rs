@@ -6182,13 +6182,26 @@ impl<S: Streaming + 'static> Session<S> {
             .get(self.shared.template.messages.len() + usize::from(state.refilled)..)
             .unwrap_or_default();
         let kept = crate::meditation::render::tail(turns, interview.meditations.tail_tokens);
-        let on_trunk = kept
+        let mut on_trunk: Vec<&str> = kept
             .iter()
             .filter(|message| message.role == Role::User)
-            .count() as u64
-            + u64::from(state.settlement == Settlement::Turn);
+            .map(|message| message.content.as_str())
+            .collect();
+        // A running turn's ask rides after a refill made under it.
+        if state.settlement == Settlement::Turn {
+            on_trunk.extend(
+                state
+                    .log
+                    .iter()
+                    .rev()
+                    .find_map(|logged| match &logged.event {
+                        Event::Asked { text, .. } => Some(text.as_str()),
+                        _ => None,
+                    }),
+            );
+        }
         let asks = (!carries_native(&state))
-            .then(|| compacted_asks(&state.log, u64::from(state.turns).saturating_sub(on_trunk)))
+            .then(|| compacted_asks(&state.log, &on_trunk))
             .flatten();
         let (number, text, object) = (status_number, status_text, status_object);
         let mut fields = vec![("render", text(&rendered.text))];
@@ -9816,8 +9829,13 @@ fn refilled(
     let asks = native
         .is_none()
         .then(|| {
-            let on_trunk = carried_turns + u64::from(!riding.is_empty());
-            compacted_asks(&state.log, u64::from(state.turns).saturating_sub(on_trunk))
+            let on_trunk: Vec<&str> = kept
+                .iter()
+                .chain(riding)
+                .filter(|message| message.role == Role::User)
+                .map(|message| message.content.as_str())
+                .collect();
+            compacted_asks(&state.log, &on_trunk)
         })
         .flatten();
     let (head, phase_document) = state.phase_head(&template.messages);
@@ -9988,18 +10006,31 @@ fn refilled(
     }
 }
 
-/// The section of the operator's asks of turns 1 to `through` (N3), verbatim
-/// and in the order asked, from `log`'s `ask` lines; `None` when there is none.
-fn compacted_asks(log: &[Logged], through: u64) -> Option<String> {
-    let asks: Vec<(u32, &str)> = log
+/// The section of the operator's asks a refill compacts away (N3), verbatim
+/// and in the order asked, from `log`'s `ask` lines; `None` when there is
+/// none. The asks still on the trunk after it are counted by the asks
+/// themselves, never by role: the newest asks whose own text is among the
+/// user messages `on_trunk` ride there, and every ask before the first one
+/// that is not is carried -- so a user-role message that is no ask cannot
+/// push a real ask out.
+fn compacted_asks(log: &[Logged], on_trunk: &[&str]) -> Option<String> {
+    let mut asks: Vec<(u32, &str)> = log
         .iter()
         .filter_map(|logged| match &logged.event {
-            Event::Asked { turn, text, .. } if u64::from(*turn) <= through => {
-                Some((*turn, text.as_str()))
-            }
+            Event::Asked { turn, text, .. } => Some((*turn, text.as_str())),
             _ => None,
         })
         .collect();
+    // Each message on the trunk accounts for one ask: two asks of the same
+    // words, the newer kept, leave the older carried.
+    let mut on_trunk = on_trunk.to_vec();
+    while let Some(at) = asks
+        .last()
+        .and_then(|(_, text)| on_trunk.iter().rposition(|held| held == text))
+    {
+        on_trunk.remove(at);
+        asks.pop();
+    }
     crate::meditation::asks::section(&asks)
 }
 
@@ -32823,6 +32854,44 @@ pub(in crate::drive) mod tests {
             1
         );
         reads_whole(&session);
+    }
+
+    /// N3: the asks on the trunk after a refill are counted by the asks
+    /// themselves, newest first, never by role -- a user-role message that is
+    /// no ask (a notice, say) pushes no ask out of the section -- and each
+    /// trunk message accounts for one ask, so two asks of the same words, the
+    /// newer kept, leave the older carried.
+    #[test]
+    fn the_refills_asks_are_counted_by_the_asks_on_the_trunk_not_by_role() {
+        let asked = |turn: u32, text: &str| Logged {
+            seq: u64::from(turn),
+            t: 0,
+            event: Event::Asked {
+                turn,
+                text: text.to_owned(),
+                scoping: false,
+                files: Vec::new(),
+                task: None,
+            },
+        };
+        let log = [
+            asked(1, "build it"),
+            asked(2, "continue"),
+            asked(3, "continue"),
+        ];
+        let carried = |on_trunk: &[&str]| compacted_asks(&log, on_trunk).unwrap_or_default();
+        // The tail keeps turn three's ask and a notice: turn two is carried.
+        let section = carried(&["continue", "a background job ended"]);
+        assert!(section.contains("## turn 1\nbuild it\n"), "{section}");
+        assert!(section.contains("## turn 2\ncontinue\n"), "{section}");
+        assert!(!section.contains("## turn 3"), "{section}");
+        // A notice alone keeps no ask: all three are carried.
+        assert!(carried(&["a background job ended"]).contains("## turn 3"));
+        // Every ask on the trunk: none is.
+        assert_eq!(
+            compacted_asks(&log, &["build it", "continue", "continue"]),
+            None
+        );
     }
 
     /// #813 with #814: a window meditation under a running turn, over a

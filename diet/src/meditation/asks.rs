@@ -8,16 +8,17 @@
 //! An ask still on the trunk after the refill -- the running turn's, or one
 //! in the kept tail -- rides there and is not repeated here.
 //!
-//! The heading and the sentence are proposed wording, for the maintainer.
+//! The heading and the sentence are the maintainer's wording (2026-11-11):
+//! "user", as the render's "user said" and the head's "a person".
 
 use std::fmt::Write as _;
 
 /// The section's heading, in the render's own register.
-pub const HEADER: &str = "# operator messages\n";
+pub const HEADER: &str = "# user messages\n";
 
 /// What the section says before the asks.
 pub const SENTENCE: &str =
-    "The operator's messages before context was compacted, verbatim, in the order they were sent:";
+    "The user's messages before context was compacted, verbatim, in the order they were sent:";
 
 /// The section a refill carries of `asks` -- each `(turn, text)`, in the
 /// order asked -- after the render; `None` when there is none. Each ask is
@@ -44,7 +45,7 @@ mod tests {
         let text = section(&[(1, "first"), (2, "two lines\n\nkept")]).expect("a section");
         assert_eq!(
             text,
-            "\n# operator messages\nThe operator's messages before context was compacted, \
+            "\n# user messages\nThe user's messages before context was compacted, \
              verbatim, in the order they were sent:\n\n## turn 1\nfirst\n\n## turn 2\ntwo \
              lines\n\nkept\n"
         );
