@@ -35992,6 +35992,19 @@ pub(in crate::drive) mod tests {
             .expect("a meditation that moved to build");
         assert!(meditated_at > settled_at, "after the turn");
         assert_eq!(session.shared.lock().phase.as_deref(), Some("build"));
+        // The model is told the move waits for the turn's end, not that it is
+        // made (PROPOSED wording, for the maintainer).
+        let shown = log
+            .iter()
+            .find_map(|logged| match &logged.event {
+                Event::ToolCalled(line) if line.id == "call-a" => line.shown.clone(),
+                _ => None,
+            })
+            .expect("the phase call's line");
+        assert_eq!(
+            shown,
+            "accepted: the move to build happens when this turn ends, through a meditation. Until then you are still in plan."
+        );
         reads_whole(&session);
     }
 
