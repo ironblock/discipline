@@ -4956,9 +4956,9 @@ impl<S: Streaming + 'static> Session<S> {
     ///
     /// # Errors
     ///
-    /// [`Refusal::Ended`]; [`Refusal::InFlight`] while a turn or a capture is
-    /// in flight; [`Refusal::Empty`] for no content; [`Refusal::UnknownEntry`]
-    /// for an id working memory does not hold, or none kept;
+    /// [`Refusal::Ended`]; [`Refusal::Empty`] for no content;
+    /// [`Refusal::UnknownEntry`] for an id working memory does not hold, or
+    /// none kept;
     /// [`Refusal::NotLive`] for one no longer live.
     pub fn edit_entry(&self, id: &str, content: &str) -> Result<(), Rejected> {
         let mut state = self.shared.lock();
@@ -5108,9 +5108,8 @@ impl<S: Streaming + 'static> Session<S> {
     ///
     /// # Errors
     ///
-    /// [`Refusal::Ended`]; [`Refusal::InFlight`] while a turn or a capture is
-    /// in flight; [`Refusal::UnknownEntry`] for an entry working memory does
-    /// not hold; [`Refusal::NotLive`] for one no longer live; and
+    /// [`Refusal::Ended`]; [`Refusal::UnknownEntry`] for an entry working
+    /// memory does not hold; [`Refusal::NotLive`] for one no longer live; and
     /// [`Refusal::NotTheOperators`] for one the operator did not write.
     pub fn retire_entry(&self, id: &str) -> Result<(), Rejected> {
         let mut state = self.shared.lock();
@@ -5203,9 +5202,8 @@ impl<S: Streaming + 'static> Session<S> {
     ///
     /// # Errors
     ///
-    /// [`Refusal::Ended`]; [`Refusal::InFlight`] while a turn or a capture is
-    /// in flight; [`Refusal::NoWorkingMemory`]; [`Refusal::Empty`] for no
-    /// span; [`Refusal::NotASource`] for a line with no text to keep from;
+    /// [`Refusal::Ended`]; [`Refusal::NoWorkingMemory`]; [`Refusal::Empty`]
+    /// for no span; [`Refusal::NotASource`] for a line with no text to keep from;
     /// [`Refusal::NotInSource`] for a span the line does not hold; and
     /// [`Refusal::Restates`] for a span working memory already holds.
     pub fn keep(&self, from: u64, span: &str, tag: Option<&str>) -> Result<String, Rejected> {
@@ -10733,13 +10731,13 @@ fn keep_refusal(state: &State, from: u64, span: &str) -> Result<(), (Refusal, Op
     }
 }
 
-/// Why an operator edit or flag of `id` with `text` is refused, if it is.
+/// Why an operator edit, flag or retire of `id` with `text` is refused, if
+/// it is. Admitted while a turn or a capture runs, as a keep is (#1042):
+/// each writes working memory only, which nothing in flight reads, and the
+/// next refill renders it as they left it.
 fn operator_refusal(state: &State, id: &str, text: &str) -> Option<Refusal> {
     if state.settlement == Settlement::Ended {
         return Some(Refusal::Ended);
-    }
-    if matches!(state.settlement, Settlement::Turn | Settlement::Capture) {
-        return Some(Refusal::InFlight);
     }
     if text.trim().is_empty() {
         return Some(Refusal::Empty);
