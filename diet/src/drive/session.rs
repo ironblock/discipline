@@ -32700,6 +32700,62 @@ pub(in crate::drive) mod tests {
         reads_whole(&session);
     }
 
+    /// N3 (the maintainer, 2026-11-11): every earlier operator ask rides a
+    /// refill verbatim and in order, as Qwen Code carries all user messages
+    /// -- not only the running turn's, and not only what the tail keeps. A
+    /// window meditation inside turn three carries turns one's and two's
+    /// asks, their own bytes, in the order they were asked; the running
+    /// turn's ask rides as it did, once.
+    #[test]
+    fn a_window_refill_carries_every_earlier_ask_verbatim_and_in_order() {
+        const FIRST: &str = "Turn their example into a voxel game, keeping its controls.";
+        const SECOND: &str = "Don't run its `start` or `stop`; only `build`.\n\nAnd keep notes.";
+        let mut acts = vec![deltas(&["Noted."]), deltas(&["Understood."])];
+        acts.extend(one_long_turn(18));
+        let session = windowed(acts, 100_000, crate::meditation::policy::Served::default());
+        for (ask, turns) in [(FIRST, 1), (SECOND, 2)] {
+            session.ask(ask, None).expect("accepted");
+            wait_until(&session, "the turn", |log| {
+                settled(log)
+                    && log
+                        .iter()
+                        .filter(|logged| matches!(logged.event, Event::TurnSettled { .. }))
+                        .count()
+                        == turns
+            });
+        }
+        session.ask("build it", None).expect("accepted");
+        let log = wait_until(&session, "the long turn", |log| {
+            settled(log)
+                && log
+                    .iter()
+                    .filter(|logged| matches!(logged.event, Event::TurnSettled { .. }))
+                    .count()
+                    == 3
+        });
+        assert!(!window_meditations(&log).is_empty(), "a window meditation in turn three");
+        let sent = session.shared.transport.sent();
+        let last = &sent.last().expect("a request").messages;
+        let summary = last
+            .iter()
+            .find(|message| message.content.starts_with("<summary>"))
+            .expect("the refill");
+        let first = summary.content.find(FIRST).expect("turn one's ask, verbatim");
+        let second = summary.content.find(SECOND).expect("turn two's ask, verbatim");
+        assert!(first < second, "in the order they were asked");
+        assert!(
+            !summary.content.contains("build it"),
+            "the running turn's ask rides on its own"
+        );
+        assert_eq!(
+            last.iter()
+                .filter(|message| message.content == "build it")
+                .count(),
+            1
+        );
+        reads_whole(&session);
+    }
+
     /// #813 with #814: a window meditation under a running turn, over a
     /// working memory too large for the window, elides the render to fit
     /// the window's line counting what rides after the refill -- the turn's
