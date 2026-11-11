@@ -2926,6 +2926,50 @@ mod tests {
             .unwrap_or_else(|why| panic!("the T1 head carries a timestamp: {why}"));
     }
 
+    /// T1's head is static and the tool descriptions are conditional, so the
+    /// head names only what the tool surface of the regimen it runs under
+    /// offers: every tool or argument it names in backticks is a tool the
+    /// manual T1 regimen declares, or an argument of one.
+    #[test]
+    fn t1s_head_names_only_what_its_regimens_tool_surface_offers() {
+        use crate::drive::tool_loop::{background_commands, tool_surface};
+        let head = include_str!("../../drive/heads/t1.md");
+        let text = std::fs::read_to_string(format!(
+            "{}/../drafts/t1-session-one-flashnext-manual.regimen.toml",
+            env!("CARGO_MANIFEST_DIR")
+        ))
+        .expect("the manual T1 regimen");
+        let regimen = crate::formats::regimen::parse(&text).expect("a regimen");
+        let tools = tool_surface(&regimen)
+            .expect("a surface")
+            .tools_with(background_commands(&regimen));
+        let mut offered: std::collections::BTreeSet<String> =
+            tools.iter().map(|tool| tool.name.clone()).collect();
+        for tool in &tools {
+            if let crate::formats::record::json::Value::Object(schema) = &tool.schema
+                && let Some(crate::formats::record::json::Value::Object(properties)) =
+                    schema.get("properties")
+            {
+                offered.extend(properties.keys().cloned());
+            }
+        }
+        let named: Vec<&str> = head
+            .split('`')
+            .skip(1)
+            .step_by(2)
+            .filter(|word| {
+                !word.is_empty() && word.chars().all(|c| c.is_ascii_lowercase() || c == '_')
+            })
+            .collect();
+        assert!(!named.is_empty(), "the head names a tool");
+        for word in named {
+            assert!(
+                offered.contains(word),
+                "the head names `{word}`, which {offered:?} does not offer"
+            );
+        }
+    }
+
     /// The lint fires BEFORE the call, and the drive stops.
     ///
     /// The meditation's render is the system prompt, so whatever it carries
