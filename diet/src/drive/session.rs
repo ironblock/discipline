@@ -13777,10 +13777,17 @@ fn phase_call<S>(
                 });
                 if meditate {
                     state.move_after_turn = Some(to.clone());
+                    // Said so (PROPOSED wording, for the maintainer): the
+                    // move waits for this turn's end, and until then the
+                    // model is where it was.
+                    format!(
+                        "accepted: the move to {to} happens when this turn ends, through a meditation. Until then you are still in {}.",
+                        state.phase.as_deref().unwrap_or("no phase")
+                    )
                 } else {
                     moved(&shared.template, &mut state, &to, PhaseChoice::Keep);
+                    "accepted".to_owned()
                 }
-                "accepted".to_owned()
             } else {
                 "declined".to_owned()
             }
