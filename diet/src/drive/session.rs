@@ -18709,6 +18709,80 @@ pub(in crate::drive) mod tests {
         );
     }
 
+    /// Under v6, whose judgment asks for the corrected entry in full, the
+    /// text after a SUPERSEDE's cited id is the entry that stands, whatever
+    /// separates them -- an em dash included: the patch voiding the cited
+    /// entry carries it as its content, and the answer's DECISION is an
+    /// addition of its own. #812's em-dash reason is v4's reading.
+    #[test]
+    fn a_v6_supersede_after_an_em_dash_is_the_entry_that_stands() {
+        let mut interview = interviewing(&[log::Warrant::Scoping]);
+        interview.asks = &crate::dogma::asks::V6;
+        let session = Session::open_with(
+            Canned::new(Vec::<Vec<Step>>::new()),
+            template(),
+            None,
+            None,
+            None,
+            Some(interview),
+        );
+        let mut state = session.shared.lock();
+        let seed = Patch::Add {
+            id: entry_id("r3017/call_dc70/note"),
+            content: "Our project dir is empty".to_owned(),
+            provenance: from_fork(0),
+        };
+        assert_eq!(applied(&mut state, &[seed], 1).0, log::ForkOutcome::Value);
+        let corrected = "Our project dir is empty; the Lite repo already has a full voxel FPS \
+                         demo at lab/lite/src/demos/minecraft";
+        let (outcome, lines, _) = folded(
+            &mut state,
+            &format!(
+                "DECISION: adapt the Lite demo\n\
+                 PLAN: NONE\n\
+                 SUPERSEDE: r3017/call_dc70/note \u{2014} {corrected}\n"
+            ),
+            2,
+            12336,
+        );
+        assert_eq!(outcome, log::ForkOutcome::Value);
+        let logged: Vec<log::Event> = lines
+            .iter()
+            .map(|event| {
+                line_of(&Logged {
+                    seq: 0,
+                    t: 0,
+                    event: event.clone(),
+                })
+                .event
+            })
+            .collect();
+        assert!(
+            logged.iter().any(|line| matches!(
+                line,
+                log::Event::Patch {
+                    op: log::PatchOp::Supersede,
+                    supersedes: Some(voids),
+                    reason: None,
+                    entry,
+                    ..
+                } if voids == "r3017/call_dc70/note" && entry.text == corrected
+            )),
+            "{logged:#?}"
+        );
+        assert!(
+            logged.iter().any(|line| matches!(
+                line,
+                log::Event::Patch {
+                    op: log::PatchOp::Add,
+                    entry,
+                    ..
+                } if entry.text == "decision: adapt the Lite demo"
+            )),
+            "{logged:#?}"
+        );
+    }
+
     /// #815: a session serve opened on a substrate that takes no images
     /// refuses an ask carrying one, `no-vision`, logged; its words alone
     /// still go, and a session that takes images sends the picture.
