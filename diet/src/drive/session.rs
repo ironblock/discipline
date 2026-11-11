@@ -13849,7 +13849,7 @@ fn phase_call<S>(
                 });
                 if meditate {
                     state.move_after_turn = Some(to.clone());
-                    // Said so (PROPOSED wording, for the maintainer): the move
+                    // Said so, in the maintainer's approved words: the move
                     // is made before the next step (N2 (b)), or at the turn's
                     // end when it cannot be made there, and until then the
                     // model is where it was.
@@ -36081,7 +36081,7 @@ pub(in crate::drive) mod tests {
         assert!(meditated_at < settled_at, "within the turn");
         assert_eq!(session.shared.lock().phase.as_deref(), Some("build"));
         // The model is told the move waits for the turn's end, not that it is
-        // made (PROPOSED wording, for the maintainer).
+        // made (the maintainer's approved words).
         let shown = log
             .iter()
             .find_map(|logged| match &logged.event {
