@@ -177,8 +177,9 @@ pub const BASH_DESCRIPTION_BACKGROUND: &str = "Executes a bash command (as `bash
      - There is no timeout. A command that does not exit on its own, such as a server or a \
      watcher, holds the call until the turn is cancelled: run it with `is_background: true`.\n\
      - With `is_background: true` the call returns at once with the job's id, its output file \
-     and its status file, and the command keeps running; `task_stop` stops it, and when it ends \
-     a notification says so.\n\
+     and its status file, and the command keeps running. To stop it, call the `task_stop` tool \
+     with the job's id: it is a tool, not a shell command. When the job ends a notification \
+     says so.\n\
      - The command may run in a sandbox: writes outside the working directory, some reads, and \
      network access can be refused.";
 

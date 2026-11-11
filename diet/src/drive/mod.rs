@@ -2912,7 +2912,7 @@ mod tests {
         assert_eq!(
             t1,
             format!(
-                "You are a coding assistant working with a person.\n{rules}\nA running command cannot be cancelled, so start long-lived servers (like the dev server) in the background.\nThe dev server uses port 5182 (ports 5173, 5180 and 5181 are taken).\n\n"
+                "You are a coding assistant working with a person.\n{rules}\nA running command cannot be cancelled, so start long-lived servers (like the dev server) with the `bash` tool's `is_background: true`, not with `&`, and stop them with the `task_stop` tool.\nThe dev server uses port 5182 (ports 5173, 5180 and 5181 are taken).\n\n"
             )
         );
         let sending = RequestShape {
