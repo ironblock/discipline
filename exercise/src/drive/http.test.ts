@@ -27,6 +27,10 @@ class FakeSource implements EventSourceLike {
   emit(type: string, data: Record<string, unknown>): void {
     for (const listener of this.named.get(type) ?? []) listener(new MessageEvent(type, { data: JSON.stringify(data) }));
   }
+  /** A line serve leaves out of the stream, declared (a shadow while the shadows are hidden): `skipped`, with its `id:`. */
+  skip(seq: number, opened = OPENED): void {
+    for (const listener of this.named.get('skipped') ?? []) listener(new MessageEvent('skipped', { data: JSON.stringify({ seq }), lastEventId: `${opened}-${String(seq)}` }));
+  }
   open(): void {
     this.readyState = 1;
     this.onopen?.(new Event('open'));
@@ -100,6 +104,16 @@ describe('HttpTransport: the log, served', () => {
     last().send(ask(3));
     last().send(ask(1));
     expect(lines.map((l) => l.seq)).toEqual([0, 1]);
+  });
+
+  it('reads past a line serve declares it left out, and still drops a line past a gap nothing declared', () => {
+    const { lines, last } = stand();
+    last().send(start);
+    last().send(ask(1));
+    last().skip(2);
+    last().send(ask(3));
+    last().send(ask(5));
+    expect(lines.map((l) => l.seq)).toEqual([0, 1, 3]);
   });
 
   it('lets an ended session’s stream go: serve exits after `end`, and that close is the end, not a dropped link', async () => {

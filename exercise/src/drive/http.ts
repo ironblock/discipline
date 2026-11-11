@@ -60,7 +60,7 @@ export interface EventSourceLike {
   onopen: ((event: Event) => void) | null;
   onmessage: ((event: MessageEvent<string>) => void) | null;
   onerror: ((event: Event) => void) | null;
-  /** A named event's listener: `waiting` and `answered` (#389). */
+  /** A named event's listener: `waiting` and `answered` (#389), and `skipped`. */
   addEventListener(type: string, listener: (event: MessageEvent<string>) => void): void;
   close(): void;
 }
@@ -98,6 +98,8 @@ export class HttpTransport implements DriveTransport {
   readonly #web: Web;
 
   readonly #log: LogLine[] = [];
+  /** The next seq the stream owes: past every line held, and every line serve declared it left out (`skipped`). */
+  #next = 0;
   readonly #listeners = new Set<(line: LogLine) => void>();
   readonly #watchers = new Set<(link: Link, why?: string) => void>();
   readonly #prompts = new Set<(prompt: Prompt | undefined) => void>();
@@ -304,7 +306,7 @@ export class HttpTransport implements DriveTransport {
   }
 
   #connect(): void {
-    const source = new this.#web.EventSource(`${this.#base}events?from=${this.#log.length}`);
+    const source = new this.#web.EventSource(`${this.#base}events?from=${this.#next}`);
     this.#source = source;
     source.onopen = () => {
       this.#backoff = 0;
@@ -317,6 +319,10 @@ export class HttpTransport implements DriveTransport {
     };
     source.addEventListener('waiting', (event) => {
       if (source === this.#source) this.#waiting(event);
+    });
+    // A line serve leaves out (a shadow while the shadows are hidden), declared: read on past its seq.
+    source.addEventListener('skipped', (event) => {
+      if (source === this.#source) this.#skipped(event);
     });
     source.addEventListener('answered', (event) => {
       if (source !== this.#source) return;
@@ -356,14 +362,23 @@ export class HttpTransport implements DriveTransport {
     const opened = event.lastEventId ? Number(event.lastEventId.split('-')[0]) : undefined;
     if (opened !== undefined && this.#opened !== undefined && opened !== this.#opened) return this.#restart();
     // Gapless, from 0: a line already held is a resume's overlap; one past the next is a gap the resume closes.
-    if (line.seq !== this.#log.length) return;
+    if (line.seq !== this.#next) return;
     if (line.kind === 'session.start') this.#opened = line.opened;
     this.#lastId = event.lastEventId || this.#lastId;
     this.#retries = 0;
     // The call's outcome is known: whatever it waited on is decided.
     if (line.kind === 'tool_call' && line.id === this.#prompt?.id && line.request === this.#prompt?.request) this.#setPrompt(undefined);
     this.#log.push(line);
+    this.#next = line.seq + 1;
     for (const listener of this.#listeners) listener(line);
+  }
+
+  /** A line serve declares it left out of the stream: the next seq moves past it, and nothing is held for it. */
+  #skipped(event: MessageEvent<string>): void {
+    const said = parse(event.data);
+    if (!said || said['seq'] !== this.#next) return;
+    this.#next += 1;
+    this.#lastId = event.lastEventId || this.#lastId;
   }
 
   /** A call waits on the operator: the page shows it until it is decided. One that does not read as a prompt is not shown. */
@@ -393,6 +408,7 @@ export class HttpTransport implements DriveTransport {
     this.#source = undefined;
     this.#setPrompt(undefined);
     this.#log.length = 0;
+    this.#next = 0;
     this.#lastId = undefined;
     this.#opened = undefined;
     this.#setLink('reconnecting', 'the drive restarted: a new session');
@@ -408,7 +424,7 @@ export class HttpTransport implements DriveTransport {
     let status: number | undefined;
     const abort = new AbortController();
     try {
-      const reply = await this.#web.fetch(`${this.#base}events?from=${this.#log.length}`, {
+      const reply = await this.#web.fetch(`${this.#base}events?from=${this.#next}`, {
         headers: this.#lastId ? { 'Last-Event-ID': this.#lastId } : {},
         signal: abort.signal,
       });
@@ -446,7 +462,7 @@ export class HttpTransport implements DriveTransport {
     let status: number | undefined;
     const abort = new AbortController();
     try {
-      status = (await this.#web.fetch(`${this.#base}events?from=${this.#log.length}`, { signal: abort.signal })).status;
+      status = (await this.#web.fetch(`${this.#base}events?from=${this.#next}`, { signal: abort.signal })).status;
     } catch {
       status = undefined;
     } finally {

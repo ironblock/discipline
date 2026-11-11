@@ -14,7 +14,9 @@
 //! * `GET /line/<seq>` answers one logged line whole, and `GET
 //!   /refill-preview` the render the next refill would carry (#1038).
 //!   While a session's shadows are hidden, `/events` and `/line/<seq>`
-//!   leave their `fork.shadowed` lines out.
+//!   leave their `fork.shadowed` lines out; `/events` declares each one it
+//!   leaves out, `event: skipped` with the line's `id:` and `{"seq"}`, so a
+//!   reader that holds the log gapless reads on past it.
 //! * `GET /state` answers what the session is doing now, as one JSON
 //!   object ([`Session::status`], #756); `GET /wait?until=idle|<kind>&
 //!   after=<seq>&timeout=<s>` answers the same once the session is idle or
@@ -643,7 +645,16 @@ impl<S: Streaming + 'static> Serving<S> {
             }
             for logged in &batch {
                 next = logged.seq + 1;
+                // Left out while the shadows are hidden, and declared so: a
+                // gapless reader (the page) reads on past the seq, where an
+                // undeclared gap waits for a resume. Its `id:` is the line's,
+                // so a resume from here starts after it.
                 if hidden && matches!(logged.event, super::session::Event::Shadowed { .. }) {
+                    let _ = write!(
+                        out,
+                        "event: skipped\nid: {}-{}\ndata: {{\"seq\":{}}}\n\n",
+                        self.opened, logged.seq, logged.seq
+                    );
                     continue;
                 }
                 if let Some(kinds) = &kinds
@@ -4178,6 +4189,20 @@ mod tests {
             !reader.data().iter().any(|data| data.contains("Shadowed")),
             "{:?}",
             reader.data()
+        );
+        // Left out, and declared so: a gapless reader (the page) reads on
+        // past it, where an undeclared gap waits for a resume.
+        let declared = format!("-{shadow}\ndata: {{\"seq\":{shadow}}}\n\n");
+        assert!(
+            reader
+                .read
+                .split("event: skipped\nid: ")
+                .skip(1)
+                .any(|event| event.starts_with(|c: char| c.is_ascii_digit())
+                    && event.contains(&declared)
+                    && !event[..event.find(&declared).unwrap_or(0)].contains('\n')),
+            "the shadow at {shadow} is declared skipped: {}",
+            reader.read
         );
         let mut asked = Client::send(
             &server,
