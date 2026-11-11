@@ -91,7 +91,8 @@ describe('a meditation’s audit in concurrent chunks (#854, #862)', () => {
     const meditation = String(meditationAfter(CHUNKED_AUDITS[0]!.at(-1)!).seq);
     const answer = session.eras.find((era) => era.meditation?.id === meditation)?.meditation?.reconcile?.answer;
     expect(answer?.split('\n').filter((line) => line.startsWith('chunk'))).toEqual(['chunk 1 of 2', 'chunk 2 of 2']);
-    // Eight entries in chunk 1 and five in chunk 2, since the open warrant shadows and its fork no longer writes (F20).
-    expect(answer?.match(/KEEP/g)?.length).toBe(8 + 5);
+    // Eight entries in chunk 1 and four in chunk 2, since the open warrant shadows and its fork no longer writes (F20),
+    // and the failed `cat missing.txt` touches no file.
+    expect(answer?.match(/KEEP/g)?.length).toBe(8 + 4);
   });
 });

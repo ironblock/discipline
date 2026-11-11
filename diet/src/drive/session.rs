@@ -8315,6 +8315,19 @@ fn capture_call<S>(
 /// The id prefix of a mechanical entry (#784): `mechanical/<path>`.
 const MECHANICAL_ID: &str = "mechanical/";
 
+/// Whether a touch the lane read agrees with the disk once the call has run.
+/// The lane reads a command's shape and cannot run anything, so a reader of
+/// a missing file (`cat x 2>/dev/null`) reads as a read; live, the disk after
+/// the call is at hand: a read, a listing or a write is a touch only of a
+/// path that exists now. A delete is as the lane read it, and a path the lane
+/// could not resolve (relative to a directory it lost) cannot be looked up,
+/// so it stands as read.
+fn on_disk((path, kind): &(std::path::PathBuf, crate::capture::mechanical::TouchKind)) -> bool {
+    matches!(kind, crate::capture::mechanical::TouchKind::Deleted)
+        || !path.is_absolute()
+        || path.exists()
+}
+
 /// What tool call `line` touched, patched into working memory as it settles
 /// (#784), when the regimen turns `mechanical_capture` on: no model call and
 /// no fork. The mechanical lane reads the call as the shell would; each file
@@ -8322,8 +8335,9 @@ const MECHANICAL_ID: &str = "mechanical/";
 /// id `mechanical/<path>` -- a later touch appending its provenance (lane
 /// `mechanical`, the turn, the step as its index), and a delete retiring it;
 /// a listed directory is `files: listed <dir>`. A path under the worktree is
-/// written relative to it. The operator's entries are theirs (#150): the
-/// guard refuses a patch on one. A path deleted and touched again stays
+/// written relative to it. A read, a listing or a write of a path that does
+/// not exist once the call has run is no touch. The operator's entries are
+/// theirs (#150): the guard refuses a patch on one. A path deleted and touched again stays
 /// retired: the object refuses to restate a retired entry. The `patch`
 /// lines to log, after the call's own.
 fn mechanically_captured<S>(
@@ -8360,6 +8374,7 @@ fn mechanically_captured<S>(
     });
     let mut touched = reader.touched_by(&event);
     touched.dedup();
+    touched.retain(on_disk);
     let tangent = state
         .tangent
         .as_ref()
@@ -25628,6 +25643,61 @@ pub(in crate::drive) mod tests {
         let log = wait_until(&session, "the turn", settled);
         assert!(live_entries(&session).is_empty());
         assert!(mechanical_patches(&log).is_empty());
+        tidy(&[&tree]);
+    }
+
+    /// A read, a listing or a write of a path that does not exist after the
+    /// call is no touch (drive g: `cat package.json 2>/dev/null` of a
+    /// missing file was recorded as read): the live lane keeps a touch the
+    /// disk agrees with, and only that.
+    #[test]
+    fn mechanical_capture_records_no_touch_of_a_path_that_does_not_exist() {
+        let tree = scratch("mechanical-missing");
+        std::fs::write(tree.join("notes.md"), "line one\n").expect("the notes");
+        let mut shape = looping();
+        shape.tools = tool_loop::ToolSurface::Standard.tools_timed(false, None);
+        let mut tools = tools(
+            Confinement::Unconfined,
+            &tree,
+            &["ls", "cat"],
+            None,
+            Decider::Decline,
+        );
+        tools.surface = tool_loop::ToolSurface::Standard;
+        tools.read_tool = tool_loop::ToolSurface::Standard.read_tool();
+        tools.approvals_off = true;
+        let mut interview = interviewing(&[log::Warrant::Scoping]);
+        interview.mechanical_capture = true;
+        let bash = |id: &str, command: &str| {
+            vec![Step::call(
+                0,
+                id,
+                "bash",
+                &serde_json::json!({ "command": command }).to_string(),
+            )]
+        };
+        let session = Session::open_with(
+            Canned::new([
+                bash("c1", "cat missing.json 2>/dev/null; cat notes.md"),
+                bash("c2", "ls gone 2>/dev/null; true"),
+                deltas(&["done"]),
+            ]),
+            shape,
+            None,
+            Some(tools),
+            None,
+            Some(interview),
+        );
+        session.ask("look around", None).expect("accepted");
+        wait_until(&session, "the turn", settled);
+        assert_eq!(
+            live_entries(&session),
+            [(
+                "mechanical/notes.md".to_owned(),
+                "files: notes.md".to_owned()
+            )]
+        );
+        reads_whole(&session);
         tidy(&[&tree]);
     }
 
