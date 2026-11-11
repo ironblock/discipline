@@ -15,6 +15,8 @@ export interface MemoryProps {
   readonly onSeen?: () => void;
   /** Where the operator's edits and flags go (#150): absent where the drive takes none (the canned script, a replay). */
   readonly act?: (command: Command) => Promise<Ack>;
+  /** The entries a mounted block or side call is wired to: kept mounted past a category's cap, so its lines reach them. */
+  readonly linked?: ReadonlySet<string>;
 }
 
 /** Landed since the last ask, and not yet acknowledged. */
@@ -28,9 +30,14 @@ export function isUnseen(entry: MemoryEntry, seenThrough = -1): boolean {
  * what was superseded or retired kept visible, struck -- evicted from the
  * next render, never deleted.
  */
-export function Memory({ entries, seenThrough = -1, onSeen, act }: MemoryProps) {
+export function Memory({ entries, seenThrough = -1, onSeen, act, linked }: MemoryProps) {
   const target = useTarget();
   const hot = useHotEntries();
+  // A long session's categories hold hundreds of entries (a three-hour drive: 163 mechanical `files:` lines), and every
+  // entry mounted is input latency. Each category shows its newest MEMORY_SHOWN, and any entry lit, linked to or wired, until
+  // the person asks for the rest.
+  const [whole, setWhole] = useState<ReadonlySet<string>>(new Set());
+  const kept = (e: MemoryEntry) => hot.has(e.id) || target === `memory/${e.id}` || linked?.has(e.id) === true;
   const live = entries.filter((e) => e.state === 'live').length;
   const fresh = entries.filter((e) => isUnseen(e, seenThrough)).length;
   const categories = [...new Set(entries.map((e) => e.category))];
@@ -47,77 +54,95 @@ export function Memory({ entries, seenThrough = -1, onSeen, act }: MemoryProps) 
         ) : null}
       </header>
       {entries.length === 0 ? <p className="ex-memory__empty">Nothing yet. Interviews write here as the session goes.</p> : null}
-      {categories.map((category) => (
-        <div className="ex-memory__category" key={category ?? ''}>
-          {/* The predecessor kept one flat list: an entry with no category is listed without a heading. */}
-          {category !== undefined ? <h3>{category}</h3> : null}
-          <ul>
-            {entries
-              .filter((e) => e.category === category)
-              .map((e) => (
-                <li
-                  key={e.id}
-                  id={`memory/${e.id}`}
-                  data-target={target === `memory/${e.id}` ? '' : undefined}
-                  data-hot={hot.has(e.id) ? '' : undefined}
-                  className="ex-memory__entry"
-                  data-state={e.state}
-                  data-fresh={isUnseen(e, seenThrough) ? '' : undefined}
-                  data-from={e.from.join(' ')}
-                  data-needs={e.needs.join(' ')}
-                  data-lane={e.lane}
-                  title={`${e.state}${e.authority ? ` · ${e.authority}` : ''} · last changed at log line ${e.by}`}
-                >
-                  <span className="ex-memory__id">#{e.id}</span>
-                  <span className="ex-memory__text">
-                    {e.text}
-                    {e.op !== undefined ? <span className="ex-memory__op">{opOf(e.op).label}</span> : null}
-                    {/* Who vouches for it (the app audit, finding 7): observed, the model's own words, yours. */}
-                    {e.authority !== undefined ? <span className="ex-memory__authority">{authorityOf(e.authority).label}</span> : null}
-                    {/* Where it came from, for every entry (the app audit's page walk, F8): the trunk's lane, or a fork's. An entry
-                        whose authority is the operator's already says "kept by you", so its source word would say it twice. */}
-                    {e.source !== undefined && e.authority !== 'operator' ? (
-                      <span className="ex-memory__source" title={sourceTitle(e.source)}>
-                        {e.source}
+      {categories.map((category) => {
+        const listed = entries.filter((e) => e.category === category);
+        const shown = shownOf(listed, whole.has(category ?? ''), kept);
+        return (
+          <div className="ex-memory__category" key={category ?? ''}>
+            {/* The predecessor kept one flat list: an entry with no category is listed without a heading. */}
+            {category !== undefined ? <h3>{category}</h3> : null}
+            <ul>
+              {shown
+                .map((e) => (
+                  <li
+                    key={e.id}
+                    id={`memory/${e.id}`}
+                    data-target={target === `memory/${e.id}` ? '' : undefined}
+                    data-hot={hot.has(e.id) ? '' : undefined}
+                    className="ex-memory__entry"
+                    data-state={e.state}
+                    data-fresh={isUnseen(e, seenThrough) ? '' : undefined}
+                    data-from={e.from.join(' ')}
+                    data-needs={e.needs.join(' ')}
+                    data-lane={e.lane}
+                    title={`${e.state}${e.authority ? ` · ${e.authority}` : ''} · last changed at log line ${e.by}`}
+                  >
+                    <span className="ex-memory__id">#{e.id}</span>
+                    <span className="ex-memory__text">
+                      {e.text}
+                      {e.op !== undefined ? <span className="ex-memory__op">{opOf(e.op).label}</span> : null}
+                      {/* Who vouches for it (the app audit, finding 7): observed, the model's own words, yours. */}
+                      {e.authority !== undefined ? <span className="ex-memory__authority">{authorityOf(e.authority).label}</span> : null}
+                      {/* Where it came from, for every entry (the app audit's page walk, F8): the trunk's lane, or a fork's. An entry
+                          whose authority is the operator's already says "kept by you", so its source word would say it twice. */}
+                      {e.source !== undefined && e.authority !== 'operator' ? (
+                        <span className="ex-memory__source" title={sourceTitle(e.source)}>
+                          {e.source}
+                        </span>
+                      ) : null}
+                    </span>
+                    {/* The operator's flag (#150), kept until a meditation addresses it; and the model's writes refused over their entry. */}
+                    {e.flag !== undefined ? <span className="ex-memory__flag">flag · {e.flag}</span> : null}
+                    {/* The notes merged into it as similar (#872): each one's id, how similar, and what it said. */}
+                    {e.merges && e.merges.length > 0 ? (
+                      <ul className="ex-memory__merges" aria-label={`merged into #${e.id}`}>
+                        {e.merges.map((m) => (
+                          <li key={m.id} className="ex-memory__merge" title={`merged as similar by patch #${m.by}`}>
+                            {`merged #${m.id} · cosine ${m.cosine} · ${m.text}`}
+                          </li>
+                        ))}
+                      </ul>
+                    ) : null}
+                    {e.refusedWrites && e.refusedWrites.length > 0 ? (
+                      <span className="ex-memory__refused" title="the model tried to change your entry, and was refused">
+                        refused: {e.refusedWrites.map((w) => `${w.op} by ${w.by}`).join(', ')}
                       </span>
                     ) : null}
-                  </span>
-                  {/* The operator's flag (#150), kept until a meditation addresses it; and the model's writes refused over their entry. */}
-                  {e.flag !== undefined ? <span className="ex-memory__flag">flag · {e.flag}</span> : null}
-                  {/* The notes merged into it as similar (#872): each one's id, how similar, and what it said. */}
-                  {e.merges && e.merges.length > 0 ? (
-                    <ul className="ex-memory__merges" aria-label={`merged into #${e.id}`}>
-                      {e.merges.map((m) => (
-                        <li key={m.id} className="ex-memory__merge" title={`merged as similar by patch #${m.by}`}>
-                          {`merged #${m.id} · cosine ${m.cosine} · ${m.text}`}
-                        </li>
-                      ))}
-                    </ul>
-                  ) : null}
-                  {e.refusedWrites && e.refusedWrites.length > 0 ? (
-                    <span className="ex-memory__refused" title="the model tried to change your entry, and was refused">
-                      refused: {e.refusedWrites.map((w) => `${w.op} by ${w.by}`).join(', ')}
-                    </span>
-                  ) : null}
-                  {/* The corrections of it waiting beside their turns (#1050), counted, each linked to its chip (F9). */}
-                  {e.waiting && e.waiting.length > 0 ? (
-                    <span className="ex-memory__waiting" title="the model's changes to your entry wait on you beside their turns">
-                      {e.waiting.length === 1 ? 'a correction is waiting' : `${e.waiting.length} corrections waiting`}
-                      {e.waiting.map((seq, i) => (
-                        <a key={seq} href={`#correction-${seq}`} aria-label={`correction ${i + 1} of ${e.waiting!.length}`}>
-                          {e.waiting!.length === 1 ? '' : ` ${i + 1}`}
-                        </a>
-                      ))}
-                    </span>
-                  ) : null}
-                  {act && e.state === 'live' ? <EntryActions id={e.id} text={e.text} act={act} yours={e.lane === 'operator' || e.authority === 'operator'} /> : null}
-                </li>
-              ))}
-          </ul>
-        </div>
-      ))}
+                    {/* The corrections of it waiting beside their turns (#1050), counted, each linked to its chip (F9). */}
+                    {e.waiting && e.waiting.length > 0 ? (
+                      <span className="ex-memory__waiting" title="the model's changes to your entry wait on you beside their turns">
+                        {e.waiting.length === 1 ? 'a correction is waiting' : `${e.waiting.length} corrections waiting`}
+                        {e.waiting.map((seq, i) => (
+                          <a key={seq} href={`#correction-${seq}`} aria-label={`correction ${i + 1} of ${e.waiting!.length}`}>
+                            {e.waiting!.length === 1 ? '' : ` ${i + 1}`}
+                          </a>
+                        ))}
+                      </span>
+                    ) : null}
+                    {act && e.state === 'live' ? <EntryActions id={e.id} text={e.text} act={act} yours={e.lane === 'operator' || e.authority === 'operator'} /> : null}
+                  </li>
+                ))}
+            </ul>
+            {shown.length < listed.length ? (
+              <button type="button" className="ex-memory__more" onClick={() => setWhole((prev) => new Set([...prev, category ?? '']))}>
+                show {listed.length - shown.length} earlier {category !== undefined ? `in ${category}` : 'entries'}
+              </button>
+            ) : null}
+          </div>
+        );
+      })}
     </section>
   );
+}
+
+/** How many of a category's entries are mounted until the person asks for the rest. */
+export const MEMORY_SHOWN = 40;
+
+/** A category's entries as mounted: all of them when `whole`, else its newest MEMORY_SHOWN and every one `kept` keeps. */
+function shownOf<T>(listed: readonly T[], whole: boolean, kept: (entry: T) => boolean): readonly T[] {
+  if (whole || listed.length <= MEMORY_SHOWN) return listed;
+  const from = listed.length - MEMORY_SHOWN;
+  return listed.filter((entry, i) => i >= from || kept(entry));
 }
 
 /** What an entry's source word means, on hover. */
