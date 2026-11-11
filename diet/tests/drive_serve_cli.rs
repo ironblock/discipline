@@ -3209,6 +3209,78 @@ fn an_unfinished_log_or_another_registrys_is_not_projected_offline() {
     }
 }
 
+/// A log cut mid-turn -- a turn opened by its `turn` settlement, its
+/// request sent, and no settlement after it, as a signal sent straight to
+/// serve leaves one (#230, the maintainer's ruling of 2026-11-11) -- is
+/// projected, the record's last row its `end` marked `interrupted` during
+/// `turn`; `check-record` accepts that record and says how it ended.
+#[test]
+fn a_log_cut_mid_turn_is_projected_with_its_end_interrupted() {
+    let tree = Dir::new("interrupted-tree");
+    let state = Dir::new("interrupted-state");
+    let drove = drive_t1(
+        Act::Raw(I0_CALL.to_vec()),
+        ("allowed_commands = []\n", "isolation = \"none\""),
+        (&tree, &state, &file_holding("auth", "author:s3cret\n")),
+        "session",
+        |_| {},
+    );
+    let written = std::fs::read_to_string(&drove.log.0).expect("the log");
+    let lines: Vec<&str> = written.lines().collect();
+    let opened = lines
+        .iter()
+        .position(|line| line.contains(r#""kind":"settlement""#) && line.contains(r#""to":"turn""#))
+        .expect("a turn opened");
+    assert!(lines[opened + 1].contains(r#""kind":"request""#), "{written}");
+    let cut = format!("{}\n", lines[..=opened + 1].join("\n"));
+    let log = file_holding("interrupted-log", &cut);
+    let out = file_holding("interrupted-record", "");
+    let out_path = out.0.display().to_string();
+    let projected = Command::new(DRIVE)
+        .arg("record")
+        .arg("--log")
+        .arg(&log.0)
+        .arg("--regimen")
+        .arg(&drove.regimen.0)
+        .arg("--out")
+        .arg(&out.0)
+        .output()
+        .expect("diet-drive runs");
+    let said = String::from_utf8_lossy(&projected.stdout).into_owned();
+    assert_eq!(
+        projected.status.code(),
+        Some(0),
+        "{said}{}",
+        String::from_utf8_lossy(&projected.stderr)
+    );
+    let report = log_line_object(said.trim_end());
+    assert_eq!(report["end"], "interrupted", "{report}");
+    let record = std::fs::read_to_string(&out.0).expect("the record");
+    let last = log_line_object(record.lines().last().expect("rows"));
+    assert_eq!(last["record"], "end", "{record}");
+    assert_eq!(last["state"], "interrupted", "{record}");
+    assert_eq!(last["during"], "turn", "{record}");
+    let checked = Command::new(DIET)
+        .arg("check-record")
+        .arg(&out.0)
+        .output()
+        .expect("diet runs");
+    let told = String::from_utf8_lossy(&checked.stdout).into_owned();
+    assert_eq!(
+        checked.status.code(),
+        Some(0),
+        "{told}{}",
+        String::from_utf8_lossy(&checked.stderr)
+    );
+    assert_eq!(log_line_object(told.trim_end())["end"], "interrupted", "{told}");
+    for path in [
+        format!("{out_path}.unspellable.json"),
+        format!("{out_path}.receipt.json"),
+    ] {
+        let _ = std::fs::remove_file(path);
+    }
+}
+
 /// T1's path under the Mac's real sandbox (#298 review round 1, findings
 /// 1 and 7): Seatbelt, `network = "host"`, `sandbox_reads = "all"`. The
 /// approved command cannot read the credential, and its own `POST
