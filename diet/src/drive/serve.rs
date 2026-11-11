@@ -4179,6 +4179,20 @@ mod tests {
             "{:?}",
             reader.data()
         );
+        // Left out, and declared so: a gapless reader (the page) reads on
+        // past it, where an undeclared gap waits for a resume.
+        let declared = format!("-{shadow}\ndata: {{\"seq\":{shadow}}}\n\n");
+        assert!(
+            reader
+                .read
+                .split("event: skipped\nid: ")
+                .skip(1)
+                .any(|event| event.starts_with(|c: char| c.is_ascii_digit())
+                    && event.contains(&declared)
+                    && !event[..event.find(&declared).unwrap_or(0)].contains('\n')),
+            "the shadow at {shadow} is declared skipped: {}",
+            reader.read
+        );
         let mut asked = Client::send(
             &server,
             &events_request(&server, "?from=0&kinds=fork.shadowed", ""),
