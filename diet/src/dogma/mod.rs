@@ -173,11 +173,12 @@ pub mod vocabulary;
 ///   judgment ask's SUPERSEDE sentence asking for the corrected entry in
 ///   full. The maintainer's approved wording (relayed by Dispatch). No
 ///   template and no set already pinned changed.
-/// * 19, PROPOSED, for the maintainer, never merged as is: `START_CWD`
-///   joins, the note on the session's first ask that names the working
-///   directory, in v6's own words ("You are in {cwd}."); before, the model
-///   was never told where it was. No template and no set already pinned
-///   changed.
+/// * 19: `START_CWD` joins, the line that names the working directory, in
+///   v6's own words ("You are in {cwd}."): a note on the session's first ask,
+///   and the last of every refill's computed render lines, since a refill
+///   drops that note. Before, the model was never told where it was. The
+///   maintainer's approved wording (relayed by Dispatch). No template and no
+///   set already pinned changed.
 pub const VERSION: u32 = 19;
 
 /// The digest of `diet/dogma/MANIFEST.tsv` that [`VERSION`] was declared
@@ -313,7 +314,7 @@ pub enum Hole {
     From,
     /// The phase a move goes to (#788).
     To,
-    /// The working directory, as a call's line names it (PROPOSED).
+    /// The working directory, as a call's line names it.
     Cwd,
 }
 
@@ -436,8 +437,8 @@ pub enum Template {
     PhaseProposed,
     /// The note that puts the operator's phase proposal to the model (#788).
     PhaseOperatorProposal,
-    /// The note on the session's first ask that names the working
-    /// directory: PROPOSED wording, for the maintainer.
+    /// The line that names the working directory: a note on the session's
+    /// first ask, and the last line of every refill's render.
     StartCwd,
 }
 

@@ -2979,6 +2979,9 @@ struct State {
     /// The files the latest native refill listed (#1012): the next one
     /// gathers them in, as Pi's compaction gathers its previous one's.
     native_files: crate::meditation::native::Files,
+    /// The line naming the session's working directory, when it has tools:
+    /// on the first ask, and again in every refill, which drops that note.
+    start_cwd: Option<String>,
     /// Who vouches for the note the latest self-capture call wrote, under a
     /// contract whose `update_record` takes no field kind (#1016): read by
     /// its result and its `patch` lines, and taken.
@@ -3146,6 +3149,9 @@ impl State {
             phase_grown: 0,
             meditation_floor: 0,
             native_files: crate::meditation::native::Files::default(),
+            // As every path the model is shown: a scenario's roots rewritten
+            // to their placeholders (path-free scenario outputs).
+            start_cwd: tools.map(|tools| start_cwd_note(&tools.shown_roots.text(&tools.cwd))),
             vouched: None,
             confirmed: None,
             jobs: BTreeMap::new(),
@@ -4343,12 +4349,11 @@ impl<S: Streaming + 'static> Session<S> {
         if let Some(text) = state.noted(turn) {
             message.notes.push(text);
         }
-        // The first ask names the working directory (PROPOSED wording, for
-        // the maintainer): before, the model was never told where it was.
+        // The first ask names the working directory: before, the model was
+        // never told where it was. A refill says it again.
         if turn == 1
-            && let Some(tools) = &self.shared.tools
+            && let Some(text) = state.start_cwd.clone()
         {
-            let text = start_cwd_note(&tools.cwd);
             state.push(Event::Notified {
                 turn,
                 text: text.clone(),
@@ -9791,6 +9796,13 @@ fn refilled(
     // lists appended (#1012); nothing after it, no acknowledgement (#1009)
     // and no restored files or images (#1012).
     let render = native.map_or(rendered.text, |summary| summary.text.clone());
+    // The working directory, said again, the last of the render's computed
+    // lines: the first ask's note is gone with the trunk this replaces. In the
+    // render, so the meditation's line logs it and a log rebuilds it.
+    let render = match state.start_cwd.as_deref() {
+        Some(cwd) => format!("{render}\n\n{cwd}"),
+        None => render,
+    };
     if native.is_some() {
         render_budget = None;
     }
@@ -13309,8 +13321,8 @@ pub fn operator_proposal_note(from: Option<&str>, to: &str) -> String {
         .expect("PHASE_OPERATOR_PROPOSAL's holes are `from` and `to`")
 }
 
-/// The note on the session's first ask that names its working directory
-/// `cwd`: the pinned `START_CWD` (PROPOSED, for the maintainer).
+/// The line that names the session's working directory `cwd`, on its first
+/// ask and in every refill: the pinned `START_CWD`.
 ///
 /// # Panics
 ///
@@ -16921,6 +16933,13 @@ pub(in crate::drive) mod tests {
         let mut message = Message::new(Role::User, text);
         message.notes = notes.iter().map(|note| (*note).to_owned()).collect();
         message
+    }
+
+    /// A session's first ask as it is sent: TEXT, the line naming the
+    /// session's working directory a note on it.
+    fn first_ask<S: Streaming>(session: &Session<S>, text: &str) -> Message {
+        let cwd = &session.shared.tools.as_ref().expect("tools").cwd;
+        noted(text, &[&start_cwd_note(cwd)])
     }
 
     fn assistant(text: &str) -> Message {
@@ -22423,7 +22442,7 @@ pub(in crate::drive) mod tests {
                 sent[1].messages,
                 [
                     Message::new(Role::System, HEAD),
-                    user("make a marker"),
+                    first_ask(&session, "make a marker"),
                     call_message("call-1", "touch marker"),
                     result.clone(),
                 ]
@@ -22431,7 +22450,7 @@ pub(in crate::drive) mod tests {
             assert_eq!(
                 session.trunk()[1..],
                 [
-                    user("make a marker"),
+                    first_ask(&session, "make a marker"),
                     call_message("call-1", "touch marker"),
                     result,
                     assistant("done"),
@@ -22522,7 +22541,7 @@ pub(in crate::drive) mod tests {
         assert!(!tree.join("m2").exists(), "the last call was not run");
         let trunk = session.trunk();
         assert_eq!(trunk.len(), 1 + 1 + 2 * 2, "{trunk:#?}");
-        assert_eq!(trunk[1], user("loop"));
+        assert_eq!(trunk[1], first_ask(&session, "loop"));
         assert_eq!(trunk[4], call_message("call-1", "touch m1"));
         tidy(&[&tree]);
     }
@@ -22561,7 +22580,7 @@ pub(in crate::drive) mod tests {
         assert!(tree.join("a").exists() && tree.join("b").exists());
         let trunk = session.trunk();
         assert_eq!(trunk.len(), 1 + 1 + 2 * 2, "{trunk:#?}");
-        assert_eq!(trunk[1], user("work"));
+        assert_eq!(trunk[1], first_ask(&session, "work"));
         assert_eq!(trunk[2], call_message("call-1", "touch a"));
         assert_eq!(trunk[4], call_message("call-2", "touch b"));
 
@@ -22810,7 +22829,7 @@ pub(in crate::drive) mod tests {
         assert_eq!(settled_as(&log), Some(SettleReason::Cancelled));
         let trunk = session.trunk();
         assert_eq!(trunk.len(), 1 + 1 + 2 * 2, "{trunk:#?}");
-        assert_eq!(trunk[1], user("work"));
+        assert_eq!(trunk[1], first_ask(&session, "work"));
         assert_eq!(trunk[2], call_message("call-1", "touch a"));
         assert_eq!(trunk[4], call_message("call-2", "echo partway; sleep 600"));
         assert_eq!(
@@ -23991,6 +24010,8 @@ pub(in crate::drive) mod tests {
     /// (#558).
     #[test]
     fn the_second_request_is_i0s_openai_shape_byte_for_byte() {
+        const ASK: &str = "[be135a0c73102528] How many files are in the current directory? Run \
+                           `ls | wc -l` with the bash tool and tell me the number.";
         use crate::client::shape::{Pin, SamplerSetting};
         use crate::client::stream::HttpStream;
         use crate::client::stub::{Act, Stub};
@@ -24049,20 +24070,28 @@ pub(in crate::drive) mod tests {
             None,
             tools(confinement, &tree, &["ls", "wc -l"], None, Decider::Decline),
         );
-        session
-            .ask(
-                "[be135a0c73102528] How many files are in the current directory? Run `ls | wc -l` \
-                 with the bash tool and tell me the number.",
-                None,
-            )
-            .expect("accepted");
+        let cwd = start_cwd_note(&session.shared.tools.as_ref().expect("tools").cwd);
+        session.ask(ASK, None).expect("accepted");
         let log = wait_until(&session, "the turn to settle", settled);
         reads_whole(&session);
         assert_eq!(settled_as(&log), Some(SettleReason::Final), "{log:#?}");
         drop(session);
         let received = stub.received();
         assert_eq!(received.len(), 2);
-        assert_eq!(received[1], SENT, "the second request is not I0's");
+        // I0's request, but for the start line on its first ask: a note, a text
+        // part before the words, as the wire carries every note (#609).
+        let asked = serde_json::to_string(ASK).expect("JSON");
+        let words = format!("\"content\":{asked}");
+        assert_eq!(SENT.matches(&words).count(), 1, "I0's ask, once");
+        let noted = format!(
+            "\"content\":[{{\"type\":\"text\",\"text\":{}}},{{\"type\":\"text\",\"text\":{asked}}}]",
+            serde_json::to_string(&cwd).expect("JSON")
+        );
+        assert_eq!(
+            received[1],
+            SENT.replacen(&words, &noted, 1),
+            "the second request is not I0's, its first ask noted"
+        );
         tidy(&[&tree, &runner]);
     }
 
@@ -31682,9 +31711,8 @@ pub(in crate::drive) mod tests {
         tidy(&[&tree]);
     }
 
-    /// The session's first ask names its working directory (PROPOSED
-    /// wording, for the maintainer), as a call's line names it; the second
-    /// ask does not repeat it.
+    /// The session's first ask names its working directory, as a call's line
+    /// names it; the second ask does not repeat it.
     #[test]
     fn the_first_ask_names_the_working_directory() {
         let tree = scratch("start-cwd");
@@ -31719,9 +31747,9 @@ pub(in crate::drive) mod tests {
         tidy(&[&tree]);
     }
 
-    /// The working directory rides every refill too, as its last computed
-    /// line: the first ask's note is dropped with the trunk the refill
-    /// replaces.
+    /// The working directory rides every refill too, the last of its render's
+    /// computed lines: the first ask's note is dropped with the trunk the
+    /// refill replaces.
     #[test]
     fn a_refill_names_the_working_directory_again() {
         let tree = scratch("start-cwd-refill");
@@ -31752,10 +31780,22 @@ pub(in crate::drive) mod tests {
             .expect("kept");
         session.declare_meditation(None).expect("admitted");
         wait_until(&session, "the meditation", meditated);
+        let log = session.events_from(0);
+        let render = log
+            .iter()
+            .find_map(|logged| match &logged.event {
+                Event::Meditated { render, .. } => Some(render.clone()),
+                _ => None,
+            })
+            .expect("a meditation");
+        assert!(
+            render.ends_with(&format!("\n\n{}", start_cwd_note(&cwd))),
+            "{render}"
+        );
         let refill = session.trunk().last().expect("the refill").content.clone();
         assert!(
-            refill.ends_with(&format!("\n\n{}", start_cwd_note(&cwd))),
-            "{refill}"
+            refill.contains(&render),
+            "the refill carries the render: {refill}"
         );
         tidy(&[&tree]);
     }
@@ -32129,12 +32169,17 @@ pub(in crate::drive) mod tests {
         wait_until(&session, "turn one", settled);
         session.declare_meditation(None).expect("admitted");
         wait_until(&session, "the meditation", meditated);
+        // Its last line, the working directory said again (the start line).
+        let cwd = start_cwd_note(&session.shared.tools.as_ref().expect("tools").cwd);
         let first = format!(
-            "{SNAPSHOT}\n\n<read-files>\na.rs\nshot.png\n</read-files>\n\n<modified-files>\nb.md\n</modified-files>"
+            "{SNAPSHOT}\n\n<read-files>\na.rs\nshot.png\n</read-files>\n\n<modified-files>\nb.md\n</modified-files>\n\n{cwd}"
         );
         let trunk = session.trunk();
         let refill = crate::meditation::render::refill(&template().messages, &first);
-        assert_eq!(trunk, refill, "the summary and its lists, nothing after");
+        assert_eq!(
+            trunk, refill,
+            "the summary and its lists, then the start line"
+        );
         assert!(trunk.iter().all(|message| message.images.is_empty()));
         session.ask("and the other file?", None).expect("accepted");
         wait_until(&session, "turn two", two_settled);
@@ -32146,7 +32191,7 @@ pub(in crate::drive) mod tests {
                 == 2
         });
         let second = format!(
-            "{SNAPSHOT}\n\n<read-files>\na.rs\nc.rs\nshot.png\n</read-files>\n\n<modified-files>\nb.md\n</modified-files>"
+            "{SNAPSHOT}\n\n<read-files>\na.rs\nc.rs\nshot.png\n</read-files>\n\n<modified-files>\nb.md\n</modified-files>\n\n{cwd}"
         );
         assert_eq!(
             session.trunk(),
