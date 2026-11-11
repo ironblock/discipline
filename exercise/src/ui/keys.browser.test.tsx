@@ -78,6 +78,25 @@ test('F5: Esc while a turn runs arms a cancel, from anywhere on the page; a seco
   await expect.poll(() => sent.map((c) => c.kind)).toEqual(['cancel']);
 });
 
+test('P14: Esc in an open picker or dialog while a turn runs closes it, and neither arms nor sends a cancel', async () => {
+  const sent = await mount((post) => (
+    <GestureContext.Provider value={post}>
+      <Composer state="turn" phase="spec" phases={PHASES} dispatch={post} />
+      <ForkAction at={{ seq: 9, text: 'Read it.' }} label="step 7" />
+      <KeepAction logged={{ seq: 6, text: 'a note' }} label="call call-1" />
+    </GestureContext.Provider>
+  ));
+  for (const opener of ['Fork at step 7', 'Keep from call call-1']) {
+    await userEvent.click(page.getByRole('button', { name: opener }));
+    await expect.poll(() => document.querySelector('dialog[open]') !== null).toBe(true);
+    await userEvent.keyboard('{Escape}');
+    await expect.poll(() => document.querySelector('dialog[open]')).toBe(null);
+    await settle();
+    expect(document.querySelector('.ex-composer__state')?.textContent).toBe('working · esc cancels');
+    expect(sent).toEqual([]);
+  }
+});
+
 test('F5: an armed cancel lets go after a few seconds, so a later Esc only arms it again', async () => {
   const sent = await mount((post) => <Composer state="turn" phase="spec" phases={PHASES} dispatch={post} />);
   (document.activeElement as HTMLElement | null)?.blur();
