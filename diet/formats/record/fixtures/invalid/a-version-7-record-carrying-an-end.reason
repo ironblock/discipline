@@ -1,0 +1,3 @@
+The `end` row arrived in version 8 (#230). A version 7 record was written by
+a reader that had no word for an interrupted session, so an `end` in one is
+a row its own version cannot have produced.

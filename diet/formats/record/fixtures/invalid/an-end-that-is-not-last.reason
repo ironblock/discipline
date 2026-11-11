@@ -1,0 +1,2 @@
+An `end` row says the log stopped there (#230). A row after it is a row from
+after the log stopped, which nothing could have recorded.

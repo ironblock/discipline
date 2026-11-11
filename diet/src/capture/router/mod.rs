@@ -1054,6 +1054,9 @@ impl Router {
             // to route. Listed rather than wildcarded, like the rest.
             | Event::PrefixChanged { .. }
             | Event::Compaction { .. }
+            // An interrupted session's `end` (#230): its last turn was cut,
+            // not ended, so it is no turn boundary to judge at.
+            | Event::End { .. }
             // Unmapped: no turn boundary, no lane, no call to route.
             | Event::Unknown { .. } => Vec::new(),
         }

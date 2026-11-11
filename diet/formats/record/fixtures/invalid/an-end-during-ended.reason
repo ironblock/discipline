@@ -1,0 +1,3 @@
+`during` is what the session was doing when its log stopped before `ended`
+(#230). A session whose last state was `ended` was not interrupted: its
+record has no `end` row at all.

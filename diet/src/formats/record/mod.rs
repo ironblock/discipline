@@ -47,11 +47,13 @@ use crate::formats::spelling;
 /// 2 was the first that names one, spelling the boundary `meditation`; 3
 /// (#910) adds the start's `run`; 4 (#926) its `rehearsing_as`; 5 (#932)
 /// a k-arm batch's `run`: its `arm` a name, its digest `arms`; 6 (#948)
-/// the start's `carried_from`, a session carried from another's meditation.
-pub const VERSION: i64 = 7;
+/// the start's `carried_from`, a session carried from another's meditation;
+/// 7 (#932) the batch's id; 8 (#230) the `end` row, a session whose log
+/// stopped before its `ended`.
+pub const VERSION: i64 = 8;
 
-/// Every version this module reads: 1, a start naming none, then 2 to 6.
-pub const READS: &[i64] = &[1, 2, 3, 4, 5, 6, 7];
+/// Every version this module reads: 1, a start naming none, then 2 to 8.
+pub const READS: &[i64] = &[1, 2, 3, 4, 5, 6, 7, 8];
 
 /// The version a start's `run` arrived in (#910).
 const RUN_ARRIVED_IN: i64 = 3;
@@ -67,6 +69,9 @@ const CARRIED_FROM_ARRIVED_IN: i64 = 6;
 
 /// The version whose start's `run` names its batch's id (#932).
 const BATCH_ARRIVED_IN: i64 = 7;
+
+/// The version the `end` row arrived in (#230).
+const END_ARRIVED_IN: i64 = 8;
 
 #[derive(Parser)]
 #[grammar = "../formats/record/grammar.pest"]
@@ -595,6 +600,10 @@ vocabulary! {
         Comparison => "comparison",
         /// The session's totals.
         Summary => "summary",
+        /// How the session ended, when its log stopped before its `ended`
+        /// (#230): the last row, and only in a record projected from such a
+        /// log.
+        End => "end",
         /// A row this library kept without having a kind for it.
         ///
         /// Written only by an adapter over a foreign harness's log (#28). A
@@ -606,6 +615,20 @@ vocabulary! {
         /// Refused in a record whose `start` declares `source = live`, where
         /// there is no foreign log for it to have come from.
         Unknown => "unknown",
+    }
+}
+
+vocabulary! {
+    /// How a session ended, as its record's `end` row says (#230).
+    ///
+    /// A session that ended with its log's `ended` has no `end` row: its
+    /// record is the whole session, as before. This word is for the other
+    /// case, and there is one so far.
+    EndState {
+        /// The log stopped before its `ended` -- a crash, or a signal sent
+        /// straight to `serve` -- so the record holds what the log held, up
+        /// to its last complete line, and nothing after.
+        Interrupted => "interrupted",
     }
 }
 
@@ -1541,6 +1564,16 @@ pub enum Event {
         /// schema. Ruled (a) on #68.
         product_sha256: String,
     },
+    /// How the session ended, when its log stopped before its `ended`
+    /// (#230). The last row.
+    End {
+        /// How it ended: `interrupted`.
+        state: EndState,
+        /// What the session was doing when its log stopped, in the log's
+        /// own words: the state its last settlement moved it to (`awaiting`
+        /// before any). Never `ended`, which would be no interruption.
+        during: log::State,
+    },
     /// A row an adapter could not map, carried rather than counted.
     Unknown {
         /// What the source called this row, in the source's own spelling.
@@ -1640,6 +1673,7 @@ impl Event {
             Self::Claim { .. } => Kind::Claim,
             Self::Comparison { .. } => Kind::Comparison,
             Self::Summary { .. } => Kind::Summary,
+            Self::End { .. } => Kind::End,
             Self::Unknown { .. } => Kind::Unknown,
         }
     }
@@ -1662,6 +1696,7 @@ impl Event {
             Self::Start { .. }
             | Self::Turn { .. }
             | Self::Summary { .. }
+            | Self::End { .. }
             | Self::Unknown { .. } => None,
         }
     }
@@ -2039,8 +2074,10 @@ pub enum StructureError {
         /// What was found.
         found: u32,
     },
-    /// Two `summary` rows, or one that is not last.
+    /// Two `summary` rows, or one that is not last (an `end` row aside).
     SummaryNotLast,
+    /// Two `end` rows, or one that is not last (#230).
+    EndNotLast,
     /// A `live` record declaring a reasoning state nobody measured.
     ///
     /// `Reasoning::Undeclared` exists for a record ADAPTED from a log that
@@ -2410,6 +2447,7 @@ impl fmt::Display for StructureError {
                 write!(f, "turn {found} follows where turn {want} was expected")
             }
             Self::SummaryNotLast => write!(f, "`summary` is not the last row, or there are two"),
+            Self::EndNotLast => write!(f, "`end` is not the last row, or there are two"),
             Self::PrefixChange(why) => write!(f, "{why}"),
         }
     }
@@ -2524,7 +2562,17 @@ pub fn parse(input: &str) -> Result<Record, ParseError> {
         let mut members = json::object(&object)?;
         let version = *declared.get_or_insert_with(|| spelling::record_declared(&members));
         spelling::record_to_current(&mut members, version).map_err(SchemaError::Respelled)?;
-        events.push(event(members)?);
+        let read = event(members)?;
+        if version < END_ARRIVED_IN && matches!(read, Event::End { .. }) {
+            return Err(SchemaError::Inconsistent {
+                of: "end",
+                why: format!(
+                    "`end` arrived in version {END_ARRIVED_IN}: a version {version} record carries none"
+                ),
+            }
+            .into());
+        }
+        events.push(read);
     }
 
     validate(&events)?;
@@ -2692,6 +2740,7 @@ fn event(mut members: BTreeMap<String, Value>) -> Result<Event, ParseError> {
             // reader that took it per-kind would have to be told twice.
             product_sha256: take_string(&mut members, of, "product_sha256")?,
         },
+        Kind::End => end(&mut members, of)?,
         Kind::Unknown => Event::Unknown {
             source_kind: take_string(&mut members, of, "source_kind")?,
             raw: take_string(&mut members, of, "raw")?,
@@ -3956,6 +4005,28 @@ fn start(members: &mut BTreeMap<String, Value>, of: &'static str) -> Result<Even
     })
 }
 
+/// An `end` row (#230): `state`, and `during`, which is never `ended`.
+fn end(members: &mut BTreeMap<String, Value>, of: &'static str) -> Result<Event, ParseError> {
+    let word = |field: &'static str, members: &mut BTreeMap<String, Value>| {
+        take_string(members, of, field)
+    };
+    let found = word("state", members)?;
+    let state = EndState::from_tag(&found).ok_or(SchemaError::BadValue {
+        of,
+        field: "state",
+        found,
+    })?;
+    let found = word("during", members)?;
+    let during = log::State::from_tag(&found)
+        .filter(|during| *during != log::State::Ended)
+        .ok_or(SchemaError::BadValue {
+            of,
+            field: "during",
+            found,
+        })?;
+    Ok(Event::End { state, during })
+}
+
 /// A `tool_call` row: its call, and how it ran when a projected log said.
 fn tool_call(members: &mut BTreeMap<String, Value>, of: &'static str) -> Result<Event, ParseError> {
     let id = take_string(members, of, "id")?;
@@ -4981,7 +5052,9 @@ impl<'a> Seen<'a> {
             } => self.admit_summary(summary, product_sha256)?,
             // Neither links to anything nor is linked to: an unmapped row
             // is evidence, not a participant in the record's own structure.
-            Event::Start { .. } | Event::Unknown { .. } => {}
+            // How the session ended links to nothing: it is the record's
+            // last word about the log, not a row about a turn.
+            Event::Start { .. } | Event::End { .. } | Event::Unknown { .. } => {}
         }
         Ok(())
     }
@@ -5218,8 +5291,12 @@ fn validate(events: &[Event]) -> Result<(), ParseError> {
     let mut lanes: BTreeMap<&str, &str> = BTreeMap::new();
 
     for (position, event) in events.iter().enumerate() {
-        if summary_seen {
+        if summary_seen && !matches!(event, Event::End { .. }) {
             return Err(StructureError::SummaryNotLast.into());
+        }
+        // An `end` row is last: nothing, a summary included, follows it.
+        if position > 0 && matches!(events[position - 1], Event::End { .. }) {
+            return Err(StructureError::EndNotLast.into());
         }
         match event {
             Event::Start { .. } if position != 0 => {
@@ -5877,6 +5954,10 @@ fn event_value(event: &Event) -> BTreeMap<String, Value> {
             summary,
             product_sha256,
         } => summary_value(summary, product_sha256, &mut members),
+        Event::End { state, during } => {
+            members.put_text("state", state.tag());
+            members.put_text("during", during.tag());
+        }
         Event::Unknown { source_kind, raw } => {
             members.put_text("source_kind", source_kind);
             members.put_text("raw", raw);
@@ -6252,7 +6333,7 @@ fn integer(count: Count) -> Value {
 pub fn project(source: &str) -> Result<Value, String> {
     parse(source)
         .map(|parsed| {
-            Value::Object(BTreeMap::from([
+            let mut projected = BTreeMap::from([
                 (
                     "regime".to_owned(),
                     Value::Object(BTreeMap::from([
@@ -6314,7 +6395,14 @@ pub fn project(source: &str) -> Result<Value, String> {
                 // parse `canonical` and become a second opinion about this format.
                 ("source".to_owned(), source_value(parsed.source())),
                 ("canonical".to_owned(), Value::String(render(&parsed))),
-            ]))
+            ]);
+            // How the session ended, when its log stopped before its `ended`
+            // (#230): said here, so a reader is told without walking the
+            // rows. Absent for a session that ended.
+            if let Some(Event::End { state, .. }) = parsed.events.last() {
+                projected.insert("end".to_owned(), Value::String(state.tag().to_owned()));
+            }
+            Value::Object(projected)
         })
         .map_err(|err| err.to_string())
 }
