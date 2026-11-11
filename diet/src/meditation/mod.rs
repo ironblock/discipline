@@ -62,6 +62,7 @@
 //! choosing. [`render::one_line`] is the fix, and it is the same escaping the
 //! audit ask needs so that `{n}` and the number of lines agree.
 
+pub mod asks;
 pub mod library;
 pub mod native;
 pub mod outputs;

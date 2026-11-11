@@ -1543,6 +1543,7 @@ impl<'a> Walk<'a> {
             render,
             tail_tokens,
             outputs,
+            asks,
             background,
             placement,
             fired,
@@ -1615,9 +1616,11 @@ impl<'a> Walk<'a> {
             .sum::<u64>();
         // The section the meditation carried of the outputs it compacted away
         // (#553), after the render, as sent.
-        let sent = outputs
+        let mut sent = outputs
             .as_ref()
             .map_or_else(|| render.clone(), |section| format!("{render}{section}"));
+        // And the operator's asks it compacted away (v45, N3), after them.
+        sent.push_str(asks.as_deref().unwrap_or_default());
         // Where the meditation put it (#597): a user message after the head, or --
         // a meditation logged before #597 -- appended to the system message.
         self.refilled = *placement == Some(log::RenderPlacement::Message);
@@ -2800,6 +2803,7 @@ mod tests {
         let mut events = vec![start()];
         events.extend(answered(1, 3, Some(warm()), None));
         events.push(Line::Meditation {
+            asks: None,
             phase_document: None,
             newest_turn_tokens: None,
             refilled_anyway: None,
@@ -2863,6 +2867,7 @@ mod tests {
         let mut events = vec![start()];
         events.extend(answered(1, 3, Some(warm()), None));
         events.push(Line::Meditation {
+            asks: None,
             phase_document: None,
             newest_turn_tokens: None,
             refilled_anyway: None,

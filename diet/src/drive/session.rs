@@ -835,6 +835,9 @@ pub enum Event {
         /// The notes its audit asked over and never reached: its answer was
         /// cut off by its cap, so it folded nothing.
         audit_unreached: Option<u64>,
+        /// The section of the refill carrying the operator's asks it
+        /// compacted away, verbatim and in order (N3), when there were any.
+        asks: Option<String>,
     },
     /// Forks' patches delivered at the tail of a trunk request, after its
     /// ask (the fork delivery lever): the note stays on the trunk.
@@ -6161,7 +6164,9 @@ impl<S: Streaming + 'static> Session<S> {
     /// entries it `reduced`; whether it `fits` its budget; and the live
     /// `entries`, by id: each is in the render whole, or shortened or elided
     /// to its id when `reduced` counts it (a refuted note's `was:` line rides
-    /// too). A refill that must also fit the window it
+    /// too); and the `asks` section it would carry after the render (N3),
+    /// when there is one: every operator ask the regimen's tail would not
+    /// keep, nor a running turn. A refill that must also fit the window it
     /// is made in may elide more, and one under a native summary carries
     /// the summary instead: the preview is the render as it stands. `None`
     /// for a session with no working memory.
@@ -6170,9 +6175,27 @@ impl<S: Streaming + 'static> Session<S> {
         let state = self.shared.lock();
         let interview = state.interview.as_ref()?;
         let rendered = marked_render(&state, interview, interview.meditations.render_budget);
+        // The operator's asks it would carry after the render (N3): those the
+        // regimen's tail would not keep, nor a running turn.
+        let turns = state
+            .trunk
+            .get(self.shared.template.messages.len() + usize::from(state.refilled)..)
+            .unwrap_or_default();
+        let kept = crate::meditation::render::tail(turns, interview.meditations.tail_tokens);
+        let on_trunk = kept
+            .iter()
+            .filter(|message| message.role == Role::User)
+            .count() as u64
+            + u64::from(state.settlement == Settlement::Turn);
+        let asks = (!carries_native(&state))
+            .then(|| compacted_asks(&state.log, u64::from(state.turns).saturating_sub(on_trunk)))
+            .flatten();
         let (number, text, object) = (status_number, status_text, status_object);
-        Some(object(vec![
-            ("render", text(&rendered.text)),
+        let mut fields = vec![("render", text(&rendered.text))];
+        if let Some(asks) = &asks {
+            fields.push(("asks", text(asks)));
+        }
+        fields.extend([
             ("tokens", number(rendered.tokens)),
             ("reduced", number(rendered.reduced)),
             ("fits", Value::Boolean(rendered.fits)),
@@ -6186,7 +6209,8 @@ impl<S: Streaming + 'static> Session<S> {
                         .collect(),
                 ),
             ),
-        ]))
+        ]);
+        Some(object(fields))
     }
 
     /// Every event from sequence number `first` on.
@@ -7086,7 +7110,9 @@ pub fn line_of(logged: &Logged) -> log::Line {
             turn_steps,
             audit_notes,
             audit_unreached,
+            asks,
         } => log::Event::Meditation {
+            asks: asks.clone(),
             carry: Some(*carry),
             summary_tokens: *summary_tokens,
             audit_notes_unreached: *audit_unreached,
@@ -9783,6 +9809,17 @@ fn refilled(
     // compacts away the call that started it.
     let background = super::background::running_at_meditation(state.jobs.values_mut())
         .map(|list| state.shown_roots.text(&list));
+    // Every operator ask the refill compacts away, verbatim and in order
+    // (N3): one still on the trunk after it -- the tail's, or the running
+    // turn's -- rides there instead. A native summary is the model's own,
+    // and carries none.
+    let asks = native
+        .is_none()
+        .then(|| {
+            let on_trunk = carried_turns + u64::from(!riding.is_empty());
+            compacted_asks(&state.log, u64::from(state.turns).saturating_sub(on_trunk))
+        })
+        .flatten();
     let (head, phase_document) = state.phase_head(&template.messages);
     // The refill fits the window (#814): sized past its line, the render is
     // elided, oldest first, to the room the rest leaves -- whatever the
@@ -9796,7 +9833,11 @@ fn refilled(
         .map(crate::meditation::render::estimated_tokens)
         .sum::<u64>()
         + estimated_chars(
-            outputs.as_ref().map_or("", |(text, _)| text.as_str()),
+            &format!(
+                "{}{}",
+                outputs.as_ref().map_or("", |(text, _)| text.as_str()),
+                asks.as_deref().unwrap_or_default()
+            ),
             background.as_deref().unwrap_or_default(),
         );
     if let Some(line) = window_line(
@@ -9840,9 +9881,10 @@ fn refilled(
     if native.is_some() {
         render_budget = None;
     }
-    let sent = outputs
+    let mut sent = outputs
         .as_ref()
         .map_or_else(|| render.clone(), |(text, _)| format!("{render}{text}"));
+    sent.push_str(asks.as_deref().unwrap_or_default());
     let mut refilled = crate::meditation::render::refill_with(&head, &sent, background.as_deref());
     if let Some(summary) = native {
         state.native_files = summary.files.clone();
@@ -9942,7 +9984,23 @@ fn refilled(
         turn_steps: None,
         audit_notes: state.audit_cut.take(),
         audit_unreached: state.audit_unreached.take(),
+        asks,
     }
+}
+
+/// The section of the operator's asks of turns 1 to `through` (N3), verbatim
+/// and in the order asked, from `log`'s `ask` lines; `None` when there is none.
+fn compacted_asks(log: &[Logged], through: u64) -> Option<String> {
+    let asks: Vec<(u32, &str)> = log
+        .iter()
+        .filter_map(|logged| match &logged.event {
+            Event::Asked { turn, text, .. } if u64::from(*turn) <= through => {
+                Some((*turn, text.as_str()))
+            }
+            _ => None,
+        })
+        .collect();
+    crate::meditation::asks::section(&asks)
 }
 
 /// Where a meditation's audit is cut (#504): the latest turn that settled
@@ -20170,6 +20228,7 @@ pub(in crate::drive) mod tests {
                 refuted: None,
             },
             Event::Meditated {
+                asks: None,
                 phase_document: None,
                 newest_turn_tokens: None,
                 refilled_anyway: None,
@@ -20849,6 +20908,7 @@ pub(in crate::drive) mod tests {
                 refuted: None,
             },
             log::Event::Meditation {
+                asks: None,
                 phase_document: None,
                 newest_turn_tokens: None,
                 refilled_anyway: None,
@@ -32733,15 +32793,24 @@ pub(in crate::drive) mod tests {
                     .count()
                     == 3
         });
-        assert!(!window_meditations(&log).is_empty(), "a window meditation in turn three");
+        assert!(
+            !window_meditations(&log).is_empty(),
+            "a window meditation in turn three"
+        );
         let sent = session.shared.transport.sent();
         let last = &sent.last().expect("a request").messages;
         let summary = last
             .iter()
             .find(|message| message.content.starts_with("<summary>"))
             .expect("the refill");
-        let first = summary.content.find(FIRST).expect("turn one's ask, verbatim");
-        let second = summary.content.find(SECOND).expect("turn two's ask, verbatim");
+        let first = summary
+            .content
+            .find(FIRST)
+            .expect("turn one's ask, verbatim");
+        let second = summary
+            .content
+            .find(SECOND)
+            .expect("turn two's ask, verbatim");
         assert!(first < second, "in the order they were asked");
         assert!(
             !summary.content.contains("build it"),
@@ -33094,11 +33163,15 @@ pub(in crate::drive) mod tests {
         });
         assert_eq!(window_meditations(&log).len(), 1, "{log:#?}");
         session.declare_meditation(None).expect("declared");
+        // Turn two's ask rides in the refill's asks (N3); nothing else of it.
         assert!(
-            !session
-                .trunk()
-                .iter()
-                .any(|m| m.content.contains("turn_two_marker")),
+            !session.trunk().iter().any(|m| {
+                let text = m.content.as_str();
+                let text = text
+                    .find(crate::meditation::asks::HEADER)
+                    .map_or(text, |at| &text[..at]);
+                text.contains("turn_two_marker")
+            }),
             "the operator's meditation dropped turn two"
         );
         let state = session.shared.lock();
@@ -36354,9 +36427,14 @@ pub(in crate::drive) mod tests {
             let object = &held.interview.as_ref().expect("interviewing").object;
             crate::meditation::render::render(object, Some(phase))
         };
+        let asks = crate::meditation::asks::section(&[(1, "what are we building?")])
+            .expect("turn one's ask");
         assert_eq!(
             session.trunk(),
-            crate::meditation::render::refill(&template().messages, &render("build"))
+            crate::meditation::render::refill(
+                &template().messages,
+                &format!("{}{asks}", render("build"))
+            )
         );
         // No phase named: a meditation that stays in `build`.
         session
@@ -37065,7 +37143,8 @@ pub(in crate::drive) mod tests {
         assert!(
             sent.messages[head]
                 .content
-                .ends_with(&format!("{section}\n</summary>"))
+                .contains(&format!("{section}\n{}", crate::meditation::asks::HEADER)),
+            "the outputs, then the operator's asks the refill compacted away (N3)"
         );
         assert!(
             !section.contains("echo tail"),
@@ -37118,7 +37197,8 @@ pub(in crate::drive) mod tests {
         assert!(
             sent.messages[head]
                 .content
-                .ends_with(&format!("{section}\n</summary>"))
+                .contains(&format!("{section}\n{}", crate::meditation::asks::HEADER)),
+            "the outputs, then the operator's asks the refill compacted away (N3)"
         );
         every_head_rebuilds(&log);
         tidy(&[&tree, &recording]);
@@ -37145,7 +37225,8 @@ pub(in crate::drive) mod tests {
         assert!(
             sent.messages[head]
                 .content
-                .ends_with(&format!("{section}\n</summary>"))
+                .contains(&format!("{section}\n{}", crate::meditation::asks::HEADER)),
+            "the outputs, then the operator's asks the refill compacted away (N3)"
         );
         every_head_rebuilds(&log);
         tidy(&[&tree]);
@@ -37702,7 +37783,11 @@ pub(in crate::drive) mod tests {
         let object = &held.interview.as_ref().expect("interviewing").object;
         let render = crate::meditation::render::render(object, None);
         drop(held);
-        let refilled = crate::meditation::render::refill(&template().messages, &render);
+        // The render, then the operator's ask the refill compacted away (N3).
+        let asks = crate::meditation::asks::section(&[(1, "what are we building?")])
+            .expect("turn one's ask");
+        let refilled =
+            crate::meditation::render::refill(&template().messages, &format!("{render}{asks}"));
         assert_eq!(session.trunk(), refilled);
         assert!(
             render.contains("decision: for one team"),
@@ -37712,8 +37797,9 @@ pub(in crate::drive) mod tests {
             !session
                 .trunk()
                 .iter()
-                .any(|m| m.content.contains("what are we building?") || m.content == SCOPED),
-            "a turn of the old trunk was carried: {:#?}",
+                .any(|m| m.content == "what are we building?" || m.content == SCOPED),
+            "a turn of the old trunk was carried as a message (its ask rides in the refill's \
+             asks, N3): {:#?}",
             session.trunk()
         );
 
@@ -37746,6 +37832,7 @@ pub(in crate::drive) mod tests {
         assert_eq!(
             line_of(&log[meditation]).event,
             log::Event::Meditation {
+                asks: Some(asks.clone()),
                 phase_document: None,
                 newest_turn_tokens: None,
                 refilled_anyway: None,
