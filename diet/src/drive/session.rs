@@ -709,6 +709,10 @@ pub enum Event {
         reserved: Option<(u64, bool)>,
         /// A refutation fork's offered notes, by id (#878).
         offered: Option<Vec<String>>,
+        /// When the operator posted it, on the log's clock, when it waited
+        /// for the turn (N4): posted while a turn ran, it fired at the next
+        /// request boundary or at the gap. Absent, it fired as it was posted.
+        queued_at: Option<u64>,
     },
     /// A meditation's audit (#504): a fork off the warm trunk on the `audit` lane,
     /// the dogma's pinned ask after it, before the refill.
@@ -5496,9 +5500,10 @@ impl<S: Streaming + 'static> Session<S> {
     /// for a name no holeless fork template has; [`Refusal::NotASource`] for
     /// a line that is no step, tool result or trunk answer, or no trunk yet;
     /// and [`Refusal::NotOnTheTrunk`] for one a meditation replaced.
-    pub fn fork(&self, at: Option<u64>, ask: &OperatorAsk) -> Result<u64, Rejected> {
+    pub fn fork(&self, at: Option<u64>, ask: &OperatorAsk) -> Result<Forking, Rejected> {
         let state = self.shared.lock();
         self.operator_fork(state, (CommandKind::Fork, at), operator_firing(ask), None)
+            .map(Forking::Fired)
     }
 
     /// The operator's fork (#1021) of `firing` at the logged line `at`, for
@@ -6712,6 +6717,7 @@ pub fn line_of(logged: &Logged) -> log::Line {
             view_overridden,
             reserved,
             offered,
+            queued_at: _,
         } => log::Event::Fork {
             offered: offered.clone(),
             after_meditation: None,
@@ -10312,6 +10318,16 @@ pub enum OperatorAsk {
     Pinned(String),
     /// The operator's own words, sent as written.
     Text(String),
+}
+
+/// What became of the operator's fork as it was posted (N4).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Forking {
+    /// Fired: its `fork` line's seq.
+    Fired(u64),
+    /// Queued, posted while a turn ran: it fires at the next request
+    /// boundary, or at the gap if the turn ends first.
+    Queued,
 }
 
 /// One of the operator's wraps (#1030): the result it replaces, by its call
@@ -14161,6 +14177,7 @@ fn fire_on<S>(
         view_overridden: None,
         reserved: None,
         offered,
+        queued_at: None,
     });
     // Beside the forks cut during the turn still in flight (#782), each
     // prompt holds its own part of the pool.
@@ -15510,6 +15527,7 @@ fn fire_cut<S>(shared: &Shared<S>, state: &mut State, cut: Cut) -> Launched {
         view_overridden: declared.filter(|view| *view != ForkView::Trunk),
         reserved: Some((reserved, counted_shared)),
         offered,
+        queued_at: None,
     });
     if short {
         state.push(Event::ForkSettled {
@@ -20219,6 +20237,7 @@ pub(in crate::drive) mod tests {
                 view_overridden: None,
                 reserved: None,
                 offered: None,
+                queued_at: None,
             },
             Event::Requested {
                 turn: 1,
@@ -30446,9 +30465,11 @@ pub(in crate::drive) mod tests {
         session.ask("what is the schema?", None).expect("accepted");
         wait_until(&session, "the turn", settled);
         let trunk = session.trunk();
-        let fork = session
-            .fork(None, &OperatorAsk::Text("Why two tables?".to_owned()))
-            .expect("forked");
+        let Ok(Forking::Fired(fork)) =
+            session.fork(None, &OperatorAsk::Text("Why two tables?".to_owned()))
+        else {
+            unreachable!("fired at the gap");
+        };
         let (forked, messages, wrote) = operator_forked(&session);
         let Event::Forked {
             why, question, cut, ..
@@ -31708,9 +31729,11 @@ pub(in crate::drive) mod tests {
         ])]));
         session.ask("what is the schema?", None).expect("accepted");
         wait_until(&session, "the turn", settled);
-        let fork = session
-            .fork(None, &OperatorAsk::Text("What else?".to_owned()))
-            .expect("forked");
+        let Ok(Forking::Fired(fork)) =
+            session.fork(None, &OperatorAsk::Text("What else?".to_owned()))
+        else {
+            unreachable!("fired at the gap");
+        };
         let log = wait_until(&session, "the fork's answer", |log| {
             !fork_outcomes(log).is_empty() && settled(log)
         });
@@ -31987,7 +32010,209 @@ pub(in crate::drive) mod tests {
         tidy(&[&tree]);
     }
 
-    /// #1021: a fork is refused while a turn is in flight, and at a line a
+    /// The operator's fork lines, each with its seq.
+    fn operator_forks(log: &[Logged]) -> Vec<(u64, Event)> {
+        log.iter()
+            .filter(|logged| {
+                matches!(
+                    logged.event,
+                    Event::Forked {
+                        why: log::Warrant::Operator,
+                        ..
+                    }
+                )
+            })
+            .map(|logged| (logged.seq, logged.event.clone()))
+            .collect()
+    }
+
+    /// N4: the operator's fork posted while a turn runs is queued, not
+    /// refused: a second is refused while it waits, `/state` shows it, and
+    /// it fires at the next request boundary -- after the step's calls
+    /// settle, before the next trunk request -- cut at the step's last
+    /// call, its posting time on its line. Its answer is logged, and the
+    /// turn then goes on.
+    #[test]
+    fn a_fork_posted_mid_turn_fires_at_the_next_request_boundary() {
+        let tree = scratch("fork-queued-mid-turn");
+        let gate = Gate::new();
+        let session = wrapping(
+            &tree,
+            vec![
+                vec![Step::Hold(gate.clone()), bash("call-1", "cat notes.md")],
+                deltas(&["Read it."]),
+            ],
+            vec![deltas(&["Because the port is free."])],
+        );
+        session.ask("look", None).expect("accepted");
+        assert!(
+            gate.wait_for_a_waiter(Duration::from_secs(10)),
+            "the step never reached the gate"
+        );
+        assert_eq!(
+            session.fork(None, &OperatorAsk::Text("why 5182?".to_owned())),
+            Ok(Forking::Queued)
+        );
+        assert_eq!(
+            session.fork(None, &OperatorAsk::Text("and again?".to_owned())),
+            Err(Rejected::Refused(Refusal::InFlight)),
+            "one queued fork at a time"
+        );
+        let status = session.status();
+        let Value::Object(members) = &status else {
+            unreachable!("an object");
+        };
+        let Some(Value::Object(queued)) = members.get("queued_fork") else {
+            unreachable!("a queued fork in /state: {status:?}");
+        };
+        assert_eq!(
+            queued.get("question"),
+            Some(&Value::String("why 5182?".to_owned()))
+        );
+        assert!(operator_forks(&session.events_from(0)).is_empty());
+        gate.open();
+        let log = wait_until(&session, "the turn", settled);
+        let [
+            (
+                fork,
+                Event::Forked {
+                    question,
+                    cut,
+                    timing,
+                    queued_at,
+                    ..
+                },
+            ),
+        ] = &operator_forks(&log)[..]
+        else {
+            unreachable!("one operator fork: {:?}", operator_forks(&log));
+        };
+        assert_eq!(question, "why 5182?");
+        let called = seq_of(&log, |event| matches!(event, Event::ToolCalled(_)));
+        assert_eq!(*cut, Some(called), "cut at the step's last call");
+        assert_eq!(*timing, Timing::DuringTurn);
+        let posted = queued_at.expect("its posting time");
+        let fired = log
+            .iter()
+            .find(|logged| logged.seq == *fork)
+            .map(|logged| logged.t)
+            .expect("its line");
+        assert!(posted <= fired);
+        let (next, _) = trunk_request_after(&log, called);
+        assert!(*fork < next, "fired before the next trunk request");
+        let settled_at = log
+            .iter()
+            .find_map(|logged| match &logged.event {
+                Event::ForkSettled {
+                    fork: settled,
+                    outcome,
+                    ..
+                } if settled == fork => Some((logged.seq, *outcome)),
+                _ => None,
+            })
+            .expect("its fork.settled");
+        assert!(settled_at.0 < next, "settled before the next trunk request");
+        assert!(
+            log.iter().any(|logged| matches!(
+                &logged.event,
+                Event::Answered { text, .. } if text == "Because the port is free."
+            )),
+            "its answer is logged"
+        );
+        let asked = session.shared.forks.get().expect("forks").sent();
+        let messages = &asked.last().expect("the fork's request").messages;
+        assert_eq!(
+            result_in(messages, "call-1").as_deref(),
+            Some("port 5182 is free\nand more\n"),
+            "it sees the step's result"
+        );
+        assert_eq!(session.shared.transport.sent().len(), 2, "the turn went on");
+        let Value::Object(members) = session.status() else {
+            unreachable!("an object");
+        };
+        assert!(!members.contains_key("queued_fork"));
+        reads_whole(&session);
+        tidy(&[&tree]);
+    }
+
+    /// N4: a fork queued while the turn runs, the turn cancelled before its
+    /// next request: it fires at the gap, as a fork posted then would.
+    #[test]
+    fn a_fork_queued_when_the_turn_is_cancelled_fires_at_the_gap() {
+        let tree = scratch("fork-queued-cancelled");
+        let gate = Gate::new();
+        let session = wrapping(
+            &tree,
+            vec![
+                vec![Step::Hold(gate.clone()), bash("call-1", "cat notes.md")],
+                deltas(&["never sent"]),
+            ],
+            vec![deltas(&["It was cancelled."])],
+        );
+        session.ask("look", None).expect("accepted");
+        assert!(
+            gate.wait_for_a_waiter(Duration::from_secs(10)),
+            "the step never reached the gate"
+        );
+        assert_eq!(
+            session.fork(None, &OperatorAsk::Text("what happened?".to_owned())),
+            Ok(Forking::Queued)
+        );
+        session.cancel(1, None).expect("stop asked");
+        gate.open();
+        let log = wait_until(&session, "the queued fork", |log| {
+            !fork_outcomes(log).is_empty()
+                && log.last().is_some_and(|logged| {
+                    matches!(
+                        logged.event,
+                        Event::Settled {
+                            to: Settlement::Awaiting,
+                            ..
+                        }
+                    )
+                })
+        });
+        let cancelled = seq_of(&log, |event| {
+            matches!(
+                event,
+                Event::TurnSettled {
+                    reason: SettleReason::Cancelled,
+                    ..
+                }
+            )
+        });
+        let [
+            (
+                fork,
+                Event::Forked {
+                    question,
+                    timing,
+                    queued_at,
+                    ..
+                },
+            ),
+        ] = &operator_forks(&log)[..]
+        else {
+            unreachable!("one operator fork: {:?}", operator_forks(&log));
+        };
+        assert_eq!(question, "what happened?");
+        assert!(*fork > cancelled, "fired at the gap");
+        assert_eq!(*timing, Timing::Gap);
+        assert!(queued_at.is_some());
+        assert!(
+            log.iter().any(|logged| matches!(
+                &logged.event,
+                Event::Answered { text, .. } if text == "It was cancelled."
+            )),
+            "its answer is logged"
+        );
+        assert_eq!(session.shared.lock().settlement, Settlement::Awaiting);
+        reads_whole(&session);
+        tidy(&[&tree]);
+    }
+
+    /// #1021: a fork at a named line is refused while a turn is in flight
+    /// (N4 queues only a fork at the latest step), and at a line a
     /// meditation has since replaced on the trunk; the operator's kept
     /// entry rides the refill.
     #[test]
@@ -32015,12 +32240,13 @@ pub(in crate::drive) mod tests {
         )
         .forking_through(Canned::new(Vec::<Vec<Step>>::new()));
         session.ask("look", None).expect("accepted");
-        wait_until(&session, "the call", |log| {
+        let log = wait_until(&session, "the call", |log| {
             log.iter()
                 .any(|logged| matches!(logged.event, Event::ToolCalled(_)))
         });
+        let mid_turn = seq_of(&log, |event| matches!(event, Event::ToolCalled(_)));
         assert!(matches!(
-            session.fork(None, &OperatorAsk::Text("why?".to_owned())),
+            session.fork(Some(mid_turn), &OperatorAsk::Text("why?".to_owned())),
             Err(Rejected::Refused(Refusal::InFlight))
         ));
         gate.open();
