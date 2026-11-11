@@ -1365,7 +1365,7 @@ impl Lane {
         }
         match builtin {
             Builtin::Cd => {
-                state.cwd = target_of(argument, state);
+                state.cwd = target_of(argument, state, self.home.as_deref());
                 false
             }
             // `pushd -n dir` pushes without moving and `popd +1` drops an
@@ -1398,7 +1398,7 @@ impl Lane {
     ) -> bool {
         if argument.is_some() {
             state.stack.push(state.cwd.clone());
-            state.cwd = target_of(argument, state);
+            state.cwd = target_of(argument, state, self.home.as_deref());
             return false;
         }
         // `pushd` with no argument exchanges the top two directories.
@@ -1651,13 +1651,27 @@ fn resolve(raw: &str, cwd: &Cwd) -> (PathBuf, bool) {
     }
 }
 
+/// `~/<rest>` under `home`, when the leading tilde is all the shell would
+/// expand in `word`: no substitution, and nothing in the rest a shell would
+/// expand. `~user` and a word with more to expand name nothing here.
+fn tilde(word: &Word, home: Option<&Path>) -> Option<PathBuf> {
+    let home = home?;
+    let rest = word.text.strip_prefix("~/")?;
+    let expands = |c: char| "*?[]{}$`\\".contains(c);
+    (word.substitutions.is_empty() && !rest.contains(expands)).then(|| normalize(&home.join(rest)))
+}
+
 /// Where a `cd` or `pushd` with this argument goes.
-fn target_of(argument: Option<&Word>, state: &State) -> Cwd {
+fn target_of(argument: Option<&Word>, state: &State, home: Option<&Path>) -> Cwd {
+    let at_home = || home.map_or(Cwd::Home, |home| Cwd::Path(normalize(home)));
     let Some(word) = argument else {
-        return Cwd::Home;
+        return at_home();
     };
     if word.text == TILDE {
-        return Cwd::Home;
+        return at_home();
+    }
+    if let Some(path) = tilde(word, home) {
+        return Cwd::Path(path);
     }
     if !word.literal || word.text == DASH {
         // `cd -` goes to the previous directory, which this lane does not

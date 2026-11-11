@@ -8328,16 +8328,59 @@ fn on_disk((path, kind): &(std::path::PathBuf, crate::capture::mechanical::Touch
         || path.exists()
 }
 
+/// The live session's mechanical lane (#784), starting in `worktree` and
+/// told the home a leading tilde names: serve's own `HOME`, which its
+/// commands are given.
+fn live_lane(worktree: std::path::PathBuf) -> crate::capture::mechanical::Lane {
+    let lane = crate::capture::mechanical::Lane::starting_in(worktree);
+    match std::env::var_os("HOME") {
+        Some(home) => lane.with_home(std::path::PathBuf::from(home)),
+        None => lane,
+    }
+}
+
+/// Tool call `line` as the lane reads it, under `event`. Each call runs in a
+/// fresh shell that starts in `worktree`, so it carries that as its `cwd`: a
+/// `cd` in one call is no part of the next.
+fn live_call(
+    line: &ToolLine,
+    worktree: &std::path::Path,
+    event: &str,
+    turn: u32,
+) -> crate::formats::record::Event {
+    use crate::formats::record::json::{self, Value};
+    let args = json::line(&line.arguments).ok().map(|mut args| {
+        args.insert(
+            crate::capture::mechanical::ARG_CWD.to_owned(),
+            Value::String(worktree.display().to_string()),
+        );
+        args
+    });
+    crate::formats::record::Event::ToolCall {
+        id: event.to_owned(),
+        at_turn: turn,
+        tool: line.name.clone(),
+        args,
+        exit: line.exit.and_then(|code| i64::try_from(code).ok()),
+        output: line.stdout.as_ref().map(|out| out.text.clone()),
+        exec: None,
+        lane: None,
+    }
+}
+
 /// What tool call `line` touched, patched into working memory as it settles
 /// (#784), when the regimen turns `mechanical_capture` on: no model call and
 /// no fork. The mechanical lane reads the call as the shell would; each file
 /// read, written or edited becomes one entry per path -- `files: <path>`,
 /// id `mechanical/<path>` -- a later touch appending its provenance (lane
 /// `mechanical`, the turn, the step as its index), and a delete retiring it;
-/// a listed directory is `files: listed <dir>`. A path under the worktree is
-/// written relative to it. A read, a listing or a write of a path that does
-/// not exist once the call has run is no touch. The operator's entries are
-/// theirs (#150): the guard refuses a patch on one. A path deleted and touched again stays
+/// a listed directory is `files: listed <dir>`. Each call is read as starting
+/// in the worktree, as its fresh shell does, and a leading tilde as serve's
+/// `HOME`, so a path is placed wherever it was named from: under the
+/// worktree it is written relative to it, elsewhere absolute. A read, a
+/// listing or a write of a path that does not exist once the call has run is
+/// no touch. The operator's entries are theirs (#150): the guard refuses a
+/// patch on one. A path deleted and touched again stays
 /// retired: the object refuses to restate a retired entry. The `patch`
 /// lines to log, after the call's own.
 fn mechanically_captured<S>(
@@ -8346,7 +8389,7 @@ fn mechanically_captured<S>(
     line: &ToolLine,
     (turn, request, step): (u32, u64, u32),
 ) -> Vec<Event> {
-    use crate::capture::mechanical::{LANE, Lane, TouchKind};
+    use crate::capture::mechanical::{LANE, TouchKind};
     let on = state
         .interview
         .as_ref()
@@ -8360,18 +8403,9 @@ fn mechanically_captured<S>(
     let worktree = tools.worktree.clone();
     let reader = state
         .mechanical
-        .get_or_insert_with(|| Lane::starting_in(worktree.clone()));
+        .get_or_insert_with(|| live_lane(worktree.clone()));
     let event = format!("r{request}/{}", line.id);
-    reader.observe(&crate::formats::record::Event::ToolCall {
-        id: event.clone(),
-        at_turn: turn,
-        tool: line.name.clone(),
-        args: crate::formats::record::json::line(&line.arguments).ok(),
-        exit: line.exit.and_then(|code| i64::try_from(code).ok()),
-        output: line.stdout.as_ref().map(|out| out.text.clone()),
-        exec: None,
-        lane: None,
-    });
+    reader.observe(&live_call(line, &worktree, &event, turn));
     let mut touched = reader.touched_by(&event);
     touched.dedup();
     touched.retain(on_disk);
