@@ -5,7 +5,7 @@ import { afterEach, expect, test } from 'vitest';
 import { page, userEvent } from 'vitest/browser';
 
 import type { Command } from '../drive/transport.ts';
-import { GestureContext, KeepAction } from './Gestures.tsx';
+import { GestureContext, KeepAction, WrapAction } from './Gestures.tsx';
 
 /**
  * The keep dialog under the browser's own clicks and keys (the app audit, finding 2): a person selects a span of the
@@ -62,4 +62,34 @@ test('a span selected, then a tag clicked into and typed, is still the span kept
   await userEvent.keyboard('notes');
   await userEvent.click(page.getByRole('button', { name: 'Keep the selection from call call-1' }));
   await expect.poll(() => sent).toEqual([{ kind: 'keep', from: 6, span: 'a note', tag: 'notes' }]);
+});
+
+/** The wrap action for a call's result that logged TEXT, its posts gathered. */
+async function wrapping(text: string): Promise<Command[]> {
+  const sent: Command[] = [];
+  const host = document.createElement('div');
+  document.body.append(host);
+  root = createRoot(host);
+  await act(async () =>
+    root!.render(
+      <GestureContext.Provider value={async (command) => (sent.push(command), { ok: true })}>
+        <WrapAction call={6} from={{ seq: 6, text }} label="call call-1" />
+      </GestureContext.Provider>,
+    ),
+  );
+  await userEvent.click(page.getByRole('button', { name: 'Wrap from call call-1' }));
+  return sent;
+}
+
+test('a span selected and wrapped with the mouse is the span the wrap keeps, as a keep is', async () => {
+  const sent = await wrapping('a note\nand more\n');
+  const raw = document.querySelector('[aria-label="What call call-1 logged, to wrap"]')!;
+  const range = document.createRange();
+  range.setStart(raw.firstChild!, 0);
+  range.setEnd(raw.firstChild!, 'a note'.length);
+  const selection = window.getSelection()!;
+  selection.removeAllRanges();
+  selection.addRange(range);
+  await userEvent.click(page.getByRole('button', { name: 'Wrap with the selection from call call-1' }));
+  await expect.poll(() => sent).toEqual([{ kind: 'wrap', call: 6, from: 6, span: 'a note' }]);
 });

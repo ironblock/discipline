@@ -285,18 +285,32 @@ export function WrapAction({ call, from, label }: { readonly call: number; reado
   const moment = useContext(GestureMomentContext);
   const [open, setOpen] = useState(false);
   const [refused, setRefused] = useState<string>();
+  // The span last selected in the text, as keep holds it (the app audit, finding 2): the click on `wrap` can move the
+  // document's selection away before the submit reads it, and the span stays what the person selected.
+  const [captured, setCaptured] = useState('');
   const raw = useRef<HTMLPreElement>(null);
   const close = () => setOpen(false);
   const dialog = useModal(open, close);
   useEffect(() => {
     if (open) raw.current?.focus();
   }, [open]);
+  useEffect(() => {
+    if (!open) return;
+    setCaptured('');
+    const selected = () => {
+      const selection = window.getSelection();
+      if (!selection || selection.rangeCount === 0 || selection.toString() === '') return;
+      if (raw.current?.contains(selection.getRangeAt(0).commonAncestorContainer)) setCaptured(selection.toString());
+    };
+    document.addEventListener('selectionchange', selected);
+    return () => document.removeEventListener('selectionchange', selected);
+  }, [open]);
   if (!act || !moment.onTrunk(call) || moment.wrappable?.(call) === false) return null;
   const submit = async (e: FormEvent) => {
     e.preventDefault();
     const selection = window.getSelection();
     const inside = selection && raw.current && selection.rangeCount > 0 && raw.current.contains(selection.getRangeAt(0).commonAncestorContainer);
-    const span = inside ? selection.toString() : '';
+    const span = inside && selection.toString() !== '' ? selection.toString() : captured;
     if (span.trim() === '') return setRefused('select the span to keep in its place first');
     const ack = await act({ kind: 'wrap', call, from: from.seq, span });
     if (ack.ok) {
