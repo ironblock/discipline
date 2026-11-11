@@ -5932,7 +5932,8 @@ impl<S: Streaming + 'static> Session<S> {
     /// is (#1037): its `phase`, the model's `proposal` awaiting a ruling --
     /// its `call`, `from` and `to` -- and the latest request's prompt as
     /// `sized`: its `prompt` tokens, its `output_cap` and the `window` it
-    /// was sized against. `turn`, `approval`, `refusal`, `corrections`,
+    /// was sized against, until a refill or a tangent's close replaces the
+    /// trunk it sized. `turn`, `approval`, `refusal`, `corrections`,
     /// `phase`, `proposal` and `sized` are absent when there is none, as the
     /// log leaves a key out.
     #[must_use]
@@ -5945,6 +5946,7 @@ impl<S: Streaming + 'static> Session<S> {
             settled,
             refusal,
             unaddressed,
+            sized_stale,
         } = LogRead::of(&state);
         let refusal = refusal.map(|(seq, command, because)| {
             object(vec![
@@ -6032,8 +6034,10 @@ impl<S: Streaming + 'static> Session<S> {
             ("corrections", pending_corrections(&state)),
         ]
         .into_iter()
-        .chain(where_it_is(&state))
-        {
+        .chain(
+            where_it_is(&state)
+                .map(|(key, value)| (key, value.filter(|_| !(key == "sized" && sized_stale)))),
+        ) {
             if let Some(value) = value {
                 status.push((key, value));
             }
@@ -12983,6 +12987,10 @@ struct LogRead<'a> {
     refusal: Option<(u64, CommandKind, Refusal)>,
     /// What the latest hold left unaddressed.
     unaddressed: Option<&'a Vec<String>>,
+    /// Whether a refill or a tangent's close replaced the trunk after its
+    /// latest request: the sizing `/state` would show describes a trunk that
+    /// is gone, so it is left out until the next trunk request is sized.
+    sized_stale: bool,
 }
 
 impl<'a> LogRead<'a> {
@@ -12992,6 +13000,7 @@ impl<'a> LogRead<'a> {
             settled: None,
             refusal: None,
             unaddressed: None,
+            sized_stale: false,
         };
         for logged in &state.log {
             match &logged.event {
@@ -13005,6 +13014,10 @@ impl<'a> LogRead<'a> {
                     command, because, ..
                 } => read.refusal = Some((logged.seq, *command, *because)),
                 Event::MeditationHeld { unaddressed, .. } => read.unaddressed = Some(unaddressed),
+                Event::Meditated { .. } | Event::TangentClosed { .. } => read.sized_stale = true,
+                Event::Requested {
+                    lane: Lane::Trunk, ..
+                } => read.sized_stale = false,
                 _ => {}
             }
         }
@@ -31478,6 +31491,99 @@ pub(in crate::drive) mod tests {
         assert!(!render.contains("port 5182 is free"), "{render}");
         assert!(!render.contains("the build is slow"), "{render}");
         reads_whole(&session);
+        tidy(&[&tree]);
+    }
+
+    /// What a cut fork counts the trunk as holding of the pool while a turn
+    /// runs (#782, #826) is unchanged by a refill: the trunk still holds
+    /// its latest sized request until the next one is sized. `/state`'s
+    /// view of `sized` is `/state`'s alone, never the sizing's.
+    #[test]
+    fn a_refill_leaves_what_the_trunk_holds_of_the_pool_as_it_was() {
+        let tree = scratch("resident-after-a-refill");
+        std::fs::write(tree.join("notes.md"), "port 5182 is free\n").expect("a note");
+        let session = Session::open_with(
+            Canned::new(vec![
+                vec![bash("call-1", "cat notes.md")],
+                deltas(&["Read it."]),
+            ]),
+            looping(),
+            None,
+            Some(tools(
+                Confinement::Unconfined,
+                &tree,
+                &["cat"],
+                None,
+                Decider::Decline,
+            )),
+            None,
+            Some(interviewing(&[])),
+        );
+        session.ask("look", None).expect("accepted");
+        let log = wait_until(&session, "the turn", settled);
+        let called = seq_of(&log, |event| matches!(event, Event::ToolCalled(_)));
+        session
+            .keep(called, "port 5182 is free", None)
+            .expect("kept");
+        let mut state = session.shared.lock();
+        // As a mid-turn window refill finds it: the turn running.
+        state.settlement = Settlement::Turn;
+        let before = trunk_resident(&state);
+        assert_ne!(before, (0, 0), "a request was sized");
+        refill_trunk(
+            &session.shared.template,
+            &mut state,
+            (crate::meditation::Reason::Window, None),
+            None,
+        );
+        assert_eq!(trunk_resident(&state), before);
+        state.settlement = Settlement::Awaiting;
+        drop(state);
+        tidy(&[&tree]);
+    }
+
+    /// `/state`'s `sized` is the latest request's prompt: once a refill
+    /// replaced the trunk it sized, it describes no trunk, and is absent
+    /// until the next request is sized.
+    #[test]
+    fn state_leaves_sized_out_once_a_refill_replaced_the_trunk_it_sized() {
+        let tree = scratch("sized-after-a-refill");
+        std::fs::write(tree.join("notes.md"), "port 5182 is free\n").expect("a note");
+        let session = Session::open_with(
+            Canned::new(vec![
+                vec![bash("call-1", "cat notes.md")],
+                deltas(&["Read it."]),
+            ]),
+            looping(),
+            None,
+            Some(tools(
+                Confinement::Unconfined,
+                &tree,
+                &["cat"],
+                None,
+                Decider::Decline,
+            )),
+            None,
+            Some(interviewing(&[])),
+        );
+        let has_sized = |session: &Session<Canned>| match session.status() {
+            Value::Object(fields) => fields.contains_key("sized"),
+            _ => unreachable!("the status is an object"),
+        };
+        session.ask("look", None).expect("accepted");
+        let log = wait_until(&session, "the turn", settled);
+        assert!(has_sized(&session), "a request was sized");
+        let called = seq_of(&log, |event| matches!(event, Event::ToolCalled(_)));
+        session
+            .keep(called, "port 5182 is free", None)
+            .expect("kept");
+        session.declare_meditation(None).expect("admitted");
+        wait_until(&session, "the meditation", meditated);
+        assert!(
+            !has_sized(&session),
+            "the refill replaced the trunk it sized: {:?}",
+            session.status()
+        );
         tidy(&[&tree]);
     }
 
