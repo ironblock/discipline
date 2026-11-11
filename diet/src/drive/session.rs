@@ -36015,6 +36015,101 @@ pub(in crate::drive) mod tests {
         reads_whole(&session);
     }
 
+    /// N2 (b): the model's acceptance of the operator's proposal to move
+    /// through a meditation, mid-turn, is made at the next request boundary,
+    /// as a window refill is: a meditation into the new phase between the
+    /// turn's steps, the turn's own messages riding after the render, and the
+    /// turn's next trunk request in the new phase -- not after the turn.
+    #[test]
+    fn an_accepted_proposal_to_meditate_moves_at_the_next_request_boundary() {
+        const SAID: &str = "The plan has three steps.";
+        let mut interview = Interview {
+            operator_unilateral: true,
+            ..phased()
+        };
+        interview.rules = Vec::new();
+        interview.self_capture = Some(crate::capture::tools::Cadence::DEFAULT);
+        // A turn of steps: the tool loop, the phase tool and the record tool
+        // declared on it.
+        let tree = scratch("move-at-the-boundary");
+        let mut shape = looping();
+        declare_self_capture(&mut shape, Some(&interview));
+        declare_phase_tool(&mut shape, Some(&interview));
+        let session = Session::open_with(
+            Canned::new(vec![
+                vec![
+                    Step::Delta(SAID.to_owned()),
+                    Step::call(
+                        0,
+                        "call-f",
+                        "update_record",
+                        &serde_json::json!({ "field": "fact", "content": SAID }).to_string(),
+                    ),
+                    Step::call(
+                        1,
+                        "call-a",
+                        PHASE_TOOL,
+                        &serde_json::json!({"to": "build", "accept": true, "reason": "planned"})
+                            .to_string(),
+                    ),
+                ],
+                deltas(&["Building."]),
+            ]),
+            shape,
+            None,
+            Some(tools(
+                Confinement::Unconfined,
+                &tree,
+                &[],
+                None,
+                Decider::Decline,
+            )),
+            None,
+            Some(interview),
+        );
+        session.propose_phase("build", true).expect("proposed");
+        session.ask("plan it", None).expect("accepted");
+        let log = wait_until(&session, "the turn and the move", |log| {
+            meditated(log)
+                && log
+                    .iter()
+                    .any(|logged| matches!(logged.event, Event::TurnSettled { .. }))
+        });
+        let seq_of_first = |pick: &dyn Fn(&Event) -> bool| {
+            log.iter()
+                .find(|logged| pick(&logged.event))
+                .map(|logged| logged.seq)
+        };
+        let moved = seq_of_first(&|event| {
+            matches!(event, Event::Meditated { phase: Some(moved), .. } if moved.to == "build")
+        })
+        .expect("a meditation that moved to build");
+        let settled_at = seq_of_first(&|event| matches!(event, Event::TurnSettled { .. }))
+            .expect("the turn settled");
+        let second_request = log
+            .iter()
+            .filter(|logged| {
+                matches!(
+                    logged.event,
+                    Event::Requested {
+                        lane: Lane::Trunk,
+                        ..
+                    }
+                )
+            })
+            .nth(1)
+            .map(|logged| logged.seq)
+            .expect("the turn's second trunk request");
+        assert!(
+            moved < second_request,
+            "the move, then the next step's request"
+        );
+        assert!(second_request < settled_at, "within the turn");
+        assert_eq!(session.shared.lock().phase.as_deref(), Some("build"));
+        reads_whole(&session);
+        tidy(&[&tree]);
+    }
+
     /// #788: the operator moves alone only with `operator_unilateral`; a
     /// move or proposal outside the phase's transitions is refused; the
     /// starting phase is chosen only before the first ask; and the
