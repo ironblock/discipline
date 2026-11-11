@@ -1166,6 +1166,11 @@ fn admissible(
                 parameter: name.clone(),
             });
         };
+        // An optional argument given empty -- `""` -- is one not given (N8): a model that fills every field of a schema it was
+        // shown writes the ones it has nothing for as empty.
+        if !param.required && is_empty_argument(value) {
+            continue;
+        }
         let Value::String(text) = value else {
             return Err(ToolError::WrongArgument {
                 tool,
@@ -1200,6 +1205,12 @@ fn admissible(
         }
     }
     Ok(given)
+}
+
+/// Whether `value` is an empty argument (N8): text that is nothing but
+/// whitespace. (The value space has no `null`.)
+fn is_empty_argument(value: &Value) -> bool {
+    matches!(value, Value::String(text) if text.trim().is_empty())
 }
 
 /// A required argument's text. Present because [`admissible`] has established
@@ -1824,6 +1835,32 @@ mod tests {
         assert!(
             note_c4(&[("content", "a note")]).is_ok(),
             "a plain note, as c3's"
+        );
+    }
+
+    /// N8 (the maintainer, 2026-11-11): an optional argument given empty is
+    /// absent -- drive g's c4 note sent `"with": ""` beside its `content` and
+    /// was refused "no `replaces`" -- so the call is the plain note it is.
+    /// A required argument given empty is still that argument, and an
+    /// empty `replaces` beside a `with` still lacks its pair.
+    #[test]
+    fn an_empty_optional_argument_is_absent() {
+        let effect = note_c4(&[("content", "the dev server is on port 5182"), ("with", "")])
+            .expect("a plain note, its empty `with` absent");
+        assert_eq!(effect.replaces, None);
+        let [Patch::Add { content, .. }] = &effect.patches[..] else {
+            panic!("one add: {:?}", effect.patches);
+        };
+        assert_eq!(content, "the dev server is on port 5182");
+        assert!(
+            note_c4(&[("content", "a note"), ("supersedes", ""), ("confirms", "")]).is_ok(),
+            "empty `supersedes` and `confirms` are absent too"
+        );
+        assert_eq!(
+            note_c4(&[("supersedes", "e1"), ("replaces", ""), ("with", "b")])
+                .expect_err("still out of shape")
+                .to_string(),
+            "update_record: no `replaces`"
         );
     }
 
