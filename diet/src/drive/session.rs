@@ -4343,6 +4343,18 @@ impl<S: Streaming + 'static> Session<S> {
         if let Some(text) = state.noted(turn) {
             message.notes.push(text);
         }
+        // The first ask names the working directory (PROPOSED wording, for
+        // the maintainer): before, the model was never told where it was.
+        if turn == 1
+            && let Some(tools) = &self.shared.tools
+        {
+            let text = start_cwd_note(&tools.cwd);
+            state.push(Event::Notified {
+                turn,
+                text: text.clone(),
+            });
+            message.notes.push(text);
+        }
         // The operator's phase proposal, put to the model (#788).
         if let Some(text) = state.operator_note_due.take() {
             state.push(Event::Notified {
@@ -13295,6 +13307,19 @@ pub fn operator_proposal_note(from: Option<&str>, to: &str) -> String {
             (crate::dogma::Hole::To, to),
         ])
         .expect("PHASE_OPERATOR_PROPOSAL's holes are `from` and `to`")
+}
+
+/// The note on the session's first ask that names its working directory
+/// `cwd`: the pinned `START_CWD` (PROPOSED, for the maintainer).
+///
+/// # Panics
+///
+/// Never: the template's one hole is `cwd`, which a test holds.
+#[must_use]
+pub fn start_cwd_note(cwd: &str) -> String {
+    crate::dogma::Template::StartCwd
+        .fill(&[(crate::dogma::Hole::Cwd, cwd)])
+        .expect("START_CWD's one hole is `cwd`")
 }
 
 /// The phase tool's definition (#788): `to` and `reason`, and `accept`, a
@@ -31654,6 +31679,43 @@ pub(in crate::drive) mod tests {
             "the refill replaced the trunk it sized: {:?}",
             session.status()
         );
+        tidy(&[&tree]);
+    }
+
+    /// The session's first ask names its working directory (PROPOSED
+    /// wording, for the maintainer), as a call's line names it; the second
+    /// ask does not repeat it.
+    #[test]
+    fn the_first_ask_names_the_working_directory() {
+        let tree = scratch("start-cwd");
+        let session = Session::open_with(
+            Canned::new(vec![deltas(&["Here."]), deltas(&["Still here."])]),
+            looping(),
+            None,
+            Some(tools(
+                Confinement::Unconfined,
+                &tree,
+                &["cat"],
+                None,
+                Decider::Decline,
+            )),
+            None,
+            None,
+        );
+        let cwd = session.shared.tools.as_ref().expect("tools").cwd.clone();
+        session.ask("where are we?", None).expect("accepted");
+        wait_until(&session, "the first turn", settled);
+        session.ask("and now?", None).expect("accepted");
+        let log = wait_until(&session, "the second turn", two_settled);
+        let notified: Vec<(u32, String)> = log
+            .iter()
+            .filter_map(|logged| match &logged.event {
+                Event::Notified { turn, text } => Some((*turn, text.clone())),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(notified, vec![(1, start_cwd_note(&cwd))]);
+        assert_eq!(start_cwd_note(&cwd), format!("You are in {cwd}."));
         tidy(&[&tree]);
     }
 
