@@ -11333,6 +11333,11 @@ fn prewarm<'a, S: Streaming>(
     // the session sends has its line.
     let turn = state.turns;
     state.wrote_cache(&shape);
+    // Its measured prompt is paired with its own estimate, not the last
+    // trunk request's from before the refill, so the next trunk request is
+    // sized from it rather than from the pad. Its cap of one is not a sizing:
+    // `last_sized` stays the trunk's.
+    state.sent_estimate = Some(estimate_of(&shape));
     let request = state.push(Event::Requested {
         turn,
         lane: Lane::Warm,
@@ -26459,7 +26464,11 @@ pub(in crate::drive) mod tests {
         let next = estimate_of(&session.shared.transport.sent()[asked]);
         assert!(next >= warmed, "{next} < {warmed}");
         let (prompt, _, _) = session.shared.lock().sizing().1.expect("sized");
-        assert_eq!(prompt, 412 + (next - warmed), "sized from the pad, not the warm");
+        assert_eq!(
+            prompt,
+            412 + (next - warmed),
+            "sized from the pad, not the warm"
+        );
         reads_whole(&session);
     }
 
