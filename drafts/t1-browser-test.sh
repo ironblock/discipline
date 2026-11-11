@@ -91,6 +91,41 @@ if [ "$got" = 0 ] && [ "$(sort <<<"$patterns")" = "$(sort <<<"$want")" ]; then
 else
   echo "FAIL start (exit $got) allowed: $(tr "\n" " " <<<"$patterns"): $(cat "$WORK/run-start/out")"; fail=1
 fi
+# The model's own `chrome-devtools start` and `stop` are refused (N8): `start` writes the run's shim, which the model's
+# PATH reaches first (browser.env), and it answers start and stop with a refusal and passes every other command on
+# to the CLI, so the run's daemon stays up.
+SHIM="$WORK/run-start/bin/chrome-devtools"
+if [ -x "$SHIM" ] && grep -q '^export PATH="[^"]*/run-start/bin:\$PATH"$' "$WORK/run-start/browser.env" 2>/dev/null; then
+  echo "ok   start writes the model's shim and puts it first on PATH"
+else
+  echo "FAIL start wrote no shim at $SHIM, or browser.env does not put it first: $(cat "$WORK/run-start/browser.env" 2>/dev/null)"; fail=1
+fi
+for verb in start stop; do
+  rm -f "$WORK/shim-args"
+  FAKE_START_ARGS="$WORK/shim-args" PATH="$WORK/run-start/bin:$PATH" chrome-devtools "$verb" --headless=false > "$WORK/shim-out" 2>&1
+  got=$?
+  if [ "$got" != 0 ] && [ ! -e "$WORK/shim-args" ] && grep -q 'refused' "$WORK/shim-out"; then
+    echo "ok   the model's chrome-devtools $verb is refused, and the daemon is left alone"
+  else
+    echo "FAIL the model's chrome-devtools $verb (exit $got) reached the CLI or was not refused: $(cat "$WORK/shim-out")"; fail=1
+  fi
+done
+PATH="$WORK/run-start/bin:$PATH" chrome-devtools list_pages > "$WORK/shim-out" 2>&1
+got=$?
+if [ "$got" = 0 ]; then echo "ok   the model's other chrome-devtools commands reach the CLI"; else echo "FAIL list_pages through the shim (exit $got): $(cat "$WORK/shim-out")"; fail=1; fi
+
+# The operator's own restart, from the shell that put the shim first (browser.env), still reaches the CLI.
+mkdir -p "$WORK/run-op"
+printf 'SID=the-runs-session\nXDG=\nSOCKET=/nonexistent\nWT=%s\nPROFILE=%s\n' "$WORK/wt-start" "$WORK/run-op/chrome-profile" > "$WORK/run-op/browser.state"
+FAKE_DOWN="$WORK/op-up" FAKE_START_ARGS="$WORK/op-args" PATH="$WORK/run-start/bin:$PATH" \
+  bash "$HERE/t1-browser.sh" restart "$WORK/run-op" > "$WORK/run-op/out" 2>&1
+got=$?
+if [ "$got" = 0 ] && [ -e "$WORK/op-args" ]; then
+  echo "ok   the operator's restart reaches the CLI past the model's shim"
+else
+  echo "FAIL the operator's restart behind the shim (exit $got): $(cat "$WORK/run-op/out")"; fail=1
+fi
+
 # `restart` brings a stopped daemon back under the run's own session id, so the socket the regimen names (browser.env
 # line 1) is the one it listens on again; `start` would mint a new one.
 mkdir -p "$WORK/run-restart"

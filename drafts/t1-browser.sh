@@ -10,7 +10,8 @@
 #   t1-browser.sh restart <run-dir>             start a stopped daemon again under the run's own session id
 #
 # State lives in <run-dir>: browser.state (sourced by the subcommands),
-# browser.env (the two lines), caffeinate.pid, daemon.log, chrome-profile/, shots/.
+# browser.env (the lines to paste and export), caffeinate.pid, daemon.log, chrome-profile/, shots/, and bin/, the
+# model's chrome-devtools, which refuses the CLI's own start and stop.
 #
 # Before the daemon starts, chrome-profile/Default/Preferences pins downloads
 # to the worktree (download.default_directory, savefile.default_directory,
@@ -18,6 +19,9 @@
 # exists only to measure what the pin changes.
 set -u
 export CHROME_DEVTOOLS_MCP_NO_UPDATE_CHECKS=1 CHROME_DEVTOOLS_MCP_NO_USAGE_STATISTICS=1
+# This script is the operator's: the model's shim (below) lets its start and stop through. A model's command never
+# carries the mark -- serve passes it only the default environment and the regimen's env_passthrough names.
+export T1_BROWSER_OPERATOR=1
 
 die() { echo "t1-browser: $*" >&2; exit 1; }
 usage() { sed -n '2,11p' "$0" | sed 's/^# \{0,1\}//' >&2; exit 2; }
@@ -77,6 +81,29 @@ launch() {
   SOCKET=$(real "$RAW")
 }
 
+# The model's chrome-devtools for $RUN (N8): first on the PATH serve's shell exports (browser.env), it refuses the
+# CLI's own `start` and `stop` -- either takes the run's daemon down, and only `restart` with the run's session id
+# brings it back -- and hands every other command to the CLI by its absolute path. The refusal is the maintainer's
+# approved wording, which says "the user" by his rule.
+shim() {
+  local real
+  real=$(PATH=$(printf '%s' "$PATH" | tr ':' '\n' | grep -vx "$RUN/bin" | paste -sd: -) command -v chrome-devtools) \
+    || die "no chrome-devtools on PATH for the model's shim"
+  mkdir -p "$RUN/bin"
+  cat > "$RUN/bin/chrome-devtools" <<SHIM
+#!/bin/bash
+# The run's chrome-devtools for the model (t1-browser.sh): start and stop refused, the rest passed on.
+case "\${1:-}" in
+  start|stop)
+    [ "\${T1_BROWSER_OPERATOR:-}" = 1 ] && exec "$real" "\$@"
+    echo "chrome-devtools \$1 is refused here: this run's browser belongs to the user, and its daemon is already running. Use the other chrome-devtools commands." >&2
+    exit 1 ;;
+esac
+exec "$real" "\$@"
+SHIM
+  chmod +x "$RUN/bin/chrome-devtools"
+}
+
 start() {
   [ $# -eq 2 ] || usage
   mkdir -p "$1" || die "cannot create $1"
@@ -98,6 +125,7 @@ start() {
   echo $! > "$RUN/caffeinate.pid"
 
   launch
+  shim
 
   {
     echo "SID=$SID"
@@ -109,9 +137,10 @@ start() {
   {
     echo "sandbox_unix_sockets = [\"$SOCKET\"]"
     echo "export CD4A_INTERNAL_DAEMON_SESSION_ID=$SID"
+    echo "export PATH=\"$RUN/bin:\$PATH\""
   } > "$RUN/browser.env"
   echo "daemon up: session $SID, profile $PROFILE, workspace $WT" >&2
-  echo "paste line 1 into the run's regimen, run line 2 in the shell that starts serve:" >&2
+  echo "paste line 1 into the run's regimen, run lines 2 and 3 in the shell that starts serve:" >&2
   cat "$RUN/browser.env"
 }
 
