@@ -32763,6 +32763,25 @@ pub(in crate::drive) mod tests {
             words, "the dev server is on port 5182",
             "the chip shows the change"
         );
+        // `/state` lists each chip not yet answered, by its line, so a
+        // driver over HTTP sees what the page shows.
+        let pending = |session: &Session<Canned>| -> Vec<u64> {
+            let Value::Object(fields) = session.status() else {
+                unreachable!("the status is an object");
+            };
+            match fields.get("corrections") {
+                None => Vec::new(),
+                Some(Value::Array(seqs)) => seqs
+                    .iter()
+                    .map(|seq| match seq {
+                        Value::Integer(seq) => u64::try_from(*seq).expect("a seq"),
+                        other => unreachable!("a seq: {other:?}"),
+                    })
+                    .collect(),
+                Some(other) => unreachable!("a list: {other:?}"),
+            }
+        };
+        assert_eq!(pending(&session), vec![*supersede, *resolve, *left]);
         // Accepted: the change, as the operator's.
         let corrected = session
             .correction(*supersede, SuggestionAnswer::Accept)
@@ -32802,6 +32821,7 @@ pub(in crate::drive) mod tests {
             rendered.contains("op-2\tuser said\tthe schema has two tables\n"),
             "{rendered}"
         );
+        assert_eq!(pending(&session), vec![*left]);
         // The third chip is left open, and the next ask logs it unanswered.
         session.ask("go on", None).expect("accepted");
         let log = wait_until(&session, "the second turn", two_settled);
