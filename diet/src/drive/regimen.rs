@@ -1839,8 +1839,12 @@ mod tests {
             ),
             "none"
         );
-        // #1031: how the shadows appear while the operator drives.
-        assert_eq!(at(&manual, "interview_shadow_offer"), "chips");
+        // How the shadows appear while the operator drives (#1031): hidden,
+        // by the maintainer's ruling of 2026-11-11, with his approved v6 asks
+        // and c4 contract.
+        assert_eq!(at(&manual, "interview_shadow_offer"), "hidden");
+        assert!(at(&manual, "fork_asks").starts_with("v6:"));
+        assert!(at(&manual, "self_capture").contains(":c4:"));
         // Dedupe off for the manual drive (the maintainer, 2026-11-03).
         assert_eq!(at(&manual, "note_dedupe"), "off");
         let offer =
