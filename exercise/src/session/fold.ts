@@ -1426,7 +1426,9 @@ export function fold(written: readonly LogLine[]): Session {
                   ...(line.files && line.files.length > 0 ? { files: line.files } : {}),
                   ...(confinement ? { confinement } : {}),
                   ...(line.exit !== undefined ? { exit: line.exit } : {}),
-                  ...(line.stdout !== undefined ? { output: line.stdout } : {}),
+                  // A command's output is its stdout; a tool whose line carries none (`read`, `grep`, `glob`) shows what
+                  // the model was shown. A refused call's `shown` is its refusal, never an output.
+                  ...(line.stdout !== undefined ? { output: line.stdout } : line.outcome === 'ran' && line.shown !== undefined ? { output: line.shown } : {}),
                   ...(line.stderr ? { stderr: line.stderr } : {}),
                   ...(rulings.has(slot.call) ? { ruled: { choice: rulings.get(slot.call)!.choice, to: rulings.get(slot.call)!.to } } : {}),
                   ...(line.reason !== undefined ? { refusal: line.reason } : {}),
