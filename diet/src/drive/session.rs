@@ -5926,15 +5926,17 @@ impl<S: Streaming + 'static> Session<S> {
     /// the meditation -- `none`, `capturing`, or `held` with what it left
     /// `unaddressed`; the prompt waiting on the operator, in `waiting`'s
     /// shape; the last refusal, its `seq`, `command` and `because`; the
-    /// last `seq`; and whether it is `idle`: no turn running, nothing in
+    /// `corrections` not yet answered (#1050), by their `patch.refused`
+    /// lines' `seq`; the last `seq`; and whether it is `idle`: no turn running, nothing in
     /// flight, nothing queued and no prompt waiting. And where the session
     /// is (#1037): its `phase`, the model's `proposal` awaiting a ruling --
     /// its `call`, `from` and `to` -- and the latest request's prompt as
     /// `sized`: its `prompt` tokens, its `output_cap` and the `window` it
-    /// was sized against. `turn`, `approval`, `refusal`, `phase`,
-    /// `proposal` and `sized` are absent when there is none, as the log
-    /// leaves a key out.
+    /// was sized against. `turn`, `approval`, `refusal`, `corrections`,
+    /// `phase`, `proposal` and `sized` are absent when there is none, as the
+    /// log leaves a key out.
     #[must_use]
+    #[allow(clippy::too_many_lines)] // one object, written out key by key
     pub fn status(&self) -> Value {
         let state = self.shared.lock();
         let (number, text, object) = (status_number, status_text, status_object);
@@ -6023,9 +6025,14 @@ impl<S: Streaming + 'static> Session<S> {
             ),
             ("idle", Value::Boolean(idle)),
         ];
-        for (key, value) in [("turn", turn), ("approval", prompt), ("refusal", refusal)]
-            .into_iter()
-            .chain(where_it_is(&state))
+        for (key, value) in [
+            ("turn", turn),
+            ("approval", prompt),
+            ("refusal", refusal),
+            ("corrections", pending_corrections(&state)),
+        ]
+        .into_iter()
+        .chain(where_it_is(&state))
         {
             if let Some(value) = value {
                 status.push((key, value));
@@ -12954,6 +12961,15 @@ fn status_object(pairs: Vec<(&str, Value)>) -> Value {
             .map(|(key, value)| (key.to_owned(), value))
             .collect(),
     )
+}
+
+/// The model's refused changes to the operator's entries not yet answered
+/// (#1050), by their `patch.refused` lines' `seq`, as `GET /state` lists
+/// them; `None` when none waits.
+fn pending_corrections(state: &State) -> Option<Value> {
+    let offered = &state.corrections.offered;
+    (!offered.is_empty())
+        .then(|| Value::Array(offered.keys().map(|seq| status_number(*seq)).collect()))
 }
 
 /// What `GET /state` reads off the log (#756).
@@ -32971,6 +32987,25 @@ pub(in crate::drive) mod tests {
             words, "the dev server is on port 5182",
             "the chip shows the change"
         );
+        // `/state` lists each chip not yet answered, by its line, so a
+        // driver over HTTP sees what the page shows.
+        let pending = |session: &Session<Canned>| -> Vec<u64> {
+            let Value::Object(fields) = session.status() else {
+                unreachable!("the status is an object");
+            };
+            match fields.get("corrections") {
+                None => Vec::new(),
+                Some(Value::Array(seqs)) => seqs
+                    .iter()
+                    .map(|seq| match seq {
+                        Value::Integer(seq) => u64::try_from(*seq).expect("a seq"),
+                        other => unreachable!("a seq: {other:?}"),
+                    })
+                    .collect(),
+                Some(other) => unreachable!("a list: {other:?}"),
+            }
+        };
+        assert_eq!(pending(&session), vec![*supersede, *resolve, *left]);
         // Accepted: the change, as the operator's.
         let corrected = session
             .correction(*supersede, SuggestionAnswer::Accept)
@@ -33010,6 +33045,7 @@ pub(in crate::drive) mod tests {
             rendered.contains("op-2\tuser said\tthe schema has two tables\n"),
             "{rendered}"
         );
+        assert_eq!(pending(&session), vec![*left]);
         // The third chip is left open, and the next ask logs it unanswered.
         session.ask("go on", None).expect("accepted");
         let log = wait_until(&session, "the second turn", two_settled);
