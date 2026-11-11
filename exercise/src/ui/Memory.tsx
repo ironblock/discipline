@@ -1,4 +1,4 @@
-import { useRef, useState, type FormEvent } from 'react';
+import { Fragment, useRef, useState, type FormEvent } from 'react';
 
 import type { Ack, Command } from '../drive/transport.ts';
 import type { Folded, MemoryEntry } from '../session/fold.ts';
@@ -163,8 +163,10 @@ function EntryActions({ id, text, act, yours }: { readonly id: string; readonly 
   };
   return (
     <form className="ex-memory__actions" onSubmit={submit}>
+      {/* Each mode's controls keyed apart: unkeyed, React reused the `flag` button as the flag mode's submit button at
+          the same position, and the click that opened the mode submitted an empty flag. */}
       {mode === 'edit' ? (
-        <>
+        <Fragment key="edit">
           <input
             type="text"
             aria-label={`Edit ${id}`}
@@ -179,9 +181,9 @@ function EntryActions({ id, text, act, yours }: { readonly id: string; readonly 
           <button type="button" aria-label={`Cancel edit ${id}`} onClick={() => setMode('none')}>
             cancel
           </button>
-        </>
+        </Fragment>
       ) : mode === 'flag' ? (
-        <>
+        <Fragment key="flag">
           <input type="text" aria-label={`Flag ${id}`} value={note} placeholder="what is wrong with it?" autoFocus onChange={(e) => setNote(e.target.value)} />
           <button type="submit" data-action="send-flag" aria-label={`Send flag ${id}`}>
             flag
@@ -189,9 +191,9 @@ function EntryActions({ id, text, act, yours }: { readonly id: string; readonly 
           <button type="button" aria-label={`Cancel flag ${id}`} onClick={() => setMode('none')}>
             cancel
           </button>
-        </>
+        </Fragment>
       ) : (
-        <>
+        <Fragment key="none">
           <button type="button" data-action="edit" aria-label={`Edit ${id}`} title="rewrite this entry: yours supersedes it, and the model may not overwrite it" onClick={() => (setDraft(text), setMode('edit'))}>
             edit
           </button>
@@ -221,7 +223,7 @@ function EntryActions({ id, text, act, yours }: { readonly id: string; readonly 
               {retiring ? 'retire it?' : 'retire'}
             </button>
           ) : null}
-        </>
+        </Fragment>
       )}
       {refused ? <span className="ex-memory__refusal">{refused}</span> : null}
     </form>
