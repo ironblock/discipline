@@ -83,8 +83,8 @@ launch() {
 
 # The model's chrome-devtools for $RUN (N8): first on the PATH serve's shell exports (browser.env), it refuses the
 # CLI's own `start` and `stop` -- either takes the run's daemon down, and only `restart` with the run's session id
-# brings it back -- and hands every other command to the CLI by its absolute path. The refusal's words are PROPOSED,
-# for the maintainer.
+# brings it back -- and hands every other command to the CLI by its absolute path. The refusal is the maintainer's
+# approved wording, which says "the user" by his rule.
 shim() {
   local real
   real=$(PATH=$(printf '%s' "$PATH" | tr ':' '\n' | grep -vx "$RUN/bin" | paste -sd: -) command -v chrome-devtools) \
@@ -96,7 +96,7 @@ shim() {
 case "\${1:-}" in
   start|stop)
     [ "\${T1_BROWSER_OPERATOR:-}" = 1 ] && exec "$real" "\$@"
-    echo "chrome-devtools \$1 is refused here: this run's browser belongs to the operator, and its daemon is already running. Use the other chrome-devtools commands." >&2
+    echo "chrome-devtools \$1 is refused here: this run's browser belongs to the user, and its daemon is already running. Use the other chrome-devtools commands." >&2
     exit 1 ;;
 esac
 exec "$real" "\$@"
