@@ -4956,9 +4956,9 @@ impl<S: Streaming + 'static> Session<S> {
     ///
     /// # Errors
     ///
-    /// [`Refusal::Ended`]; [`Refusal::InFlight`] while a turn or a capture is
-    /// in flight; [`Refusal::Empty`] for no content; [`Refusal::UnknownEntry`]
-    /// for an id working memory does not hold, or none kept;
+    /// [`Refusal::Ended`]; [`Refusal::Empty`] for no content;
+    /// [`Refusal::UnknownEntry`] for an id working memory does not hold, or
+    /// none kept;
     /// [`Refusal::NotLive`] for one no longer live.
     pub fn edit_entry(&self, id: &str, content: &str) -> Result<(), Rejected> {
         let mut state = self.shared.lock();
@@ -5108,9 +5108,8 @@ impl<S: Streaming + 'static> Session<S> {
     ///
     /// # Errors
     ///
-    /// [`Refusal::Ended`]; [`Refusal::InFlight`] while a turn or a capture is
-    /// in flight; [`Refusal::UnknownEntry`] for an entry working memory does
-    /// not hold; [`Refusal::NotLive`] for one no longer live; and
+    /// [`Refusal::Ended`]; [`Refusal::UnknownEntry`] for an entry working
+    /// memory does not hold; [`Refusal::NotLive`] for one no longer live; and
     /// [`Refusal::NotTheOperators`] for one the operator did not write.
     pub fn retire_entry(&self, id: &str) -> Result<(), Rejected> {
         let mut state = self.shared.lock();
@@ -5203,9 +5202,8 @@ impl<S: Streaming + 'static> Session<S> {
     ///
     /// # Errors
     ///
-    /// [`Refusal::Ended`]; [`Refusal::InFlight`] while a turn or a capture is
-    /// in flight; [`Refusal::NoWorkingMemory`]; [`Refusal::Empty`] for no
-    /// span; [`Refusal::NotASource`] for a line with no text to keep from;
+    /// [`Refusal::Ended`]; [`Refusal::NoWorkingMemory`]; [`Refusal::Empty`]
+    /// for no span; [`Refusal::NotASource`] for a line with no text to keep from;
     /// [`Refusal::NotInSource`] for a span the line does not hold; and
     /// [`Refusal::Restates`] for a span working memory already holds.
     pub fn keep(&self, from: u64, span: &str, tag: Option<&str>) -> Result<String, Rejected> {
@@ -10733,13 +10731,13 @@ fn keep_refusal(state: &State, from: u64, span: &str) -> Result<(), (Refusal, Op
     }
 }
 
-/// Why an operator edit or flag of `id` with `text` is refused, if it is.
+/// Why an operator edit, flag or retire of `id` with `text` is refused, if
+/// it is. Admitted while a turn or a capture runs, as a keep is (#1042):
+/// each writes working memory only, which nothing in flight reads, and the
+/// next refill renders it as they left it.
 fn operator_refusal(state: &State, id: &str, text: &str) -> Option<Refusal> {
     if state.settlement == Settlement::Ended {
         return Some(Refusal::Ended);
-    }
-    if matches!(state.settlement, Settlement::Turn | Settlement::Capture) {
-        return Some(Refusal::InFlight);
     }
     if text.trim().is_empty() {
         return Some(Refusal::Empty);
@@ -31211,6 +31209,79 @@ pub(in crate::drive) mod tests {
             )
             .expect("kept");
         reads_whole(&session);
+    }
+
+    /// The operator's edit, flag and retire are admitted while a turn runs,
+    /// as a keep is (#1042): each writes working memory only, and the next
+    /// refill renders working memory as they left it -- the edit's content,
+    /// not the entry it replaced, and no retired entry.
+    #[test]
+    fn the_operators_edit_flag_and_retire_are_admitted_mid_turn() {
+        let tree = scratch("operator-entries-mid-turn");
+        std::fs::write(
+            tree.join("notes.md"),
+            "port 5182 is free\nthe cache is warm\nthe build is slow\n",
+        )
+        .expect("a note");
+        let gate = Gate::new();
+        let session = Session::open_with(
+            Canned::new(vec![
+                vec![bash("call-1", "cat notes.md")],
+                deltas(&["Read it."]),
+                vec![Step::Hold(gate.clone()), Step::Delta("Next.".to_owned())],
+            ]),
+            looping(),
+            None,
+            Some(tools(
+                Confinement::Unconfined,
+                &tree,
+                &["cat"],
+                None,
+                Decider::Decline,
+            )),
+            None,
+            Some(interviewing(&[])),
+        );
+        session.ask("look", None).expect("accepted");
+        let log = wait_until(&session, "the first turn", settled);
+        let called = seq_of(&log, |event| matches!(event, Event::ToolCalled(_)));
+        let port = session
+            .keep(called, "port 5182 is free", None)
+            .expect("kept");
+        let cache = session
+            .keep(called, "the cache is warm", None)
+            .expect("kept");
+        let build = session
+            .keep(called, "the build is slow", None)
+            .expect("kept");
+        session.ask("go on", None).expect("accepted");
+        wait_until(&session, "the second turn's request", |log| {
+            log.iter()
+                .filter(|logged| matches!(logged.event, Event::Requested { .. }))
+                .count()
+                == 3
+        });
+        assert_eq!(
+            session.edit_entry(&port, "port 5183 is free"),
+            Ok(()),
+            "an edit mid-turn"
+        );
+        assert_eq!(
+            session.flag_entry(&cache, "still warm?"),
+            Ok(()),
+            "a flag mid-turn"
+        );
+        assert_eq!(session.retire_entry(&build), Ok(()), "a retire mid-turn");
+        gate.open();
+        wait_until(&session, "the second turn", |log| turns_settled(log) == 2);
+        session.declare_meditation(None).expect("admitted");
+        let log = wait_until(&session, "the meditation", meditated);
+        let render = meditated_render(&log);
+        assert!(render.contains("port 5183 is free"), "{render}");
+        assert!(!render.contains("port 5182 is free"), "{render}");
+        assert!(!render.contains("the build is slow"), "{render}");
+        reads_whole(&session);
+        tidy(&[&tree]);
     }
 
     /// #1021: a fork is refused while a turn is in flight, and at a line a
