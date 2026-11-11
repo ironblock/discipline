@@ -6,12 +6,13 @@
 # - `interview_timing = "gap"`: with no step warrant firing there is nothing to cut during the turn;
 # - `interview_shadow` names the other four: evaluated on the patterns, logged as `fork.shadowed`, never fired on
 #   their own;
-# - `interview_shadow_offer = "chips"` (#1031): each shadow is offered on its step as a suggestion the operator
-#   accepts or rejects, every answer logged. The maintainer, 2026-11-03: "my intended use is to see UI offering a
-#   chip off of a particular node... giving me the opportunity to accept or reject it." Shown, a shadow is no longer
-#   independent of the operator's own forks: the acceptance is the measure, and the start row says chips;
-# - self-capture under contract set c3 (#1016): a note in the model's own words, always kept, observed or
-#   self-stated;
+# - `interview_shadow_offer = "hidden"` (#1031, #1038): the shadows are evaluated and logged but kept off the
+#   operator's live view, so they stay independent of the operator's own forks; the maintainer's ruling of
+#   2026-11-11, and the start row says hidden;
+# - `fork_asks = "v6"` (#1050): the maintainer's approved wording, v5 with the judgment ask's supersede sentence
+#   asking for the corrected entry in full;
+# - self-capture under contract set c4 (#1050): the maintainer's approved wording, c3's note in the model's own
+#   words with replace by detail (`replaces` and `with`) and a check (`confirms`);
 # - `note_dedupe = "off"`: the maintainer's ruling of 2026-11-03, on a judged sample of merges on one model line
 #   that found most wrong at tfidf 0.40 (2026-11-03).
 # Everything else is that draft's, and its header's notes hold here too.
@@ -46,16 +47,16 @@ tool_surface = "standard"
 phase_library = "starter"
 starting_phase = "orient"
 self_capture = "on"
-self_capture_contract = "c3"
+self_capture_contract = "c4"
 
 # Manual first (#1021): the operator's scoping toggle alone fires an interview; the other four warrants shadow.
 interview_warrant = ["scoping"]
 interview_timing = "gap"
 interview_shadow = ["read", "evidence", "trouble", "open"]
-interview_shadow_offer = "chips"
+interview_shadow_offer = "hidden"
 mechanical_capture = "on"
 capture_modality = "fields"
-fork_asks = "v4"
+fork_asks = "v6"
 warrant_gate = "regex"
 refutation_interview = "off"
 fork_delivery = "meditation"
