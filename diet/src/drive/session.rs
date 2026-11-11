@@ -25524,6 +25524,61 @@ pub(in crate::drive) mod tests {
         tidy(&[&tree]);
     }
 
+    /// A read, a listing or a write of a path that does not exist after the
+    /// call is no touch (drive g: `cat package.json 2>/dev/null` of a
+    /// missing file was recorded as read): the live lane keeps a touch the
+    /// disk agrees with, and only that.
+    #[test]
+    fn mechanical_capture_records_no_touch_of_a_path_that_does_not_exist() {
+        let tree = scratch("mechanical-missing");
+        std::fs::write(tree.join("notes.md"), "line one\n").expect("the notes");
+        let mut shape = looping();
+        shape.tools = tool_loop::ToolSurface::Standard.tools_timed(false, None);
+        let mut tools = tools(
+            Confinement::Unconfined,
+            &tree,
+            &["ls", "cat"],
+            None,
+            Decider::Decline,
+        );
+        tools.surface = tool_loop::ToolSurface::Standard;
+        tools.read_tool = tool_loop::ToolSurface::Standard.read_tool();
+        tools.approvals_off = true;
+        let mut interview = interviewing(&[log::Warrant::Scoping]);
+        interview.mechanical_capture = true;
+        let bash = |id: &str, command: &str| {
+            vec![Step::call(
+                0,
+                id,
+                "bash",
+                &serde_json::json!({ "command": command }).to_string(),
+            )]
+        };
+        let session = Session::open_with(
+            Canned::new([
+                bash("c1", "cat missing.json 2>/dev/null; cat notes.md"),
+                bash("c2", "ls gone 2>/dev/null; true"),
+                deltas(&["done"]),
+            ]),
+            shape,
+            None,
+            Some(tools),
+            None,
+            Some(interview),
+        );
+        session.ask("look around", None).expect("accepted");
+        wait_until(&session, "the turn", settled);
+        assert_eq!(
+            live_entries(&session),
+            [(
+                "mechanical/notes.md".to_owned(),
+                "files: notes.md".to_owned()
+            )]
+        );
+        reads_whole(&session);
+        tidy(&[&tree]);
+    }
+
     /// #784: a delete retires the path's entry.
     #[test]
     fn mechanical_capture_retires_a_deleted_files_entry() {
