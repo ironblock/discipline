@@ -31163,6 +31163,79 @@ pub(in crate::drive) mod tests {
         reads_whole(&session);
     }
 
+    /// The operator's edit, flag and retire are admitted while a turn runs,
+    /// as a keep is (#1042): each writes working memory only, and the next
+    /// refill renders working memory as they left it -- the edit's content,
+    /// not the entry it replaced, and no retired entry.
+    #[test]
+    fn the_operators_edit_flag_and_retire_are_admitted_mid_turn() {
+        let tree = scratch("operator-entries-mid-turn");
+        std::fs::write(
+            tree.join("notes.md"),
+            "port 5182 is free\nthe cache is warm\nthe build is slow\n",
+        )
+        .expect("a note");
+        let gate = Gate::new();
+        let session = Session::open_with(
+            Canned::new(vec![
+                vec![bash("call-1", "cat notes.md")],
+                deltas(&["Read it."]),
+                vec![Step::Hold(gate.clone()), Step::Delta("Next.".to_owned())],
+            ]),
+            looping(),
+            None,
+            Some(tools(
+                Confinement::Unconfined,
+                &tree,
+                &["cat"],
+                None,
+                Decider::Decline,
+            )),
+            None,
+            Some(interviewing(&[])),
+        );
+        session.ask("look", None).expect("accepted");
+        let log = wait_until(&session, "the first turn", settled);
+        let called = seq_of(&log, |event| matches!(event, Event::ToolCalled(_)));
+        let port = session
+            .keep(called, "port 5182 is free", None)
+            .expect("kept");
+        let cache = session
+            .keep(called, "the cache is warm", None)
+            .expect("kept");
+        let build = session
+            .keep(called, "the build is slow", None)
+            .expect("kept");
+        session.ask("go on", None).expect("accepted");
+        wait_until(&session, "the second turn's request", |log| {
+            log.iter()
+                .filter(|logged| matches!(logged.event, Event::Requested { .. }))
+                .count()
+                == 3
+        });
+        assert_eq!(
+            session.edit_entry(&port, "port 5183 is free"),
+            Ok(()),
+            "an edit mid-turn"
+        );
+        assert_eq!(
+            session.flag_entry(&cache, "still warm?"),
+            Ok(()),
+            "a flag mid-turn"
+        );
+        assert_eq!(session.retire_entry(&build), Ok(()), "a retire mid-turn");
+        gate.open();
+        wait_until(&session, "the second turn", |log| turns_settled(log) == 2);
+        session.declare_meditation(None).expect("admitted");
+        let log = wait_until(&session, "the meditation", meditated);
+        let render = meditated_render(&log);
+        assert!(render.contains("port 5183 is free"), "{render}");
+        assert!(!render.contains("port 5182 is free"), "{render}");
+        assert!(!render.contains("the build is slow"), "{render}");
+        reads_whole(&session);
+        tidy(&[&tree]);
+    }
+
     /// #1021: a fork is refused while a turn is in flight, and at a line a
     /// meditation has since replaced on the trunk; the operator's kept
     /// entry rides the refill.
