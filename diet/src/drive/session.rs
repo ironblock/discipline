@@ -7996,6 +7996,14 @@ fn run_calls<S: Streaming + 'static>(
     // The operator's wraps (#1030), at this boundary: the request in flight
     // stood as sent; the next one carries them.
     apply_wraps(&mut state, shape, Some(exchange), turn);
+    // A move the model accepted to meditate into (N2 (b)), made here, at the
+    // turn's next request boundary, rather than after the turn.
+    if let Some(to) = state.move_after_turn.clone()
+        && phase_meditation(&shared.template, &mut state, shape, &to)
+    {
+        state.move_after_turn = None;
+        compacted_out(&mut state, shape, exchange);
+    }
     // The automatic meditation (#617), between the turn's steps too; under
     // a native summary (#936) its request first, waited for.
     let (mut state, summary) = window_summary(shared, state, shape, false);
@@ -12744,25 +12752,90 @@ fn window_meditation(
     else {
         return false;
     };
+    refill_mid_turn(
+        template,
+        state,
+        shape,
+        (ask, steps, keep_from),
+        (
+            (
+                crate::meditation::Reason::Window,
+                Some(log::MeditationFired {
+                    prompt_tokens: prompt,
+                    window,
+                    native_reserve: Some(native),
+                    fork_room,
+                }),
+            ),
+            None,
+        ),
+        summary,
+    );
+    true
+}
+
+/// A move the model accepted to meditate into (#788, N2 (b)), made at this
+/// request boundary as a window refill is: the trunk refilled into the
+/// phase `to`, and the turn's own messages so far riding after the render.
+/// `false` when it cannot be made here -- no working memory to render, a
+/// tangent open, a native summary not in hand, or a shape that does not
+/// start with the trunk -- and the move waits for the turn's end, as before.
+fn phase_meditation(
+    template: &RequestShape,
+    state: &mut State,
+    shape: &mut RequestShape,
+    to: &str,
+) -> bool {
+    let Some(interview) = state.interview.as_ref() else {
+        return false;
+    };
+    if state.tangent.is_some()
+        || carries_native(state)
+        || interview.object.live().next().is_none()
+        || !shape.messages.starts_with(&state.trunk)
+    {
+        return false;
+    }
+    let split = split_turn(&shape.messages[state.trunk.len()..]);
+    refill_mid_turn(
+        template,
+        state,
+        shape,
+        split,
+        (
+            (crate::meditation::Reason::Phase, None),
+            Some(to.to_owned()),
+        ),
+        None,
+    );
+    true
+}
+
+/// The refill a meditation makes between a turn's steps (#617, and a move's,
+/// N2): the trunk refilled for `meditation`, into the phase `to` when it
+/// moves, and the running turn split (#813, #931) -- its ask, then its last
+/// step, the pending call and its result, riding after the render; the steps
+/// before it compacted.
+fn refill_mid_turn(
+    template: &RequestShape,
+    state: &mut State,
+    shape: &mut RequestShape,
+    (ask, steps, keep_from): (usize, u64, usize),
+    (meditation, to): (
+        (crate::meditation::Reason, Option<log::MeditationFired>),
+        Option<String>,
+    ),
+    summary: Option<&crate::meditation::native::Summary>,
+) {
     let mut own = shape.messages.split_off(state.trunk.len());
-    // The running turn split (#813, #931): its ask, then its last step --
-    // the pending call and its result; the steps before it are compacted.
     let kept = own.split_off(keep_from);
     let dropped = own.split_off(ask);
     let riding: Vec<Message> = own.iter().chain(&kept).cloned().collect();
     let mut meditated = refilled(
         template,
         state,
-        (
-            crate::meditation::Reason::Window,
-            Some(log::MeditationFired {
-                prompt_tokens: prompt,
-                window,
-                native_reserve: Some(native),
-                fork_room,
-            }),
-        ),
-        None,
+        meditation,
+        to,
         (&dropped, &riding),
         summary,
     );
@@ -12780,7 +12853,6 @@ fn window_meditation(
     shape.messages.clone_from(&state.trunk);
     shape.messages.extend(own);
     shape.messages.extend(kept);
-    true
 }
 
 /// The running turn's exchange after a window meditation refilled the trunk
@@ -13777,10 +13849,18 @@ fn phase_call<S>(
                 });
                 if meditate {
                     state.move_after_turn = Some(to.clone());
+                    // Said so, in the maintainer's approved words: the move
+                    // is made before the next step (N2 (b)), or at the turn's
+                    // end when it cannot be made there, and until then the
+                    // model is where it was.
+                    format!(
+                        "accepted: the move to {to} is made through a meditation before your next step, or at this turn's end. Until then you are still in {}.",
+                        state.phase.as_deref().unwrap_or("no phase")
+                    )
                 } else {
                     moved(&shared.template, &mut state, &to, PhaseChoice::Keep);
+                    "accepted".to_owned()
                 }
-                "accepted".to_owned()
             } else {
                 "declined".to_owned()
             }
@@ -35922,9 +36002,10 @@ pub(in crate::drive) mod tests {
 
     /// #788: the operator's proposal says whether the move it proposes
     /// meditates -- on its line -- and when the model accepts, the
-    /// meditation that moves the phase runs once the turn has ended.
+    /// meditation that moves the phase runs at the turn's next request
+    /// boundary (N2 (b)), within the turn.
     #[test]
-    fn an_accepted_proposal_to_meditate_moves_through_a_meditation_after_the_turn() {
+    fn an_accepted_proposal_to_meditate_moves_through_a_meditation_within_the_turn() {
         const SAID: &str = "The schema has two tables.";
         let mut interview = Interview {
             self_capture: Some(crate::capture::tools::Cadence::DEFAULT),
@@ -35969,7 +36050,13 @@ pub(in crate::drive) mod tests {
             }
         )));
         session.ask("plan it", None).expect("accepted");
-        let log = wait_until(&session, "the meditation", meditated);
+        // The meditation is within the turn now: wait for the turn's end too.
+        let log = wait_until(&session, "the meditation and the turn", |log| {
+            meditated(log)
+                && log
+                    .iter()
+                    .any(|logged| matches!(logged.event, Event::TurnSettled { .. }))
+        });
         assert!(log.iter().any(|logged| matches!(
             &logged.event,
             Event::PhaseRuled { by: Some(Key::Model), choice: PhaseChoice::Meditation, to, .. }
@@ -35990,9 +36077,118 @@ pub(in crate::drive) mod tests {
                 _ => None,
             })
             .expect("a meditation that moved to build");
-        assert!(meditated_at > settled_at, "after the turn");
+        // Made at the turn's next request boundary (N2 (b)), not after it.
+        assert!(meditated_at < settled_at, "within the turn");
+        assert_eq!(session.shared.lock().phase.as_deref(), Some("build"));
+        // The model is told the move waits for the turn's end, not that it is
+        // made (the maintainer's approved words).
+        let shown = log
+            .iter()
+            .find_map(|logged| match &logged.event {
+                Event::ToolCalled(line) if line.id == "call-a" => line.shown.clone(),
+                _ => None,
+            })
+            .expect("the phase call's line");
+        assert_eq!(
+            shown,
+            "accepted: the move to build is made through a meditation before your next step, or at this turn's end. Until then you are still in plan."
+        );
+        reads_whole(&session);
+    }
+
+    /// N2 (b): the model's acceptance of the operator's proposal to move
+    /// through a meditation, mid-turn, is made at the next request boundary,
+    /// as a window refill is: a meditation into the new phase between the
+    /// turn's steps, the turn's own messages riding after the render, and the
+    /// turn's next trunk request in the new phase -- not after the turn.
+    #[test]
+    fn an_accepted_proposal_to_meditate_moves_at_the_next_request_boundary() {
+        const SAID: &str = "The plan has three steps.";
+        let mut interview = Interview {
+            operator_unilateral: true,
+            ..phased()
+        };
+        interview.rules = Vec::new();
+        interview.self_capture = Some(crate::capture::tools::Cadence::DEFAULT);
+        // A turn of steps: the tool loop, the phase tool and the record tool
+        // declared on it.
+        let tree = scratch("move-at-the-boundary");
+        let mut shape = looping();
+        declare_self_capture(&mut shape, Some(&interview));
+        declare_phase_tool(&mut shape, Some(&interview));
+        let session = Session::open_with(
+            Canned::new(vec![
+                vec![
+                    Step::Delta(SAID.to_owned()),
+                    Step::call(
+                        0,
+                        "call-f",
+                        "update_record",
+                        &serde_json::json!({ "field": "fact", "content": SAID }).to_string(),
+                    ),
+                    Step::call(
+                        1,
+                        "call-a",
+                        PHASE_TOOL,
+                        &serde_json::json!({"to": "build", "accept": true, "reason": "planned"})
+                            .to_string(),
+                    ),
+                ],
+                deltas(&["Building."]),
+            ]),
+            shape,
+            None,
+            Some(tools(
+                Confinement::Unconfined,
+                &tree,
+                &[],
+                None,
+                Decider::Decline,
+            )),
+            None,
+            Some(interview),
+        );
+        session.propose_phase("build", true).expect("proposed");
+        session.ask("plan it", None).expect("accepted");
+        let log = wait_until(&session, "the turn and the move", |log| {
+            meditated(log)
+                && log
+                    .iter()
+                    .any(|logged| matches!(logged.event, Event::TurnSettled { .. }))
+        });
+        let seq_of_first = |pick: &dyn Fn(&Event) -> bool| {
+            log.iter()
+                .find(|logged| pick(&logged.event))
+                .map(|logged| logged.seq)
+        };
+        let moved = seq_of_first(&|event| {
+            matches!(event, Event::Meditated { phase: Some(moved), .. } if moved.to == "build")
+        })
+        .expect("a meditation that moved to build");
+        let settled_at = seq_of_first(&|event| matches!(event, Event::TurnSettled { .. }))
+            .expect("the turn settled");
+        let second_request = log
+            .iter()
+            .filter(|logged| {
+                matches!(
+                    logged.event,
+                    Event::Requested {
+                        lane: Lane::Trunk,
+                        ..
+                    }
+                )
+            })
+            .nth(1)
+            .map(|logged| logged.seq)
+            .expect("the turn's second trunk request");
+        assert!(
+            moved < second_request,
+            "the move, then the next step's request"
+        );
+        assert!(second_request < settled_at, "within the turn");
         assert_eq!(session.shared.lock().phase.as_deref(), Some("build"));
         reads_whole(&session);
+        tidy(&[&tree]);
     }
 
     /// #788: the operator moves alone only with `operator_unilateral`; a

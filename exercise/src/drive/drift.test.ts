@@ -47,7 +47,7 @@ describe('every kind diet writes, the fold reads', () => {
  * The kinds no valid fixture of diet's carries, so `log.test.ts`'s folding of them reads none: named here, so a kind
  * diet adds without a fixture is a decision someone writes down, and one that gains a fixture leaves the list.
  */
-const UNCOVERED = ['phase.proposed', 'phase.answered', 'phase.started', 'tangent.open', 'tangent.close', 'reminded', 'trunk.clamped', 'trunk.waited', 'warrant.gated'];
+const UNCOVERED = ['phase.started', 'tangent.open', 'tangent.close', 'reminded', 'trunk.clamped', 'trunk.waited', 'warrant.gated'];
 
 describe("diet's valid fixtures, by kind", () => {
   it('carry every kind but the ones named uncovered', () => {

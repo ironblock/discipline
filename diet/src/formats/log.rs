@@ -268,6 +268,13 @@
 //! log that declares 28 or less and carries it is refused. For a reader of
 //! earlier logs, the migration is nothing: no session declared one.
 //!
+//! v47 (N2) makes a move at the turn's next request boundary: a
+//! `meditation` whose `reason` is `phase` -- the move the model accepted to
+//! meditate into -- may refill under the running turn, as a `window` one may
+//! since v7, the turn's exchange riding after the refill. A log that declares
+//! 46 or less still refuses one under a turn. For a reader of earlier logs,
+//! the migration is nothing: none refilled under a turn.
+//!
 //! v46 (N4) queues the operator's fork posted while a turn runs: a
 //! `fork` line's `queued_at` is when the operator posted it, a count of
 //! milliseconds on the line's own clock, never greater than the line's
@@ -512,12 +519,12 @@ use super::record::vocabulary;
 struct LogParser;
 
 /// The version this module writes, as `session.start` states it.
-pub const VERSION: i64 = 46;
+pub const VERSION: i64 = 47;
 
 /// Every version this module reads.
 pub const READS: &[i64] = &[
     0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25,
-    26, 27, 28, 29, 30, 31, 32, 33, 34, 35, 36, 37, 38, 39, 40, 41, 42, 43, 44, 45, 46,
+    26, 27, 28, 29, 30, 31, 32, 33, 34, 35, 36, 37, 38, 39, 40, 41, 42, 43, 44, 45, 46, 47,
 ];
 
 /// How recent an input event must be, at the moment a turn settles, for the
@@ -3580,7 +3587,7 @@ fn gap_once(
 /// awaits and no fork is unsettled.
 fn meditation_at(
     at_turn: u32,
-    reason: MeditationReason,
+    (reason, declared): (MeditationReason, i64),
     turns: u32,
     settled: &BTreeSet<u32>,
     state: State,
@@ -3595,6 +3602,16 @@ fn meditation_at(
     // so it may refill under the turn whose next request it makes fit; that
     // turn's own exchange rides after the refill, as it rode after the trunk.
     if reason == MeditationReason::Window && state == State::Turn && !settled.contains(&turns) {
+        return Ok(());
+    }
+    // A move the model accepted to meditate into (v47, N2): made at the
+    // turn's next request boundary as a window refill is, so it refills under
+    // the turn too, its exchange riding after the refill.
+    if reason == MeditationReason::Phase
+        && declared >= 47
+        && state == State::Turn
+        && !settled.contains(&turns)
+    {
         return Ok(());
     }
     if turns > 0 && !settled.contains(&turns) {
@@ -4611,8 +4628,15 @@ fn check(lines: &[Line]) -> Result<(), LogError> {
             Event::Meditation {
                 at_turn, reason, ..
             } => {
-                meditation_at(*at_turn, *reason, turns, &settled, state, &forks)
-                    .map_err(|why| at(index, why))?;
+                meditation_at(
+                    *at_turn,
+                    (*reason, declared),
+                    turns,
+                    &settled,
+                    state,
+                    &forks,
+                )
+                .map_err(|why| at(index, why))?;
                 forks.meditated = Some(*at_turn);
                 forks.last_meditation = Some(line.seq);
             }
@@ -11370,16 +11394,17 @@ mod tests {
 
     /// #583, #878, #904, #555, #931, #936, #910, #942, #926, #932, #948, #971, #1016, #1021,
     /// #1022, #1031, #1030, #1037, #1038, #1050, #1094, the withdrawn chip,
-    /// N3's asks, and the queued fork (N4): this module writes v46.
+    /// N3's asks, the queued fork (N4), and the move at the boundary (N2):
+    /// this module writes v47.
     #[test]
-    fn this_module_writes_v46_and_reads_every_version_before_it() {
-        assert_eq!(super::VERSION, 46);
+    fn this_module_writes_v47_and_reads_every_version_before_it() {
+        assert_eq!(super::VERSION, 47);
         assert_eq!(
             super::READS,
             &[
                 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22,
                 23, 24, 25, 26, 27, 28, 29, 30, 31, 32, 33, 34, 35, 36, 37, 38, 39, 40, 41, 42, 43,
-                44, 45, 46
+                44, 45, 46, 47
             ]
         );
     }
