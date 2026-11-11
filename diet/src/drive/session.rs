@@ -5932,7 +5932,8 @@ impl<S: Streaming + 'static> Session<S> {
     /// is (#1037): its `phase`, the model's `proposal` awaiting a ruling --
     /// its `call`, `from` and `to` -- and the latest request's prompt as
     /// `sized`: its `prompt` tokens, its `output_cap` and the `window` it
-    /// was sized against. `turn`, `approval`, `refusal`, `corrections`,
+    /// was sized against, until a refill or a tangent's close replaces the
+    /// trunk it sized. `turn`, `approval`, `refusal`, `corrections`,
     /// `phase`, `proposal` and `sized` are absent when there is none, as the
     /// log leaves a key out.
     #[must_use]
@@ -5945,6 +5946,7 @@ impl<S: Streaming + 'static> Session<S> {
             settled,
             refusal,
             unaddressed,
+            sized_stale,
         } = LogRead::of(&state);
         let refusal = refusal.map(|(seq, command, because)| {
             object(vec![
@@ -6032,8 +6034,10 @@ impl<S: Streaming + 'static> Session<S> {
             ("corrections", pending_corrections(&state)),
         ]
         .into_iter()
-        .chain(where_it_is(&state))
-        {
+        .chain(
+            where_it_is(&state)
+                .map(|(key, value)| (key, value.filter(|_| !(key == "sized" && sized_stale)))),
+        ) {
             if let Some(value) = value {
                 status.push((key, value));
             }
@@ -12983,6 +12987,10 @@ struct LogRead<'a> {
     refusal: Option<(u64, CommandKind, Refusal)>,
     /// What the latest hold left unaddressed.
     unaddressed: Option<&'a Vec<String>>,
+    /// Whether a refill or a tangent's close replaced the trunk after its
+    /// latest request: the sizing `/state` would show describes a trunk that
+    /// is gone, so it is left out until the next trunk request is sized.
+    sized_stale: bool,
 }
 
 impl<'a> LogRead<'a> {
@@ -12992,6 +13000,7 @@ impl<'a> LogRead<'a> {
             settled: None,
             refusal: None,
             unaddressed: None,
+            sized_stale: false,
         };
         for logged in &state.log {
             match &logged.event {
@@ -13005,6 +13014,10 @@ impl<'a> LogRead<'a> {
                     command, because, ..
                 } => read.refusal = Some((logged.seq, *command, *because)),
                 Event::MeditationHeld { unaddressed, .. } => read.unaddressed = Some(unaddressed),
+                Event::Meditated { .. } | Event::TangentClosed { .. } => read.sized_stale = true,
+                Event::Requested {
+                    lane: Lane::Trunk, ..
+                } => read.sized_stale = false,
                 _ => {}
             }
         }
