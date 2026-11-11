@@ -30941,6 +30941,56 @@ pub(in crate::drive) mod tests {
         tidy(&[&tree]);
     }
 
+    /// A chip whose step a refill took off the trunk can no longer be
+    /// accepted, so it is no longer offered: once the refill is logged, a
+    /// `suggestion` line answers it, and an accept is refused as answered,
+    /// never `not-on-the-trunk` -- what the page and the log offer is what
+    /// `suggestion` admits.
+    #[test]
+    fn a_chip_whose_step_a_refill_replaced_is_answered_and_no_longer_offered() {
+        let tree = scratch("chip-off-the-trunk");
+        let session = offering(
+            &tree,
+            vec![
+                vec![bash("call-1", "cat notes.md")],
+                deltas(&["Read it. Next, I will write the schema."]),
+            ],
+            (&[log::Warrant::Read], true),
+            Vec::new(),
+        );
+        session.ask("look around", None).expect("accepted");
+        let log = wait_until(&session, "the turn and its gap", settled);
+        let (shadow, ..) = shadow_lines(&log)
+            .into_iter()
+            .find(|(_, why, ..)| *why == log::Warrant::Read)
+            .expect("a read shadow");
+        let called = seq_of(&log, |event| matches!(event, Event::ToolCalled(_)));
+        session.keep(called, "a note", None).expect("kept");
+        session.declare_meditation(None).expect("admitted");
+        let log = wait_until(&session, "the meditation", meditated);
+        let refilled = seq_of(&log, |event| matches!(event, Event::Meditated { .. }));
+        let answered: Vec<_> = log
+            .iter()
+            .filter_map(|logged| match &logged.event {
+                Event::Suggestion {
+                    shadow: answered,
+                    outcome,
+                    ..
+                } if *answered == shadow => Some((logged.seq, *outcome)),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(answered.len(), 1, "one answer to the chip: {answered:?}");
+        assert!(answered[0].0 > refilled, "answered after the refill");
+        assert_ne!(answered[0].1, log::SuggestionOutcome::Accepted);
+        assert_eq!(
+            session.suggestion(shadow, SuggestionAnswer::Accept),
+            Err(Rejected::Refused(Refusal::AnsweredAlready))
+        );
+        reads_whole(&session);
+        tidy(&[&tree]);
+    }
+
     /// #1031: offered as chips, each shadow is a suggestion the operator
     /// answers. Rejected, it is logged so, and a second answer is refused;
     /// accepted, it fires as the operator's fork at the shadow's trunk
