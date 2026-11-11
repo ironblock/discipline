@@ -730,6 +730,8 @@ const KEY_REPORT: &str = "report";
 #[derive(Debug, Clone, Default)]
 pub struct Lane {
     state: State,
+    /// The home directory a leading tilde names, when the lane was told it.
+    home: Option<PathBuf>,
     files: BTreeMap<PathBuf, Touch>,
     commands: Vec<CommandRun>,
     failures: Vec<Failure>,
@@ -874,6 +876,13 @@ impl Lane {
         let mut lane = Self::default();
         lane.state.cwd = Cwd::Path(cwd);
         lane
+    }
+
+    /// This lane, told the home directory a leading tilde names.
+    #[must_use]
+    pub fn with_home(mut self, home: PathBuf) -> Self {
+        self.home = Some(home);
+        self
     }
 
     /// The files tool call `event` touched, and how, in the order derived
@@ -2192,6 +2201,34 @@ mod tests {
             lane_after(&[shell("t1", "cd /abs/../x/./y")]).cwd(),
             &at("/x/y")
         );
+    }
+
+    /// A lane told the home directory (a live session's: its commands'
+    /// `HOME`) resolves a leading tilde the shell would expand -- `cd`,
+    /// `cd ~`, `cd ~/<path>` -- so the paths after it are placed (drive g:
+    /// `cd ~/<reference>/demos/minecraft && grep … ../minecraft.ts` left
+    /// `../minecraft.ts` relative to nothing). A word with anything else to
+    /// expand, or `~user`, still loses the cwd.
+    #[test]
+    fn a_lane_that_knows_home_resolves_a_leading_tilde() {
+        let homed = |events: &[Event]| {
+            let mut lane = Lane::default().with_home(PathBuf::from("/h"));
+            for event in events {
+                lane.observe(event);
+            }
+            lane
+        };
+        let lane = homed(&[shell("t1", "cd ~/ref/demo && cat a.ts ../b.ts")]);
+        assert_eq!(lane.cwd(), &at("/h/ref/demo"));
+        assert_eq!(
+            touched(&lane, "/h/ref/demo/a.ts"),
+            Some((TouchKind::Read, true))
+        );
+        assert_eq!(touched(&lane, "/h/ref/b.ts"), Some((TouchKind::Read, true)));
+        assert_eq!(homed(&[shell("t1", "cd ~")]).cwd(), &at("/h"));
+        assert_eq!(homed(&[shell("t1", "cd")]).cwd(), &at("/h"));
+        assert_eq!(homed(&[shell("t1", "cd ~/$X")]).cwd(), &Cwd::Unknown);
+        assert_eq!(homed(&[shell("t1", "cd ~other/x")]).cwd(), &Cwd::Unknown);
     }
 
     #[test]

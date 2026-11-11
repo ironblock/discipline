@@ -25701,6 +25701,68 @@ pub(in crate::drive) mod tests {
         tidy(&[&tree]);
     }
 
+    /// Each call runs in a fresh shell that starts in the worktree, so a
+    /// `cd` in one call is no part of the next: the live lane starts every
+    /// call there, and a path is placed against the directory the call was
+    /// in -- one entry per file, whichever directory it was named from.
+    #[test]
+    fn mechanical_capture_starts_each_call_in_the_worktree() {
+        let tree = scratch("mechanical-cwd");
+        std::fs::create_dir_all(tree.join("sub")).expect("a directory");
+        std::fs::write(tree.join("sub/a.txt"), "in sub\n").expect("sub's file");
+        std::fs::write(tree.join("a.txt"), "at the top\n").expect("the top's file");
+        let mut shape = looping();
+        shape.tools = tool_loop::ToolSurface::Standard.tools_timed(false, None);
+        let mut tools = tools(
+            Confinement::Unconfined,
+            &tree,
+            &["cat"],
+            None,
+            Decider::Decline,
+        );
+        tools.surface = tool_loop::ToolSurface::Standard;
+        tools.read_tool = tool_loop::ToolSurface::Standard.read_tool();
+        tools.approvals_off = true;
+        let mut interview = interviewing(&[log::Warrant::Scoping]);
+        interview.mechanical_capture = true;
+        let bash = |id: &str, command: &str| {
+            vec![Step::call(
+                0,
+                id,
+                "bash",
+                &serde_json::json!({ "command": command }).to_string(),
+            )]
+        };
+        let session = Session::open_with(
+            Canned::new([
+                bash("c1", "cd sub && cat a.txt"),
+                bash("c2", "cat a.txt sub/a.txt"),
+                deltas(&["done"]),
+            ]),
+            shape,
+            None,
+            Some(tools),
+            None,
+            Some(interview),
+        );
+        session.ask("look around", None).expect("accepted");
+        wait_until(&session, "the turn", settled);
+        let mut live = live_entries(&session);
+        live.sort();
+        assert_eq!(
+            live,
+            [
+                ("mechanical/a.txt".to_owned(), "files: a.txt".to_owned()),
+                (
+                    "mechanical/sub/a.txt".to_owned(),
+                    "files: sub/a.txt".to_owned()
+                ),
+            ]
+        );
+        reads_whole(&session);
+        tidy(&[&tree]);
+    }
+
     /// #784: a delete retires the path's entry.
     #[test]
     fn mechanical_capture_retires_a_deleted_files_entry() {
