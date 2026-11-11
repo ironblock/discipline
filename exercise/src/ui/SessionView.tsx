@@ -234,7 +234,26 @@ export function SessionView({ session, link = 'live', linkWhy, onReconnect, surf
   // The trunk as mounted: its newest TRUNK_SHOWN blocks, and as many pages before them as the person asked for. A
   // three-hour session mounted every block it had (28.5k DOM nodes at 105k log lines), and every click waited on them.
   const [pages, setPages] = useState(0);
-  const hidden = Math.max(0, trunkOrder.length - trunkShown * (pages + 1));
+  const locked = useRef(true);
+  // The window's start holds while a dialog is open on the trunk -- a keep, fork or wrap picker on a block near its top
+  // would unmount with that block as newer ones land -- or while the reader has scrolled away from the newest, and lets
+  // go when both are over.
+  const [dialogOpen, setDialogOpen] = useState(false);
+  useEffect(() => {
+    const root = stage.current;
+    if (!root) return;
+    const seen = () => setDialogOpen(root.querySelector('dialog[open]') !== null);
+    const observer = new MutationObserver(seen);
+    observer.observe(root, { subtree: true, attributes: true, attributeFilter: ['open'] });
+    seen();
+    return () => observer.disconnect();
+  }, []);
+  const heldFirst = useRef<string>(undefined);
+  const natural = Math.max(0, trunkOrder.length - trunkShown * (pages + 1));
+  if (!(dialogOpen || (follow && !locked.current))) heldFirst.current = undefined;
+  else heldFirst.current ??= trunkOrder[natural];
+  const heldAt = heldFirst.current === undefined ? -1 : trunkOrder.indexOf(heldFirst.current);
+  const hidden = heldAt >= 0 ? Math.min(natural, heldAt) : natural;
   const shown = new Set(trunkOrder.slice(hidden));
   // What the mounted side calls wrote: the entries their lines into working memory run to, kept mounted there.
   const linked = new Set([...session.branches.entries()].flatMap(([at, branches]) => (shown.has(at) ? branches.flatMap((b) => b.patches.map((p) => p.entryId)) : [])));
@@ -436,7 +455,7 @@ export function SessionView({ session, link = 'live', linkWhy, onReconnect, surf
   // Following: the bottom of the page is now -- the newest trunk node, or the
   // side calls queued past it -- so the view is locked to it while the page
   // grows, until the person scrolls away from it, and again once they return.
-  const locked = useRef(true);
+  // (`locked` is declared above, where the trunk's window reads it.)
   useEffect(() => {
     if (!follow) return;
     const page = document.documentElement;
