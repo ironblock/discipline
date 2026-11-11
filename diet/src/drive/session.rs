@@ -4691,6 +4691,11 @@ impl<S: Streaming + 'static> Session<S> {
         let phase_document = (choice != PhaseChoice::Stay)
             .then(|| state.document_of(&to))
             .flatten();
+        // Declined, the model is told so on its next ask: before, it was
+        // shown nothing.
+        if choice == PhaseChoice::Stay {
+            state.operator_note_due = Some(declined_proposal_note(from.as_deref(), &to));
+        }
         state.push(Event::PhaseRuled {
             call: Some(call),
             by: None,
@@ -13627,6 +13632,22 @@ pub fn start_cwd_note(cwd: &str) -> String {
     crate::dogma::Template::StartCwd
         .fill(&[(crate::dogma::Hole::Cwd, cwd)])
         .expect("START_CWD's one hole is `cwd`")
+}
+
+/// The note on the next ask that tells the model the operator declined its
+/// proposal to move from `from` to `to`: the pinned `PHASE_DECLINED`.
+///
+/// # Panics
+///
+/// Never: the template's holes are `from` and `to`, which a test holds.
+#[must_use]
+pub fn declined_proposal_note(from: Option<&str>, to: &str) -> String {
+    crate::dogma::Template::PhaseDeclined
+        .fill(&[
+            (crate::dogma::Hole::From, from.unwrap_or("none")),
+            (crate::dogma::Hole::To, to),
+        ])
+        .expect("PHASE_DECLINED's holes are `from` and `to`")
 }
 
 /// The phase tool's definition (#788): `to` and `reason`, and `accept`, a
@@ -36876,6 +36897,32 @@ pub(in crate::drive) mod tests {
                     == 2
         });
         assert_eq!(phase_notes(&log).len(), 1, "the opening note, and no other");
+        reads_whole(&session);
+    }
+
+    /// A declined proposal (`stay`) is told to the model on its next ask: a
+    /// note says the user declined the move and the model stays in its
+    /// phase, in the maintainer's words.
+    #[test]
+    fn a_declined_proposal_is_a_note_on_the_next_ask() {
+        let (session, _) = proposing("build", vec![deltas(&["Staying in plan."])]);
+        session
+            .ratify_phase("call-p", PhaseChoice::Stay)
+            .expect("ruled");
+        session.ask("go on", None).expect("accepted");
+        let log = wait_until(&session, "the second turn", two_settled);
+        let note = declined_proposal_note(Some("plan"), "build");
+        assert_eq!(
+            note,
+            "The user declined your move from phase plan to phase build. You stay in phase plan."
+        );
+        assert!(
+            log.iter().any(|logged| matches!(
+                &logged.event,
+                Event::Notified { turn: 2, text } if *text == note
+            )),
+            "the note rode the ask: {note}"
+        );
         reads_whole(&session);
     }
 

@@ -179,7 +179,13 @@ pub mod vocabulary;
 ///   drops that note. Before, the model was never told where it was. The
 ///   maintainer's approved wording (relayed by Dispatch). No template and no
 ///   set already pinned changed.
-pub const VERSION: u32 = 19;
+/// * 20: `PHASE_DECLINED` joins, the note on the next ask that tells the
+///   model the user declined its phase proposal (`stay`), which before
+///   sent it nothing: "The user declined your move from phase {from} to
+///   phase {to}. You stay in phase {from}." The maintainer's approved
+///   wording, cut to the fact, saying "the user" by his rule (relayed by
+///   Dispatch). No template and no set already pinned changed.
+pub const VERSION: u32 = 20;
 
 /// The digest of `diet/dogma/MANIFEST.tsv` that [`VERSION`] was declared
 /// against.
@@ -189,7 +195,7 @@ pub const VERSION: u32 = 19;
 /// that recomputes it fails until both lines are edited together. Without it
 /// the manifest could be regenerated after an edit and the version left at
 /// what it was, which is a bump that never happened.
-pub const MANIFEST_DIGEST: &str = "0386822ec2bfdfcb";
+pub const MANIFEST_DIGEST: &str = "dc1521e4f057e035";
 
 /// The per-model operating points, as TOML text, exactly as pinned.
 ///
@@ -440,6 +446,9 @@ pub enum Template {
     /// The line that names the working directory: a note on the session's
     /// first ask, and the last line of every refill's render.
     StartCwd,
+    /// The note that tells the model the operator declined its phase
+    /// proposal (`stay`).
+    PhaseDeclined,
 }
 
 impl Template {
@@ -477,6 +486,7 @@ impl Template {
         Self::PhaseProposed,
         Self::PhaseOperatorProposal,
         Self::StartCwd,
+        Self::PhaseDeclined,
     ];
 
     /// The name the manifest pins this template under, and the stem of its
@@ -516,6 +526,7 @@ impl Template {
             Self::PhaseProposed => "PHASE_PROPOSED",
             Self::PhaseOperatorProposal => "PHASE_OPERATOR_PROPOSAL",
             Self::StartCwd => "START_CWD",
+            Self::PhaseDeclined => "PHASE_DECLINED",
         }
     }
 
@@ -574,6 +585,7 @@ impl Template {
                 include_str!("../../dogma/templates/PHASE_OPERATOR_PROPOSAL.txt")
             }
             Self::StartCwd => include_str!("../../dogma/templates/START_CWD.txt"),
+            Self::PhaseDeclined => include_str!("../../dogma/templates/PHASE_DECLINED.txt"),
         }
     }
 
@@ -589,7 +601,8 @@ impl Template {
             | Self::PhaseToolReason
             | Self::PhaseProposed
             | Self::PhaseOperatorProposal
-            | Self::StartCwd => Site::Trunk,
+            | Self::StartCwd
+            | Self::PhaseDeclined => Site::Trunk,
             Self::ApiSurface
             | Self::Doctrine
             | Self::DocRead
@@ -633,7 +646,7 @@ impl Template {
             Self::Supersede => &[Hole::OldEntry, Hole::NewQuote],
             Self::ForkNoteAdvisory | Self::ForkNoteImperative => &[Hole::Entry],
             Self::PhaseProposed => &[Hole::To],
-            Self::PhaseOperatorProposal => &[Hole::From, Hole::To],
+            Self::PhaseOperatorProposal | Self::PhaseDeclined => &[Hole::From, Hole::To],
             Self::StartCwd => &[Hole::Cwd],
             Self::AuditQ
             | Self::AuditQCadence
