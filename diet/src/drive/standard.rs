@@ -628,9 +628,27 @@ fn write(args: &Args, tools: &Tools, stop: &dyn Fn() -> bool) -> Done {
     }
 }
 
+/// `edit`'s file (N8): its `file_path`, or `path`, the name `read` and
+/// `write` take it under; both, when they name the same file. Two different
+/// files are refused, and neither is refused as a missing `file_path`.
+fn edit_path(args: &Args) -> Result<&str, String> {
+    let given = |key: &str| match args.get(key) {
+        None | Some(serde_json::Value::Null) => Ok(None),
+        Some(serde_json::Value::String(value)) => Ok(Some(value.as_str())),
+        Some(_) => Err(format!("params/{key} must be string")),
+    };
+    match (given("file_path")?, given("path")?) {
+        (Some(file_path), Some(path)) if file_path != path => Err(format!(
+            "params/file_path and params/path name different files: '{file_path}' and '{path}'"
+        )),
+        (Some(file), _) | (None, Some(file)) => Ok(file),
+        (None, None) => Err("params must have required property 'file_path'".to_owned()),
+    }
+}
+
 fn edit(args: &Args, tools: &Tools, stop: &dyn Fn() -> bool) -> Done {
     let (path, old, new) = match (
-        required(args, "file_path"),
+        edit_path(args),
         required(args, "old_string"),
         required(args, "new_string"),
     ) {
@@ -1287,8 +1305,8 @@ mod tests {
     }
 
     /// N8 (the maintainer, 2026-11-11): `edit` takes its file as `path`, the
-    /// name `read` and `write` use, as well as `file_path` (drive g: "params
-    /// must have required property 'file_path'"); the same file under both
+    /// name `read` and `write` use, as well as `file_path` (drive g: `params
+    /// must have required property 'file_path'`); the same file under both
     /// is that file, and two different files are still refused.
     #[test]
     fn edit_takes_its_file_as_path_too_but_not_two_different_files() {

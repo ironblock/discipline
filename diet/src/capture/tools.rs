@@ -1166,6 +1166,11 @@ fn admissible(
                 parameter: name.clone(),
             });
         };
+        // An optional argument given empty -- `""` -- is one not given (N8): a model that fills every field of a schema it was
+        // shown writes the ones it has nothing for as empty.
+        if !param.required && is_empty_argument(value) {
+            continue;
+        }
         let Value::String(text) = value else {
             return Err(ToolError::WrongArgument {
                 tool,
@@ -1200,6 +1205,12 @@ fn admissible(
         }
     }
     Ok(given)
+}
+
+/// Whether `value` is an empty argument (N8): text that is nothing but
+/// whitespace. (The value space has no `null`.)
+fn is_empty_argument(value: &Value) -> bool {
+    matches!(value, Value::String(text) if text.trim().is_empty())
 }
 
 /// A required argument's text. Present because [`admissible`] has established
