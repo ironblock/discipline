@@ -268,6 +268,13 @@
 //! log that declares 28 or less and carries it is refused. For a reader of
 //! earlier logs, the migration is nothing: no session declared one.
 //!
+//! v45 (N3, the maintainer's ruling of 2026-11-11) carries the operator's
+//! asks through a refill: a `meditation` line's `asks` is the section of the
+//! refill, after the render and any `outputs`, holding every ask the refill
+//! compacts away, verbatim and in the order asked -- present exactly when it
+//! carried one. It is refused in a log that declares 44 or less. For a reader
+//! of earlier logs, the migration is nothing: their refills carried none.
+//!
 //! v44 withdraws a chip that can no longer be accepted: a `suggestion`
 //! line's `outcome` may be `withdrawn`, logged when the step the shadow
 //! would fork at left the trunk -- a refill or a tangent's close replaced
@@ -495,12 +502,12 @@ use super::record::vocabulary;
 struct LogParser;
 
 /// The version this module writes, as `session.start` states it.
-pub const VERSION: i64 = 44;
+pub const VERSION: i64 = 45;
 
 /// Every version this module reads.
 pub const READS: &[i64] = &[
     0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25,
-    26, 27, 28, 29, 30, 31, 32, 33, 34, 35, 36, 37, 38, 39, 40, 41, 42, 43, 44,
+    26, 27, 28, 29, 30, 31, 32, 33, 34, 35, 36, 37, 38, 39, 40, 41, 42, 43, 44, 45,
 ];
 
 /// How recent an input event must be, at the moment a turn settles, for the
@@ -2596,6 +2603,10 @@ pub enum Event {
         /// The section of the refill after the render carrying them, as
         /// sent (v7, #553): present exactly when it carried any.
         outputs: Option<String>,
+        /// The section of the refill after the render and `outputs` carrying
+        /// the operator's asks it compacted away, verbatim and in order, as
+        /// sent (v45, N3): present exactly when it carried one.
+        asks: Option<String>,
         /// How many outputs the section carried (v7, #553).
         carried_outputs: Option<u64>,
         /// The section's bytes (v7, #553).
@@ -5749,6 +5760,7 @@ fn from_object(object: &BTreeMap<String, Value>) -> Result<Line, String> {
             phase_document: fields.optional_phase_document("phase_document")?,
             tool_outputs: fields.optional_tag("tool_outputs", MeditationToolOutputs::from_tag)?,
             outputs: fields.optional_string("outputs")?,
+            asks: fields.optional_string("asks")?,
             carried_outputs: fields.optional_count("carried_outputs")?,
             carried_output_bytes: fields.optional_count("carried_output_bytes")?,
             background: fields.optional_string("background")?,
@@ -6893,6 +6905,16 @@ const fn may_v43(key: &'static str, holds: Holds) -> Field {
     }
 }
 
+/// A key that arrived in v45 (N3), optional wherever its line is written.
+const fn may_v45(key: &'static str, holds: Holds) -> Field {
+    Field {
+        key,
+        holds,
+        required: false,
+        since: 45,
+    }
+}
+
 /// A key that arrived in v30, optional wherever its object is written.
 const fn may_v30(key: &'static str, holds: Holds) -> Field {
     Field {
@@ -7978,6 +8000,7 @@ pub fn schema(kind: Kind) -> &'static [Field] {
                 may_v8("phase_document", Holds::PhaseDocument),
                 may_v7("tool_outputs", Tag(Tags::MeditationToolOutputs)),
                 may_v7("outputs", Text),
+                may_v45("asks", Text),
                 may_v7("carried_outputs", Count),
                 may_v7("carried_output_bytes", Count),
                 may_v7("background", Text),
@@ -9461,6 +9484,7 @@ fn to_value(line: &Line) -> Value {
             phase_document,
             tool_outputs,
             outputs,
+            asks,
             carried_outputs,
             carried_output_bytes,
             background,
@@ -9534,6 +9558,9 @@ fn to_value(line: &Line) -> Value {
             }
             if let Some(section) = outputs {
                 put("outputs", text(section));
+            }
+            if let Some(section) = asks {
+                put("asks", text(section));
             }
             if let Some(n) = carried_outputs {
                 put("carried_outputs", count(*n));
@@ -11286,17 +11313,17 @@ mod tests {
     }
 
     /// #583, #878, #904, #555, #931, #936, #910, #942, #926, #932, #948, #971, #1016, #1021,
-    /// #1022, #1031, #1030, #1037, #1038, #1050, #1094, and the withdrawn
-    /// chip: this module writes v44.
+    /// #1022, #1031, #1030, #1037, #1038, #1050, #1094, the withdrawn chip,
+    /// and N3's asks: this module writes v45.
     #[test]
-    fn this_module_writes_v44_and_reads_every_version_before_it() {
-        assert_eq!(super::VERSION, 44);
+    fn this_module_writes_v45_and_reads_every_version_before_it() {
+        assert_eq!(super::VERSION, 45);
         assert_eq!(
             super::READS,
             &[
                 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22,
                 23, 24, 25, 26, 27, 28, 29, 30, 31, 32, 33, 34, 35, 36, 37, 38, 39, 40, 41, 42, 43,
-                44
+                44, 45
             ]
         );
     }

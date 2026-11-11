@@ -1220,13 +1220,14 @@ export function fold(written: readonly LogLine[]): Session {
         if (e.phase_document) inForce = e.phase_document;
         // What the model was sent after the meditation -- `diet`'s `meditation::render::refill`, whose output the record's head
         // check verifies: since #597 the head as it was and a user message carrying the render (and the tool outputs
-        // the meditation carried, #553); before, the head's system message, a blank line, then the render.
+        // the meditation carried, #553, then the operator's asks it compacted away, v45, N3); before, the head's system
+        // message, a blank line, then the render.
         const message = 'placement' in e && e.placement === 'message';
         const rendered: SystemNode = {
           kind: 'system',
           id: `system/${e.seq}`,
           text: message
-            ? `<summary>\n${e.render}${'outputs' in e && e.outputs !== undefined ? e.outputs : ''}\n</summary>`
+            ? `<summary>\n${e.render}${'outputs' in e && e.outputs !== undefined ? e.outputs : ''}${'asks' in e && e.asks !== undefined ? e.asks : ''}\n</summary>`
             : system
               ? `${system.content}\n\n${e.render}`
               : e.render,

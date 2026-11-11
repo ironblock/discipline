@@ -835,6 +835,9 @@ pub enum Event {
         /// The notes its audit asked over and never reached: its answer was
         /// cut off by its cap, so it folded nothing.
         audit_unreached: Option<u64>,
+        /// The section of the refill carrying the operator's asks it
+        /// compacted away, verbatim and in order (N3), when there were any.
+        asks: Option<String>,
     },
     /// Forks' patches delivered at the tail of a trunk request, after its
     /// ask (the fork delivery lever): the note stays on the trunk.
@@ -6161,7 +6164,9 @@ impl<S: Streaming + 'static> Session<S> {
     /// entries it `reduced`; whether it `fits` its budget; and the live
     /// `entries`, by id: each is in the render whole, or shortened or elided
     /// to its id when `reduced` counts it (a refuted note's `was:` line rides
-    /// too). A refill that must also fit the window it
+    /// too); and the `asks` section it would carry after the render (N3),
+    /// when there is one: every operator ask the regimen's tail would not
+    /// keep, nor a running turn. A refill that must also fit the window it
     /// is made in may elide more, and one under a native summary carries
     /// the summary instead: the preview is the render as it stands. `None`
     /// for a session with no working memory.
@@ -6170,9 +6175,40 @@ impl<S: Streaming + 'static> Session<S> {
         let state = self.shared.lock();
         let interview = state.interview.as_ref()?;
         let rendered = marked_render(&state, interview, interview.meditations.render_budget);
+        // The operator's asks it would carry after the render (N3): those the
+        // regimen's tail would not keep, nor a running turn.
+        let turns = state
+            .trunk
+            .get(self.shared.template.messages.len() + usize::from(state.refilled)..)
+            .unwrap_or_default();
+        let kept = crate::meditation::render::tail(turns, interview.meditations.tail_tokens);
+        let mut on_trunk: Vec<&str> = kept
+            .iter()
+            .filter(|message| message.role == Role::User)
+            .map(|message| message.content.as_str())
+            .collect();
+        // A running turn's ask rides after a refill made under it.
+        if state.settlement == Settlement::Turn {
+            on_trunk.extend(
+                state
+                    .log
+                    .iter()
+                    .rev()
+                    .find_map(|logged| match &logged.event {
+                        Event::Asked { text, .. } => Some(text.as_str()),
+                        _ => None,
+                    }),
+            );
+        }
+        let asks = (!carries_native(&state))
+            .then(|| compacted_asks(&state.log, &on_trunk))
+            .flatten();
         let (number, text, object) = (status_number, status_text, status_object);
-        Some(object(vec![
-            ("render", text(&rendered.text)),
+        let mut fields = vec![("render", text(&rendered.text))];
+        if let Some(asks) = &asks {
+            fields.push(("asks", text(asks)));
+        }
+        fields.extend([
             ("tokens", number(rendered.tokens)),
             ("reduced", number(rendered.reduced)),
             ("fits", Value::Boolean(rendered.fits)),
@@ -6186,7 +6222,8 @@ impl<S: Streaming + 'static> Session<S> {
                         .collect(),
                 ),
             ),
-        ]))
+        ]);
+        Some(object(fields))
     }
 
     /// Every event from sequence number `first` on.
@@ -7086,7 +7123,9 @@ pub fn line_of(logged: &Logged) -> log::Line {
             turn_steps,
             audit_notes,
             audit_unreached,
+            asks,
         } => log::Event::Meditation {
+            asks: asks.clone(),
             carry: Some(*carry),
             summary_tokens: *summary_tokens,
             audit_notes_unreached: *audit_unreached,
@@ -9783,6 +9822,22 @@ fn refilled(
     // compacts away the call that started it.
     let background = super::background::running_at_meditation(state.jobs.values_mut())
         .map(|list| state.shown_roots.text(&list));
+    // Every operator ask the refill compacts away, verbatim and in order
+    // (N3): one still on the trunk after it -- the tail's, or the running
+    // turn's -- rides there instead. A native summary is the model's own,
+    // and carries none.
+    let asks = native
+        .is_none()
+        .then(|| {
+            let on_trunk: Vec<&str> = kept
+                .iter()
+                .chain(riding)
+                .filter(|message| message.role == Role::User)
+                .map(|message| message.content.as_str())
+                .collect();
+            compacted_asks(&state.log, &on_trunk)
+        })
+        .flatten();
     let (head, phase_document) = state.phase_head(&template.messages);
     // The refill fits the window (#814): sized past its line, the render is
     // elided, oldest first, to the room the rest leaves -- whatever the
@@ -9796,7 +9851,11 @@ fn refilled(
         .map(crate::meditation::render::estimated_tokens)
         .sum::<u64>()
         + estimated_chars(
-            outputs.as_ref().map_or("", |(text, _)| text.as_str()),
+            &format!(
+                "{}{}",
+                outputs.as_ref().map_or("", |(text, _)| text.as_str()),
+                asks.as_deref().unwrap_or_default()
+            ),
             background.as_deref().unwrap_or_default(),
         );
     if let Some(line) = window_line(
@@ -9840,9 +9899,10 @@ fn refilled(
     if native.is_some() {
         render_budget = None;
     }
-    let sent = outputs
+    let mut sent = outputs
         .as_ref()
         .map_or_else(|| render.clone(), |(text, _)| format!("{render}{text}"));
+    sent.push_str(asks.as_deref().unwrap_or_default());
     let mut refilled = crate::meditation::render::refill_with(&head, &sent, background.as_deref());
     if let Some(summary) = native {
         state.native_files = summary.files.clone();
@@ -9942,7 +10002,36 @@ fn refilled(
         turn_steps: None,
         audit_notes: state.audit_cut.take(),
         audit_unreached: state.audit_unreached.take(),
+        asks,
     }
+}
+
+/// The section of the operator's asks a refill compacts away (N3), verbatim
+/// and in the order asked, from `log`'s `ask` lines; `None` when there is
+/// none. The asks still on the trunk after it are counted by the asks
+/// themselves, never by role: the newest asks whose own text is among the
+/// user messages `on_trunk` ride there, and every ask before the first one
+/// that is not is carried -- so a user-role message that is no ask cannot
+/// push a real ask out.
+fn compacted_asks(log: &[Logged], on_trunk: &[&str]) -> Option<String> {
+    let mut asks: Vec<(u32, &str)> = log
+        .iter()
+        .filter_map(|logged| match &logged.event {
+            Event::Asked { turn, text, .. } => Some((*turn, text.as_str())),
+            _ => None,
+        })
+        .collect();
+    // Each message on the trunk accounts for one ask: two asks of the same
+    // words, the newer kept, leave the older carried.
+    let mut on_trunk = on_trunk.to_vec();
+    while let Some(at) = asks
+        .last()
+        .and_then(|(_, text)| on_trunk.iter().rposition(|held| held == text))
+    {
+        on_trunk.remove(at);
+        asks.pop();
+    }
+    crate::meditation::asks::section(&asks)
 }
 
 /// Where a meditation's audit is cut (#504): the latest turn that settled
@@ -20170,6 +20259,7 @@ pub(in crate::drive) mod tests {
                 refuted: None,
             },
             Event::Meditated {
+                asks: None,
                 phase_document: None,
                 newest_turn_tokens: None,
                 refilled_anyway: None,
@@ -20849,6 +20939,7 @@ pub(in crate::drive) mod tests {
                 refuted: None,
             },
             log::Event::Meditation {
+                asks: None,
                 phase_document: None,
                 newest_turn_tokens: None,
                 refilled_anyway: None,
@@ -32700,6 +32791,109 @@ pub(in crate::drive) mod tests {
         reads_whole(&session);
     }
 
+    /// N3 (the maintainer, 2026-11-11): every earlier operator ask rides a
+    /// refill verbatim and in order, as Qwen Code carries all user messages
+    /// -- not only the running turn's, and not only what the tail keeps. A
+    /// window meditation inside turn three carries turns one's and two's
+    /// asks, their own bytes, in the order they were asked; the running
+    /// turn's ask rides as it did, once.
+    #[test]
+    fn a_window_refill_carries_every_earlier_ask_verbatim_and_in_order() {
+        const FIRST: &str = "Turn their example into a voxel game, keeping its controls.";
+        const SECOND: &str = "Don't run its `start` or `stop`; only `build`.\n\nAnd keep notes.";
+        let mut acts = vec![deltas(&["Noted."]), deltas(&["Understood."])];
+        acts.extend(one_long_turn(18));
+        let session = windowed(acts, 100_000, crate::meditation::policy::Served::default());
+        for (ask, turns) in [(FIRST, 1), (SECOND, 2)] {
+            session.ask(ask, None).expect("accepted");
+            wait_until(&session, "the turn", |log| {
+                settled(log)
+                    && log
+                        .iter()
+                        .filter(|logged| matches!(logged.event, Event::TurnSettled { .. }))
+                        .count()
+                        == turns
+            });
+        }
+        session.ask("build it", None).expect("accepted");
+        let log = wait_until(&session, "the long turn", |log| {
+            settled(log)
+                && log
+                    .iter()
+                    .filter(|logged| matches!(logged.event, Event::TurnSettled { .. }))
+                    .count()
+                    == 3
+        });
+        assert!(
+            !window_meditations(&log).is_empty(),
+            "a window meditation in turn three"
+        );
+        let sent = session.shared.transport.sent();
+        let last = &sent.last().expect("a request").messages;
+        let summary = last
+            .iter()
+            .find(|message| message.content.starts_with("<summary>"))
+            .expect("the refill");
+        let first = summary
+            .content
+            .find(FIRST)
+            .expect("turn one's ask, verbatim");
+        let second = summary
+            .content
+            .find(SECOND)
+            .expect("turn two's ask, verbatim");
+        assert!(first < second, "in the order they were asked");
+        assert!(
+            !summary.content.contains("build it"),
+            "the running turn's ask rides on its own"
+        );
+        assert_eq!(
+            last.iter()
+                .filter(|message| message.content == "build it")
+                .count(),
+            1
+        );
+        reads_whole(&session);
+    }
+
+    /// N3: the asks on the trunk after a refill are counted by the asks
+    /// themselves, newest first, never by role -- a user-role message that is
+    /// no ask (a notice, say) pushes no ask out of the section -- and each
+    /// trunk message accounts for one ask, so two asks of the same words, the
+    /// newer kept, leave the older carried.
+    #[test]
+    fn the_refills_asks_are_counted_by_the_asks_on_the_trunk_not_by_role() {
+        let asked = |turn: u32, text: &str| Logged {
+            seq: u64::from(turn),
+            t: 0,
+            event: Event::Asked {
+                turn,
+                text: text.to_owned(),
+                scoping: false,
+                files: Vec::new(),
+                task: None,
+            },
+        };
+        let log = [
+            asked(1, "build it"),
+            asked(2, "continue"),
+            asked(3, "continue"),
+        ];
+        let carried = |on_trunk: &[&str]| compacted_asks(&log, on_trunk).unwrap_or_default();
+        // The tail keeps turn three's ask and a notice: turn two is carried.
+        let section = carried(&["continue", "a background job ended"]);
+        assert!(section.contains("## turn 1\nbuild it\n"), "{section}");
+        assert!(section.contains("## turn 2\ncontinue\n"), "{section}");
+        assert!(!section.contains("## turn 3"), "{section}");
+        // A notice alone keeps no ask: all three are carried.
+        assert!(carried(&["a background job ended"]).contains("## turn 3"));
+        // Every ask on the trunk: none is.
+        assert_eq!(
+            compacted_asks(&log, &["build it", "continue", "continue"]),
+            None
+        );
+    }
+
     /// #813 with #814: a window meditation under a running turn, over a
     /// working memory too large for the window, elides the render to fit
     /// the window's line counting what rides after the refill -- the turn's
@@ -33038,11 +33232,15 @@ pub(in crate::drive) mod tests {
         });
         assert_eq!(window_meditations(&log).len(), 1, "{log:#?}");
         session.declare_meditation(None).expect("declared");
+        // Turn two's ask rides in the refill's asks (N3); nothing else of it.
         assert!(
-            !session
-                .trunk()
-                .iter()
-                .any(|m| m.content.contains("turn_two_marker")),
+            !session.trunk().iter().any(|m| {
+                let text = m.content.as_str();
+                let text = text
+                    .find(crate::meditation::asks::HEADER)
+                    .map_or(text, |at| &text[..at]);
+                text.contains("turn_two_marker")
+            }),
             "the operator's meditation dropped turn two"
         );
         let state = session.shared.lock();
@@ -36298,9 +36496,14 @@ pub(in crate::drive) mod tests {
             let object = &held.interview.as_ref().expect("interviewing").object;
             crate::meditation::render::render(object, Some(phase))
         };
+        let asks = crate::meditation::asks::section(&[(1, "what are we building?")])
+            .expect("turn one's ask");
         assert_eq!(
             session.trunk(),
-            crate::meditation::render::refill(&template().messages, &render("build"))
+            crate::meditation::render::refill(
+                &template().messages,
+                &format!("{}{asks}", render("build"))
+            )
         );
         // No phase named: a meditation that stays in `build`.
         session
@@ -37009,7 +37212,8 @@ pub(in crate::drive) mod tests {
         assert!(
             sent.messages[head]
                 .content
-                .ends_with(&format!("{section}\n</summary>"))
+                .contains(&format!("{section}\n{}", crate::meditation::asks::HEADER)),
+            "the outputs, then the operator's asks the refill compacted away (N3)"
         );
         assert!(
             !section.contains("echo tail"),
@@ -37062,7 +37266,8 @@ pub(in crate::drive) mod tests {
         assert!(
             sent.messages[head]
                 .content
-                .ends_with(&format!("{section}\n</summary>"))
+                .contains(&format!("{section}\n{}", crate::meditation::asks::HEADER)),
+            "the outputs, then the operator's asks the refill compacted away (N3)"
         );
         every_head_rebuilds(&log);
         tidy(&[&tree, &recording]);
@@ -37089,7 +37294,8 @@ pub(in crate::drive) mod tests {
         assert!(
             sent.messages[head]
                 .content
-                .ends_with(&format!("{section}\n</summary>"))
+                .contains(&format!("{section}\n{}", crate::meditation::asks::HEADER)),
+            "the outputs, then the operator's asks the refill compacted away (N3)"
         );
         every_head_rebuilds(&log);
         tidy(&[&tree]);
@@ -37646,7 +37852,11 @@ pub(in crate::drive) mod tests {
         let object = &held.interview.as_ref().expect("interviewing").object;
         let render = crate::meditation::render::render(object, None);
         drop(held);
-        let refilled = crate::meditation::render::refill(&template().messages, &render);
+        // The render, then the operator's ask the refill compacted away (N3).
+        let asks = crate::meditation::asks::section(&[(1, "what are we building?")])
+            .expect("turn one's ask");
+        let refilled =
+            crate::meditation::render::refill(&template().messages, &format!("{render}{asks}"));
         assert_eq!(session.trunk(), refilled);
         assert!(
             render.contains("decision: for one team"),
@@ -37656,8 +37866,9 @@ pub(in crate::drive) mod tests {
             !session
                 .trunk()
                 .iter()
-                .any(|m| m.content.contains("what are we building?") || m.content == SCOPED),
-            "a turn of the old trunk was carried: {:#?}",
+                .any(|m| m.content == "what are we building?" || m.content == SCOPED),
+            "a turn of the old trunk was carried as a message (its ask rides in the refill's \
+             asks, N3): {:#?}",
             session.trunk()
         );
 
@@ -37690,6 +37901,7 @@ pub(in crate::drive) mod tests {
         assert_eq!(
             line_of(&log[meditation]).event,
             log::Event::Meditation {
+                asks: Some(asks.clone()),
                 phase_document: None,
                 newest_turn_tokens: None,
                 refilled_anyway: None,

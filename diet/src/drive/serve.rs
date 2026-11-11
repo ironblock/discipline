@@ -4102,7 +4102,7 @@ mod tests {
 
     /// #1086: `/refill-preview` is the next refill's render, byte for byte:
     /// the meditation logs the same render, and the trunk's request carries
-    /// it -- frame 2, with no legend line (the maintainer's ruling,
+    /// it, then the asks the preview names (N3) -- frame 2, with no legend line (the maintainer's ruling,
     /// 2026-11-09).
     #[test]
     fn the_refill_preview_is_the_next_refills_render_byte_for_byte() {
@@ -4134,9 +4134,15 @@ mod tests {
             })
             .expect("the meditation's render");
         assert_eq!(rendered, previewed);
+        // The operator's asks it compacts away ride after the render (N3), as
+        // the preview names them.
+        let asks = preview["asks"].as_str().expect("the asks").to_owned();
+        assert!(asks.contains("which port?"), "{asks}");
         assert_eq!(
             session.trunk().last(),
-            Some(&crate::meditation::render::refill_message(&previewed))
+            Some(&crate::meditation::render::refill_message(&format!(
+                "{previewed}{asks}"
+            )))
         );
     }
 
