@@ -3166,10 +3166,12 @@ fn a_finished_logs_record_is_projected_offline_as_serve_wrote_it() {
     }
 }
 
-/// And it refuses what it cannot project faithfully: a log whose session has
-/// not ended, and a log written under another registry than this build's.
+/// And it refuses what it cannot project faithfully: a log written under
+/// another registry than this build's. A log whose session has not ended is
+/// projected, its record's `end` interrupted (#230): here, cut between turns,
+/// during `awaiting`.
 #[test]
-fn an_unfinished_log_or_another_registrys_is_not_projected_offline() {
+fn another_registrys_log_is_not_projected_offline_and_an_unended_one_is_interrupted() {
     let tree = Dir::new("refused-tree");
     let state = Dir::new("refused-state");
     let drove = drive_t1(
@@ -3187,25 +3189,124 @@ fn an_unfinished_log_or_another_registrys_is_not_projected_offline() {
         .expect("a registry digest")
         .to_owned();
     let other = written.replacen(&logged, &"0".repeat(64), 1);
-    for (log, refusal) in [
-        (format!("{unended}\n"), "does not end with `ended`"),
-        (other, "was written under registry"),
+    let unended = file_holding("unended-log", &format!("{unended}\n"));
+    let out = file_holding("unended-record", "");
+    let projected = Command::new(DRIVE)
+        .arg("record")
+        .arg("--log")
+        .arg(&unended.0)
+        .arg("--regimen")
+        .arg(&drove.regimen.0)
+        .arg("--out")
+        .arg(&out.0)
+        .output()
+        .expect("diet-drive runs");
+    let said = String::from_utf8_lossy(&projected.stdout).into_owned();
+    assert_eq!(projected.status.code(), Some(0), "{said}");
+    let record = std::fs::read_to_string(&out.0).expect("the record");
+    let last = log_line_object(record.lines().last().expect("rows"));
+    assert_eq!(last["state"], "interrupted", "{record}");
+    assert_eq!(last["during"], "awaiting", "{record}");
+    let out_path = out.0.display().to_string();
+    for path in [
+        format!("{out_path}.unspellable.json"),
+        format!("{out_path}.receipt.json"),
     ] {
-        let log = file_holding("refused-log", &log);
-        let out = file_holding("refused-record", "");
-        let projected = Command::new(DRIVE)
-            .arg("record")
-            .arg("--log")
-            .arg(&log.0)
-            .arg("--regimen")
-            .arg(&drove.regimen.0)
-            .arg("--out")
-            .arg(&out.0)
-            .output()
-            .expect("diet-drive runs");
-        let said = String::from_utf8_lossy(&projected.stdout).into_owned();
-        assert_eq!(projected.status.code(), Some(1), "{said}");
-        assert!(said.contains(refusal), "{said}");
+        let _ = std::fs::remove_file(path);
+    }
+    let log = file_holding("refused-log", &other);
+    let out = file_holding("refused-record", "");
+    let projected = Command::new(DRIVE)
+        .arg("record")
+        .arg("--log")
+        .arg(&log.0)
+        .arg("--regimen")
+        .arg(&drove.regimen.0)
+        .arg("--out")
+        .arg(&out.0)
+        .output()
+        .expect("diet-drive runs");
+    let said = String::from_utf8_lossy(&projected.stdout).into_owned();
+    assert_eq!(projected.status.code(), Some(1), "{said}");
+    assert!(said.contains("was written under registry"), "{said}");
+}
+
+/// A log cut mid-turn -- a turn opened by its `turn` settlement, its
+/// request sent, and no settlement after it, as a signal sent straight to
+/// serve leaves one (#230, the maintainer's ruling of 2026-11-11) -- is
+/// projected, the record's last row its `end` marked `interrupted` during
+/// `turn`; `check-record` accepts that record and says how it ended.
+#[test]
+fn a_log_cut_mid_turn_is_projected_with_its_end_interrupted() {
+    let tree = Dir::new("interrupted-tree");
+    let state = Dir::new("interrupted-state");
+    let drove = drive_t1(
+        Act::Raw(I0_CALL.to_vec()),
+        ("allowed_commands = []\n", "isolation = \"none\""),
+        (&tree, &state, &file_holding("auth", "author:s3cret\n")),
+        "session",
+        |_| {},
+    );
+    let written = std::fs::read_to_string(&drove.log.0).expect("the log");
+    let lines: Vec<&str> = written.lines().collect();
+    let opened = lines
+        .iter()
+        .position(|line| line.contains(r#""kind":"settlement""#) && line.contains(r#""to":"turn""#))
+        .expect("a turn opened");
+    assert!(
+        lines[opened + 1].contains(r#""kind":"request""#),
+        "{written}"
+    );
+    let cut = format!("{}\n", lines[..=opened + 1].join("\n"));
+    let log = file_holding("interrupted-log", &cut);
+    let out = file_holding("interrupted-record", "");
+    let out_path = out.0.display().to_string();
+    let projected = Command::new(DRIVE)
+        .arg("record")
+        .arg("--log")
+        .arg(&log.0)
+        .arg("--regimen")
+        .arg(&drove.regimen.0)
+        .arg("--out")
+        .arg(&out.0)
+        .output()
+        .expect("diet-drive runs");
+    let said = String::from_utf8_lossy(&projected.stdout).into_owned();
+    assert_eq!(
+        projected.status.code(),
+        Some(0),
+        "{said}{}",
+        String::from_utf8_lossy(&projected.stderr)
+    );
+    let report = log_line_object(said.trim_end());
+    assert_eq!(report["end"], "interrupted", "{report}");
+    let record = std::fs::read_to_string(&out.0).expect("the record");
+    let last = log_line_object(record.lines().last().expect("rows"));
+    assert_eq!(last["record"], "end", "{record}");
+    assert_eq!(last["state"], "interrupted", "{record}");
+    assert_eq!(last["during"], "turn", "{record}");
+    let checked = Command::new(DIET)
+        .arg("check-record")
+        .arg(&out.0)
+        .output()
+        .expect("diet runs");
+    let told = String::from_utf8_lossy(&checked.stdout).into_owned();
+    assert_eq!(
+        checked.status.code(),
+        Some(0),
+        "{told}{}",
+        String::from_utf8_lossy(&checked.stderr)
+    );
+    assert_eq!(
+        log_line_object(told.trim_end())["value"]["end"],
+        "interrupted",
+        "{told}"
+    );
+    for path in [
+        format!("{out_path}.unspellable.json"),
+        format!("{out_path}.receipt.json"),
+    ] {
+        let _ = std::fs::remove_file(path);
     }
 }
 

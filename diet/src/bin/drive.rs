@@ -107,7 +107,8 @@ const ARMS: &str = "arms";
 /// The subcommand that writes a batch's table (#914).
 const TABLE: &str = "table";
 
-/// The subcommand that projects a finished log's record offline (#879).
+/// The subcommand that projects a log's record offline (#879), its session
+/// ended or interrupted (#230).
 const RECORD: &str = "record";
 
 /// The subcommand that derives an operator script from a run's log (#908).
@@ -3591,7 +3592,7 @@ fn replay(args: &[String]) -> ExitCode {
 fn record_usage() -> String {
     String::from(
         "usage: diet-drive record --log FILE --regimen FILE --out FILE [--recording DIR]\n\
-         Project a finished session's record from its log, offline (#879): the\n\
+         Project a session's record from its log, offline (#879): the\n\
          record serve writes after `ended`, at --out, with its sidecar\n\
          (FILE.unspellable.json) and, when the regimen runs commands, its receipt\n\
          (FILE.receipt.json). --regimen is the one the session ran under; the\n\
@@ -3603,20 +3604,26 @@ fn record_usage() -> String {
          summary's product digest (the working memory at the end), and the\n\
          receipt's `allow` and `reference_modified` (and `tmpdir` under a\n\
          sandbox). Exit 0 when written, 1 when an input is unusable, 2 on a\n\
-         usage error, 3 when the record could not be written.\n",
+         usage error, 3 when the record could not be written. A log that\n\
+         stopped before its `ended` (a crash, or a signal sent straight to\n\
+         serve; #230) is projected through its last complete line, and the\n\
+         record's last row is an `end` naming it `interrupted` and what the\n\
+         session was doing (`during`); the line on stdout says `end` too.\n",
     )
 }
 
-/// `diet-drive record` (#879): a finished log's record, sidecar and receipt,
+/// `diet-drive record` (#879): a log's record, sidecar and receipt,
 /// projected offline as `serve` would have written them after `ended`, but
-/// for what only the running session held, which is named.
+/// for what only the running session held, which is named. A log that
+/// stopped before its `ended` (#230) ends its record with an `end` row
+/// marking it interrupted.
 fn record_from_log(args: &[String]) -> ExitCode {
     use diet::drive::projection;
     let Some((log_path, regimen_path, out_path, recording)) = record_flags(args) else {
         eprint!("{}", record_usage());
         return ExitCode::from(EXIT_USAGE);
     };
-    let lines = match finished_log(&log_path) {
+    let lines = match read_log(&log_path) {
         Ok(lines) => lines,
         Err(why) => return fail(EXIT_INPUT, &why),
     };
@@ -3648,6 +3655,7 @@ fn record_from_log(args: &[String]) -> ExitCode {
     {
         *regimen_sha256 = Some(read.regimen_sha256.clone());
     }
+    let interrupted = end_interrupted(&lines, &mut projected);
     // No summary row: what it digests is not in the log.
     projected.unfilled.insert(
         "summary.product_sha256".to_owned(),
@@ -3697,6 +3705,9 @@ fn record_from_log(args: &[String]) -> ExitCode {
             Err(why) => return fail(EXIT_OUTPUT, &why),
         }
     }
+    if let Some(state) = interrupted {
+        report.insert("end".to_owned(), Value::String(state.tag().to_owned()));
+    }
     let mut out = String::new();
     json::render(&Value::Object(report), &mut out);
     println!("{out}");
@@ -3704,6 +3715,39 @@ fn record_from_log(args: &[String]) -> ExitCode {
         return ExitCode::from(EXIT_OUTPUT);
     }
     ExitCode::SUCCESS
+}
+
+/// A log that stopped before its `ended` (#230): a crash, or a signal sent
+/// straight to serve. Its record is what the log held, its last row the
+/// `end` that says so, with what the session was doing; the state, or
+/// `None` for a log that ended.
+fn end_interrupted(
+    lines: &[diet::formats::log::Line],
+    projected: &mut diet::drive::projection::Projection,
+) -> Option<diet::formats::record::EndState> {
+    use diet::formats::record::{EndState, Event};
+    let during = interrupted_during(lines)?;
+    projected.events.push(Event::End {
+        state: EndState::Interrupted,
+        during,
+    });
+    Some(EndState::Interrupted)
+}
+
+/// What the session was doing when its log stopped, when that was before its
+/// `ended` (#230): the state its last settlement moved it to, `awaiting`
+/// before any. `None` for a log whose last settlement is `ended`.
+fn interrupted_during(lines: &[diet::formats::log::Line]) -> Option<diet::formats::log::State> {
+    use diet::formats::log;
+    let last = lines
+        .iter()
+        .rev()
+        .find_map(|line| match line.event {
+            log::Event::Settlement { to, .. } => Some(to),
+            _ => None,
+        })
+        .unwrap_or(log::State::Awaiting);
+    (last != log::State::Ended).then_some(last)
 }
 
 /// `record`'s flags: the log, the regimen, the record's path, and the
@@ -3729,7 +3773,7 @@ fn script_usage() -> String {
 }
 
 /// `diet-drive record` (#879) and `diet-drive script` (#908), which read a
-/// finished log and write beside it; `None` for any other subcommand.
+/// log and write beside it; `None` for any other subcommand.
 fn offline(args: &[String]) -> Option<ExitCode> {
     match args.first().map(String::as_str) {
         Some(RECORD) if asks_for_help(&args[1..]) => {
@@ -3876,30 +3920,17 @@ fn record_flags(args: &[String]) -> Option<(String, String, String, Option<Strin
     Some((log?, regimen?, out?, recording))
 }
 
-/// The log at `path`, read, when its session finished -- `ended` is the
-/// last line serve writes before its record -- under this build's registry:
-/// a log written under another would be projected against entries it never
-/// ran under.
-fn finished_log(path: &str) -> Result<Vec<diet::formats::log::Line>, String> {
+/// The log at `path`, read through its last complete line (a torn final
+/// line set aside), ended or not (#230: [`interrupted_during`] says which),
+/// under this build's registry: a log written under another would be
+/// projected against entries it never ran under.
+fn read_log(path: &str) -> Result<Vec<diet::formats::log::Line>, String> {
     use diet::formats::log;
     let bytes = std::fs::read(path).map_err(|why| format!("{path} cannot be read: {why}"))?;
     let lines = log::decode(&bytes)
         .map_err(|why| why.to_string())
         .and_then(|text| log::parse(text).map_err(|why| format!("{why:?}")))
         .map_err(|why| format!("{path} is not a log: {why}"))?;
-    if !lines.last().is_some_and(|line| {
-        matches!(
-            line.event,
-            log::Event::Settlement {
-                to: log::State::Ended,
-                ..
-            }
-        )
-    }) {
-        return Err(format!(
-            "{path} does not end with `ended`: its session has not finished"
-        ));
-    }
     let registry = diet::drive::registry::registry_sha256();
     if let Some(log::Event::SessionStart {
         claim:

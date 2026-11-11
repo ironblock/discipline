@@ -1,0 +1,3 @@
+An `end` row's `state` is a closed vocabulary with one word, `interrupted`
+(#230). A word outside it is a way of ending this format has not been told
+about.

@@ -856,6 +856,7 @@ impl Lane {
             | Event::Claim { .. }
             | Event::Comparison { .. }
             | Event::Summary { .. }
+            | Event::End { .. }
             // A prefix that moved and a history a harness discarded carry no
             // tool call either, so they move nothing here.
             | Event::PrefixChanged { .. }
