@@ -36515,8 +36515,9 @@ pub(in crate::drive) mod tests {
     /// directories written as `/scenario/<kind>`.
     #[test]
     fn a_background_session_before_the_task_stop_line_has_its_heads_rebuilt() {
-        let fixture =
-            include_str!("../../drive/fixtures/a-background-session-before-the-task-stop-line.jsonl");
+        let fixture = include_str!(
+            "../../drive/fixtures/a-background-session-before-the-task-stop-line.jsonl"
+        );
         let lines = log::parse(fixture).expect("the fixture is a log the format reads");
         assert!(matches!(
             &lines[0].event,

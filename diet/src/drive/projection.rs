@@ -1849,6 +1849,11 @@ impl<'a> Walk<'a> {
         // the digest still decides.
         let verified = std::iter::once(tools.clone())
             .chain(earlier_bash(&tools))
+            // And one before the timed background line named `task_stop` as
+            // a tool.
+            .chain(super::tool_loop::with_bash_before_the_task_stop_tool(
+                &tools,
+            ))
             .map(head)
             .find(|rebuilt| rebuilt.digest() == logged);
         // A head whose attachment could not be read back is never verified,
@@ -1953,6 +1958,9 @@ impl<'a> Walk<'a> {
         messages.push(Message::new(Role::User, String::new()));
         std::iter::once(tools.clone())
             .chain(earlier_bash(&tools))
+            .chain(super::tool_loop::with_bash_before_the_task_stop_tool(
+                &tools,
+            ))
             .map(|tools| {
                 Head::of(&RequestShape {
                     model: self.model.clone(),
