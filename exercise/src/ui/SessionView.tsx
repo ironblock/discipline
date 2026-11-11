@@ -54,11 +54,16 @@ export interface SessionViewProps {
   readonly approving?: Approving;
   /** Where a tool call's files are read from, by digest (#372). Absent: none can be, and each says so. */
   readonly files?: FileSource;
+  /** How many of the trunk's newest blocks are mounted per page asked for: TRUNK_SHOWN on the page; a story of a
+   * whole session's layout mounts them all. */
+  readonly trunkShown?: number;
 }
 
 /** Vertical space between two branches stacked in one slot: whole, and condensed to bars. */
 const STACK_GAP = 14;
 const STACK_GAP_CONDENSED = 4;
+/** How many of the trunk's blocks are mounted, newest first, per page the person has asked for. */
+export const TRUNK_SHOWN = 80;
 /** How near the bottom still counts as at it, for following. */
 const LOCK_SLACK = 48;
 /** How long after a wheel, a touch or a key a scroll is still the person's: a trackpad's momentum, a smooth scroll's animation. */
@@ -79,7 +84,7 @@ interface Placement extends Placed {
  */
 const NOTHING_WAITS: Approving = { waiting: undefined };
 
-export function SessionView({ session, link = 'live', linkWhy, onReconnect, surface, onSurface, composer, follow = false, approving = NOTHING_WAITS, files }: SessionViewProps) {
+export function SessionView({ session, link = 'live', linkWhy, onReconnect, surface, onSurface, composer, follow = false, approving = NOTHING_WAITS, files, trunkShown = TRUNK_SHOWN }: SessionViewProps) {
   // What the row has room for beside the trunk (measured below): whole side calls, bars, or neither. With
   // less room than the curtain asks for, side calls condense to bars; with none, the curtain draws closed.
   // Either way a side call that cannot open in its lane opens under the message it came from (`inline`).
@@ -226,6 +231,21 @@ export function SessionView({ session, link = 'live', linkWhy, onReconnect, surf
   const now = follow && running ? session.now + (performance.now() - receivedAt) : session.now;
 
   const trunkOrder = session.eras.flatMap((era) => era.nodes.map((n) => n.id));
+  // The trunk as mounted: its newest TRUNK_SHOWN blocks, and as many pages before them as the person asked for. A
+  // three-hour session mounted every block it had (28.5k DOM nodes at 105k log lines), and every click waited on them.
+  const [pages, setPages] = useState(0);
+  const hidden = Math.max(0, trunkOrder.length - trunkShown * (pages + 1));
+  const shown = new Set(trunkOrder.slice(hidden));
+  // What the mounted side calls wrote: the entries their lines into working memory run to, kept mounted there.
+  const linked = new Set([...session.branches.entries()].flatMap(([at, branches]) => (shown.has(at) ? branches.flatMap((b) => b.patches.map((p) => p.entryId)) : [])));
+  // A link to a block, or to a side call off one, the window has not reached widens it to reach it.
+  useEffect(() => {
+    if (target === undefined) return;
+    const side = [...session.branches.values()].flat().find((b) => b.id === target);
+    const at = trunkOrder.indexOf(side?.at ?? target);
+    if (at >= 0 && at < hidden) setPages(Math.ceil((trunkOrder.length - at) / trunkShown) - 1);
+    // `trunkOrder` is derived from `session`.
+  }, [target, hidden, session, trunkShown]);
   const eraOf = new Map(session.eras.flatMap((era) => era.nodes.map((n) => [n.id, era.index] as const)));
   // What serve takes a fork or a wrap at (the app audit, finding 10): a line of the latest era's, while the session awaits.
   const onTrunk = new Set(session.eras.at(-1)?.nodes.flatMap((n) => ((n as { readonly logged?: { readonly seq: number } }).logged ? [(n as { readonly logged: { readonly seq: number } }).logged.seq] : [])) ?? []);
@@ -245,8 +265,9 @@ export function SessionView({ session, link = 'live', linkWhy, onReconnect, surf
     resultOf: (call) => results.get(call)?.name,
     entryText: (id) => texts.get(id),
   };
+  // A side call is mounted with the block it came off.
   const laneBranches = (slot: number) =>
-    trunkOrder.flatMap((id) => (session.branches.get(id) ?? []).filter((b) => b.slot === slot));
+    trunkOrder.flatMap((id) => (shown.has(id) ? (session.branches.get(id) ?? []).filter((b) => b.slot === slot) : []));
 
   // The trunk's cables routed as a harness (harness.ts), when the surface asks.
   // How lines are drawn, and which: the person's preferences.
@@ -554,7 +575,12 @@ export function SessionView({ session, link = 'live', linkWhy, onReconnect, surf
             ) : null}
             <div className="ex-stage" ref={stage}>
               <div className="ex-trunk">
-                {session.eras.map((era) => (
+                {hidden > 0 ? (
+                  <button type="button" className="ex-trunk__earlier" onClick={() => setPages((n) => n + 1)}>
+                    show {Math.min(trunkShown, hidden)} earlier blocks ({hidden} not shown)
+                  </button>
+                ) : null}
+                {session.eras.map((era) => (era.nodes.length > 0 && !era.nodes.some((n) => shown.has(n.id)) ? null : (
                   <section className="ex-era" key={era.index} data-era={era.index}>
                     {era.meditation ? (
                       <div
@@ -575,7 +601,7 @@ export function SessionView({ session, link = 'live', linkWhy, onReconnect, surf
                           : ' Behind the curtain, side calls run in the slots to the right while you read, and what they learn lands in working memory.'}
                       </p>
                     ) : null}
-                    {era.nodes.map((node) => {
+                    {era.nodes.filter((node) => shown.has(node.id)).map((node) => {
                       const branches = session.branches.get(node.id) ?? [];
                       return (
                         <div
@@ -621,7 +647,7 @@ export function SessionView({ session, link = 'live', linkWhy, onReconnect, surf
                       );
                     })}
                   </section>
-                ))}
+                )))}
               </div>
               {cabled.length > 0 ? <Wiring nets={cabled} lit={hot.branches} /> : null}
               {lanes.map((slot) => (
@@ -709,6 +735,7 @@ export function SessionView({ session, link = 'live', linkWhy, onReconnect, surf
             <div className="ex-drawer__body" inert={drawer && !drawerOpen}>
               <Memory
                 entries={session.memory}
+                linked={linked}
                 seenThrough={seenThrough}
                 onSeen={() => setSeenThrough(session.events - 1)}
                 // The served drive takes the operator's edits and flags (#150); the canned script and a replay do not.

@@ -73,7 +73,10 @@ test('a three-hour session mounts under 5,000 DOM nodes, and a cancel click post
   );
   const nodes = document.querySelectorAll('*').length;
   expect(nodes, `${nodes} DOM nodes mounted`).toBeLessThan(5000);
-  const clicked = performance.now();
+  // From the click as the page receives it to the post: the page's own latency, not the test runner's round trip
+  // to the browser, which a loaded machine stretches past any bound.
+  let clicked = 0;
+  document.addEventListener('click', () => (clicked = performance.now()), { capture: true, once: true });
   await userEvent.click(page.getByRole('button', { name: /cancel/ }).first());
   await expect.poll(() => sent.map((s) => s.command.kind)).toEqual(['cancel']);
   expect(sent[0]!.at - clicked).toBeLessThan(500);

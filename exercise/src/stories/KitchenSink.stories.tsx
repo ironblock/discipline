@@ -33,7 +33,7 @@ const meta = {
   parameters: { layout: 'fullscreen' },
   args: { t: Number.POSITIVE_INFINITY },
   render: ({ t, condensed = false }) => (
-    <SessionView session={fold(recordedAt(KITCHEN_SINK, t))} surface={{ curtain: true, gaps: false, condensed }} composer={{ phases: PHASES }} />
+    <SessionView trunkShown={Number.POSITIVE_INFINITY} session={fold(recordedAt(KITCHEN_SINK, t))} surface={{ curtain: true, gaps: false, condensed }} composer={{ phases: PHASES }} />
   ),
 } satisfies Meta<Args>;
 
@@ -208,7 +208,7 @@ export const AuditSettingsInView: Story = {
   name: 'audit F14: the settings panel is in the window, above the minimap',
   parameters: AT_1440,
   // With the surface's own toggles, as the app has them: the header wraps, and settings opens at its second row's left.
-  render: () => <SessionView session={fold(recordedAt(KITCHEN_SINK, Number.POSITIVE_INFINITY))} surface={{ curtain: true, gaps: false }} onSurface={() => undefined} composer={{ phases: PHASES }} />,
+  render: () => <SessionView trunkShown={Number.POSITIVE_INFINITY} session={fold(recordedAt(KITCHEN_SINK, Number.POSITIVE_INFINITY))} surface={{ curtain: true, gaps: false }} onSurface={() => undefined} composer={{ phases: PHASES }} />,
   play: async ({ canvasElement }) => {
     await userEvent.click(canvasElement.querySelector('.ex-settings__button')!);
     const panel = canvasElement.querySelector<HTMLElement>('.ex-settings__panel')!;

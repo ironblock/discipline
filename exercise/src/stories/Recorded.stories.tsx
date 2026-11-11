@@ -38,7 +38,7 @@ const meta = {
   parameters: { layout: 'fullscreen' },
   args: { t: Number.POSITIVE_INFINITY, curtain: true, gaps: false },
   render: ({ t, curtain, gaps, condensed = false, recording: name = 'first-drive' }) => (
-    <SessionView session={fold(recordedAt(RECORDINGS[name], t))} surface={{ curtain, gaps, condensed }} composer={{ phases: PHASES }} />
+    <SessionView trunkShown={Number.POSITIVE_INFINITY} session={fold(recordedAt(RECORDINGS[name], t))} surface={{ curtain, gaps, condensed }} composer={{ phases: PHASES }} />
   ),
 } satisfies Meta<RecordedArgs>;
 
@@ -182,7 +182,7 @@ function Following() {
       <button type="button" data-advance="" style={{ position: 'fixed', top: 0, left: 0, zIndex: 9, opacity: 0 }} onClick={() => setAt((i) => Math.min(i + 1, QUEUE.length - 1))}>
         later
       </button>
-      <SessionView session={fold(recordedAt(recording, QUEUE[at] ?? 0))} surface={{ curtain: true, gaps: false }} composer={{ phases: PHASES }} follow />
+      <SessionView trunkShown={Number.POSITIVE_INFINITY} session={fold(recordedAt(recording, QUEUE[at] ?? 0))} surface={{ curtain: true, gaps: false }} composer={{ phases: PHASES }} follow />
     </>
   );
 }
@@ -321,7 +321,7 @@ export const MinimapScrollsWithThePage: Story = {
   // scales nearly agree on this viewport, and a squash would hide inside the tolerance).
   render: ({ t, curtain, gaps, condensed = false }) => (
     <div style={{ '--minimap-width': '120px' } as CSSProperties}>
-      <SessionView session={fold(recordedAt(RECORDINGS['first-drive'], t))} surface={{ curtain, gaps, condensed }} composer={{ phases: PHASES }} />
+      <SessionView trunkShown={Number.POSITIVE_INFINITY} session={fold(recordedAt(RECORDINGS['first-drive'], t))} surface={{ curtain, gaps, condensed }} composer={{ phases: PHASES }} />
     </div>
   ),
   play: async ({ canvasElement }) => {
