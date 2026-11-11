@@ -1,0 +1,1 @@
+The user declined your move from phase {from} to phase {to}. You stay in phase {from}.
