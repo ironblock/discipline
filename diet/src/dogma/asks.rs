@@ -50,6 +50,11 @@ pub struct AskSet {
     /// line (#1050): from `v5` and `t3`; no set before them. Its answer is
     /// read as text on either route, so it is told no tool can run.
     operator_imperative: bool,
+    /// Whether its judgment ask has SUPERSEDE give the corrected entry in
+    /// full after the cited id: from `v6`. Then the text after the id is the
+    /// entry that stands, whatever separates them; before it, an em dash
+    /// after the id opens the pair's reason (#812), v4's reading.
+    supersede_in_full: bool,
 }
 
 macro_rules! set_files {
@@ -65,6 +70,7 @@ pub const V3: AskSet = AskSet {
     files: set_files!("v3": "api_surface", "change", "finding", "generic", "imperative",
         "judgment", "outcome", "reminder"),
     operator_imperative: false,
+    supersede_in_full: false,
 };
 
 /// v3, with the judgment ask showing the working record and asking for
@@ -75,6 +81,7 @@ pub const V4: AskSet = AskSet {
     files: set_files!("v4": "api_surface", "change", "finding", "generic", "imperative",
         "judgment", "outcome", "reminder"),
     operator_imperative: false,
+    supersede_in_full: false,
 };
 
 /// v4's asks answered through the self-capture tools (#610): each answer
@@ -87,6 +94,7 @@ pub const T1: AskSet = AskSet {
     files: set_files!("t1": "api_surface", "change", "finding", "generic", "imperative",
         "judgment", "outcome", "reminder"),
     operator_imperative: false,
+    supersede_in_full: false,
 };
 
 /// t1's asks, each wrapped in `<interview>` tags, with the priming paragraph
@@ -98,6 +106,7 @@ pub const T2: AskSet = AskSet {
     files: set_files!("t2": "api_surface", "change", "finding", "generic", "imperative",
         "judgment", "outcome", "priming", "reminder"),
     operator_imperative: false,
+    supersede_in_full: false,
 };
 
 /// v4 with the fields route's imperative (#1050): no tool can run in a
@@ -109,6 +118,7 @@ pub const V5: AskSet = AskSet {
     files: set_files!("v5": "api_surface", "change", "finding", "generic", "imperative",
         "judgment", "outcome", "reminder"),
     operator_imperative: true,
+    supersede_in_full: false,
 };
 
 /// t2 with the tools route's imperative (#1050): no tool runs in a fork but
@@ -120,6 +130,7 @@ pub const T3: AskSet = AskSet {
     files: set_files!("t3": "api_surface", "change", "finding", "generic", "imperative",
         "judgment", "outcome", "priming", "reminder"),
     operator_imperative: true,
+    supersede_in_full: false,
 };
 
 /// v5 with the judgment ask's SUPERSEDE sentence asking for the corrected
@@ -131,6 +142,7 @@ pub const V6: AskSet = AskSet {
     files: set_files!("v6": "api_surface", "change", "finding", "generic", "imperative",
         "judgment", "outcome", "reminder"),
     operator_imperative: true,
+    supersede_in_full: true,
 };
 
 /// Every set, in the order they were added.
@@ -161,6 +173,13 @@ impl AskSet {
     #[must_use]
     pub fn files(&self) -> &'static [(&'static str, &'static str)] {
         self.files
+    }
+
+    /// Whether its SUPERSEDE gives the corrected entry in full after the
+    /// cited id (from `v6`), so no separator after the id opens a reason.
+    #[must_use]
+    pub const fn supersede_in_full(&self) -> bool {
+        self.supersede_in_full
     }
 
     /// The imperative a fork the operator fires is sent with as its first
