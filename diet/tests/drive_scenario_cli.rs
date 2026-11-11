@@ -2889,7 +2889,8 @@ fn a_native_refill_carries_a_sealed_files_path_and_never_its_content() {
         .expect("the first session meditated");
     assert_eq!(
         meditation["render"],
-        "<state_snapshot>it reads 42</state_snapshot>\n\n<read-files>\nreference/source.ts\n</read-files>",
+        // Its last line, the working directory said again, path-free.
+        "<state_snapshot>it reads 42</state_snapshot>\n\n<read-files>\nreference/source.ts\n</read-files>\n\nYou are in /scenario/worktree.",
         "the summary names the file it read: {meditation}"
     );
     assert!(

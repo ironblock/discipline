@@ -3253,11 +3253,13 @@ fn a_log_cut_mid_turn_is_projected_with_its_end_interrupted() {
         .iter()
         .position(|line| line.contains(r#""kind":"settlement""#) && line.contains(r#""to":"turn""#))
         .expect("a turn opened");
-    assert!(
-        lines[opened + 1].contains(r#""kind":"request""#),
-        "{written}"
-    );
-    let cut = format!("{}\n", lines[..=opened + 1].join("\n"));
+    // The turn's request, after the notes its ask logs (the start line).
+    let request = opened
+        + lines[opened..]
+            .iter()
+            .position(|line| line.contains(r#""kind":"request""#))
+            .expect("the turn's request");
+    let cut = format!("{}\n", lines[..=request].join("\n"));
     let log = file_holding("interrupted-log", &cut);
     let out = file_holding("interrupted-record", "");
     let out_path = out.0.display().to_string();

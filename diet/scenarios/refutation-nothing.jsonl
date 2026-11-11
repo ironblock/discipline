@@ -14,5 +14,5 @@
 {"expect":"fork.settled","where":{"outcome":"unparseable"},"after":"asked"}
 {"expect":"turn.settled","where":{"turn":"2","reason":"final"}}
 {"expect":"tool_call","name":"unprompted","where":{"name":"refute_beliefs","outcome":"ran","turn":"3"}}
-{"expect":"patch","name":"trunk-refuted","where":{"op":"supersede","lane":"trunk","entry.text":"fact: there is no config.toml","refuted.confidence":"6","refuted.pointer":"log seq 34"}}
+{"expect":"patch","name":"trunk-refuted","where":{"op":"supersede","lane":"trunk","entry.text":"fact: there is no config.toml","refuted.confidence":"6","refuted.pointer":"log seq 35"}}
 {"expect":"turn.settled","where":{"turn":"3","reason":"final"},"after":"unprompted"}

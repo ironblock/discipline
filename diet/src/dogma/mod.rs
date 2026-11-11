@@ -173,7 +173,13 @@ pub mod vocabulary;
 ///   judgment ask's SUPERSEDE sentence asking for the corrected entry in
 ///   full. The maintainer's approved wording (relayed by Dispatch). No
 ///   template and no set already pinned changed.
-pub const VERSION: u32 = 18;
+/// * 19: `START_CWD` joins, the line that names the working directory, in
+///   v6's own words ("You are in {cwd}."): a note on the session's first ask,
+///   and the last of every refill's computed render lines, since a refill
+///   drops that note. Before, the model was never told where it was. The
+///   maintainer's approved wording (relayed by Dispatch). No template and no
+///   set already pinned changed.
+pub const VERSION: u32 = 19;
 
 /// The digest of `diet/dogma/MANIFEST.tsv` that [`VERSION`] was declared
 /// against.
@@ -183,7 +189,7 @@ pub const VERSION: u32 = 18;
 /// that recomputes it fails until both lines are edited together. Without it
 /// the manifest could be regenerated after an edit and the version left at
 /// what it was, which is a bump that never happened.
-pub const MANIFEST_DIGEST: &str = "ad80a505cc9600ed";
+pub const MANIFEST_DIGEST: &str = "0386822ec2bfdfcb";
 
 /// The per-model operating points, as TOML text, exactly as pinned.
 ///
@@ -308,6 +314,8 @@ pub enum Hole {
     From,
     /// The phase a move goes to (#788).
     To,
+    /// The working directory, as a call's line names it.
+    Cwd,
 }
 
 impl Hole {
@@ -326,6 +334,7 @@ impl Hole {
         Self::Entry,
         Self::From,
         Self::To,
+        Self::Cwd,
     ];
 
     /// The tag written between the braces in a template file.
@@ -345,6 +354,7 @@ impl Hole {
             Self::Entry => "entry",
             Self::From => "from",
             Self::To => "to",
+            Self::Cwd => "cwd",
         }
     }
 
@@ -427,6 +437,9 @@ pub enum Template {
     PhaseProposed,
     /// The note that puts the operator's phase proposal to the model (#788).
     PhaseOperatorProposal,
+    /// The line that names the working directory: a note on the session's
+    /// first ask, and the last line of every refill's render.
+    StartCwd,
 }
 
 impl Template {
@@ -463,6 +476,7 @@ impl Template {
         Self::PhaseToolReason,
         Self::PhaseProposed,
         Self::PhaseOperatorProposal,
+        Self::StartCwd,
     ];
 
     /// The name the manifest pins this template under, and the stem of its
@@ -501,6 +515,7 @@ impl Template {
             Self::PhaseToolReason => "PHASE_TOOL_REASON",
             Self::PhaseProposed => "PHASE_PROPOSED",
             Self::PhaseOperatorProposal => "PHASE_OPERATOR_PROPOSAL",
+            Self::StartCwd => "START_CWD",
         }
     }
 
@@ -558,6 +573,7 @@ impl Template {
             Self::PhaseOperatorProposal => {
                 include_str!("../../dogma/templates/PHASE_OPERATOR_PROPOSAL.txt")
             }
+            Self::StartCwd => include_str!("../../dogma/templates/START_CWD.txt"),
         }
     }
 
@@ -572,7 +588,8 @@ impl Template {
             | Self::PhaseToolTo
             | Self::PhaseToolReason
             | Self::PhaseProposed
-            | Self::PhaseOperatorProposal => Site::Trunk,
+            | Self::PhaseOperatorProposal
+            | Self::StartCwd => Site::Trunk,
             Self::ApiSurface
             | Self::Doctrine
             | Self::DocRead
@@ -617,6 +634,7 @@ impl Template {
             Self::ForkNoteAdvisory | Self::ForkNoteImperative => &[Hole::Entry],
             Self::PhaseProposed => &[Hole::To],
             Self::PhaseOperatorProposal => &[Hole::From, Hole::To],
+            Self::StartCwd => &[Hole::Cwd],
             Self::AuditQ
             | Self::AuditQCadence
             | Self::AuditQHuman
