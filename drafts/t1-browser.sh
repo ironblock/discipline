@@ -7,6 +7,7 @@
 #   t1-browser.sh shot   <run-dir> <pageId> <name>   the operator's own screenshot -> <run-dir>/shots/<name>.png
 #   t1-browser.sh status <run-dir>              exit 0 if the daemon is alive, 1 if not (the model can stop it)
 #   t1-browser.sh stop   <run-dir>              stop the daemon, kill caffeinate by pidfile, end leftovers
+#   t1-browser.sh restart <run-dir>             start a stopped daemon again under the run's own session id
 #
 # State lives in <run-dir>: browser.state (sourced by the subcommands),
 # browser.env (the two lines), caffeinate.pid, daemon.log, chrome-profile/, shots/.
@@ -19,7 +20,7 @@ set -u
 export CHROME_DEVTOOLS_MCP_NO_UPDATE_CHECKS=1 CHROME_DEVTOOLS_MCP_NO_USAGE_STATISTICS=1
 
 die() { echo "t1-browser: $*" >&2; exit 1; }
-usage() { sed -n '2,10p' "$0" | sed 's/^# \{0,1\}//' >&2; exit 2; }
+usage() { sed -n '2,11p' "$0" | sed 's/^# \{0,1\}//' >&2; exit 2; }
 real() { python3 -I -c 'import os,sys; print(os.path.realpath(sys.argv[1]))' "$1"; }
 cdt() { chrome-devtools "$@" 2> >(grep -v -e ExperimentalWarning -e 'trace-warnings' >&2); }
 alive() { cdt status 2>/dev/null | grep -q 'daemon is running'; }
@@ -51,26 +52,8 @@ with open(path, "w") as f:
 EOF
 }
 
-start() {
-  [ $# -eq 2 ] || usage
-  mkdir -p "$1" || die "cannot create $1"
-  [ -d "$2" ] || die "worktree $2 does not exist"
-  RUN=$(real "$1"); WT=$(real "$2")
-  if [ -f "$RUN/browser.state" ]; then
-    ( load "$RUN"; alive ) && die "a daemon is already running for $RUN; 'stop' it first"
-  fi
-  SID=$(uuidgen | tr 'A-F' 'a-f')
-  PROFILE=$RUN/chrome-profile
-  mkdir -p "$RUN/shots"
-  if [ "${T1_BROWSER_NO_DOWNLOAD_PIN:-}" = 1 ]; then
-    echo "t1-browser: download pin SKIPPED (T1_BROWSER_NO_DOWNLOAD_PIN=1)" >&2
-  else
-    pin_downloads "$PROFILE" "$WT"
-  fi
-
-  caffeinate -d -i >/dev/null 2>&1 &
-  echo $! > "$RUN/caffeinate.pid"
-
+# Start the daemon for $RUN under session $SID, from $WT, on $PROFILE, and set $SOCKET to the socket it listens on.
+launch() {
   export CD4A_INTERNAL_DAEMON_SESSION_ID=$SID
   # The daemon resolves a relative --filePath against ITS OWN cwd, which it
   # inherits from this `start` (measured 2026-10-12: a relative path resolved into the
@@ -92,6 +75,29 @@ start() {
   RAW=$(cdt status | sed -n 's/.* socket=\([^ ]*\) .*/\1/p')
   [ -n "$RAW" ] || die "could not read the socket from 'chrome-devtools status'"
   SOCKET=$(real "$RAW")
+}
+
+start() {
+  [ $# -eq 2 ] || usage
+  mkdir -p "$1" || die "cannot create $1"
+  [ -d "$2" ] || die "worktree $2 does not exist"
+  RUN=$(real "$1"); WT=$(real "$2")
+  if [ -f "$RUN/browser.state" ]; then
+    ( load "$RUN"; alive ) && die "a daemon is already running for $RUN; 'stop' it first"
+  fi
+  SID=$(uuidgen | tr 'A-F' 'a-f')
+  PROFILE=$RUN/chrome-profile
+  mkdir -p "$RUN/shots"
+  if [ "${T1_BROWSER_NO_DOWNLOAD_PIN:-}" = 1 ]; then
+    echo "t1-browser: download pin SKIPPED (T1_BROWSER_NO_DOWNLOAD_PIN=1)" >&2
+  else
+    pin_downloads "$PROFILE" "$WT"
+  fi
+
+  caffeinate -d -i >/dev/null 2>&1 &
+  echo $! > "$RUN/caffeinate.pid"
+
+  launch
 
   {
     echo "SID=$SID"
@@ -182,8 +188,26 @@ stop() {
   return 0
 }
 
+# Bring a stopped daemon back for $RUN under the session id browser.state holds, so the socket the regimen names
+# (browser.env line 1) and the id serve's shell exported are the ones it listens on again: `start` mints a new id,
+# and a model's own `chrome-devtools start` or `stop` (measured 2026-11-11) leaves the run's daemon down.
+restart() {
+  [ $# -eq 1 ] || usage
+  load "$1"
+  alive && die "the daemon for $RUN is running; 'stop' it first, or leave it"
+  WAS=$SOCKET
+  CAF=$(cat "$RUN/caffeinate.pid" 2>/dev/null)
+  if [ -z "$CAF" ] || [ "$(ps -o comm= -p "$CAF" 2>/dev/null)" != caffeinate ]; then
+    caffeinate -d -i >/dev/null 2>&1 &
+    echo $! > "$RUN/caffeinate.pid"
+  fi
+  launch
+  [ "$SOCKET" = "$WAS" ] || die "the daemon is back on $SOCKET, not $WAS: the regimen's sandbox_unix_sockets names the old one"
+  echo "daemon back: session $SID, socket $SOCKET, profile $PROFILE, workspace $WT" >&2
+}
+
 cmd=${1:-}; [ $# -gt 0 ] && shift
 case $cmd in
-  start|shot|status|stop) "$cmd" "$@" ;;
+  start|shot|status|stop|restart) "$cmd" "$@" ;;
   *) usage ;;
 esac
