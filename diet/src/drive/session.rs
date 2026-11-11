@@ -31719,6 +31719,47 @@ pub(in crate::drive) mod tests {
         tidy(&[&tree]);
     }
 
+    /// The working directory rides every refill too, as its last computed
+    /// line: the first ask's note is dropped with the trunk the refill
+    /// replaces.
+    #[test]
+    fn a_refill_names_the_working_directory_again() {
+        let tree = scratch("start-cwd-refill");
+        std::fs::write(tree.join("notes.md"), "port 5182 is free\n").expect("a note");
+        let session = Session::open_with(
+            Canned::new(vec![
+                vec![bash("call-1", "cat notes.md")],
+                deltas(&["Read it."]),
+            ]),
+            looping(),
+            None,
+            Some(tools(
+                Confinement::Unconfined,
+                &tree,
+                &["cat"],
+                None,
+                Decider::Decline,
+            )),
+            None,
+            Some(interviewing(&[])),
+        );
+        let cwd = session.shared.tools.as_ref().expect("tools").cwd.clone();
+        session.ask("look", None).expect("accepted");
+        let log = wait_until(&session, "the turn", settled);
+        let called = seq_of(&log, |event| matches!(event, Event::ToolCalled(_)));
+        session
+            .keep(called, "port 5182 is free", None)
+            .expect("kept");
+        session.declare_meditation(None).expect("admitted");
+        wait_until(&session, "the meditation", meditated);
+        let refill = session.trunk().last().expect("the refill").content.clone();
+        assert!(
+            refill.ends_with(&format!("\n\n{}", start_cwd_note(&cwd))),
+            "{refill}"
+        );
+        tidy(&[&tree]);
+    }
+
     /// #1021: a fork is refused while a turn is in flight, and at a line a
     /// meditation has since replaced on the trunk; the operator's kept
     /// entry rides the refill.
