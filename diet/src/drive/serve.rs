@@ -1608,7 +1608,6 @@ fn idle_gap(value: &Value) -> Option<IdleGap> {
     })
 }
 
-/// A `400`'s body for an ask whose named PNG cannot be attached (#372):
 /// The command a posted body's `kind` names, a retired spelling read as its
 /// current one.
 fn posted_kind(object: &BTreeMap<String, Value>) -> Option<CommandKind> {
@@ -1698,6 +1697,7 @@ fn malformed(object: &BTreeMap<String, Value>) -> Value {
     )]))
 }
 
+/// A `400`'s body for an ask whose named PNG cannot be attached (#372):
 /// `{"unattachable": {"path", "check", "reason"}}` -- the path as named, the
 /// check it failed, one of [`attach::Check`]'s words, and a sentence. Nothing
 /// was logged, copied or sent.
