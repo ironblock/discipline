@@ -1,0 +1,265 @@
+{
+  "events": [
+    {
+      "compaction_persists": true,
+      "fork_asks": "v3",
+      "fork_asks_digest": "49c0f8c081a24a9a",
+      "fork_delivery": "meditation",
+      "head": [
+        {
+          "content": "you are the trunk",
+          "role": "system"
+        }
+      ],
+      "kind": "session.start",
+      "model": "a-model",
+      "notes_in_the_ask": true,
+      "opened": 1790000000000,
+      "opening_phase": "plan",
+      "phase_transitions": [
+        {
+          "from": "plan",
+          "to": "build"
+        },
+        {
+          "from": "build",
+          "to": "review"
+        }
+      ],
+      "phases": [
+        "plan",
+        "build",
+        "review"
+      ],
+      "seq": 0,
+      "t": 0,
+      "tool_output": "capped",
+      "tool_output_max_bytes": 51200,
+      "tool_output_max_lines": 2000,
+      "tools": [
+        "bash",
+        "update_record",
+        "resolve_entry",
+        "propose_phase_transition"
+      ],
+      "version": 47
+    },
+    {
+      "by": "operator",
+      "from": "plan",
+      "kind": "phase.proposed",
+      "meditate": true,
+      "meditated_by_hand": false,
+      "phase_steps": 0,
+      "phase_tokens": 0,
+      "seq": 1,
+      "t": 0,
+      "to": "build",
+      "tokens_since_meditation": 0
+    },
+    {
+      "kind": "ask",
+      "seq": 2,
+      "t": 0,
+      "text": "plan it",
+      "turn": 1
+    },
+    {
+      "from": "awaiting",
+      "kind": "settlement",
+      "seq": 3,
+      "t": 0,
+      "to": "turn"
+    },
+    {
+      "kind": "notice",
+      "seq": 4,
+      "t": 0,
+      "text": "The operator proposes moving from phase plan to phase build. Before anything else, answer with propose_phase_transition: to = \"build\" and accept = true to agree, or accept = false and your reason to decline.",
+      "turn": 1
+    },
+    {
+      "head_sha256": "edb1e0df8e70ce362858420b6e83b8fc96e0d303f3256b9e868ae56190a20ae2",
+      "kind": "request",
+      "lane": "trunk",
+      "max_tokens": 64,
+      "seq": 5,
+      "sized_tokens": 59,
+      "t": 0,
+      "turn": 1
+    },
+    {
+      "kind": "delta",
+      "request": 5,
+      "seq": 6,
+      "t": 0,
+      "text": "The plan has three steps."
+    },
+    {
+      "kind": "delta",
+      "request": 5,
+      "seq": 7,
+      "t": 1,
+      "tool_call": {
+        "arguments": "{\"content\":\"The plan has three steps.\",\"field\":\"fact\"}",
+        "id": "call-f",
+        "index": 0,
+        "name": "update_record"
+      }
+    },
+    {
+      "kind": "delta",
+      "request": 5,
+      "seq": 8,
+      "t": 1,
+      "tool_call": {
+        "arguments": "{\"accept\":true,\"reason\":\"planned\",\"to\":\"build\"}",
+        "id": "call-a",
+        "index": 1,
+        "name": "propose_phase_transition"
+      }
+    },
+    {
+      "finish_reason": "stop",
+      "kind": "response",
+      "seq": 9,
+      "t": 1,
+      "text": "The plan has three steps.",
+      "to_request": 5
+    },
+    {
+      "call": "call-f",
+      "entries": [
+        "r5/call-f/fact"
+      ],
+      "kind": "capture",
+      "outcome": "recorded",
+      "request": 5,
+      "seq": 10,
+      "t": 2,
+      "tool": "update_record"
+    },
+    {
+      "entry": {
+        "id": "r5/call-f/fact",
+        "text": "The plan has three steps."
+      },
+      "kind": "patch",
+      "lane": "self-capture",
+      "op": "add",
+      "seq": 11,
+      "t": 2
+    },
+    {
+      "arguments": "{\"content\":\"The plan has three steps.\",\"field\":\"fact\"}",
+      "id": "call-f",
+      "kind": "tool_call",
+      "name": "update_record",
+      "outcome": "ran",
+      "request": 5,
+      "seq": 12,
+      "shown": "recorded: r5/call-f/fact",
+      "t": 2,
+      "turn": 1
+    },
+    {
+      "accepted": true,
+      "call": "call-a",
+      "kind": "phase.answered",
+      "reason": "planned",
+      "seq": 13,
+      "t": 2
+    },
+    {
+      "by": "model",
+      "call": "call-a",
+      "choice": "meditation",
+      "from": "plan",
+      "kind": "phase.ruled",
+      "seq": 14,
+      "t": 2,
+      "to": "build"
+    },
+    {
+      "arguments": "{\"accept\":true,\"reason\":\"planned\",\"to\":\"build\"}",
+      "id": "call-a",
+      "kind": "tool_call",
+      "name": "propose_phase_transition",
+      "outcome": "ran",
+      "request": 5,
+      "seq": 15,
+      "shown": "accepted: the move to build is made through a meditation before your next step, or at this turn's end. Until then you are still in plan.",
+      "t": 2,
+      "turn": 1
+    },
+    {
+      "at_turn": 1,
+      "carried_entries": 1,
+      "carried_turns": 0,
+      "carry": "render",
+      "frame": "2",
+      "kind": "meditation",
+      "phase": {
+        "from": "plan",
+        "to": "build"
+      },
+      "placement": "message",
+      "prefix_hash_after": "b859c2b47b63f35e4f5ef3c64a60441ef6747709e7ab3563d44a796d5021e4cd",
+      "prefix_hash_before": "edb1e0df8e70ce362858420b6e83b8fc96e0d303f3256b9e868ae56190a20ae2",
+      "reason": "phase",
+      "render": "# regime\ndogma_version: 0\nphase: build\nframe_version: 2\n\n# working set\nr5/call-f/fact\tyou noted\tThe plan has three steps.\n",
+      "seq": 16,
+      "t": 3,
+      "tool_outputs": "evict",
+      "turn_steps_compacted": 0,
+      "turn_steps_kept": 1
+    },
+    {
+      "head_sha256": "b0a1b429a886389957de89f3eeb4bc603703c88dca95dc8bd1f75bdec946ed59",
+      "kind": "request",
+      "lane": "trunk",
+      "max_tokens": 64,
+      "seq": 17,
+      "sized_tokens": 176,
+      "t": 4,
+      "turn": 1
+    },
+    {
+      "kind": "delta",
+      "request": 17,
+      "seq": 18,
+      "t": 4,
+      "text": "Building."
+    },
+    {
+      "finish_reason": "stop",
+      "kind": "response",
+      "seq": 19,
+      "t": 4,
+      "text": "Building.",
+      "to_request": 17
+    },
+    {
+      "kind": "turn.settled",
+      "reason": "final",
+      "seq": 20,
+      "t": 4,
+      "turn": 1
+    },
+    {
+      "from": "turn",
+      "kind": "settlement",
+      "seq": 21,
+      "t": 4,
+      "to": "capture"
+    },
+    {
+      "from": "capture",
+      "kind": "settlement",
+      "seq": 22,
+      "t": 4,
+      "to": "awaiting"
+    }
+  ],
+  "torn": 0
+}
