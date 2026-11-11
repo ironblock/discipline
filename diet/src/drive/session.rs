@@ -26422,6 +26422,47 @@ pub(in crate::drive) mod tests {
         reads_whole(&session);
     }
 
+    /// A warmed meditation's measured prompt is paired with the warm's own
+    /// estimate, so the trunk request after it is sized from that measure
+    /// plus what was added since -- not from the estimate of the trunk before
+    /// the refill, which the shrunk prompt falls back to the pad against.
+    #[test]
+    fn the_ask_after_a_warmed_meditation_is_sized_from_the_warms_measure() {
+        let timed = |prompt: u64| {
+            Step::Timings(Timings {
+                prompt_n: Some(prompt),
+                cache_n: Some(0),
+                predicted_n: Some(1),
+                ..Timings::default()
+            })
+        };
+        let session = three_decisions_then(
+            |meditations| meditations.warm = true,
+            vec![
+                vec![Step::Delta("x".to_owned()), timed(412)],
+                vec![Step::Delta("next".to_owned()), timed(430)],
+            ],
+        );
+        session.declare_meditation(None).expect("admitted");
+        wait_until(&session, "the meditation", meditated);
+        let warmed = estimate_of(session.shared.transport.sent().last().expect("the warm"));
+        assert_eq!(
+            session.shared.lock().sizing().2,
+            Some((412, warmed)),
+            "the warm's measure is paired with its own estimate"
+        );
+        let asked = session.shared.transport.sent().len();
+        session.ask("and next?", None).expect("accepted");
+        wait_until(&session, "the ask to settle", |log| {
+            settled(log) && session.shared.transport.sent().len() > asked
+        });
+        let next = estimate_of(&session.shared.transport.sent()[asked]);
+        assert!(next >= warmed, "{next} < {warmed}");
+        let (prompt, _, _) = session.shared.lock().sizing().1.expect("sized");
+        assert_eq!(prompt, 412 + (next - warmed), "sized from the pad, not the warm");
+        reads_whole(&session);
+    }
+
     /// #504: an ask while the warm is in flight cancels it: the meditation stands,
     /// logged without the warm's timings, and the ask is admitted.
     #[test]
