@@ -292,9 +292,7 @@ pub fn bash_description(background: bool, timeout: Option<u64>) -> String {
             .to_owned(),
     };
     let running = if background {
-        "- With `is_background: true` the call returns at once with the job's id, its output \
-         file and its status file, and the command keeps running, with no timeout; `task_stop` \
-         stops it, and when it ends a notification says so."
+        BACKGROUND_RUNNING
     } else {
         "- The call returns when the command exits. A process left running in the background \
          keeps running, but nothing it prints after the call returns is shown."
@@ -308,6 +306,44 @@ pub fn bash_description(background: bool, timeout: Option<u64>) -> String {
          - The command may run in a sandbox: writes outside the working directory, some reads, \
          and network access can be refused."
     )
+}
+
+/// The timed background `bash` line on a running job, in the maintainer's
+/// words: it names `task_stop` as a tool, which the model had run as a shell
+/// command.
+pub const BACKGROUND_RUNNING: &str = "- With `is_background: true` the call returns at once with \
+     the job's id, its output file and its status file, and the command keeps running, with no \
+     timeout. To stop it, call the `task_stop` tool with the job's id: it is a tool, not a shell \
+     command. When the job ends a notification says so.";
+
+/// [`BACKGROUND_RUNNING`] as a log before it sent the line, so its heads
+/// still rebuild (the digest decides).
+pub const BACKGROUND_RUNNING_BEFORE_THE_TASK_STOP_TOOL: &str = "- With `is_background: true` the \
+     call returns at once with the job's id, its output file and its status file, and the command \
+     keeps running, with no timeout; `task_stop` stops it, and when it ends a notification says \
+     so.";
+
+/// `tools` with a timed background `bash`, if it is there, described as it
+/// was before [`BACKGROUND_RUNNING`].
+#[must_use]
+pub fn with_bash_before_the_task_stop_tool(
+    tools: &[ToolDefinition],
+) -> Option<Vec<ToolDefinition>> {
+    let at = tools.iter().position(|tool| {
+        tool.name == BASH
+            && tool
+                .description
+                .as_deref()
+                .is_some_and(|text| text.contains(BACKGROUND_RUNNING))
+    })?;
+    let mut earlier = tools.to_vec();
+    earlier[at].description = earlier[at].description.as_deref().map(|text| {
+        text.replace(
+            BACKGROUND_RUNNING,
+            BACKGROUND_RUNNING_BEFORE_THE_TASK_STOP_TOOL,
+        )
+    });
+    Some(earlier)
 }
 
 /// The `bash` tool once calls time out (#613): #614's, with `timeout`, no
@@ -2781,6 +2817,26 @@ pub(in crate::drive) mod tests {
             bash_timeout_ms(&crate::formats::regimen::parse("").expect("a regimen")),
             Some(120_000)
         );
+    }
+
+    /// What a timed background session sends (`tools_timed`, live serve's
+    /// surface) names `task_stop` as a tool, in the maintainer's words, with
+    /// a timeout or with none.
+    #[test]
+    fn a_timed_background_bash_names_task_stop_as_a_tool() {
+        const LINE: &str = "- With `is_background: true` the call returns at once with the job's \
+             id, its output file and its status file, and the command keeps running, with no \
+             timeout. To stop it, call the `task_stop` tool with the job's id: it is a tool, not \
+             a shell command. When the job ends a notification says so.";
+        for timeout in [None, Some(120_000)] {
+            let tools = ToolSurface::Bash.tools_timed(true, timeout);
+            let description = tools[0].description.clone().expect("a description");
+            assert!(description.contains(LINE), "{description}");
+            assert!(
+                !description.contains("`task_stop` stops it"),
+                "{description}"
+            );
+        }
     }
 
     #[test]

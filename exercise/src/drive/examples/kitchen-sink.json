@@ -15,7 +15,7 @@
     {
       "approvals_off": true,
       "bash_timeout_ms": 120000,
-      "build_commit": "c2143b1515cb70dd072de62874cb2be0cae4310f",
+      "build_commit": "95c7fce68d735926af9d1685307b60d7dec745ab",
       "build_dirty": false,
       "compaction_persists": true,
       "fork_asks": "v4",
@@ -92,7 +92,7 @@
       },
       "model": "scenario",
       "notes_in_the_ask": true,
-      "opened": 1794438635909,
+      "opened": 1794441725988,
       "opening_phase": "plan",
       "phase_document": {
         "digest": "c3c3afe17657994b1403ed749e7352bdf4ad1eb47c688b6e60bb0e122db95e8e",
@@ -234,7 +234,7 @@
     },
     {
       "beside": 0,
-      "head_sha256": "158e8414230cb7b37b95b8f6477c1c8e056915128039b429c1590ebc0aa6b175",
+      "head_sha256": "aa704378f5b523abe0a0b0aa06ef50debebfc5d9917fcd5e35918ac14971d903",
       "kind": "request",
       "lane": "trunk",
       "max_tokens": 512,
@@ -397,7 +397,7 @@
     },
     {
       "fork": 17,
-      "head_sha256": "3cfe6396b57ca90eee0fb94e9761aee5c0b57a75486b3c9acf2f3eb5385431d6",
+      "head_sha256": "558c5fbd0d389588f2c0eb078afbad9af481d8507fb9eda956aeb0216b008002",
       "kind": "request",
       "lane": "interview",
       "max_tokens": 512,
@@ -408,7 +408,7 @@
     },
     {
       "beside": 1,
-      "head_sha256": "9d07d7a59ec40df1491a9fa4d7ade34bae79bcaa4070b87822bbe2189c618da5",
+      "head_sha256": "e6271a1385fe5914c5953cfa13755fdb0acbdf98b62472c2fbf12b8f5eba91cd",
       "kind": "request",
       "lane": "trunk",
       "max_tokens": 512,
@@ -589,7 +589,7 @@
     },
     {
       "fork": 32,
-      "head_sha256": "1f0cf28339a3a273cc83bccb151df87cee8d5aa6cdfefe926245f847b9f2d8f8",
+      "head_sha256": "c3bfed67bedd8b55ede8a9b0eef0205a96567ba364e0682c29422a8ea923f3f4",
       "kind": "request",
       "lane": "interview",
       "max_tokens": 512,
@@ -682,7 +682,7 @@
     },
     {
       "beside": 0,
-      "head_sha256": "1f0cf28339a3a273cc83bccb151df87cee8d5aa6cdfefe926245f847b9f2d8f8",
+      "head_sha256": "c3bfed67bedd8b55ede8a9b0eef0205a96567ba364e0682c29422a8ea923f3f4",
       "kind": "request",
       "lane": "trunk",
       "max_tokens": 512,
@@ -833,7 +833,7 @@
     },
     {
       "fork": 52,
-      "head_sha256": "dc0b202cbbb5922507731031c8c9dded89f00e472f73cdaa2adebd280438a2f1",
+      "head_sha256": "8ebc871f81216d4573339274f5132411c5842c9db7a583e8e30f6cb39fd2929e",
       "kind": "request",
       "lane": "interview",
       "max_tokens": 512,
@@ -844,7 +844,7 @@
     },
     {
       "beside": 1,
-      "head_sha256": "71ea86f1870a47d63b8ba84ade769d8e49d71747321a29f6ea9c0523f23edf8b",
+      "head_sha256": "bf7b51f018f09e0a1a95467295cf1910dd37d3d39e402e45e209be25f506689d",
       "kind": "request",
       "lane": "trunk",
       "max_tokens": 512,
@@ -1056,7 +1056,7 @@
     },
     {
       "fork": 69,
-      "head_sha256": "0a0414531b8cc7f587a8757b28159cf779bc6fbcc82c16c721e32ef9e9f26270",
+      "head_sha256": "8d37c0cdcce3eb36063f7ad5a3bfb0687357346292dae7e4790f15cf019b04ba",
       "kind": "request",
       "lane": "interview",
       "max_tokens": 512,
@@ -1067,7 +1067,7 @@
     },
     {
       "beside": 1,
-      "head_sha256": "49463281320b5c31ecfa12dce999aace5da38475b5852ad383030893f312626e",
+      "head_sha256": "8db3b99f355d0daca6c838a18d1099a6cdb7a8a645ffe73b5d1c8dd1dc5e9f9b",
       "kind": "request",
       "lane": "trunk",
       "max_tokens": 512,
@@ -1267,7 +1267,7 @@
     },
     {
       "fork": 84,
-      "head_sha256": "3887b7f734c2c358cbcb0d75b427beccdb4b1d426b704bda448b510753353287",
+      "head_sha256": "857dae1b4bff5f54e7034d21383def4c7bfdbef212828bf21113f3482712b501",
       "kind": "request",
       "lane": "interview",
       "max_tokens": 512,
@@ -1278,7 +1278,7 @@
     },
     {
       "beside": 1,
-      "head_sha256": "2bff8fd53a227db65898ad2e2f332abef39a7b659995135f7662705185551210",
+      "head_sha256": "4fd52c87698cce99e99e1ebc3881f78498185fe0c114dddfb962605051671f61",
       "kind": "request",
       "lane": "trunk",
       "max_tokens": 512,
@@ -1475,7 +1475,7 @@
     },
     {
       "beside": 0,
-      "head_sha256": "5e30e7eb21591ac40c15f4779ab413b4671c750f60c512b1ab7d4a5a60d0a84a",
+      "head_sha256": "029f507f2bc47de17f70a6f841414496a552fc683d54fae018e15c2e948e00e8",
       "kind": "request",
       "lane": "trunk",
       "max_tokens": 512,
@@ -1641,7 +1641,7 @@
     },
     {
       "beside": 0,
-      "head_sha256": "f6eaa007aeb9d309e2a63aca0906d23c89571be981edab9d7cc48f2a3c8dd7f8",
+      "head_sha256": "7f611699849dc73eefaa65118280f5a232f508a63b374a3e63fee67d74574401",
       "kind": "request",
       "lane": "trunk",
       "max_tokens": 512,
@@ -1800,7 +1800,7 @@
     },
     {
       "fork": 124,
-      "head_sha256": "4a57a7c7c3ab966f34d90e63d594d96b3feadf17f7ae03b064a7c9ed64b3812b",
+      "head_sha256": "611a6259e6faa305b8176c016bf09dab575e3ed37261125ec6ef9360fa4598c8",
       "kind": "request",
       "lane": "interview",
       "max_tokens": 512,
@@ -1835,8 +1835,8 @@
         ]
       },
       "placement": "message",
-      "prefix_hash_after": "7e777c98b6300413b5345d2426dd94f37017333a2d7b540820c63f3779c1b96b",
-      "prefix_hash_before": "5e30e7eb21591ac40c15f4779ab413b4671c750f60c512b1ab7d4a5a60d0a84a",
+      "prefix_hash_after": "cd23c614d5cc15a6155a3bba07d5ddbc9fb492fc6ec953bfd8cf13484b39fb50",
+      "prefix_hash_before": "029f507f2bc47de17f70a6f841414496a552fc683d54fae018e15c2e948e00e8",
       "prompt_tokens": 16995,
       "reason": "window",
       "render": "# regime\ndogma_version: 0\nphase: orient\nframe_version: 2\n\n# working set\ninterview-t1-0\ninterview-t1-1\ninterview-t1-f32-0\ninterview-t2-0\ninterview-t2-1\ninterview-t2-f84-1\nmechanical/listed:shot.png\nmechanical/notes.md\nmechanical/shot.png\nr6/call-r1/decision\n10 older entries elided\n\n\nYou are in /scenario/worktree.",
@@ -1919,7 +1919,7 @@
     },
     {
       "beside": 0,
-      "head_sha256": "37b11d397bd6b58c0a10dce14acccc13797cc4f13ed2c60d4c17c2b1932cfbba",
+      "head_sha256": "59785df9b6e1e55a5318c230aa867839bc0343cdd369cfc79dbe8748705172b6",
       "kind": "request",
       "lane": "trunk",
       "max_tokens": 512,
@@ -2087,8 +2087,8 @@
         ]
       },
       "placement": "message",
-      "prefix_hash_after": "7442fa3889200b6f796fb6dfcdee44d3f0bed8e1f6e723fd5f66d6da31b26933",
-      "prefix_hash_before": "3e9a8dcaa29e65fb2d1163a337d59d76e8295c0fab10b58635da6f4f659a96dc",
+      "prefix_hash_after": "cf52e766e9d6eaed255ec214908092fcf28bc0011fc3f94c20fcbddb8647c1a8",
+      "prefix_hash_before": "096a4a11d1c04cf42f27173e4796f4574962b064130d17c28c632852459867d1",
       "prompt_tokens": 17010,
       "reason": "window",
       "render": "# regime\ndogma_version: 0\nphase: orient\nframe_version: 2\n\n# working set\ninterview-t1-0\ninterview-t1-1\ninterview-t1-f32-0\ninterview-t2-0\ninterview-t2-1\ninterview-t2-f84-1\nmechanical/listed:shot.png\nmechanical/notes.md\nmechanical/shot.png\nr6/call-r1/decision\n10 older entries elided\n\n\nYou are in /scenario/worktree.",
@@ -2108,7 +2108,7 @@
     },
     {
       "beside": 0,
-      "head_sha256": "7442fa3889200b6f796fb6dfcdee44d3f0bed8e1f6e723fd5f66d6da31b26933",
+      "head_sha256": "cf52e766e9d6eaed255ec214908092fcf28bc0011fc3f94c20fcbddb8647c1a8",
       "kind": "request",
       "lane": "trunk",
       "max_tokens": 480,
@@ -2245,7 +2245,7 @@
       "to": "capture"
     },
     {
-      "head_sha256": "e353f8c4589e8edcd5a4debd16764b8d7529810efe26b54c1920d69d6d070525",
+      "head_sha256": "4c156ab94eb1e74a5c67065fee014ae37ff87f2522ccb21126382bf1692a8109",
       "kind": "request",
       "lane": "warm",
       "max_tokens": 1,
@@ -2301,8 +2301,8 @@
         ]
       },
       "placement": "message",
-      "prefix_hash_after": "5c0387406893fe2840233f3943176a6e956e1ead2d4d0106bd06e7feda06eacf",
-      "prefix_hash_before": "b47bde0f754fdf67eb78c9e4ee90f30c28c44b06dbef1034a772b606f683f71c",
+      "prefix_hash_after": "c1c9ea4e22822b0d06091e6da11c8946bb6fa1f6936b122689f68d721f16829d",
+      "prefix_hash_before": "ba19b6d20a5c24934dccfdf32f749f9004024117c9d11aa74772cc6b507680ce",
       "reason": "budget",
       "render": "# regime\ndogma_version: 0\nphase: orient\nframe_version: 2\n\n# working set\ninterview-t1-0\tyou said, when asked\tlearned: notes.md reads back exactly as it was written\ninterview-t1-1\tyou said, when asked\tplan: write it, then read it back\ninterview-t1-f32-0\tyou said, when asked\tdecision: notes.md holds one line per decision\ninterview-t2-0\tyou said, when asked\tlearned: notes.md now holds the first decision\ninterview-t2-1\tyou said, when asked\tevidence: the write of notes.md\ninterview-t2-f84-1\tyou said, when asked\tevidence: decision: one line per decision\nmechanical/listed:shot.png\tfiles: listed shot.png\nmechanical/notes.md\tfiles: notes.md\nmechanical/shot.png\tfiles: shot.png\nr6/call-r1/decision\tyou noted\tnotes.md holds one line per decision\n\n\nYou are in /scenario/worktree.",
       "render_budget_tokens": 120,
@@ -2352,7 +2352,7 @@
     },
     {
       "beside": 0,
-      "head_sha256": "5c0387406893fe2840233f3943176a6e956e1ead2d4d0106bd06e7feda06eacf",
+      "head_sha256": "c1c9ea4e22822b0d06091e6da11c8946bb6fa1f6936b122689f68d721f16829d",
       "kind": "request",
       "lane": "trunk",
       "max_tokens": 512,
@@ -2475,7 +2475,7 @@
     },
     {
       "beside": 0,
-      "head_sha256": "3cb736b40bde2b7e11c96f2e0ff266c1f09e4ce0417450c0a639c3b89a17a9c0",
+      "head_sha256": "56139b094b4e8d74206dae2f974678fd96008ceded0ab61e33da50593e732341",
       "kind": "request",
       "lane": "trunk",
       "max_tokens": 512,
@@ -2598,7 +2598,7 @@
     },
     {
       "beside": 0,
-      "head_sha256": "f3e7cf97b6e88a39f7ff4b8f43bd3631e7e9b1d2ef458ae7f538a07e041a234d",
+      "head_sha256": "11f6a33a1fb177f0e8b36b75f131c348e840ba3b6611c9b4fb36866dac366ccc",
       "kind": "request",
       "lane": "trunk",
       "max_tokens": 512,
@@ -2755,7 +2755,7 @@
     },
     {
       "fork": 194,
-      "head_sha256": "13198ea8e0509a60029cb73b274caedf0a7c8b0f5925999833606326949864ee",
+      "head_sha256": "6fa01df6b4e1013240c40bc6896335814e1278ed86b66451eed377396efb64b2",
       "kind": "request",
       "lane": "interview",
       "max_tokens": 512,
@@ -2814,7 +2814,7 @@
     },
     {
       "beside": 0,
-      "head_sha256": "4806d219739da387f64708af50bd535e4768d1a01baa634e7cee246e87877d6b",
+      "head_sha256": "4bef14bc9e235067b46f5ab8863447de3ab664c93284dadb7b19823b87406f61",
       "kind": "request",
       "lane": "trunk",
       "max_tokens": 512,
@@ -2975,7 +2975,7 @@
     },
     {
       "fork": 209,
-      "head_sha256": "4bc5eb5e9a7731bd02c1dae3820ebaa4e75803ca90b9c64ceba0b8dbebc49711",
+      "head_sha256": "682b4570d59e526bd5cd350c29208d701a4d87e9c15dda700e422030b1d99d0d",
       "kind": "request",
       "lane": "interview",
       "max_tokens": 512,
@@ -2986,7 +2986,7 @@
     },
     {
       "beside": 1,
-      "head_sha256": "4057a37e253d46e41da730dedf090992f806bc123f05b03cbd16985c06818c41",
+      "head_sha256": "96afba82ff047f5ee98cee18400c0f547d24e0b32c33d92d818846c30ec3667c",
       "kind": "request",
       "lane": "trunk",
       "max_tokens": 512,
@@ -3063,7 +3063,7 @@
     },
     {
       "fork": 215,
-      "head_sha256": "4bc5eb5e9a7731bd02c1dae3820ebaa4e75803ca90b9c64ceba0b8dbebc49711",
+      "head_sha256": "682b4570d59e526bd5cd350c29208d701a4d87e9c15dda700e422030b1d99d0d",
       "kind": "request",
       "lane": "interview",
       "max_tokens": 512,
@@ -3134,7 +3134,7 @@
     },
     {
       "fork": 221,
-      "head_sha256": "4bc5eb5e9a7731bd02c1dae3820ebaa4e75803ca90b9c64ceba0b8dbebc49711",
+      "head_sha256": "682b4570d59e526bd5cd350c29208d701a4d87e9c15dda700e422030b1d99d0d",
       "kind": "request",
       "lane": "interview",
       "max_tokens": 512,
@@ -3200,7 +3200,7 @@
     },
     {
       "fork": 226,
-      "head_sha256": "4bc5eb5e9a7731bd02c1dae3820ebaa4e75803ca90b9c64ceba0b8dbebc49711",
+      "head_sha256": "682b4570d59e526bd5cd350c29208d701a4d87e9c15dda700e422030b1d99d0d",
       "kind": "request",
       "lane": "interview",
       "max_tokens": 512,
@@ -3375,7 +3375,7 @@
     },
     {
       "fork": 239,
-      "head_sha256": "c8d470b5bf88a74f0026bcb06ddbd593d618037558849b71fc6128761b59499e",
+      "head_sha256": "9e06cbb6cad954b3ca980af843afa8f2904ba757c22a07bc07953e39c2230f67",
       "kind": "request",
       "lane": "interview",
       "max_tokens": 512,
@@ -3455,7 +3455,7 @@
     },
     {
       "beside": 0,
-      "head_sha256": "51d9e77c0a0cb8fca07c923b870246862ec5f9eed68f3778ac57783f36f670a5",
+      "head_sha256": "72030c4a1aeb2fa516f21aca57a2696842bae712fff3fcb8802b4fa110e05bd3",
       "kind": "request",
       "lane": "trunk",
       "max_tokens": 512,
@@ -3599,7 +3599,7 @@
     },
     {
       "beside": 0,
-      "head_sha256": "e7d58bec0f204392de4874b072d1f0e2454bc13b897a588949cf01e3471671b9",
+      "head_sha256": "439307f6bf7f6a01199fdd8af6656818d0ab4643278d193dd8c128e8c466ef18",
       "kind": "request",
       "lane": "trunk",
       "max_tokens": 512,
@@ -3743,7 +3743,7 @@
     },
     {
       "beside": 0,
-      "head_sha256": "4d4dbe7d61c689f59431dbf5087d995d6f3e5ef19b22ec7baa4aeabf1b71ae98",
+      "head_sha256": "752c87076b801fee31b6c299da673a43196c6796ad30a5804f698ce847680288",
       "kind": "request",
       "lane": "trunk",
       "max_tokens": 512,
@@ -3883,7 +3883,7 @@
     },
     {
       "fork": 275,
-      "head_sha256": "da094c9e95800e036f89c9e848e49537a900285415f7a4ad29cd87ffb5883d8f",
+      "head_sha256": "a347d402148378a679d8e8a881814550a60920c626fb5d45fae206bfa2205c4b",
       "kind": "request",
       "lane": "interview",
       "max_tokens": 512,
@@ -3894,7 +3894,7 @@
     },
     {
       "beside": 1,
-      "head_sha256": "5ad64c3ca0e93a3fb9a7fc619c1d827223e4105d2ee16e9dcd10eb40c7b45910",
+      "head_sha256": "dcff2fd465970ba2b489aa9850117479749c4df826e010ce35136b59a3819529",
       "kind": "request",
       "lane": "trunk",
       "max_tokens": 512,
@@ -4122,7 +4122,7 @@
     },
     {
       "beside": 0,
-      "head_sha256": "d6d64a2d048513d42a8c7a5f14200eb00d410389097cdac591d37e5ca4410044",
+      "head_sha256": "6046157db918d754b18e5b59bcb852312c8d218b6d1a7f87a596d75c385b4a8e",
       "kind": "request",
       "lane": "trunk",
       "max_tokens": 512,
@@ -4294,7 +4294,7 @@
     },
     {
       "fork": 306,
-      "head_sha256": "516169066374dc9854c7b0c0048c6f76ffe911bf9a37c1c182ade731a1591e23",
+      "head_sha256": "8d7e0cd9dd37bd0bb3b68aab8a3a0718e0c3f530fa5cf5320d110d3fe859855a",
       "kind": "request",
       "lane": "interview",
       "max_tokens": 512,
@@ -4331,8 +4331,8 @@
         ]
       },
       "placement": "message",
-      "prefix_hash_after": "d4456dbc24d763c9eaad4a191ef1ea0ab399280044b530d2050069363af93618",
-      "prefix_hash_before": "d6d64a2d048513d42a8c7a5f14200eb00d410389097cdac591d37e5ca4410044",
+      "prefix_hash_after": "8144c21e9a96fead7fa5440ad871dfc60bb46300a417e9747893d99868216c2d",
+      "prefix_hash_before": "6046157db918d754b18e5b59bcb852312c8d218b6d1a7f87a596d75c385b4a8e",
       "prompt_tokens": 5617,
       "reason": "window",
       "render": "# regime\ndogma_version: 0\nphase: orient\nframe_version: 2\n\n# working set\ninterview-t1-0\ninterview-t1-1\ninterview-t1-f32-0\ninterview-t2-0\ninterview-t2-1\ninterview-t2-f84-1\ninterview-t6-0\nmechanical/listed:shot.png\nmechanical/notes.md\nmechanical/shot.png\nr6/call-r1/decision\n11 older entries elided\n\n\nYou are in /scenario/worktree.",
@@ -4361,7 +4361,7 @@
     },
     {
       "beside": 1,
-      "head_sha256": "6ccd1ae55a63e2045ed3221d0845d2fed528b9020e68e8a82524fbbfa1af83f5",
+      "head_sha256": "d3e70731ffbe1fceef0a8e279fb1c9a53d94e4fad00fa8e164241233122e0d24",
       "kind": "request",
       "lane": "trunk",
       "max_tokens": 512,
@@ -4584,7 +4584,7 @@
     },
     {
       "fork": 324,
-      "head_sha256": "dcda167cff53c4ec761f25fe614a035c8c5adbc5c414363bd7b89d19dd246c32",
+      "head_sha256": "6ce1c5e5864ab6143475037d6e7e8ebae655d8c9218aec0c0c19f2d33077e45e",
       "kind": "request",
       "lane": "interview",
       "max_tokens": 512,
@@ -4595,7 +4595,7 @@
     },
     {
       "beside": 1,
-      "head_sha256": "5ab98e30b64f8fe97eb2d7e6cf9099e8b0b42d6ac0d1a14a701843554cfdf718",
+      "head_sha256": "72f86a69b54d0feb2ec73ac1de1c5b752706dcb8e09b2cd10b29e01491d1fc54",
       "kind": "request",
       "lane": "trunk",
       "max_tokens": 512,
@@ -4803,7 +4803,7 @@
     },
     {
       "beside": 0,
-      "head_sha256": "672d9bce2cddc6b94e221418e6d433657817edf57eaec7740d4eb6a0992e7840",
+      "head_sha256": "3b7d5e046143f9023782c4f4cf2122e01fca100c7d4c344310ee8b43f36e29f3",
       "kind": "request",
       "lane": "trunk",
       "max_tokens": 512,
@@ -4937,7 +4937,7 @@
     },
     {
       "beside": 0,
-      "head_sha256": "135e51ba62cf097129126b40fe82bb3c8abaa9c60b083b19fafa6428ad929dc2",
+      "head_sha256": "5077eaded88daea31b20da8b8a97da9259da717fc5efe2995304d66c542819ca",
       "kind": "request",
       "lane": "trunk",
       "max_tokens": 512,
@@ -5089,7 +5089,7 @@
     },
     {
       "beside": 0,
-      "head_sha256": "ab84f81b87d5c4eb3f35ed775a1a35e85782be3f8d7499a045372fa8c3b2fa32",
+      "head_sha256": "73164511972320ba5eb2a5b1bbbbfe06dd387f6109d5a4543a8f78242df5bda6",
       "kind": "request",
       "lane": "trunk",
       "max_tokens": 512,
@@ -5226,7 +5226,7 @@
     },
     {
       "fork": 373,
-      "head_sha256": "1dff1766de36358bf62d81576ddbdaf0550482b1cfdb742e08b11a6aea37d4f5",
+      "head_sha256": "28b50e4cb113097f677ccfb4fe3d931458b8a072917697b66b47d128691064c2",
       "kind": "request",
       "lane": "interview",
       "max_tokens": 512,
@@ -5344,7 +5344,7 @@
     },
     {
       "beside": 0,
-      "head_sha256": "6050c029bf715b8b3b3e96ae4597347d2196dd135d35b19fef0b8394e22a51e5",
+      "head_sha256": "7e3db5f32704d5c54fc2eec1a504fb57d8f142185370fab7525ecca8354dc074",
       "kind": "request",
       "lane": "trunk",
       "max_tokens": 512,
@@ -5488,7 +5488,7 @@
     },
     {
       "beside": 0,
-      "head_sha256": "0a9c0f0459e89331fd8220f761cc5377f953275ada62149861663c828b1adba0",
+      "head_sha256": "2629a7990dc9b49e8339e3d6f010c5f5acb7db790a0858558613a1eb7a0abef7",
       "kind": "request",
       "lane": "trunk",
       "max_tokens": 512,
@@ -5632,7 +5632,7 @@
     },
     {
       "beside": 0,
-      "head_sha256": "72346f544353f68fb61868ec69327ef03da8a728504eaac9a71bb66967cef517",
+      "head_sha256": "2f654d784a94be9e537c1919b5a02729d24d90a5e541e49d0d06b3873922b3ce",
       "kind": "request",
       "lane": "trunk",
       "max_tokens": 512,
@@ -5776,7 +5776,7 @@
     },
     {
       "beside": 0,
-      "head_sha256": "54de4f9c334e5a962e177241ddda26d6c9c94d8deacb8a57b4ca33177afc105c",
+      "head_sha256": "1868ae7215c25674d7e63ab2247457c318fd6e509af5f121ad80c3a8e21d4aa8",
       "kind": "request",
       "lane": "trunk",
       "max_tokens": 512,
@@ -5933,7 +5933,7 @@
     },
     {
       "beside": 0,
-      "head_sha256": "517648c2514befd495b83d360c9f1fb704a8d035f7b3432bc740541745330cfc",
+      "head_sha256": "df6cf4ecb19034d8e859524d9ff5e886ba7ad421a3cab73019de3d827ba92ab6",
       "kind": "request",
       "lane": "trunk",
       "max_tokens": 512,
@@ -6088,7 +6088,7 @@
     },
     {
       "beside": 0,
-      "head_sha256": "99921b520c3552ccafe69779cc7678afbc0cb800cfa1bbeddab09438ca8bc377",
+      "head_sha256": "4019d224b09f3c24d519cd7a951c580a6744c371cf57eecc34e3ee70f68e9e8c",
       "kind": "request",
       "lane": "trunk",
       "max_tokens": 512,
@@ -6244,7 +6244,7 @@
     },
     {
       "fork": 447,
-      "head_sha256": "99921b520c3552ccafe69779cc7678afbc0cb800cfa1bbeddab09438ca8bc377",
+      "head_sha256": "4019d224b09f3c24d519cd7a951c580a6744c371cf57eecc34e3ee70f68e9e8c",
       "kind": "request",
       "lane": "interview",
       "max_tokens": 512,
@@ -6316,7 +6316,7 @@
     },
     {
       "beside": 0,
-      "head_sha256": "3bcb670258aadb1930de61f9e76a17f4be9111b92297233d7b0d3c9af6b0b924",
+      "head_sha256": "878c6c4cc1f1b4bfeb29637e8235b375e1013f88c241b67e084eddd0d64ee047",
       "kind": "request",
       "lane": "trunk",
       "max_tokens": 512,
@@ -6479,7 +6479,7 @@
     },
     {
       "fork": 467,
-      "head_sha256": "6f464db08ea7d2d1ca90a621199f8f3d3f13c547e34f4d7e05f3cdd1cf3f285f",
+      "head_sha256": "f36c4e0dc815a51fa5edfb37270c91c6f14d54a7ae9f5dc5a34162074d06d492",
       "kind": "request",
       "lane": "interview",
       "max_tokens": 512,
@@ -6490,7 +6490,7 @@
     },
     {
       "beside": 1,
-      "head_sha256": "5b632448cdf3bfe3d2b86e0ffaabafa39f7e0f8cb89843b3e42ce710bf843ca1",
+      "head_sha256": "12652c3104feba92bc156eda656ee8a2c2016691bd4db569aa367aff4595bdf4",
       "kind": "request",
       "lane": "trunk",
       "max_tokens": 512,
@@ -6706,7 +6706,7 @@
     },
     {
       "beside": 0,
-      "head_sha256": "28e6e3dd543997b91838e543745c45433492871d364ab81e3e9ac2a71d27d969",
+      "head_sha256": "b3f0f6b050ebd71bea860c451cdb8e9b19b46a731e61b919c4e4d32843811955",
       "kind": "request",
       "lane": "trunk",
       "max_tokens": 512,
@@ -6833,7 +6833,7 @@
     },
     {
       "fork": 495,
-      "head_sha256": "4364ac76d7b5d705aef29ca2947f67fb467277a9d34a431c792e58ba96827b27",
+      "head_sha256": "2ee39aa90b0d2e201e87c61a16dcf03616e5a638d63f91d488ea6e45116c2780",
       "kind": "request",
       "lane": "interview",
       "max_tokens": 512,
@@ -6926,7 +6926,7 @@
     },
     {
       "fork": 503,
-      "head_sha256": "f1c00ec0742cbca7cdf8cf196929e59c1dbb54a182d8575c2ba5d98bd7550a64",
+      "head_sha256": "d7404af81aca47920c5a59a1326001866d8138c64e14c2efab1a9e1277ac59f0",
       "kind": "request",
       "lane": "audit",
       "max_tokens": 512,
@@ -6949,7 +6949,7 @@
     },
     {
       "fork": 505,
-      "head_sha256": "f1c00ec0742cbca7cdf8cf196929e59c1dbb54a182d8575c2ba5d98bd7550a64",
+      "head_sha256": "d7404af81aca47920c5a59a1326001866d8138c64e14c2efab1a9e1277ac59f0",
       "kind": "request",
       "lane": "audit",
       "max_tokens": 512,
@@ -7023,7 +7023,7 @@
       "t": 110407
     },
     {
-      "head_sha256": "e1787bc9aec43b1a628cd55982cd794fc3cc9bf59684dcc6dfbaf43340de7cf3",
+      "head_sha256": "b9cd62e6a9814f4a36f9f54bde08a2d0f608b1d283e84134564fb69a58e563fa",
       "kind": "request",
       "lane": "warm",
       "max_tokens": 1,
@@ -7081,8 +7081,8 @@
         ]
       },
       "placement": "message",
-      "prefix_hash_after": "85bff646a1bba6015caea46acebcd39947d3e21b383c93333ad47d08fd008323",
-      "prefix_hash_before": "f1c00ec0742cbca7cdf8cf196929e59c1dbb54a182d8575c2ba5d98bd7550a64",
+      "prefix_hash_after": "652cdd40bab798047f078a321528593043e2a00b76c908681d38d53940a46bf3",
+      "prefix_hash_before": "d7404af81aca47920c5a59a1326001866d8138c64e14c2efab1a9e1277ac59f0",
       "reason": "cadence",
       "render": "# regime\ndogma_version: 0\nphase: orient\nframe_version: 2\n\n# working set\ninterview-t1-1\tyou said, when asked\tplan: write it, then read it back\ninterview-t1-f32-0\tyou said, when asked\tdecision: notes.md holds one line per decision\ninterview-t14-2\tyou said, when asked\tdecision: notes.md holds the decisions as a Markdown list\ninterview-t2-0\tyou said, when asked\tlearned: notes.md now holds the first decision\ninterview-t2-1\tyou said, when asked\tevidence: the write of notes.md\ninterview-t2-f84-1\tyou said, when asked\tevidence: decision: one line per decision\ninterview-t6-0\tyou said, when asked\tgotcha: missing.txt does not exist — IMPLICATION: create it before showing it\ninterview-t8-0\tyou said, when asked\tevidence: xxxxxxxxxx\ninterview-t8-1\tyou said, when asked\tpointer: the long line is 9000 x's (the output of call-b2)\nmechanical/listed:shot.png\tfiles: listed shot.png\nmechanical/notes.md\tfiles: notes.md\nmechanical/shot.png\tfiles: shot.png\nr374/refute-1.1\tyou said, when asked\tfact: the build takes longer than the step's timeout\nr374/refute-1.1-claim\tyou said, when asked\twas: fact: the build finishes in a few seconds (held at 7/10), wrong because the command timed out after 16000ms [call call-b7]\n\n\nYou are in /scenario/worktree.",
       "render_budget_tokens": 120,
@@ -7133,7 +7133,7 @@
     },
     {
       "beside": 0,
-      "head_sha256": "85bff646a1bba6015caea46acebcd39947d3e21b383c93333ad47d08fd008323",
+      "head_sha256": "652cdd40bab798047f078a321528593043e2a00b76c908681d38d53940a46bf3",
       "kind": "request",
       "lane": "trunk",
       "max_tokens": 512,
@@ -7273,7 +7273,7 @@
     },
     {
       "fork": 529,
-      "head_sha256": "58b9d0188f0ba85f7c4fae366bdd31335f95b855ba55496d66781a25d8a7e37a",
+      "head_sha256": "cd8fda0a84223bd8855cf678e1cdd4697ae9e314ad4ce228dd58c0abec3d41c0",
       "kind": "request",
       "lane": "interview",
       "max_tokens": 512,
@@ -7411,7 +7411,7 @@
     },
     {
       "fork": 540,
-      "head_sha256": "58b9d0188f0ba85f7c4fae366bdd31335f95b855ba55496d66781a25d8a7e37a",
+      "head_sha256": "cd8fda0a84223bd8855cf678e1cdd4697ae9e314ad4ce228dd58c0abec3d41c0",
       "kind": "request",
       "lane": "audit",
       "max_tokens": 512,
@@ -7434,7 +7434,7 @@
     },
     {
       "fork": 542,
-      "head_sha256": "58b9d0188f0ba85f7c4fae366bdd31335f95b855ba55496d66781a25d8a7e37a",
+      "head_sha256": "cd8fda0a84223bd8855cf678e1cdd4697ae9e314ad4ce228dd58c0abec3d41c0",
       "kind": "request",
       "lane": "audit",
       "max_tokens": 512,
@@ -7508,7 +7508,7 @@
       "t": 116860
     },
     {
-      "head_sha256": "2be70dc5b71da5c85f841bc47a42de4d330b57681b9bebe1a5ec62fe6ed828eb",
+      "head_sha256": "0a1a802241921dce66bd54e39b58d7ca1142406b4af879faf34626acbdac04bf",
       "kind": "request",
       "lane": "warm",
       "max_tokens": 1,
@@ -7574,8 +7574,8 @@
         ]
       },
       "placement": "message",
-      "prefix_hash_after": "704e82f3bb449ec9ea995a24b2e657ab2b763928cda4d869f5136a92b3d7208e",
-      "prefix_hash_before": "58b9d0188f0ba85f7c4fae366bdd31335f95b855ba55496d66781a25d8a7e37a",
+      "prefix_hash_after": "6b5db326ced79c345cf86e94845d23d6dd3caa647ab79e5de2902a8c677014f2",
+      "prefix_hash_before": "cd8fda0a84223bd8855cf678e1cdd4697ae9e314ad4ce228dd58c0abec3d41c0",
       "reason": "phase",
       "render": "# regime\ndogma_version: 0\nphase: plan\nframe_version: 2\n\n# working set\ninterview-t1-1\tyou said, when asked\tplan: write it, then read it back\ninterview-t1-f32-0\tyou said, when asked\tdecision: notes.md holds one line per decision\ninterview-t14-2\tyou said, when asked\tdecision: notes.md holds the decisions as a Markdown list\ninterview-t2-0\tyou said, when asked\tlearned: notes.md now holds the first decision\ninterview-t2-1\tyou said, when asked\tevidence: the write of notes.md\ninterview-t2-f84-1\tyou said, when asked\tevidence: decision: one line per decision\ninterview-t6-0\tyou said, when asked\tgotcha: missing.txt does not exist — IMPLICATION: create it before showing it\ninterview-t8-0\tyou said, when asked\tevidence: xxxxxxxxxx\ninterview-t8-1\tyou said, when asked\tpointer: the long line is 9000 x's (the output of call-b2)\nmechanical/listed:shot.png\tfiles: listed shot.png\nmechanical/notes.md\tfiles: notes.md\nmechanical/shot.png\tfiles: shot.png\nr374/refute-1.1\tyou said, when asked\tfact: the build takes longer than the step's timeout\nr374/refute-1.1-claim\tyou said, when asked\twas: fact: the build finishes in a few seconds (held at 7/10), wrong because the command timed out after 16000ms [call call-b7]\n\n\nYou are in /scenario/worktree.",
       "render_budget_tokens": 120,
@@ -7631,7 +7631,7 @@
     },
     {
       "beside": 0,
-      "head_sha256": "704e82f3bb449ec9ea995a24b2e657ab2b763928cda4d869f5136a92b3d7208e",
+      "head_sha256": "6b5db326ced79c345cf86e94845d23d6dd3caa647ab79e5de2902a8c677014f2",
       "kind": "request",
       "lane": "trunk",
       "max_tokens": 512,
@@ -7783,7 +7783,7 @@
     },
     {
       "fork": 568,
-      "head_sha256": "b8e9278fb76654fae10bd923206a0671c03af743389d8792bb80fa7138484a45",
+      "head_sha256": "3c3f3f371289a31512e5ab41997174dcebe430194443993ee907502db9be7da1",
       "kind": "request",
       "lane": "interview",
       "max_tokens": 512,
@@ -7794,7 +7794,7 @@
     },
     {
       "beside": 1,
-      "head_sha256": "255221cad8bb8045e900ab20fd0e279f00e73d0dd5b7dddb03be5826aa94de2b",
+      "head_sha256": "9efd1c9adbbbf3c2a9e7f3e035e2906e401e3a390baabba064a537d8caee4401",
       "kind": "request",
       "lane": "trunk",
       "max_tokens": 512,
@@ -7998,7 +7998,7 @@
     },
     {
       "beside": 0,
-      "head_sha256": "704e82f3bb449ec9ea995a24b2e657ab2b763928cda4d869f5136a92b3d7208e",
+      "head_sha256": "6b5db326ced79c345cf86e94845d23d6dd3caa647ab79e5de2902a8c677014f2",
       "kind": "request",
       "lane": "trunk",
       "max_tokens": 512,
@@ -8170,7 +8170,7 @@
     },
     {
       "fork": 597,
-      "head_sha256": "348d081510c555ad3d23e281e313d5cde766298e737fe5092031e93e92ffcf5e",
+      "head_sha256": "a9a6795d4081e4ea2a50ecd0425ff9a090100d4e6587d6ba4cae2c2e69330338",
       "kind": "request",
       "lane": "interview",
       "max_tokens": 512,
@@ -8181,7 +8181,7 @@
     },
     {
       "beside": 1,
-      "head_sha256": "1b6d0b6e2e90098aa2c56f08bac9b213e65ed6036a3d67ec1bb34bff8becd34e",
+      "head_sha256": "afd4909b4839ee954eebf4d00f6711e83d98ea7ab5776b6c7b71d601fe82c81a",
       "kind": "request",
       "lane": "trunk",
       "max_tokens": 512,
@@ -8373,7 +8373,7 @@
     },
     {
       "fork": 614,
-      "head_sha256": "348d081510c555ad3d23e281e313d5cde766298e737fe5092031e93e92ffcf5e",
+      "head_sha256": "a9a6795d4081e4ea2a50ecd0425ff9a090100d4e6587d6ba4cae2c2e69330338",
       "kind": "request",
       "lane": "interview",
       "max_tokens": 512,
@@ -8463,8 +8463,8 @@
       "entry": "operator-620",
       "from": 617,
       "kind": "wrapped",
-      "prefix_after": "59cbf24ac4fdcbde32982519532687e81794af65b3521c3a3be92f5e309c6d2d",
-      "prefix_before": "e59d5d6f92b42ff11defc56bee6a0658b6e56984a0a2a6344d9d0ce0c8cd2972",
+      "prefix_after": "5a4fa1b6b7c347a37fe62568f286314a2f92716af4fffa9e9320cb94eff422d1",
+      "prefix_before": "6adc57e45b2e704cafdc6852cdbaf73c6b195065e988fe8001f17d656d8ad798",
       "seq": 624,
       "t": 134768,
       "tail_tokens": 24,
@@ -8473,7 +8473,7 @@
     },
     {
       "beside": 0,
-      "head_sha256": "59cbf24ac4fdcbde32982519532687e81794af65b3521c3a3be92f5e309c6d2d",
+      "head_sha256": "5a4fa1b6b7c347a37fe62568f286314a2f92716af4fffa9e9320cb94eff422d1",
       "kind": "request",
       "lane": "trunk",
       "max_tokens": 512,
@@ -8624,7 +8624,7 @@
     },
     {
       "fork": 635,
-      "head_sha256": "040cadd858ca766c2a8e3f904872e77112ad8df59ed9deceafbfd136146f734f",
+      "head_sha256": "f4ab741209a502925d717c7c1157c8ce50b6e39bc327e4c13aa9f112e766c59f",
       "kind": "request",
       "lane": "interview",
       "max_tokens": 512,
@@ -8756,7 +8756,7 @@
     },
     {
       "beside": 0,
-      "head_sha256": "040cadd858ca766c2a8e3f904872e77112ad8df59ed9deceafbfd136146f734f",
+      "head_sha256": "f4ab741209a502925d717c7c1157c8ce50b6e39bc327e4c13aa9f112e766c59f",
       "kind": "request",
       "lane": "trunk",
       "max_tokens": 512,
@@ -8896,7 +8896,7 @@
     },
     {
       "fork": 658,
-      "head_sha256": "55890637cf15893b3bf1673f17716cbd531b186ea05809f44c7ba5322851dd31",
+      "head_sha256": "7e3ff0e5c84b117b5d806a11bb22eaa63acded944dd66d3f249bf7d0bda7acf8",
       "kind": "request",
       "lane": "interview",
       "max_tokens": 512,
@@ -9068,7 +9068,7 @@
     },
     {
       "beside": 0,
-      "head_sha256": "55890637cf15893b3bf1673f17716cbd531b186ea05809f44c7ba5322851dd31",
+      "head_sha256": "7e3ff0e5c84b117b5d806a11bb22eaa63acded944dd66d3f249bf7d0bda7acf8",
       "kind": "request",
       "lane": "trunk",
       "max_tokens": 512,
@@ -9222,7 +9222,7 @@
     },
     {
       "beside": 0,
-      "head_sha256": "68b259a905a817a216aa9ade706a6dd61d1b66a5df5e8331dc232aebde2ef85e",
+      "head_sha256": "5eca39c4e7ad82aedbd6805357dad4c4748aa014cc37103d7a9d7ee521f4d034",
       "kind": "request",
       "lane": "trunk",
       "max_tokens": 512,
@@ -9391,7 +9391,7 @@
     },
     {
       "fork": 698,
-      "head_sha256": "503ab184e2cdaaac4bdfb7ff9584426d0945114c8355ad371dccfb7df6aebcda",
+      "head_sha256": "b6cf44ad99222620c99650d36b1e1ab96650358a53fc2f37abbde6c7a86341c8",
       "kind": "request",
       "lane": "interview",
       "max_tokens": 512,
@@ -9402,7 +9402,7 @@
     },
     {
       "beside": 1,
-      "head_sha256": "85ea3b2742c6814891aea75eea5dd3598022cff57ec17327726c373128929a30",
+      "head_sha256": "dc79ff06bfbc6306d30bbee6553bac86d6e2041d33a272142d37e8725423836f",
       "kind": "request",
       "lane": "trunk",
       "max_tokens": 512,
@@ -9590,7 +9590,7 @@
     },
     {
       "fork": 714,
-      "head_sha256": "96cbbe6e4742700054b64831f099d492bc78ecc41b55cd9c9c8413d6ffdb325f",
+      "head_sha256": "e13c52077fdf661533543abf56e50ba4e8a9daec3cd0165ef5dbad77429ae1d7",
       "kind": "request",
       "lane": "audit",
       "max_tokens": 512,
@@ -9613,7 +9613,7 @@
     },
     {
       "fork": 716,
-      "head_sha256": "96cbbe6e4742700054b64831f099d492bc78ecc41b55cd9c9c8413d6ffdb325f",
+      "head_sha256": "e13c52077fdf661533543abf56e50ba4e8a9daec3cd0165ef5dbad77429ae1d7",
       "kind": "request",
       "lane": "audit",
       "max_tokens": 512,
@@ -9687,7 +9687,7 @@
       "t": 151576
     },
     {
-      "head_sha256": "f9eab68b334bccc2267b5a8060d73b6c1f1dabc53e386246ad7853f263e23d05",
+      "head_sha256": "0d36467d058b56dfda737929a2ac65ab38f27000bc571e1f299a159df9b0135b",
       "kind": "request",
       "lane": "warm",
       "max_tokens": 1,
@@ -9751,8 +9751,8 @@
         ]
       },
       "placement": "message",
-      "prefix_hash_after": "2ae2573d8b775cb278d2fd6747e6b786475e3a5900f0b322f677c051798c05bf",
-      "prefix_hash_before": "96cbbe6e4742700054b64831f099d492bc78ecc41b55cd9c9c8413d6ffdb325f",
+      "prefix_hash_after": "47427254f6c03353cba81f014944e0e1925f9880787c1117165d46945431ab76",
+      "prefix_hash_before": "e13c52077fdf661533543abf56e50ba4e8a9daec3cd0165ef5dbad77429ae1d7",
       "reason": "cadence",
       "render": "# regime\ndogma_version: 0\nphase: test\nframe_version: 2\n\n# working set\ninterview-t1-1\tyou said, when asked\tplan: write it, then read it back\ninterview-t1-f32-0\tyou said, when asked\tdecision: notes.md holds one line per decision\ninterview-t2-0\tyou said, when asked\tlearned: notes.md now holds the first decision\ninterview-t2-1\tyou said, when asked\tevidence: the write of notes.md\ninterview-t2-f84-1\tyou said, when asked\tevidence: decision: one line per decision\ninterview-t6-0\tyou said, when asked\tgotcha: missing.txt does not exist — IMPLICATION: create it before showing it\ninterview-t8-0\tyou said, when asked\tevidence: xxxxxxxxxx\ninterview-t8-1\tyou said, when asked\tpointer: the long line is 9000 x's (the output of call-b2)\nmechanical/listed:shot.png\tfiles: listed shot.png\nmechanical/notes.md\tfiles: notes.md\nmechanical/shot.png\tfiles: shot.png\nmechanical/side.md\tfiles: side.md\noperator-554\tuser said\tdecision: notes.md holds the decisions as a sorted Markdown list [edited by the operator]\noperator-612\tuser kept, from tool output [side]\tthe list could be sorted\noperator-620\tuser kept, from your answer\tTo sort the list.\nr374/refute-1.1\tyou said, when asked\tfact: the build takes longer than the step's timeout\nr374/refute-1.1-claim\tyou said, when asked\twas: fact: the build finishes in a few seconds (held at 7/10), wrong because the command timed out after 16000ms [call call-b7]\n\n\nYou are in /scenario/worktree.",
       "render_budget_tokens": 120,
@@ -9809,7 +9809,7 @@
     },
     {
       "beside": 0,
-      "head_sha256": "2ae2573d8b775cb278d2fd6747e6b786475e3a5900f0b322f677c051798c05bf",
+      "head_sha256": "47427254f6c03353cba81f014944e0e1925f9880787c1117165d46945431ab76",
       "kind": "request",
       "lane": "trunk",
       "max_tokens": 512,
@@ -9957,7 +9957,7 @@
     },
     {
       "fork": 742,
-      "head_sha256": "e9518125a210f01b1a1ae5db045459b5f3f9055c1ccb189dc7d10b5bec72910c",
+      "head_sha256": "5fed79fea683c75202e9da34b24f8821c14024d12faa8dd4fb8da3245c873d42",
       "kind": "request",
       "lane": "interview",
       "max_tokens": 512,
@@ -9968,7 +9968,7 @@
     },
     {
       "beside": 1,
-      "head_sha256": "048fc023df0dce6e08779721894b87bf440f9410fc9ca7decc76682f2d8a1d5f",
+      "head_sha256": "7b28633cc2ae438c5f9e7958d9cccc1b8aac99b5211ce61eed997e23b55304e8",
       "kind": "request",
       "lane": "trunk",
       "max_tokens": 512,
@@ -10177,7 +10177,7 @@
     },
     {
       "fork": 760,
-      "head_sha256": "7fb88bb7e6d1cca0baba0f6ab27b7bb5d6806bd82e9431c43012a6aefc650d47",
+      "head_sha256": "c49118e2385795062485a67a6be598d529a1e45ec5b52c23ef02afcad8bdaa54",
       "kind": "request",
       "lane": "audit",
       "max_tokens": 512,
@@ -10200,7 +10200,7 @@
     },
     {
       "fork": 762,
-      "head_sha256": "7fb88bb7e6d1cca0baba0f6ab27b7bb5d6806bd82e9431c43012a6aefc650d47",
+      "head_sha256": "c49118e2385795062485a67a6be598d529a1e45ec5b52c23ef02afcad8bdaa54",
       "kind": "request",
       "lane": "audit",
       "max_tokens": 512,
@@ -10286,7 +10286,7 @@
     },
     {
       "fork": 770,
-      "head_sha256": "7fb88bb7e6d1cca0baba0f6ab27b7bb5d6806bd82e9431c43012a6aefc650d47",
+      "head_sha256": "c49118e2385795062485a67a6be598d529a1e45ec5b52c23ef02afcad8bdaa54",
       "kind": "request",
       "lane": "audit",
       "max_tokens": 512,
@@ -10360,7 +10360,7 @@
       "to": "capture"
     },
     {
-      "head_sha256": "f3ab0e563aadbc955367ad6546fdb6581cfcef90a70d601e2001d621eecc218d",
+      "head_sha256": "3c3f95832450e78d9d44edb678a590c7be7efbbe7adfc86675bcdde48e37b604",
       "kind": "request",
       "lane": "warm",
       "max_tokens": 1,
@@ -10425,8 +10425,8 @@
         ]
       },
       "placement": "message",
-      "prefix_hash_after": "540a92aabac4c7c376fa0cbcbd86a3e2b5aa0225f86f8980010d0ecbfe6cbffe",
-      "prefix_hash_before": "7fb88bb7e6d1cca0baba0f6ab27b7bb5d6806bd82e9431c43012a6aefc650d47",
+      "prefix_hash_after": "d160fc19f5ab527b291de8b30ef2b8fbd711f22c05043bb6933f17aaee1c4807",
+      "prefix_hash_before": "c49118e2385795062485a67a6be598d529a1e45ec5b52c23ef02afcad8bdaa54",
       "reason": "operator",
       "refilled_anyway": true,
       "render": "# regime\ndogma_version: 0\nphase: build\nframe_version: 2\n\n# working set\ninterview-t1-1\tyou said, when asked\tplan: write it, then read it back\ninterview-t1-f32-0\tyou said, when asked\tdecision: notes.md holds one line per decision\ninterview-t2-0\tyou said, when asked\tlearned: notes.md now holds the first decision\ninterview-t2-1\tyou said, when asked\tevidence: the write of notes.md\ninterview-t2-f84-1\tyou said, when asked\tevidence: decision: one line per decision\ninterview-t6-0\tyou said, when asked\tgotcha: missing.txt does not exist — IMPLICATION: create it before showing it\ninterview-t8-0\tyou said, when asked\tevidence: xxxxxxxxxx\ninterview-t8-1\tyou said, when asked\tpointer: the long line is 9000 x's (the output of call-b2)\nmechanical/listed:shot.png\tfiles: listed shot.png\nmechanical/notes.md\tfiles: notes.md\nmechanical/shot.png\tfiles: shot.png\nmechanical/side.md\tfiles: side.md\noperator-554\tuser said\tdecision: notes.md holds the decisions as a sorted Markdown list [flagged: still sorted?]\noperator-612\tuser kept, from tool output [side]\tthe list could be sorted\noperator-620\tuser kept, from your answer\tTo sort the list.\nr374/refute-1.1\tyou said, when asked\tfact: the build takes longer than the step's timeout\nr374/refute-1.1-claim\tyou said, when asked\twas: fact: the build finishes in a few seconds (held at 7/10), wrong because the command timed out after 16000ms [call call-b7]\n\n\nYou are in /scenario/worktree.",
@@ -10473,7 +10473,7 @@
     },
     {
       "beside": 0,
-      "head_sha256": "540a92aabac4c7c376fa0cbcbd86a3e2b5aa0225f86f8980010d0ecbfe6cbffe",
+      "head_sha256": "d160fc19f5ab527b291de8b30ef2b8fbd711f22c05043bb6933f17aaee1c4807",
       "kind": "request",
       "lane": "trunk",
       "max_tokens": 512,
@@ -10633,7 +10633,7 @@
     },
     {
       "fork": 797,
-      "head_sha256": "5ac3f67ba1f7bacdce474b6aa08967338c1ef3217661f540eef1a24c518f948c",
+      "head_sha256": "34d3d4a557cc4ad51c6201fa41ee2852dea2aceac10f9d5dd8d04a9416529f6a",
       "kind": "request",
       "lane": "interview",
       "max_tokens": 512,
@@ -10644,7 +10644,7 @@
     },
     {
       "beside": 1,
-      "head_sha256": "9e3e05688ee75c7074c3d4f10519a3a3f87d3240231df1a007037a49af4bbb23",
+      "head_sha256": "9db0973405058389327a8af193765e6d3c361c31e5ee9f13f2fe579580fe41f5",
       "kind": "request",
       "lane": "trunk",
       "max_tokens": 512,

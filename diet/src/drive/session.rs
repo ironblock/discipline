@@ -36508,6 +36508,33 @@ pub(in crate::drive) mod tests {
         assert_eq!(unrebuilt, Vec::<&str>::new());
     }
 
+    /// A log written before the timed background `bash` line named
+    /// `task_stop` as a tool still rebuilds every request's head. The fixture
+    /// is `diet/scenarios/background-wait.jsonl` with `bash_timeout_ms = 0`
+    /// (T1's setting), as the build at `c7f95c40` logged it, its temporary
+    /// directories written as `/scenario/<kind>`.
+    #[test]
+    fn a_background_session_before_the_task_stop_line_has_its_heads_rebuilt() {
+        let fixture = include_str!(
+            "../../drive/fixtures/a-background-session-before-the-task-stop-line.jsonl"
+        );
+        let lines = log::parse(fixture).expect("the fixture is a log the format reads");
+        assert!(matches!(
+            &lines[0].event,
+            log::Event::SessionStart { tools: Some(tools), .. }
+                if tools.iter().any(|tool| tool == super::super::background::TASK_STOP)
+        ));
+        let projected =
+            crate::drive::projection::project(&lines, &regime(), None).expect("projected");
+        let unrebuilt: Vec<&str> = projected
+            .unspellable
+            .iter()
+            .filter(|u| u.why.contains("could not be rebuilt"))
+            .map(|u| u.why.as_str())
+            .collect();
+        assert_eq!(unrebuilt, Vec::<&str>::new());
+    }
+
     /// #1050: the three graph refusals name where the session is and the
     /// moves open from there, in the maintainer's words.
     #[test]
