@@ -1806,6 +1806,89 @@ mod tests {
         );
     }
 
+    /// A serve that answers every request 200 `{}` and keeps each POST's
+    /// body, on a thread for as long as the test runs.
+    fn recording_serve() -> (Serve, std::sync::Arc<std::sync::Mutex<Vec<Value>>>) {
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").expect("a port");
+        let address = std::net::TcpListener::local_addr(&listener).expect("its address");
+        let bodies = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
+        let kept = std::sync::Arc::clone(&bodies);
+        std::thread::spawn(move || {
+            for stream in listener.incoming() {
+                let Ok(mut stream) = stream else { continue };
+                let mut head = Vec::new();
+                let mut byte = [0_u8; 1];
+                while !head.ends_with(b"\r\n\r\n") && stream.read(&mut byte).is_ok_and(|n| n == 1) {
+                    head.push(byte[0]);
+                }
+                let head = String::from_utf8_lossy(&head).into_owned();
+                let length: usize = head
+                    .lines()
+                    .find_map(|line| line.strip_prefix("Content-Length: "))
+                    .and_then(|n| n.trim().parse().ok())
+                    .unwrap_or(0);
+                let mut body = vec![0_u8; length];
+                let _ = stream.read_exact(&mut body);
+                if head.starts_with("POST") {
+                    if let Ok(body) = serde_json::from_slice::<Value>(&body) {
+                        kept.lock().expect("the bodies").push(body);
+                    }
+                }
+                let _ = write!(
+                    stream,
+                    "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: 2\r\nConnection: close\r\n\r\n{{}}"
+                );
+            }
+        });
+        (
+            Serve::new(&format!("http://{address}"), None).expect("an address"),
+            bodies,
+        )
+    }
+
+    /// Audit 12: every gesture serve takes the operator's `note` on (#1037)
+    /// takes one through MCP too -- its schema lists it, and the command
+    /// posted carries it.
+    #[test]
+    fn a_gesture_carries_the_operators_note() {
+        let gestures: [(&str, Value); 9] = [
+            ("edit", json!({"id": "operator-1", "content": "new"})),
+            ("retire_entry", json!({"id": "operator-1"})),
+            ("correction", json!({"refused": 4, "answer": "reject"})),
+            ("fork", json!({"text": "why?"})),
+            ("keep", json!({"from": 3, "span": "x"})),
+            ("wrap", json!({"call": 6})),
+            ("propose_phase", json!({"to": "build"})),
+            ("move_phase", json!({"to": "build"})),
+            ("rule_phase", json!({"choice": "keep", "call": "call-p"})),
+        ];
+        let listed = tools();
+        for (name, _) in &gestures {
+            let tool = listed
+                .as_array()
+                .expect("tools")
+                .iter()
+                .find(|tool| tool["name"] == *name)
+                .expect("the tool");
+            assert!(
+                tool["inputSchema"]["properties"]["note"].is_object(),
+                "`{name}` lists no `note`: {tool}"
+            );
+        }
+        let (serve, bodies) = recording_serve();
+        for (name, arguments) in gestures {
+            let mut arguments = arguments.as_object().expect("an object").clone();
+            arguments.insert("note".to_owned(), json!("because"));
+            call(&serve, name, &arguments).expect("called");
+            let posted = bodies.lock().expect("the bodies").last().cloned();
+            assert_eq!(
+                posted.as_ref().map(|body| &body["note"]),
+                Some(&json!("because")),
+                "`{name}` posted {posted:?}"
+            );
+        }
+    }
+
     /// A driver attached to `serve`, having started `child` as it, waiting
     /// `patience` for it.
     fn started(serve: Serve, child: std::process::Child, patience: Duration) -> Driver {
