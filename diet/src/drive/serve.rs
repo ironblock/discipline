@@ -4148,6 +4148,85 @@ mod tests {
         );
     }
 
+    /// The audit of 2026-11-11 (`refill-preview-not-the-refill-with-tools`):
+    /// with tools on, the preview is the refill -- its render ends with the
+    /// working-directory line, its `outputs` are the section a refill under
+    /// `reference` carries, and its `refill` is the message the model is sent.
+    #[test]
+    fn with_tools_on_the_refill_preview_is_the_refill() {
+        use crate::drive::session::tests::{bash, interviewing, looping, tools};
+        use crate::drive::tool_loop::Decider;
+        use crate::drive::tool_loop::tests::scratch;
+        use crate::isolation::Confinement;
+        let tree = scratch("serve-preview-with-tools");
+        std::fs::write(tree.join("notes.md"), "port 5182 is free\n").expect("a note");
+        let mut interview = interviewing(&[]);
+        interview.meditations.outputs = crate::formats::log::MeditationToolOutputs::Reference;
+        let listener = TcpListener::bind("127.0.0.1:0").expect("loopback");
+        let session = Arc::new(Session::open_with(
+            Canned::new([
+                vec![bash("call-1", "cat notes.md")],
+                deltas(&["The port is 5182."]),
+            ]),
+            looping(),
+            None,
+            Some(tools(
+                Confinement::Unconfined,
+                &tree,
+                &["cat"],
+                None,
+                Decider::Decline,
+            )),
+            None,
+            Some(interview),
+        ));
+        let server = Server::start(listener, Arc::clone(&session), quick(), render)
+            .expect("the server starts");
+        session.ask("which port?", None).expect("accepted");
+        let log = wait_until(&session, "the turn", settled);
+        let answered = log
+            .iter()
+            .find(|logged| matches!(logged.event, Event::Answered { .. }))
+            .map(|logged| logged.seq)
+            .expect("an answer");
+        session.keep(answered, "port is 5182", None).expect("kept");
+        let (code, preview) = get_json(&server, "/refill-preview");
+        assert_eq!(code, 200, "{preview}");
+        session.declare_meditation(None).expect("a meditation");
+        let (render, outputs) = wait_until(&session, "the meditation", |log| {
+            log.iter()
+                .any(|logged| matches!(logged.event, Event::Meditated { .. }))
+        })
+        .iter()
+        .find_map(|logged| match &logged.event {
+            Event::Meditated {
+                render, outputs, ..
+            } => Some((render.clone(), outputs.clone())),
+            _ => None,
+        })
+        .expect("the meditation");
+        let (outputs, _) = outputs.expect("a refill under `reference` carries the call's output");
+        assert_eq!(
+            preview["render"].as_str(),
+            Some(render.as_str()),
+            "{preview}"
+        );
+        assert_eq!(
+            preview["outputs"].as_str(),
+            Some(outputs.as_str()),
+            "{preview}"
+        );
+        assert_eq!(
+            preview["refill"].as_str(),
+            session
+                .trunk()
+                .last()
+                .map(|message| message.content.as_str()),
+            "{preview}"
+        );
+        let _ = std::fs::remove_dir_all(&tree);
+    }
+
     /// #1038: while the shadows are hidden, `/events` and `/line/<seq>`
     /// leave `fork.shadowed` out of the live operator's view; the log keeps
     /// it.
