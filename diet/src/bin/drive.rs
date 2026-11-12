@@ -4454,7 +4454,9 @@ fn declared(
         .map_err(|why| (EXIT_INPUT, format!("{path} could not be read: {why}")))?;
     let regimen = regimen::parse(&text)
         .map_err(|why| (EXIT_INPUT, format!("{path} is not a regimen: {why:?}")))?;
-    let regime = regime_of(&regimen, endpoint_given).map_err(|why| (EXIT_INPUT, why))?;
+    let regime = regime_of(&regimen, endpoint_given)
+        .and_then(diet::drive::regimen::dogma_in_force)
+        .map_err(|why| (EXIT_INPUT, why))?;
     // `regime_of` refused above already if an endpoint was given, so a regime
     // that reaches here is always about to run against this program's own
     // canned server. That server renders no chat template -- no effort level

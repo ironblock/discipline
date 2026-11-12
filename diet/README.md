@@ -4,7 +4,7 @@
 
 It's primarily a library, but exists primarily to apply a `regimen` - a fixed combination of variables expected to describe the character, performance, and timing of a session (live or replayed).
 
-**A regimen** is a TOML file naming the arm, the dogma version, the substrate (a served model on a registered machine, `substrates/README.md`) and the sampler a session runs under, and what else it is held to (`diet check-regimen` reads one). Three ship as specimens:
+**A regimen** is a TOML file naming the arm, the dogma version, the substrate (a served model on a registered machine, `substrates/README.md`) and the sampler a session runs under, and what else it is held to (`diet check-regimen` reads one). A drive's record and every refill header say the dogma the build carries (`dogma::VERSION`), whatever the regimen types: a regimen's `dogma_version` is checked, not taken, and one naming a version other than the build's is refused (`0`, which every regimen written before the audit of 2026-11-11 types, names none). Three ship as specimens:
 
 - [`drive/floor.toml`](drive/floor.toml) binds a session to the maintainer's floor, the 3.8 line's config r2 on TabbyAPI (#497). It starts only against a server reporting what that substrate's entry declares.
 - [`drive/dev-loop.toml`](drive/dev-loop.toml) names the canned substrate: a scripted server inside this crate, with no weights. It is served only by that canned server, which the batch drive starts for itself.

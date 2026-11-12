@@ -277,6 +277,37 @@ pub fn regime_registered(regimen: &Regimen, registry: &str) -> Result<Regime, St
             ..trunk
         });
     }
+    dogma_in_force(regime)
+}
+
+/// `regime` as a drive runs it: its `dogma_version` the dogma this build
+/// carries and sends ([`crate::dogma::VERSION`]), which its record's start
+/// and every refill's header say (the audit of 2026-11-11). The words a
+/// session sends are this binary's, whatever a regimen types, so the build
+/// is what the field can truthfully name.
+///
+/// A regimen's own `dogma_version` is checked, not taken: one naming
+/// another version was written for other words and is refused. `0` is
+/// read as naming none: dogma 0's twenty frozen templates are carried by no
+/// build that drives a session, so no drive regimen can mean them, and
+/// every regimen written before this check types it.
+///
+/// # Errors
+///
+/// A regimen naming a version that is neither `0` nor this build's.
+pub fn dogma_in_force(mut regime: Regime) -> Result<Regime, String> {
+    let carried = crate::dogma::VERSION;
+    match regime.dogma_version {
+        0 => {}
+        declared if declared == carried => {}
+        declared => {
+            return Err(format!(
+                "`dogma_version = {declared}` names a dogma this build does not carry: it \
+                 carries dogma {carried}, and a drive sends that dogma's words"
+            ));
+        }
+    }
+    regime.dogma_version = carried;
     Ok(regime)
 }
 
