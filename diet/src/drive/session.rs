@@ -32303,6 +32303,74 @@ pub(in crate::drive) mod tests {
         tidy(&[&tree]);
     }
 
+    /// The files the model changed ride every refill (N5), counted from the
+    /// worktree, never from the commands it ran: a file written by a Python
+    /// heredoc, which no edit tool's path names, is on the line, and a file
+    /// only read is not.
+    #[test]
+    fn a_refill_names_the_files_the_model_changed_counted_from_the_worktree() {
+        let tree = scratch("changed-files-refill");
+        std::fs::write(tree.join("notes.md"), "port 5182 is free\n").expect("a note");
+        let written = "python3 - <<'EOF'\nfrom pathlib import Path\nPath('report.txt').write_text('done\\n')\nEOF";
+        let session = Session::open_with(
+            Canned::new(vec![
+                vec![bash("call-1", "cat notes.md")],
+                vec![bash("call-2", written)],
+                deltas(&["Wrote it."]),
+            ]),
+            looping(),
+            None,
+            Some(tools(
+                Confinement::Unconfined,
+                &tree,
+                &["cat"],
+                None,
+                Decider::Operator,
+            )),
+            None,
+            Some(interviewing(&[])),
+        );
+        session
+            .ask("look, then write the report", None)
+            .expect("accepted");
+        // A here-doc is read as dynamic: the operator lets it run.
+        assert_eq!(waiting_on(&session).id, "call-2");
+        assert_eq!(session.approve("call-2", Decision::Once), Ok(()));
+        let log = wait_until(&session, "the turn", settled);
+        assert!(
+            tree.join("report.txt").exists(),
+            "the heredoc ran and wrote its file"
+        );
+        let called = seq_of(&log, |event| matches!(event, Event::ToolCalled(_)));
+        session
+            .keep(called, "port 5182 is free", None)
+            .expect("kept");
+        session.declare_meditation(None).expect("admitted");
+        wait_until(&session, "the meditation", meditated);
+        let render = session
+            .events_from(0)
+            .iter()
+            .find_map(|logged| match &logged.event {
+                Event::Meditated { render, .. } => Some(render.clone()),
+                _ => None,
+            })
+            .expect("a meditation");
+        let line = render
+            .lines()
+            .find(|line| line.contains("report.txt"))
+            .unwrap_or_else(|| panic!("the refill names the file the heredoc wrote: {render}"));
+        assert!(
+            !line.contains("notes.md"),
+            "a file only read is not on the line: {line}"
+        );
+        let refill = session.trunk().last().expect("the refill").content.clone();
+        assert!(
+            refill.contains(line),
+            "the refill carries the line: {refill}"
+        );
+        tidy(&[&tree]);
+    }
+
     /// The operator's fork lines, each with its seq.
     fn operator_forks(log: &[Logged]) -> Vec<(u64, Event)> {
         log.iter()
