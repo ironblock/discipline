@@ -6194,9 +6194,10 @@ impl<S: Streaming + 'static> Session<S> {
             .map(|list| state.shown_roots.text(&list));
         let render = render_as_sent(&state, rendered.text.clone(), carries_native(&state));
         let sent = refill_sent(&render, outputs.as_ref(), asks.as_deref());
+        // With no head, the refill is its one message.
         let refill = crate::meditation::render::refill_with(&[], &sent, background.as_deref())
             .pop()
-            .expect("a refill is one message after its head");
+            .unwrap_or_else(|| Message::new(Role::User, String::new()));
         let (number, text, object) = (status_number, status_text, status_object);
         let mut fields = vec![("render", text(&render))];
         if let Some((outputs, _)) = &outputs {
