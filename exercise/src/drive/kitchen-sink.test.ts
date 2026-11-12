@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 
 import { serialize } from '../replay/payload.ts';
-import { kitchenSinkExample } from './kitchen-sink.ts';
+import { fails, kitchenSinkExample, sinkVerdict } from './kitchen-sink.ts';
 import type { LogLine } from './log.ts';
 import { clockCarried } from './scenario-log.ts';
 
@@ -47,10 +47,47 @@ describe("a rewrite's wall-clock fields", () => {
 
   it('give byte-identical examples when the same log is written twice', () => {
     const today = run([7, 9]);
-    const first = kitchenSinkExample(today, { migration: [], log: run([2, 3]) }, []);
-    const second = kitchenSinkExample(today, first as { migration: string[]; log: LogLine[] }, []);
+    const first = kitchenSinkExample(today, { migration: [], log: run([2, 3]) }, [], 'c'.repeat(64));
+    const second = kitchenSinkExample(today, first as { migration: string[]; log: LogLine[] }, [], 'c'.repeat(64));
     expect(serialize(second)).toBe(serialize(first));
     expect(latencies((first as { log: LogLine[] }).log)).toEqual([2, 3]);
     expect((first as { migration: string[] }).migration.some((line) => line.includes('latency_ms') && line.includes('carried'))).toBe(true);
+  });
+});
+
+/**
+ * The kitchen sink lags (the maintainer's ruling, 2026-11-11): a change to what the scenario writes merges without
+ * regenerating the example, and one regeneration on develop catches it up. `check` fails only when the scenario file
+ * itself changed since the example was written; lane drift alone is stale -- shown, not failed -- unless the check is
+ * asked for the current example (`--current`, which the regeneration runs).
+ */
+describe('the kitchen sink check', () => {
+  const SCENARIO = 'a'.repeat(64);
+  const published = (log: readonly LogLine[], scenario?: string) => ({ log, ...(scenario !== undefined ? { scenario_sha256: scenario } : {}) });
+
+  it('records the digest of the scenario file it was written from', () => {
+    const example = kitchenSinkExample(run([2, 3]), undefined, [], SCENARIO) as { scenario_sha256?: string; migration: string[] };
+    expect(example.scenario_sha256).toBe(SCENARIO);
+    expect(example.migration.some((line) => line.includes(SCENARIO))).toBe(true);
+  });
+
+  it('is current when each lane is what the scenario writes', () => {
+    expect(sinkVerdict(published(run([2, 3]), SCENARIO), run([7, 9]), SCENARIO)).toEqual({ verdict: 'current' });
+  });
+
+  it('is stale, not failed, when the code changed what the scenario writes', () => {
+    const today = [...run([2, 3]), { seq: 6, t: 6, kind: 'turn.settled', turn: 1, reason: 'final' }] as unknown as LogLine[];
+    const verdict = sinkVerdict(published(run([2, 3]), SCENARIO), today, SCENARIO);
+    expect(verdict.verdict).toBe('stale');
+    expect(verdict.verdict === 'stale' && verdict.lanes.length).toBe(1);
+    expect(fails(verdict, { current: false })).toBe(false);
+    expect(fails(verdict, { current: true })).toBe(true);
+  });
+
+  it('fails when the scenario file changed and the example was not written from it', () => {
+    const verdict = sinkVerdict(published(run([2, 3]), SCENARIO), run([2, 3]), 'b'.repeat(64));
+    expect(verdict.verdict).toBe('unwritten');
+    expect(fails(verdict, { current: false })).toBe(true);
+    expect(sinkVerdict(published(run([2, 3])), run([2, 3]), SCENARIO).verdict).toBe('unwritten');
   });
 });
