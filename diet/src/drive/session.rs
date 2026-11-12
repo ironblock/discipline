@@ -3000,6 +3000,9 @@ struct State {
     /// The line naming the session's working directory, when it has tools:
     /// on the first ask, and again in every refill, which drops that note.
     start_cwd: Option<String>,
+    /// The worktree's files at the session's start (N5), by path to digest:
+    /// what a refill's line of the files the model changed counts from.
+    worktree_at_start: Option<BTreeMap<String, String>>,
     /// Who vouches for the note the latest self-capture call wrote, under a
     /// contract whose `update_record` takes no field kind (#1016): read by
     /// its result and its `patch` lines, and taken.
@@ -3171,6 +3174,7 @@ impl State {
             // As every path the model is shown: a scenario's roots rewritten
             // to their placeholders (path-free scenario outputs).
             start_cwd: tools.map(|tools| start_cwd_note(&tools.shown_roots.text(&tools.cwd))),
+            worktree_at_start: tools.and_then(|tools| super::carry::digests(&tools.worktree).ok()),
             vouched: None,
             confirmed: None,
             jobs: BTreeMap::new(),
@@ -9898,6 +9902,23 @@ fn refilled(
     // The working directory, said again, the last of the render's computed
     // lines: the first ask's note is gone with the trunk this replaces. In the
     // render, so the meditation's line logs it and a log rebuilds it.
+    // The files the model changed since the session started (N5), counted
+    // from the worktree as it stands, before the working directory: that
+    // stays the render's last line. A native refill carries Pi's own
+    // `<modified-files>` list and nothing else after it (#1012).
+    let changed = state
+        .worktree
+        .as_deref()
+        .filter(|_| native.is_none())
+        .zip(state.worktree_at_start.as_ref())
+        .and_then(|(worktree, before)| {
+            let after = super::carry::digests(worktree).ok()?;
+            crate::meditation::changed::line(before, &after)
+        });
+    let render = match changed {
+        Some(line) => format!("{render}\n\n{}", state.shown_roots.text(&line)),
+        None => render,
+    };
     let render = match state.start_cwd.as_deref() {
         Some(cwd) => format!("{render}\n\n{cwd}"),
         None => render,

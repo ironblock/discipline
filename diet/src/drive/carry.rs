@@ -263,6 +263,61 @@ pub fn snapshot(worktree: &Path, recording: &Path) -> Result<String, String> {
         .map_err(|(_, why)| why)
 }
 
+/// A worktree's files by path relative to it, each to what stands for its
+/// bytes (N5): a regular file's sha256, a file over [`SNAPSHOT_MAX_BYTES`]
+/// its size and modification time, a symlink its target. A `.git`
+/// directory is not walked: a commit is not a file the model changed.
+///
+/// # Errors
+///
+/// A directory or file that cannot be read.
+pub fn digests(worktree: &Path) -> Result<std::collections::BTreeMap<String, String>, String> {
+    let mut files = std::collections::BTreeMap::new();
+    let mut stack = vec![worktree.to_path_buf()];
+    while let Some(dir) = stack.pop() {
+        let entries = std::fs::read_dir(&dir).map_err(|why| format!("{}: {why}", dir.display()))?;
+        for entry in entries {
+            let entry = entry.map_err(|why| format!("{}: {why}", dir.display()))?;
+            let path = entry.path();
+            let kind = entry
+                .file_type()
+                .map_err(|why| format!("{}: {why}", path.display()))?;
+            let rel = path
+                .strip_prefix(worktree)
+                .map_err(|_| format!("{} is outside its worktree", path.display()))?
+                .to_string_lossy()
+                .into_owned();
+            if kind.is_symlink() {
+                let target = std::fs::read_link(&path)
+                    .map_err(|why| format!("{}: {why}", path.display()))?;
+                files.insert(rel, format!("link:{}", target.display()));
+            } else if kind.is_dir() {
+                if entry.file_name() != ".git" {
+                    stack.push(path);
+                }
+            } else if kind.is_file() {
+                let metadata = entry
+                    .metadata()
+                    .map_err(|why| format!("{}: {why}", path.display()))?;
+                let stands = if metadata.len() > SNAPSHOT_MAX_BYTES {
+                    let modified = metadata
+                        .modified()
+                        .ok()
+                        .and_then(|at| at.duration_since(std::time::UNIX_EPOCH).ok())
+                        .map_or(0, |at| at.as_nanos());
+                    format!("bytes:{}:{modified}", metadata.len())
+                } else {
+                    let bytes =
+                        std::fs::read(&path).map_err(|why| format!("{}: {why}", path.display()))?;
+                    crate::digest::sha256_hex(&bytes)
+                };
+                files.insert(rel, stands);
+            }
+        }
+    }
+    Ok(files)
+}
+
 /// The worktree snapshot `manifest_sha256` names, restored into `into` from
 /// `recording`: each file checked against its digest before it is written.
 /// Returns how many files it wrote.
