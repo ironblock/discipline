@@ -362,7 +362,60 @@ pub fn tools() -> Value {
     all.extend(phase_tools());
     all.extend(correction_tools());
     all.extend(last_tools());
+    // The operator's reason (#1037), on every gesture serve takes one on.
+    for tool in &mut all {
+        if tool["name"]
+            .as_str()
+            .is_some_and(|name| NOTED.contains(&name))
+        {
+            tool["inputSchema"]["properties"]["note"] = string(NOTE);
+        }
+    }
     Value::Array(all)
+}
+
+/// The tools whose command serve takes the operator's `note` on (#1037).
+/// `flag`'s own text is its note already.
+const NOTED: &[&str] = &[
+    "edit",
+    "retire_entry",
+    "correction",
+    "fork",
+    "keep",
+    "wrap",
+    "propose_phase",
+    "move_phase",
+    "rule_phase",
+];
+
+/// What a gesture's `note` is.
+const NOTE: &str = "Your reason for the gesture, optional: logged as an `operator.note` line \
+                    immediately before its outcome (#1037).";
+
+/// The operator's `note` on the gesture `name` names, if it takes one.
+fn note_of<'a>(name: &str, args: &'a Args<'_>) -> Result<Option<&'a str>, String> {
+    if NOTED.contains(&name) {
+        args.optional_string("note")
+    } else {
+        Ok(None)
+    }
+}
+
+/// The `edit-entry` command's body (#150).
+fn edit_body(args: &Args<'_>) -> Result<Value, String> {
+    Ok(json!({
+        "kind": "edit-entry",
+        "id": args.string("id")?,
+        "content": args.string("content")?
+    }))
+}
+
+/// `body` with the operator's `note`, when one was given.
+fn noted(mut body: Value, note: Option<&str>) -> Value {
+    if let Some(note) = note {
+        body["note"] = json!(note);
+    }
+    body
 }
 
 /// The state, the ask, and the turn's commands.
@@ -830,7 +883,12 @@ fn status(serve: &Serve) -> Result<Value, String> {
 /// `propose_phase`, `move_phase` or `rule_phase` (#790): the operator's
 /// proposal, the operator's move alone, or a ruling on the model's -- the
 /// pending one when no call is named.
-fn phase_command(serve: &Serve, name: &str, args: &Args<'_>) -> Result<Answer, String> {
+fn phase_command(
+    serve: &Serve,
+    name: &str,
+    args: &Args<'_>,
+    note: Option<&str>,
+) -> Result<Answer, String> {
     if name == "propose_phase" || name == "move_phase" {
         let kind = if name == "move_phase" {
             "move-phase"
@@ -841,7 +899,7 @@ fn phase_command(serve: &Serve, name: &str, args: &Args<'_>) -> Result<Answer, S
         if let Some(meditate) = args.optional_bool("meditate")? {
             body["meditate"] = Value::Bool(meditate);
         }
-        return serve.command(&body);
+        return serve.command(&noted(body, note));
     }
     let call = match args.optional_string("call")? {
         Some(call) => call.to_owned(),
@@ -849,11 +907,14 @@ fn phase_command(serve: &Serve, name: &str, args: &Args<'_>) -> Result<Answer, S
             pending_model_proposal(serve)?.ok_or("no proposal of the model's awaits a ruling")?
         }
     };
-    serve.command(&json!({
-        "kind": "ratify-phase",
-        "call": call,
-        "choice": args.string("choice")?
-    }))
+    serve.command(&noted(
+        json!({
+            "kind": "ratify-phase",
+            "call": call,
+            "choice": args.string("choice")?
+        }),
+        note,
+    ))
 }
 
 /// The call of the model's proposal awaiting the operator's ruling.
@@ -917,6 +978,7 @@ fn gesture(name: &str, args: &Args<'_>) -> Result<Value, String> {
 /// An unknown tool, an argument of the wrong shape, or serve unreachable.
 pub fn call(serve: &Serve, name: &str, arguments: &Map<String, Value>) -> Result<Value, String> {
     let args = Args(arguments);
+    let note = note_of(name, &args)?;
     let answer = match name {
         "status" => return status(serve),
         "wait" => {
@@ -958,19 +1020,17 @@ pub fn call(serve: &Serve, name: &str, arguments: &Map<String, Value>) -> Result
         } else {
             "/memory"
         })?,
-        "edit" => serve.command(&json!({
-            "kind": "edit-entry",
-            "id": args.string("id")?,
-            "content": args.string("content")?
-        }))?,
-        "retire_entry" | "correction" => serve.command(&correction_body(name, &args)?)?,
+        "edit" => serve.command(&noted(edit_body(&args)?, note))?,
+        "retire_entry" | "correction" => {
+            serve.command(&noted(correction_body(name, &args)?, note))?
+        }
         "flag" => serve.command(&json!({
             "kind": "flag-entry",
             "id": args.string("id")?,
             "note": args.string("note")?
         }))?,
-        "fork" | "keep" => serve.command(&gesture(name, &args)?)?,
-        "wrap" => serve.command(&wrap_body(&args)?)?,
+        "fork" | "keep" => serve.command(&noted(gesture(name, &args)?, note))?,
+        "wrap" => serve.command(&noted(wrap_body(&args)?, note))?,
         "declare_meditation" => {
             let mut body = json!({"kind": "declare-meditation"});
             if let Some(phase) = args.optional_string("phase")? {
@@ -979,7 +1039,7 @@ pub fn call(serve: &Serve, name: &str, arguments: &Map<String, Value>) -> Result
             serve.command(&body)?
         }
         "refill_anyway" => serve.command(&json!({"kind": "refill-anyway"}))?,
-        "propose_phase" | "move_phase" | "rule_phase" => phase_command(serve, name, &args)?,
+        "propose_phase" | "move_phase" | "rule_phase" => phase_command(serve, name, &args, note)?,
         "open_tangent" => {
             serve.command(&json!({"kind": "open-tangent", "id": args.string("id")?}))?
         }
@@ -1829,10 +1889,10 @@ mod tests {
                     .unwrap_or(0);
                 let mut body = vec![0_u8; length];
                 let _ = stream.read_exact(&mut body);
-                if head.starts_with("POST") {
-                    if let Ok(body) = serde_json::from_slice::<Value>(&body) {
-                        kept.lock().expect("the bodies").push(body);
-                    }
+                if head.starts_with("POST")
+                    && let Ok(body) = serde_json::from_slice::<Value>(&body)
+                {
+                    kept.lock().expect("the bodies").push(body);
                 }
                 let _ = write!(
                     stream,
