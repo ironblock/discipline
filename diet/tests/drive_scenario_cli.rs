@@ -1189,8 +1189,9 @@ fn a_ruling_that_names_no_call_rules_the_pending_proposal() {
     assert_eq!(code, Some(0), "{said}");
     let log = std::fs::read_to_string(out.join("session.log")).expect("the log");
     assert!(
-        log.lines().any(|line| line.contains("\"kind\":\"phase.ruled\"")
-            && line.contains("\"call\":\"call-p\"")),
+        log.lines()
+            .any(|line| line.contains("\"kind\":\"phase.ruled\"")
+                && line.contains("\"call\":\"call-p\"")),
         "the pending proposal was ruled:\n{log}"
     );
     let _ = std::fs::remove_dir_all(&dir);

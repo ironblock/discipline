@@ -20,14 +20,39 @@
 //! call by call, a tangent closed with more than one ruling, a meditation
 //! declared with a phase move, a refused command that is not an ask, a keep
 //! from an ask, a wrap that keeps nothing, a gesture whose line the runner
-//! would not find again, a chip answered out of order, and a fork queued
-//! mid-turn that fired before the turn's next request (N4). One queued
-//! that fired at the gap derives as a fork posted then.
+//! would not find again, a chip answered out of order, a fork queued
+//! mid-turn that fired before the turn's next request (N4), and any other
+//! gesture serve admits while a turn runs -- a keep, a wrap, a flag, an
+//! edit, a retire, a chip's answer -- logged mid-turn (audit 14): a
+//! scripted step runs between turns, so it is never moved after the turn.
+//! One queued that fired at the gap derives as a fork posted then.
+//!
+//! A ruling on the model's phase proposal derives naming no call (audit
+//! 14): the runner rules the proposal pending then, as MCP's `rule_phase`
+//! does, since a served model never reproduces the run's call ids. A step
+//! that names a line by its call's id -- a keep, a fork or a wrap at a call
+//! -- still finds it by that id, which only a substrate that reproduces the
+//! run (a canned one) gives back.
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::fmt;
 
 use serde_json::{Map, Value, json};
+
+/// Whether `line` is one of the operator's gestures serve admits while a
+/// turn runs (#1038, #1113): a keep, an edit or a retire (the operator's
+/// `patch`), a flag, a wrap, or a chip's answer.
+fn mid_turn_gesture(line: &Map<String, Value>) -> bool {
+    match text(line, "kind") {
+        Some("flag" | "wrap.accepted") => true,
+        // The operator's answer; serve logs a chip let go or withdrawn itself.
+        Some("suggestion" | "correction") => {
+            matches!(text(line, "outcome"), Some("accepted" | "rejected"))
+        }
+        Some("patch") => text(line, "lane") == Some("operator"),
+        _ => false,
+    }
+}
 
 /// A run's operator moves, as a scenario's parts.
 #[derive(Debug, Clone, PartialEq)]
@@ -391,6 +416,8 @@ fn derived(lines: &[Map<String, Value>], priming: Option<&str>) -> Result<Derive
     let mut held_open = false;
     let mut approvals: Option<(String, u64)> = None;
     let mut awaiting = false;
+    // Whether a turn runs (audit 14): a gesture logged then has no step.
+    let mut in_turn = false;
     // The open grade step (#942): its task, its index among the steps, and
     // the latest grade of it, which the next ask of its task answers.
     let mut grading: Option<OpenGrade> = None;
@@ -432,6 +459,15 @@ fn derived(lines: &[Map<String, Value>], priming: Option<&str>) -> Result<Derive
         let kind = text(line, "kind").unwrap_or_default();
         let seq = line.get("seq").and_then(Value::as_u64).unwrap_or_default();
         let turn = line.get("turn").and_then(Value::as_u64);
+        if in_turn && mid_turn_gesture(line) {
+            return Err(refused(
+                line,
+                format!(
+                    "an operator's `{kind}` made while a turn ran, mid-turn: a scripted step \
+                     runs between turns"
+                ),
+            ));
+        }
         match kind {
             "request" => {
                 lane_of.insert(seq, text(line, "lane").unwrap_or_default().to_owned());
@@ -761,9 +797,10 @@ fn derived(lines: &[Map<String, Value>], priming: Option<&str>) -> Result<Derive
                     "meditate": text(line, "choice") == Some("meditation"),
                     "place": {"between": true},
                 })),
-                (None, Some(call)) => steps.push(json!({
+                // The model's proposal, pending as it was ruled: the
+                // replay rules its own (audit 14).
+                (None, Some(_)) => steps.push(json!({
                     "step": "rule-phase",
-                    "call": call,
                     "choice": text(line, "choice").unwrap_or_default(),
                     "place": {"between": true},
                 })),
@@ -862,6 +899,7 @@ fn derived(lines: &[Map<String, Value>], priming: Option<&str>) -> Result<Derive
             }
             "settlement" => {
                 awaiting = text(line, "to") == Some("awaiting");
+                in_turn = text(line, "to") == Some("turn");
                 if text(line, "to") == Some("ended") {
                     steps.push(json!({"step": "end"}));
                 }
@@ -1023,7 +1061,8 @@ pub fn operator_lines(log: &str) -> Result<Vec<Value>, Refusal> {
             {
                 out.push(pick(&["reason", "refilled_anyway"]));
             }
-            "phase.ruled" => out.push(pick(&["by", "call", "choice", "from", "to"])),
+            // The ruling, not the model's call id (audit 14).
+            "phase.ruled" => out.push(pick(&["by", "choice", "from", "to"])),
             "phase.proposed" if text(line, "by") == Some("operator") => {
                 out.push(pick(&["by", "to", "meditate"]));
             }
@@ -1279,8 +1318,10 @@ mod tests {
             .expect("a rule-phase step");
         assert!(ruling.get("call").is_none(), "{ruling}");
         assert_eq!(ruling["choice"], json!("keep"));
-        let text: String = lines.iter().map(|line| Value::Object(line.clone()).to_string() + "\n").collect();
-        let compared = operator_lines(&text).expect("its lines");
+        let compared = operator_lines(include_str!(
+            "../../formats/log/fixtures/valid/a-v8-session-in-a-phase-library.jsonl"
+        ))
+        .expect("its lines");
         let ruled = compared
             .iter()
             .find(|line| line["kind"] == "phase.ruled")
