@@ -6134,17 +6134,23 @@ impl<S: Streaming + 'static> Session<S> {
     }
 
     /// What the next refill would carry, as `GET /refill-preview` answers
-    /// it (#1038): working memory's render under the regimen's budget, with
-    /// the operator's pending marks; its estimated `tokens`; how many
-    /// entries it `reduced`; whether it `fits` its budget; and the live
-    /// `entries`, by id: each is in the render whole, or shortened or elided
-    /// to its id when `reduced` counts it (a refuted note's `was:` line rides
-    /// too); and the `asks` section it would carry after the render (N3),
-    /// when there is one: every operator ask the regimen's tail would not
-    /// keep, nor a running turn. A refill that must also fit the window it
-    /// is made in may elide more, and one under a native summary carries
-    /// the summary instead: the preview is the render as it stands. `None`
-    /// for a session with no working memory.
+    /// it (#1038), read by the refill's own code (the audit of 2026-11-11):
+    /// the `render` as the refill sends it and its line logs it -- working
+    /// memory under the regimen's budget, with the operator's pending marks,
+    /// then the working-directory line when the session has tools; the
+    /// `outputs` section it carries of the turns the tail drops, when there
+    /// is one; the `asks` section after it (N3), every operator ask the
+    /// tail would not keep, nor a running turn; the `background` commands
+    /// still running; and the whole `refill` message the model is sent,
+    /// with its estimated `refill_tokens`. Then the render's own estimated
+    /// `tokens` before that line, how many entries it `reduced`, whether it
+    /// `fits` its budget, and the live `entries`, by id: each is in the
+    /// render whole, or shortened or elided to its id when `reduced` counts
+    /// it (a refuted note's `was:` line rides too). A refill that must also
+    /// fit the window it is made in may elide more, one under a native
+    /// summary carries the summary in the render's place, and one made
+    /// mid-turn also compacts the steps it drops: the preview is the next
+    /// refill between turns. `None` for a session with no working memory.
     #[must_use]
     pub fn refill_preview(&self) -> Option<Value> {
         let state = self.shared.lock();
@@ -6178,12 +6184,37 @@ impl<S: Streaming + 'static> Session<S> {
         let asks = (!carries_native(&state))
             .then(|| compacted_asks(&state.log, &on_trunk))
             .flatten();
+        // The tool outputs it would carry of the turns the tail drops, and
+        // the background commands still running, as the refill reads them:
+        // the jobs are copied, so previewing marks none listed.
+        let compacted = &turns[..turns.len() - kept.len()];
+        let outputs = refill_outputs(&state, interview.meditations.outputs, compacted);
+        let mut jobs: Vec<super::background::Job> = state.jobs.values().cloned().collect();
+        let background = super::background::running_at_meditation(jobs.iter_mut())
+            .map(|list| state.shown_roots.text(&list));
+        let render = render_as_sent(&state, rendered.text.clone(), carries_native(&state));
+        let sent = refill_sent(&render, outputs.as_ref(), asks.as_deref());
+        // With no head, the refill is its one message.
+        let refill = crate::meditation::render::refill_with(&[], &sent, background.as_deref())
+            .pop()
+            .unwrap_or_else(|| Message::new(Role::User, String::new()));
         let (number, text, object) = (status_number, status_text, status_object);
-        let mut fields = vec![("render", text(&rendered.text))];
+        let mut fields = vec![("render", text(&render))];
+        if let Some((outputs, _)) = &outputs {
+            fields.push(("outputs", text(outputs)));
+        }
         if let Some(asks) = &asks {
             fields.push(("asks", text(asks)));
         }
+        if let Some(background) = &background {
+            fields.push(("background", text(background)));
+        }
         fields.extend([
+            ("refill", text(&refill.content)),
+            (
+                "refill_tokens",
+                number(crate::meditation::render::estimated_tokens(&refill)),
+            ),
             ("tokens", number(rendered.tokens)),
             ("reduced", number(rendered.reduced)),
             ("fits", Value::Boolean(rendered.fits)),
@@ -9817,16 +9848,7 @@ fn refilled(
     // working-memory entry no longer live, for a recall to find later.
     let earlier = meditations_at(&state.log, state.turns);
     let archived = archived_at_meditation(compacted, &interview.object, (state.turns, earlier));
-    let outputs = crate::meditation::outputs::section(
-        tool_outputs,
-        &compacted_outputs(
-            &state.log,
-            compacted,
-            tool_outputs,
-            (state.recording.as_deref(), &state.pruned),
-        ),
-    )
-    .map(|(text, n)| (state.shown_roots.text(&text), n));
+    let outputs = refill_outputs(state, tool_outputs, compacted);
     // Each background command still running (#614), after the summary in
     // the refill's message, as Qwen Code places its list: the refill
     // compacts away the call that started it.
@@ -9899,37 +9921,14 @@ fn refilled(
     // lists appended (#1012); nothing after it, no acknowledgement (#1009)
     // and no restored files or images (#1012).
     let render = native.map_or(rendered.text, |summary| summary.text.clone());
-    // The working directory, said again, the last of the render's computed
-    // lines: the first ask's note is gone with the trunk this replaces. In the
-    // render, so the meditation's line logs it and a log rebuilds it.
-    // The files the model changed since the session started (N5), counted
-    // from the worktree as it stands, before the working directory: that
-    // stays the render's last line. A native refill carries Pi's own
-    // `<modified-files>` list and nothing else after it (#1012).
-    let changed = state
-        .worktree
-        .as_deref()
-        .filter(|_| native.is_none())
-        .zip(state.worktree_at_start.as_ref())
-        .and_then(|(worktree, before)| {
-            let after = super::carry::digests(worktree).ok()?;
-            crate::meditation::changed::line(before, &after)
-        });
-    let render = match changed {
-        Some(line) => format!("{render}\n\n{}", state.shown_roots.text(&line)),
-        None => render,
-    };
-    let render = match state.start_cwd.as_deref() {
-        Some(cwd) => format!("{render}\n\n{cwd}"),
-        None => render,
-    };
+    // The files the model changed (N5), then the working directory, said
+    // again: the first ask's note is gone with the trunk this replaces. In
+    // the render, so the meditation's line logs them and a log rebuilds them.
+    let render = render_as_sent(state, render, native.is_some());
     if native.is_some() {
         render_budget = None;
     }
-    let mut sent = outputs
-        .as_ref()
-        .map_or_else(|| render.clone(), |(text, _)| format!("{render}{text}"));
-    sent.push_str(asks.as_deref().unwrap_or_default());
+    let sent = refill_sent(&render, outputs.as_ref(), asks.as_deref());
     let mut refilled = crate::meditation::render::refill_with(&head, &sent, background.as_deref());
     if let Some(summary) = native {
         state.native_files = summary.files.clone();
@@ -10031,6 +10030,62 @@ fn refilled(
         audit_unreached: state.audit_unreached.take(),
         asks,
     }
+}
+
+/// The section of tool outputs a refill carries of `compacted` (#553), under
+/// the regimen's `tool_outputs`, its paths shown as the model is shown them,
+/// with how many outputs it names; `None` when there is none. Both the
+/// refill and its preview read it here, so the preview is what is sent.
+fn refill_outputs(
+    state: &State,
+    tool_outputs: log::MeditationToolOutputs,
+    compacted: &[Message],
+) -> Option<(String, u64)> {
+    crate::meditation::outputs::section(
+        tool_outputs,
+        &compacted_outputs(
+            &state.log,
+            compacted,
+            tool_outputs,
+            (state.recording.as_deref(), &state.pruned),
+        ),
+    )
+    .map(|(text, n)| (state.shown_roots.text(&text), n))
+}
+
+/// `render` as a refill sends it and its meditation line logs it, when the
+/// session has tools: the files the model changed since the session started
+/// (N5), counted from the worktree as it stands, then the working directory
+/// said again, the last of its computed lines (#1112). A `native` refill
+/// carries Pi's own `<modified-files>` list in the changed line's place
+/// (#1012).
+fn render_as_sent(state: &State, render: String, native: bool) -> String {
+    let changed = state
+        .worktree
+        .as_deref()
+        .filter(|_| !native)
+        .zip(state.worktree_at_start.as_ref())
+        .and_then(|(worktree, before)| {
+            let after = super::carry::digests(worktree).ok()?;
+            crate::meditation::changed::line(before, &after)
+        });
+    let render = match changed {
+        Some(line) => format!("{render}\n\n{}", state.shown_roots.text(&line)),
+        None => render,
+    };
+    match state.start_cwd.as_deref() {
+        Some(cwd) => format!("{render}\n\n{cwd}"),
+        None => render,
+    }
+}
+
+/// What a refill's summary holds: the render as sent, then its tool
+/// outputs, then the operator's asks it compacts away (N3).
+fn refill_sent(render: &str, outputs: Option<&(String, u64)>, asks: Option<&str>) -> String {
+    let mut sent = render.to_owned();
+    sent.push_str(outputs.map_or("", |(text, _)| text.as_str()));
+    sent.push_str(asks.unwrap_or_default());
+    sent
 }
 
 /// The section of the operator's asks a refill compacts away (N3), verbatim
