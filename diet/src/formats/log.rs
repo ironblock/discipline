@@ -268,6 +268,16 @@
 //! log that declares 28 or less and carries it is refused. For a reader of
 //! earlier logs, the migration is nothing: no session declared one.
 //!
+//! v49 (audit 9) logs what an operator's fork was sent: under a set whose
+//! operator forks carry the fields route's imperative (v6), a `fork`
+//! line's `imperative` is the line sent before its `question`, which stays
+//! the operator's own words or the pinned ask, so the message the fork
+//! sent is `imperative`, a newline, then `question`. It is carried only by
+//! a fork whose `why` is `operator`, and refused in a log that declares 48
+//! or less. For a reader of earlier logs, the migration is a reading: a v6
+//! operator fork before v49 was sent its set's imperative too, which only
+//! `session.start`'s `fork_asks` names.
+//!
 //! v48 (audit 7) logs the operator's fork as it is queued: a `fork.queued`
 //! line, its `question` the one the fork will ask, written when the
 //! operator posts a fork while a turn runs, so that a reader of the log --
@@ -531,12 +541,12 @@ use super::record::vocabulary;
 struct LogParser;
 
 /// The version this module writes, as `session.start` states it.
-pub const VERSION: i64 = 48;
+pub const VERSION: i64 = 49;
 
 /// Every version this module reads.
 pub const READS: &[i64] = &[
     0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25,
-    26, 27, 28, 29, 30, 31, 32, 33, 34, 35, 36, 37, 38, 39, 40, 41, 42, 43, 44, 45, 46, 47, 48,
+    26, 27, 28, 29, 30, 31, 32, 33, 34, 35, 36, 37, 38, 39, 40, 41, 42, 43, 44, 45, 46, 47, 48, 49,
 ];
 
 /// How recent an input event must be, at the moment a turn settles, for the
@@ -2062,6 +2072,10 @@ pub enum Event {
         /// which waited for the next request boundary or the gap. Absent, it
         /// fired as it was posted.
         queued_at: Option<u64>,
+        /// The line sent before `question` (v49, audit 9): an operator's
+        /// fork under a set whose operator forks carry the fields route's
+        /// imperative (v6). Absent, `question` was sent alone.
+        imperative: Option<String>,
     },
     /// How a fork ended (v5, #374).
     ForkSettled {
@@ -4551,8 +4565,21 @@ fn check(lines: &[Line]) -> Result<(), LogError> {
                 timing,
                 queued_at,
                 question,
+                imperative,
                 ..
             } => {
+                // Sent with an imperative before its question (v49, audit 9):
+                // only the operator's fork is.
+                if imperative.is_some() && *why != Warrant::Operator {
+                    return Err(at(
+                        index,
+                        format!(
+                            "a `{}` fork carries `imperative`: only an operator's fork is sent \
+                             one before its question",
+                            why.tag()
+                        ),
+                    ));
+                }
                 // Queued by the operator while a turn ran (v46, N4): posted
                 // no later than it fired, and only the operator's.
                 if let Some(posted) = queued_at {
@@ -5403,6 +5430,7 @@ fn from_object(object: &BTreeMap<String, Value>) -> Result<Line, String> {
             chunk: fields.optional_count("chunk")?,
             offered: fields.optional_strings("offered")?,
             queued_at: fields.optional_count("queued_at")?,
+            imperative: fields.optional_string("imperative")?,
         },
         Kind::ForkSettled => Event::ForkSettled {
             fork: fields.count("fork")?,
@@ -7025,6 +7053,16 @@ const fn must_v48(key: &'static str, holds: Holds) -> Field {
 }
 
 /// A key that arrived in v46, optional wherever its object is written.
+/// A key that arrived in v49, optional on its kind.
+const fn may_v49(key: &'static str, holds: Holds) -> Field {
+    Field {
+        key,
+        holds,
+        required: false,
+        since: 49,
+    }
+}
+
 const fn may_v46(key: &'static str, holds: Holds) -> Field {
     Field {
         key,
@@ -7947,6 +7985,7 @@ pub fn schema(kind: Kind) -> &'static [Field] {
                 may_v8("chunk", Count),
                 may_v9("offered", Holds::Strings),
                 may_v46("queued_at", Count),
+                may_v49("imperative", Text),
             ];
             F
         }
@@ -9268,6 +9307,7 @@ fn to_value(line: &Line) -> Value {
             chunk,
             offered,
             queued_at,
+            imperative,
         } => {
             put("lane", text(lane.tag()));
             put("of_turn", count(u64::from(*of_turn)));
@@ -9319,6 +9359,9 @@ fn to_value(line: &Line) -> Value {
                     "offered",
                     Value::Array(offered.iter().map(|id| text(id)).collect()),
                 );
+            }
+            if let Some(line) = imperative {
+                put("imperative", text(line));
             }
             if let Some(posted) = queued_at {
                 put("queued_at", count(*posted));
@@ -11470,16 +11513,17 @@ mod tests {
     /// #583, #878, #904, #555, #931, #936, #910, #942, #926, #932, #948, #971, #1016, #1021,
     /// #1022, #1031, #1030, #1037, #1038, #1050, #1094, the withdrawn chip,
     /// N3's asks, the queued fork (N4), the move at the boundary (N2), and
-    /// the queued fork's own line (audit 7): this module writes v48.
+    /// the queued fork's own line (audit 7), and the operator fork's
+    /// imperative (audit 9): this module writes v49.
     #[test]
-    fn this_module_writes_v48_and_reads_every_version_before_it() {
-        assert_eq!(super::VERSION, 48);
+    fn this_module_writes_v49_and_reads_every_version_before_it() {
+        assert_eq!(super::VERSION, 49);
         assert_eq!(
             super::READS,
             &[
                 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22,
                 23, 24, 25, 26, 27, 28, 29, 30, 31, 32, 33, 34, 35, 36, 37, 38, 39, 40, 41, 42, 43,
-                44, 45, 46, 47, 48
+                44, 45, 46, 47, 48, 49
             ]
         );
     }
@@ -11868,6 +11912,7 @@ mod tests {
                 // A refutation fork's offered notes (v9, #878).
                 offered: Some(vec!["e1".to_owned(), "e2".to_owned()]),
                 queued_at: None,
+                imperative: None,
             },
             Event::Request {
                 turn: 5,
@@ -12279,6 +12324,7 @@ mod tests {
                 chunk: None,
                 offered: None,
                 queued_at: None,
+                imperative: None,
             },
             Event::ForkSettled {
                 trailer: None,

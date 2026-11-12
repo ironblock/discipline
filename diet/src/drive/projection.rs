@@ -3673,6 +3673,7 @@ mod tests {
             chunk: None,
             offered: None,
             queued_at: None,
+            imperative: None,
         };
         let call = |turn: u32, fork: u64| {
             [

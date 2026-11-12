@@ -713,6 +713,10 @@ pub enum Event {
         /// for the turn (N4): posted while a turn ran, it fired at the next
         /// request boundary or at the gap. Absent, it fired as it was posted.
         queued_at: Option<u64>,
+        /// The line sent before `question` (audit 9): an operator's fork
+        /// under a set whose operator forks carry the fields route's
+        /// imperative (v6). Absent, `question` was sent alone.
+        imperative: Option<String>,
     },
     /// A meditation's audit (#504): a fork off the warm trunk on the `audit` lane,
     /// the dogma's pinned ask after it, before the refill.
@@ -6719,7 +6723,9 @@ pub fn line_of(logged: &Logged) -> log::Line {
             reserved,
             offered,
             queued_at,
+            imperative,
         } => log::Event::Fork {
+            imperative: imperative.clone(),
             offered: offered.clone(),
             queued_at: *queued_at,
             after_meditation: None,
@@ -6762,6 +6768,7 @@ pub fn line_of(logged: &Logged) -> log::Line {
         } => log::Event::Fork {
             offered: None,
             queued_at: None,
+            imperative: None,
             chunk: *chunk,
             after_meditation: *after_meditation,
             lane: log::Lane::Audit,
@@ -14482,8 +14489,8 @@ fn fire_on<S>(
         prefix.unwrap_or_else(|| viewed(&state.trunk, shared.template.messages.len(), view));
     // A fork the operator fires -- their own words, or a pinned ask -- is
     // sent with the fields route's imperative first on either route, since
-    // its answer is read as text (#1050); its line logs the question alone,
-    // and `session.start` names the set.
+    // its answer is read as text (#1050); its line logs the question and,
+    // beside it, the imperative it was sent with (audit 9).
     let imperative = state
         .interview
         .as_ref()
@@ -14534,6 +14541,7 @@ fn fire_on<S>(
         reserved: None,
         offered,
         queued_at,
+        imperative: imperative.map(str::to_owned),
     });
     // Beside the forks cut during the turn still in flight (#782), each
     // prompt holds its own part of the pool.
@@ -15885,6 +15893,9 @@ fn fire_cut<S>(shared: &Shared<S>, state: &mut State, cut: Cut) -> Launched {
         reserved: Some((reserved, counted_shared)),
         offered,
         queued_at: None,
+        // A fork cut during the turn is a warrant's; the operator's waits
+        // for the boundary and fires through `fire_on`.
+        imperative: None,
     });
     if short {
         state.push(Event::ForkSettled {
@@ -20597,6 +20608,7 @@ pub(in crate::drive) mod tests {
                 reserved: None,
                 offered: None,
                 queued_at: None,
+                imperative: None,
             },
             Event::Requested {
                 turn: 1,
@@ -21282,6 +21294,7 @@ pub(in crate::drive) mod tests {
                 chunk: None,
                 offered: None,
                 queued_at: None,
+                imperative: None,
             },
             log::Event::Request {
                 turn: 1,
@@ -21462,6 +21475,7 @@ pub(in crate::drive) mod tests {
                 chunk: Some(1),
                 offered: None,
                 queued_at: None,
+                imperative: None,
             },
             log::Event::Flag {
                 turn: 2,
