@@ -30813,6 +30813,52 @@ pub(in crate::drive) mod tests {
         )
     }
 
+    /// The audit of 2026-11-11 (`operator-imperative-hidden-from-page`):
+    /// under v6 the operator's own words are sent with the fields route's
+    /// imperative before them, and the `fork` line says so -- the log names
+    /// what was sent, not the operator's words alone.
+    #[test]
+    fn under_v6_the_operators_fork_line_says_the_imperative_it_was_sent_with() {
+        let mut interview = interviewing(&[]);
+        interview.asks = &crate::dogma::asks::V6;
+        let imperative = interview
+            .asks
+            .operator_imperative()
+            .expect("v6 sends the operator's fork with an imperative");
+        let session = Session::open_with(
+            Canned::new([deltas(&["The schema has two tables."])]),
+            template(),
+            None,
+            None,
+            None,
+            Some(interview),
+        )
+        .forking_through(Canned::new([deltas(&["Because of joins."])]));
+        session.ask("what is the schema?", None).expect("accepted");
+        wait_until(&session, "the turn", settled);
+        let Ok(Forking::Fired(_)) =
+            session.fork(None, &OperatorAsk::Text("Why two tables?".to_owned()))
+        else {
+            unreachable!("fired at the gap");
+        };
+        let (_, messages, _) = operator_forked(&session);
+        assert_eq!(
+            messages.last().map(|message| message.content.clone()),
+            Some(format!("{imperative}\nWhy two tables?")),
+            "the imperative is sent first"
+        );
+        let logged = session
+            .events_from(0)
+            .into_iter()
+            .find(|logged| matches!(logged.event, Event::Forked { .. }))
+            .expect("the fork's line");
+        let line = log::render(&line_of(&logged));
+        assert!(
+            line.contains(imperative),
+            "the fork's line names the imperative it was sent with: {line}"
+        );
+    }
+
     /// #1021: the operator forks at the trunk's end in their own words: the
     /// fork is logged `warrant: operator` with the question as sent, born of
     /// the whole trunk; its answer is logged, and even an answer in the
