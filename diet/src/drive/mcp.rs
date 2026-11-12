@@ -242,7 +242,8 @@ impl Serve {
                 head = Some(status);
             }
             // Each complete event, ended by a blank line; a named event
-            // (`waiting`, `answered`) carries no `id:` and is not a log line.
+            // (`waiting`, `answered`) carries no `id:` and is not a log line,
+            // nor is `skipped`, which has one.
             while let Some(end) = pending.windows(2).position(|window| window == b"\n\n") {
                 let event: Vec<u8> = pending.drain(..end + 2).collect();
                 let event = String::from_utf8_lossy(&event);
@@ -259,8 +260,11 @@ impl Serve {
                 if line.get("seq").and_then(Value::as_u64) >= Some(last) {
                     reached = true;
                 }
+                // A seq serve declares and leaves out (a hidden shadow, #1114):
+                // no log line, so none is handed back, though it may end the read.
+                let skipped = event.lines().any(|line| line == "event: skipped");
                 let kind = line.get("kind").and_then(Value::as_str).unwrap_or_default();
-                if kinds.is_empty() || kinds.iter().any(|wanted| wanted == kind) {
+                if !skipped && (kinds.is_empty() || kinds.iter().any(|wanted| wanted == kind)) {
                     if lines.len() as u64 >= limit {
                         more = true;
                         break;
@@ -1791,8 +1795,15 @@ mod tests {
         assert_eq!(seqs, [&json!(0), &json!(2)], "{read}");
         assert_eq!(read["more"], false, "{read}");
         let limited = serve.events(None, (&[], false), 2).expect("read");
-        assert_eq!(limited["events"].as_array().map(Vec::len), Some(2), "{limited}");
-        assert_eq!(limited["more"], false, "a skipped seq is no line: {limited}");
+        assert_eq!(
+            limited["events"].as_array().map(Vec::len),
+            Some(2),
+            "{limited}"
+        );
+        assert_eq!(
+            limited["more"], false,
+            "a skipped seq is no line: {limited}"
+        );
     }
 
     /// A driver attached to `serve`, having started `child` as it, waiting
