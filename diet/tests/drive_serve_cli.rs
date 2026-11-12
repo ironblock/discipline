@@ -1248,7 +1248,7 @@ fn a_drive_server_confirms_a_declared_engines_model_settings_and_draft() {
         ]),
         "{start_line}"
     );
-    assert_eq!(start_line["version"], 47, "{start_line}");
+    assert_eq!(start_line["version"], 48, "{start_line}");
     // And its server speaks TabbyAPI's dialect, by name (#496).
     assert_eq!(start_line["serving"]["dialect"], "tabbyapi", "{start_line}");
 }

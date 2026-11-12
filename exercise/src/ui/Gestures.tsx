@@ -30,10 +30,8 @@ export interface GestureMoment {
    * settle, before its next request -- cut at the latest step, wherever it was asked from.
    */
   readonly queueing?: boolean;
-  /** The question of the fork queued now, until it fires. */
+  /** The question of the fork queued now, as the log carries it (audit 7), until it fires. */
   readonly queued?: string;
-  /** A fork was queued, asking this. */
-  readonly onQueued?: (question: string) => void;
   readonly onTrunk: (seq: number) => boolean;
   /** Whether the result at a call's line can still be wrapped: a result wraps once (the app audit's page walk, F17). */
   readonly wrappable?: (call: number) => boolean;
@@ -107,11 +105,10 @@ export function ForkAction({ at, label }: { readonly at: LoggedText; readonly la
   const queueing = !moment.awaiting && moment.queueing === true;
   const takes = moment.awaiting || (queueing && moment.queued === undefined);
   const place = queueing ? "the turn's next step" : label;
-  const send = async (command: Command, question: string) => {
+  const send = async (command: Command) => {
     const posted: Command = queueing && command.kind === 'fork' ? ('ask' in command ? { kind: 'fork', ask: command.ask } : { kind: 'fork', text: command.text }) : command;
     const ack = await act(posted);
     if (ack.ok) {
-      if (ack.answer?.queued === true) moment.onQueued?.(question);
       setText('');
       setRefused(undefined);
       setOpen(false);
@@ -132,7 +129,7 @@ export function ForkAction({ at, label }: { readonly at: LoggedText; readonly la
         </span>
       </button>
       {reading === ask.name ? (
-        <button type="button" className="ex-gesture__send" aria-label={`Ask ${ask.name} at ${label}`} onClick={() => void send({ kind: 'fork', at: at.seq, ask: ask.name }, ask.name)}>
+        <button type="button" className="ex-gesture__send" aria-label={`Ask ${ask.name} at ${label}`} onClick={() => void send({ kind: 'fork', at: at.seq, ask: ask.name })}>
           ask this
         </button>
       ) : null}
@@ -140,7 +137,7 @@ export function ForkAction({ at, label }: { readonly at: LoggedText; readonly la
   );
   const submit = (e: FormEvent) => {
     e.preventDefault();
-    if (text.trim() !== '') void send({ kind: 'fork', at: at.seq, text: text.trim() }, text.trim());
+    if (text.trim() !== '') void send({ kind: 'fork', at: at.seq, text: text.trim() });
   };
   // Return asks; Shift-Return is a new line.
   const keys = (e: KeyboardEvent<HTMLTextAreaElement>) => {

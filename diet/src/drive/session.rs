@@ -1125,6 +1125,13 @@ pub enum Event {
         /// The note as written.
         note: String,
     },
+    /// The operator's fork posted while a turn runs, queued for the turn's
+    /// next request boundary (audit 7): the `fork` that fires names this
+    /// line's `t` as its `queued_at`.
+    ForkQueued {
+        /// The question the fork will ask.
+        question: String,
+    },
     /// The operator's wrap, accepted (#1030): applied at the next trunk
     /// request, or never, when the session ends first.
     WrapAccepted {
@@ -5528,7 +5535,11 @@ impl<S: Streaming + 'static> Session<S> {
             return match queued {
                 Ok(firing) => {
                     state.admit_within_the_gap();
-                    let posted_at = state.now();
+                    // Logged as it is posted (audit 7): a page reloaded, or
+                    // a second one, reads it back off the log.
+                    let question = firing.question.clone();
+                    state.push(Event::ForkQueued { question });
+                    let posted_at = state.log.last().map_or_else(|| state.now(), |line| line.t);
                     state.queued_fork = Some(QueuedFork { firing, posted_at });
                     drop(state);
                     self.shared.changed.notify_all();
@@ -6907,6 +6918,9 @@ pub fn line_of(logged: &Logged) -> log::Line {
         Event::OperatorNote { command, note } => log::Event::OperatorNote {
             command: command_of(*command),
             note: note.clone(),
+        },
+        Event::ForkQueued { question } => log::Event::ForkQueued {
+            question: question.clone(),
         },
         Event::WrapAccepted { call, from, entry } => log::Event::WrapAccepted {
             call: *call,
@@ -20839,6 +20853,10 @@ pub(in crate::drive) mod tests {
             outcome: log::SuggestionOutcome::Rejected,
             entry: None,
         });
+        // Audit 7: the operator's fork, queued while a turn ran.
+        events.push(Event::ForkQueued {
+            question: "why 5182?".to_owned(),
+        });
         let mut kinds = std::collections::BTreeSet::new();
         for event in &events {
             kinds.insert(match event {
@@ -20899,9 +20917,10 @@ pub(in crate::drive) mod tests {
                 Event::WrapAccepted { .. } => 54,
                 Event::OperatorNote { .. } => 55,
                 Event::Correction { .. } => 56,
+                Event::ForkQueued { .. } => 57,
             });
         }
-        assert_eq!(kinds.len(), 57, "a variant has no sample");
+        assert_eq!(kinds.len(), 58, "a variant has no sample");
         events
             .into_iter()
             .enumerate()
@@ -21524,6 +21543,9 @@ pub(in crate::drive) mod tests {
             refused,
             outcome: log::SuggestionOutcome::Rejected,
             entry: None,
+        });
+        lines.push(log::Event::ForkQueued {
+            question: "why 5182?".to_owned(),
         });
         lines
     }
@@ -32402,6 +32424,61 @@ pub(in crate::drive) mod tests {
             unreachable!("an object");
         };
         assert!(!members.contains_key("queued_fork"));
+        reads_whole(&session);
+        tidy(&[&tree]);
+    }
+
+    /// Audit 7: the operator's fork queued while a turn runs is logged as
+    /// it is posted -- a `fork.queued` line with its question -- so a page
+    /// reloaded, or a second one, reads it back off the log; the `fork` that
+    /// fires names that line's `t` as its `queued_at`.
+    #[test]
+    fn a_queued_fork_is_logged_as_it_is_posted() {
+        let tree = scratch("fork-queued-logged");
+        let gate = Gate::new();
+        let session = wrapping(
+            &tree,
+            vec![
+                vec![Step::Hold(gate.clone()), bash("call-1", "cat notes.md")],
+                deltas(&["Read it."]),
+            ],
+            vec![deltas(&["Because the port is free."])],
+        );
+        session.ask("look", None).expect("accepted");
+        assert!(
+            gate.wait_for_a_waiter(Duration::from_secs(10)),
+            "the step never reached the gate"
+        );
+        assert_eq!(
+            session.fork(None, &OperatorAsk::Text("why 5182?".to_owned())),
+            Ok(Forking::Queued)
+        );
+        let queued_line = |log: &[Logged]| {
+            log.iter().find_map(|logged| {
+                let Ok(line) = crate::formats::record::json::line(&render(logged)) else {
+                    return None;
+                };
+                (line.get("kind") == Some(&Value::String("fork.queued".to_owned())))
+                    .then_some((logged.t, line))
+            })
+        };
+        let Some((posted, line)) = queued_line(&session.events_from(0)) else {
+            unreachable!("a fork.queued line as it is posted");
+        };
+        assert_eq!(
+            line.get("question"),
+            Some(&Value::String("why 5182?".to_owned()))
+        );
+        gate.open();
+        let log = wait_until(&session, "the turn", settled);
+        let [(_, Event::Forked { queued_at, .. })] = &operator_forks(&log)[..] else {
+            unreachable!("one operator fork: {:?}", operator_forks(&log));
+        };
+        assert_eq!(
+            *queued_at,
+            Some(posted),
+            "the fork names its queued line's t"
+        );
         reads_whole(&session);
         tidy(&[&tree]);
     }

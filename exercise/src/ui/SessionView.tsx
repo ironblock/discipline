@@ -230,15 +230,9 @@ export function SessionView({ session, link = 'live', linkWhy, onReconnect, surf
   }, [follow, running]);
   const now = follow && running ? session.now + (performance.now() - receivedAt) : session.now;
 
-  // The operator's fork queued for the turn's next step (N4): its question, how many queued forks had fired when it
-  // was posted, and the turn it was posted in. It waits until one more has fired; a session back at awaiting after
-  // that turn settled, with none fired, refused it at the gap.
-  const [queued, setQueued] = useState<{ readonly question: string; readonly fired: number; readonly settled?: number }>();
-  const queuedFired = [...session.branches.values()].flat().filter((b) => b.queuedAt !== undefined).length;
-  const waiting = queued !== undefined && queuedFired <= queued.fired && !(session.state === 'awaiting' && session.lastSettled !== queued.settled) ? queued : undefined;
-  useEffect(() => {
-    if (queued !== undefined && waiting === undefined) setQueued(undefined);
-  }, [queued, waiting]);
+  // The operator's fork queued for the turn's next step (N4), as the log carries it (audit 7): every window, and one
+  // reloaded, shows it until it fires.
+  const waiting = session.queuedFork;
   const trunkOrder = session.eras.flatMap((era) => era.nodes.map((n) => n.id));
   // The trunk as mounted: its newest TRUNK_SHOWN blocks, and as many pages before them as the person asked for. A
   // three-hour session mounted every block it had (28.5k DOM nodes at 105k log lines), and every click waited on them.
@@ -290,7 +284,6 @@ export function SessionView({ session, link = 'live', linkWhy, onReconnect, surf
     awaiting: session.state === 'awaiting',
     queueing: session.state === 'turn',
     ...(waiting ? { queued: waiting.question } : {}),
-    onQueued: (question) => setQueued({ question, fired: queuedFired, ...(session.lastSettled !== undefined ? { settled: session.lastSettled } : {}) }),
     onTrunk: (seq) => onTrunk.has(seq),
     wrappable: (call) => results.get(call)?.wrapped !== true,
     resultOf: (call) => results.get(call)?.name,
