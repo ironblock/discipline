@@ -111,6 +111,26 @@ pub const C4: CaptureSet = CaptureSet {
     ],
 };
 
+/// A set for tests alone (the audit of 2026-11-11, `reminder-reads-c1`):
+/// c1's contract, with reminder and sweep words no shipped set has, so a
+/// session that sends another set's words is caught. Not in [`SETS`], and
+/// pinned in no manifest: no session can declare it.
+#[cfg(test)]
+pub const DISTINCT_WORDS: CaptureSet = CaptureSet {
+    name: "test-distinct-words",
+    files: &[
+        (
+            "contract.jsonl",
+            include_str!("../../dogma/self-capture/c1/contract.jsonl"),
+        ),
+        (
+            "reminder.txt",
+            "A test set's reminder: nothing was recorded for a while.",
+        ),
+        ("sweep.txt", "A test set's sweep: what went unrecorded?"),
+    ],
+};
+
 /// Every set, in the order they were added.
 pub const SETS: &[&CaptureSet] = &[&C1, &C2, &C3, &C4];
 

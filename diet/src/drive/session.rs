@@ -35622,6 +35622,53 @@ pub(in crate::drive) mod tests {
         reads_whole(&session);
     }
 
+    /// The audit of 2026-11-11 (`reminder-reads-c1`): the reminder a session
+    /// sends is its contract set's words, not c1's -- latent while every
+    /// shipped set shares c1's, so a test set with words of its own holds it.
+    #[test]
+    fn the_self_capture_reminder_is_the_words_of_the_set_in_force() {
+        let set = &crate::dogma::capture::DISTINCT_WORDS;
+        let reminder = set.text("reminder.txt").expect("a reminder");
+        assert_ne!(
+            Some(reminder),
+            crate::dogma::capture::C1.text("reminder.txt"),
+            "the test set's words are its own"
+        );
+        let mut interview = interviewing(&[]);
+        interview.self_capture = Some(crate::capture::tools::Cadence::every(1).expect("a cadence"));
+        interview.capture_contract = set;
+        let mut shape = template();
+        declare_self_capture(&mut shape, Some(&interview));
+        let session = Session::open_with(
+            Canned::new(vec![deltas(&["one"]), deltas(&["two"])]),
+            shape,
+            None,
+            None,
+            None,
+            Some(interview),
+        );
+        session.ask("first", None).expect("accepted");
+        wait_until(&session, "turn one", settled);
+        session.ask("second", None).expect("accepted");
+        let log = wait_until(&session, "turn two", |log| {
+            log.iter()
+                .filter(|logged| matches!(logged.event, Event::TurnSettled { .. }))
+                .count()
+                == 2
+        });
+        let reminded: Vec<&str> = log
+            .iter()
+            .filter_map(|logged| match &logged.event {
+                Event::Reminded { text, .. } => Some(text.as_str()),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(reminded, [reminder]);
+        let sent = session.shared.transport.sent();
+        assert_eq!(sent[1].messages.last(), Some(&noted("second", &[reminder])));
+        reads_whole(&session);
+    }
+
     /// #609's c2: the session's contract set is the one declared, so c2's
     /// parameter descriptions reach the request and c1's absence of them
     /// stays as it was.
