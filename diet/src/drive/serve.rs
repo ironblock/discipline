@@ -12,7 +12,8 @@
 //!   resumes against a restarted process is told `410` instead of being fed
 //!   another session's events as if they continued its own (D7).
 //! * `GET /line/<seq>` answers one logged line whole, and `GET
-//!   /refill-preview` the render the next refill would carry (#1038).
+//!   /refill-preview` the next refill (#1038): its render, sections and
+//!   whole message, read by the refill's own code.
 //!   While a session's shadows are hidden, `/events` and `/line/<seq>`
 //!   leave their `fork.shadowed` lines out; `/events` declares each one it
 //!   leaves out, `event: skipped` with the line's `id:` and `{"seq"}`, so a

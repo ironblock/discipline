@@ -716,10 +716,12 @@ fn last_tools() -> Vec<Value> {
         ),
         tool(
             "refill_preview",
-            "What the next refill would carry (GET /refill-preview, #1038): working memory's \
-             render as it stands, its tokens, and the live entries by id -- each whole in the \
-             render, or shortened or elided to its id when `reduced` counts it -- before ruling \
-             on a meditation.",
+            "What the next refill would carry (GET /refill-preview, #1038): the render as it \
+             is sent (working memory, then the working-directory line), the tool `outputs` and \
+             user `asks` sections after it, any `background` commands still running, the whole \
+             `refill` message the model is sent and its `refill_tokens`; the render's own \
+             tokens, and the live entries by id -- each whole in the render, or shortened or \
+             elided to its id when `reduced` counts it -- before ruling on a meditation.",
             none(),
         ),
     ]
