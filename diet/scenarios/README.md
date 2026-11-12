@@ -154,7 +154,7 @@ What the deny list does:
 | `edit` | `pick`, `text`, `as`? | edits it; the operator's new entry is bound |
 | `declare-meditation` | | |
 | `refill-anyway` | | |
-| `rule-phase` | `call`, `choice` | rules on the model's phase proposal that call `call` made: `meditation`, `keep` (`continue` is read too) or `stay`, posted as written |
+| `rule-phase` | `choice`; `call` optional | rules on the model's phase proposal that call `call` made, or with no `call` the one pending when the step runs (`/state`'s `proposal`, audit 14): `meditation`, `keep` (`continue` is read too) or `stay`, posted as written |
 | `start-phase` | `phase` | picks the phase the session starts in, before the first ask |
 | `propose-phase` | `to`, `meditate`? | proposes a phase move the model accepts or declines; `meditate` absent is serve's default |
 | `move-phase` | `to`, `meditate`? | moves the phase on the operator's word alone |
@@ -275,6 +275,7 @@ Beside it the command writes:
   - An accepted suggestion's fork is no step of its own, nor is a wrap's entry.
   - A `suggestion` or `correction` step answers the first chip still unanswered, so the line it derives from must answer that chip.
   - A lapsed chip has no step.
+- **A ruling names no call.** A ruling on the model's proposal derives as `rule-phase` with no `call`: the replay rules its own pending proposal, since a served model never reproduces the run's call ids, and the operator lines compare the ruling without the id. A keep, fork or wrap at a call still finds its line by the call's id, which only a substrate that reproduces the run (the canned one) gives back.
 - **A refused ask is written with no text.** Its log line keeps none, and its refusal turns on the session's state.
 - **For a replay on the canned substrate**, `--canned SCENARIO` copies that scenario's `reply` and `classify` lines and its `seed` (under `seed/`).
   - The round trip is tested this way, on the kitchen sink and on the gestures scenario. Each log becomes a script, which replays with that scenario's replies, and its operator lines are the original's apart from `seq` and `t` (`diet/tests/drive_scenario_cli.rs`).
@@ -290,7 +291,9 @@ Beside it the command writes:
   - a keep from an ask;
   - a wrap that keeps nothing;
   - a gesture whose line is not the last of its id or text;
-  - a chip answered out of order.
+  - a chip answered out of order;
+  - a fork queued mid-turn that fired at the turn's next request (N4);
+  - a keep, wrap, flag, edit, retire or chip answer made while a turn ran (audit 14): a scenario's steps run between turns, so it is never moved after the turn.
 
 ## A session that goes on from its refill (#948)
 

@@ -324,8 +324,9 @@ pub enum Step {
     /// proposal's call, and `meditation`, `keep` (read too as `continue`)
     /// or `stay`, posted as written.
     RulePhase {
-        /// The `propose_phase_transition` call.
-        call: String,
+        /// The `propose_phase_transition` call; with none, the proposal
+        /// pending when the step runs, as `/state` names it (audit 14).
+        call: Option<String>,
         /// The ruling.
         choice: String,
     },
@@ -1485,7 +1486,7 @@ fn step_of(mut fields: Fields) -> Result<(Step, Option<u64>), ScenarioError> {
         "declare-meditation" => Step::DeclareMeditation,
         "refill-anyway" => Step::RefillAnyway,
         "rule-phase" => Step::RulePhase {
-            call: fields.text("call")?,
+            call: fields.maybe_text("call")?,
             choice: fields.text("choice")?,
         },
         "wait" => {
@@ -2522,6 +2523,27 @@ pub fn drive_from(
                     .settle(approvals, scenario.patience(at))
                     .map_err(failed)?;
                 return Ok((bound, Some(at + 1)));
+            }
+            Step::RulePhase { call: None, choice } => {
+                // The model's proposal pending now (audit 14).
+                let state = driver.get("/state").map_err(failed)?;
+                let call = state
+                    .pointer("/proposal/call")
+                    .and_then(serde_json::Value::as_str)
+                    .ok_or_else(|| {
+                        failed(Failure(
+                            "no proposal of the model's awaits a ruling".to_owned(),
+                        ))
+                    })?;
+                mark = driver.last_seq().map_err(failed)?;
+                driver
+                    .command(&serde_json::json!({
+                        "kind": "ratify-phase", "call": call, "choice": choice,
+                    }))
+                    .map_err(failed)?;
+                driver
+                    .settle(approvals, scenario.patience(at))
+                    .map_err(failed)?;
             }
             Step::DeclareMeditation
             | Step::RefillAnyway
@@ -4532,7 +4554,7 @@ mod tests {
                 },
                 Step::RefillAnyway,
                 Step::RulePhase {
-                    call: "call-p".to_owned(),
+                    call: Some("call-p".to_owned()),
                     choice: "keep".to_owned(),
                 },
                 Step::ProposePhase {
