@@ -2,7 +2,7 @@
   "title": "The kitchen sink: every lever, written by a scenario",
   "migration": [
     "Authored: this is an example of everything working the way we think it should, not a real session",
-    "written by diet-drive scenario diet/scenarios/kitchen-sink.jsonl on the canned scenario substrate: every line is diet's own, the model's replies are the scenario's",
+    "written by diet-drive scenario diet/scenarios/kitchen-sink.jsonl (sha256 8b093cee3ce092878c36193fbac0a34fd8b5b46832b855017ae0462e1530c2eb) on the canned scenario substrate: every line is diet's own, the model's replies are the scenario's",
     "the run's temporary and home paths are written /work/..., and its background jobs bg_1, bg_2, ... (src/drive/scenario-log.ts)",
     "retimed: every t is placed on assumed rates (src/drive/retime.ts), not measured, and reads nothing of the run's clock: a tool's run is its timeout_ms when it timed out, else 150 ms",
     "stitched: each wall-clock field (a gate's latency_ms, a trunk wait's wait_ms; never compared) is carried from the example this one replaced, by lane and place (src/drive/scenario-log.ts): 193 carried, 0 this run's own",
@@ -11,11 +11,12 @@
   ],
   "carried": {},
   "timing": "retimed",
+  "scenario_sha256": "8b093cee3ce092878c36193fbac0a34fd8b5b46832b855017ae0462e1530c2eb",
   "log": [
     {
       "approvals_off": true,
       "bash_timeout_ms": 120000,
-      "build_commit": "7219e8f22c66b285c8b7ae55d130ea8e1696d281",
+      "build_commit": "832f746eedefa2ed45bc2d2290976079cc2ee515",
       "build_dirty": false,
       "compaction_persists": true,
       "fork_asks": "v4",
@@ -92,7 +93,7 @@
       },
       "model": "scenario",
       "notes_in_the_ask": true,
-      "opened": 1794448522573,
+      "opened": 1794456492626,
       "opening_phase": "plan",
       "phase_document": {
         "digest": "c3c3afe17657994b1403ed749e7352bdf4ad1eb47c688b6e60bb0e122db95e8e",
@@ -3904,31 +3905,16 @@
       "turn": 7
     },
     {
-      "files": [
-        {
-          "bytes": 0,
-          "media_type": "text/plain",
-          "path": "files/e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
-          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
-        }
-      ],
-      "job": "bg_2",
-      "kind": "background.ended",
-      "seq": 278,
-      "status": "cancelled",
-      "t": 52846
-    },
-    {
       "kind": "delta",
       "request": 276,
-      "seq": 279,
+      "seq": 278,
       "t": 53206,
       "text": "LEARNED: NONE\nEVIDENCE: NONE\nSTUCK: NONE"
     },
     {
       "finish_reason": "stop",
       "kind": "response",
-      "seq": 280,
+      "seq": 279,
       "t": 53211,
       "text": "LEARNED: NONE\nEVIDENCE: NONE\nSTUCK: NONE",
       "timings": {
@@ -3964,8 +3950,23 @@
           "why": "declined"
         }
       ],
-      "seq": 281,
+      "seq": 280,
       "t": 53216
+    },
+    {
+      "files": [
+        {
+          "bytes": 0,
+          "media_type": "text/plain",
+          "path": "files/e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        }
+      ],
+      "job": "bg_2",
+      "kind": "background.ended",
+      "seq": 281,
+      "status": "cancelled",
+      "t": 53221
     },
     {
       "kind": "delta",
