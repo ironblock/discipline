@@ -4,11 +4,11 @@
 // i64, and a JavaScript number is exact only to 2^53. A `timings`
 // millisecond may carry a fraction, written as the server wrote it.
 
-export const VERSION = 47;
-export const READS = [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32, 33, 34, 35, 36, 37, 38, 39, 40, 41, 42, 43, 44, 45, 46, 47] as const;
+export const VERSION = 48;
+export const READS = [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32, 33, 34, 35, 36, 37, 38, 39, 40, 41, 42, 43, 44, 45, 46, 47, 48] as const;
 export const PRESENCE_WINDOW_MS = 2000;
 
-export const KINDS = ["session.start", "ask", "settlement", "request", "refused", "delta", "stop.asked", "response", "cancelled", "request.failed", "turn.settled", "idle.gap", "progress", "tool_call", "fork", "fork.settled", "patch", "meditation", "delivered", "recalled", "flag", "meditation.held", "patch.refused", "pruned", "wrapped", "wrap.accepted", "operator.note", "phase.ruled", "phase.proposed", "phase.answered", "phase.started", "tangent.open", "tangent.close", "capture", "reminded", "background.ended", "notice", "timeout.near", "fork.skipped", "fork.shadowed", "suggestion", "correction", "phase.noted", "trunk.clamped", "trunk.waited", "warrant.gated", "request.retried", "grade", "meditation.skipped"] as const;
+export const KINDS = ["session.start", "ask", "settlement", "request", "refused", "delta", "stop.asked", "response", "cancelled", "request.failed", "turn.settled", "idle.gap", "progress", "tool_call", "fork", "fork.settled", "patch", "meditation", "delivered", "recalled", "flag", "meditation.held", "patch.refused", "pruned", "wrapped", "wrap.accepted", "operator.note", "fork.queued", "phase.ruled", "phase.proposed", "phase.answered", "phase.started", "tangent.open", "tangent.close", "capture", "reminded", "background.ended", "notice", "timeout.near", "fork.skipped", "fork.shadowed", "suggestion", "correction", "phase.noted", "trunk.clamped", "trunk.waited", "warrant.gated", "request.retried", "grade", "meditation.skipped"] as const;
 export const REFUSALS = ["in-flight", "ended", "nothing-in-flight", "meditation-not-built", "nothing-to-meditate", "no-phase-graph", "not-a-phase", "already-in-phase", "no-phase-edge", "stale", "tangent-open", "no-tangent", "bad-tangent", "not-the-scope", "nothing-running", "no-proposal", "unknown-entry", "not-live", "empty", "meditation-held", "nothing-held", "restates", "not-unilateral", "already-asked", "proposal-pending", "no-vision", "api-cap", "not-a-source", "not-in-source", "no-working-memory", "not-on-the-trunk", "not-a-pinned-ask", "not-a-suggestion", "answered-already", "not-the-operators", "wrapped-already", "anchor-not-unique"] as const;
 export const AUTHORITIES = ["observed", "self-stated", "operator", "user-stated"] as const;
 export const KEPT_FROM = ["ask", "tool-result", "answer"] as const;
@@ -43,6 +43,7 @@ export type Kind =
   | "wrapped"
   | "wrap.accepted"
   | "operator.note"
+  | "fork.queued"
   | "phase.ruled"
   | "phase.proposed"
   | "phase.answered"
@@ -473,7 +474,7 @@ export type SessionStartLine = {
   seq: number;
   t: number;
   kind: "session.start";
-  version: 0 | 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9 | 10 | 11 | 12 | 13 | 14 | 15 | 16 | 17 | 18 | 19 | 20 | 21 | 22 | 23 | 24 | 25 | 26 | 27 | 28 | 29 | 30 | 31 | 32 | 33 | 34 | 35 | 36 | 37 | 38 | 39 | 40 | 41 | 42 | 43 | 44 | 45 | 46 | 47;
+  version: 0 | 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9 | 10 | 11 | 12 | 13 | 14 | 15 | 16 | 17 | 18 | 19 | 20 | 21 | 22 | 23 | 24 | 25 | 26 | 27 | 28 | 29 | 30 | 31 | 32 | 33 | 34 | 35 | 36 | 37 | 38 | 39 | 40 | 41 | 42 | 43 | 44 | 45 | 46 | 47 | 48;
   opened: number;
   model: string;
   head: HeadMessage[];
@@ -872,6 +873,13 @@ export type OperatorNoteLine = {
   note: string;
 };
 
+export type ForkQueuedLine = {
+  seq: number;
+  t: number;
+  kind: "fork.queued";
+  question: string;
+};
+
 export type PhaseRuledLine = {
   seq: number;
   t: number;
@@ -1141,6 +1149,7 @@ export type LogLine =
   | WrappedLine
   | WrapAcceptedLine
   | OperatorNoteLine
+  | ForkQueuedLine
   | PhaseRuledLine
   | PhaseProposedLine
   | PhaseAnsweredLine

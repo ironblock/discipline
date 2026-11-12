@@ -530,6 +530,12 @@ export interface Session {
   readonly state: SessionState;
   /** The `seq` of the latest `turn.settled`: the gap a person's next command ends opened there. */
   readonly lastSettled?: number;
+  /**
+   * The operator's fork queued while the turn runs (v48, audit 7): its question and its line's `t`, read off the log so
+   * a page reloaded, or a second one, shows it. Gone once the fork that names it fires, it is refused at the gap, or the
+   * session ends.
+   */
+  readonly queuedFork?: { readonly question: string; readonly t: number };
   /** Every idle gap the log carries. */
   readonly gaps: readonly Folded<GapNode>[];
   /** When the session opened, ms since the Unix epoch: the stream's identity (Q11). 0 before it has. */
@@ -868,6 +874,7 @@ export function fold(written: readonly LogLine[]): Session {
   let lastAskSeq = -1;
   // The state as the log says it, when it says it (`diet` logs every move; a script logs only the end).
   let settledTo: LineOf<'settlement'>['to'] | undefined;
+  let queuedFork: { readonly question: string; readonly t: number } | undefined;
 
   for (const e of lines) {
     switch (e.kind) {
@@ -875,7 +882,13 @@ export function fold(written: readonly LogLine[]): Session {
         version = e.version;
         break;
       case 'refused':
+        // Refused at the gap, no trunk answer to cut at: a fork is refused out of a turn only once none is queued.
+        if (queuedFork !== undefined && e.command === 'fork' && e.during !== 'turn') queuedFork = undefined;
+        break;
       case 'stop.asked':
+        break;
+      case 'fork.queued':
+        queuedFork = { question: e.question, t: e.t };
         break;
       case 'idle.gap': {
         const opened = settles.get(e.opened_by);
@@ -898,6 +911,7 @@ export function fold(written: readonly LogLine[]): Session {
       }
       case 'settlement':
         settledTo = e.to;
+        if (e.to === 'ended') queuedFork = undefined;
         break;
       case 'ask':
         asks.set(e.turn, e);
@@ -983,6 +997,7 @@ export function fold(written: readonly LogLine[]): Session {
         break;
       case 'fork':
         if (e.at !== undefined) forkCutAt.set(e.seq, e.at);
+        if (queuedFork !== undefined && e.queued_at === queuedFork.t) queuedFork = undefined;
         // A meditation's audit (#646) rules on the working memory live when it opens: what it leaves alone, it kept.
         forks.set(e.seq, { fork: e, patches: [], ...(e.lane === 'audit' ? { audited: [...entries.values()].filter((x) => x.state === 'live').map((x) => x.id) } : {}) });
         break;
@@ -1624,6 +1639,7 @@ export function fold(written: readonly LogLine[]): Session {
   return {
     state,
     ...(lastSettled !== undefined ? { lastSettled } : {}),
+    ...(queuedFork !== undefined ? { queuedFork } : {}),
     gaps,
     opened: start.opened,
     arm: start.arm ?? '',

@@ -268,6 +268,18 @@
 //! log that declares 28 or less and carries it is refused. For a reader of
 //! earlier logs, the migration is nothing: no session declared one.
 //!
+//! v48 (audit 7) logs the operator's fork as it is queued: a `fork.queued`
+//! line, its `question` the one the fork will ask, written when the
+//! operator posts a fork while a turn runs, so that a reader of the log --
+//! a page reloaded, or a second one -- knows a fork is waiting. The `fork`
+//! that fires names that line's `t` as its `queued_at`, with the same
+//! question; a v48 `queued_at` naming no unnamed `fork.queued` line is
+//! refused. One whose turn ended with no trunk answer to cut at is refused
+//! `not-a-source` at the gap, and one the session ended before is never
+//! named. It is refused in a log that declares 47 or less. For a reader of
+//! earlier logs, the migration is nothing: a v46 or v47 fork's `queued_at`
+//! is the moment it was posted, as before.
+//!
 //! v47 (N2) makes a move at the turn's next request boundary: a
 //! `meditation` whose `reason` is `phase` -- the move the model accepted to
 //! meditate into -- may refill under the running turn, as a `window` one may
@@ -519,12 +531,12 @@ use super::record::vocabulary;
 struct LogParser;
 
 /// The version this module writes, as `session.start` states it.
-pub const VERSION: i64 = 47;
+pub const VERSION: i64 = 48;
 
 /// Every version this module reads.
 pub const READS: &[i64] = &[
     0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25,
-    26, 27, 28, 29, 30, 31, 32, 33, 34, 35, 36, 37, 38, 39, 40, 41, 42, 43, 44, 45, 46, 47,
+    26, 27, 28, 29, 30, 31, 32, 33, 34, 35, 36, 37, 38, 39, 40, 41, 42, 43, 44, 45, 46, 47, 48,
 ];
 
 /// How recent an input event must be, at the moment a turn settles, for the
@@ -599,6 +611,9 @@ vocabulary! {
         /// The operator's note on a gesture, before its outcome (v36,
         /// #1037).
         OperatorNote => "operator.note",
+        /// The operator's fork posted while a turn runs, queued for the
+        /// turn's next request boundary (v48, audit 7).
+        ForkQueued => "fork.queued",
         /// The operator's ruling on the model's phase proposal (v7, #124).
         PhaseRuled => "phase.ruled",
         /// A phase move proposed, by the model or the operator, with the
@@ -2422,6 +2437,13 @@ pub enum Event {
         command: Command,
         /// The note, as the operator wrote it.
         note: String,
+    },
+    /// The operator's fork posted while a turn runs (v48, audit 7), queued
+    /// for the turn's next request boundary: the `fork` that fires names
+    /// this line's `t` as its `queued_at`.
+    ForkQueued {
+        /// The question the fork will ask, as its `fork` line will carry it.
+        question: String,
     },
     /// A tool result the operator wrapped (v35, #1030): replaced on the
     /// trunk, from the trunk request this names on, by a span the operator
@@ -4377,6 +4399,9 @@ fn check(lines: &[Line]) -> Result<(), LogError> {
     // The shadows' suggestions (v34, #1031): what each answers.
     let mut suggestions = Suggestions::default();
     let mut corrections = Corrections::default();
+    // The operator's queued forks (v48, audit 7), by their line's `t`, not
+    // yet named by the `fork` that fired: each with its question.
+    let mut queued_forks: BTreeMap<u64, String> = BTreeMap::new();
     let mut claimed = false;
     let mut last_t = 0_u64;
     for (index, line) in lines.iter().enumerate() {
@@ -4386,6 +4411,9 @@ fn check(lines: &[Line]) -> Result<(), LogError> {
         }
         last_t = line.t;
         match &line.event {
+            Event::ForkQueued { question } => {
+                queued_forks.insert(line.t, question.clone());
+            }
             Event::SessionStart { .. } if index > 0 => {
                 return Err(at(index, "a second `session.start`".to_owned()));
             }
@@ -4522,6 +4550,7 @@ fn check(lines: &[Line]) -> Result<(), LogError> {
                 chunk,
                 timing,
                 queued_at,
+                question,
                 ..
             } => {
                 // Queued by the operator while a turn ran (v46, N4): posted
@@ -4546,6 +4575,30 @@ fn check(lines: &[Line]) -> Result<(), LogError> {
                                 line.t
                             ),
                         ));
+                    }
+                    // Named by its `fork.queued` line from v48 (audit 7).
+                    if declared >= 48 {
+                        match queued_forks.remove(posted) {
+                            Some(asked) if asked == *question => {}
+                            Some(asked) => {
+                                return Err(at(
+                                    index,
+                                    format!(
+                                        "a fork queued at {posted} asks {question:?}, where its \
+                                         `fork.queued` line asks {asked:?}"
+                                    ),
+                                ));
+                            }
+                            None => {
+                                return Err(at(
+                                    index,
+                                    format!(
+                                        "a fork's `queued_at` is {posted}, the `t` of no \
+                                         `fork.queued` line not yet fired"
+                                    ),
+                                ));
+                            }
+                        }
                     }
                 }
                 // Cut as the operator's message arrives (v10, #904).
@@ -5712,6 +5765,9 @@ fn from_object(object: &BTreeMap<String, Value>) -> Result<Line, String> {
         Kind::OperatorNote => Event::OperatorNote {
             command: fields.tag("command", Command::from_tag)?,
             note: fields.string("note")?,
+        },
+        Kind::ForkQueued => Event::ForkQueued {
+            question: fields.string("question")?,
         },
         Kind::WrapAccepted => Event::WrapAccepted {
             call: fields.count("call")?,
@@ -6958,6 +7014,16 @@ const fn must_v8(key: &'static str, holds: Holds) -> Field {
     }
 }
 
+/// A key that arrived in v48 with its kind, which always writes it.
+const fn must_v48(key: &'static str, holds: Holds) -> Field {
+    Field {
+        key,
+        holds,
+        required: true,
+        since: 48,
+    }
+}
+
 /// A key that arrived in v46, optional wherever its object is written.
 const fn may_v46(key: &'static str, holds: Holds) -> Field {
     Field {
@@ -7443,6 +7509,7 @@ pub fn introduced(kind: Kind) -> i64 {
         Kind::Wrapped | Kind::WrapAccepted => 35,
         Kind::OperatorNote => 36,
         Kind::Correction => 41,
+        Kind::ForkQueued => 48,
         _ => 0,
     }
 }
@@ -7964,6 +8031,10 @@ pub fn schema(kind: Kind) -> &'static [Field] {
                 must_v36("command", Tag(Tags::Command)),
                 must_v36("note", Text),
             ];
+            F
+        }
+        Kind::ForkQueued => {
+            const F: &[Field] = &[must_v48("question", Text)];
             F
         }
         Kind::WrapAccepted => {
@@ -9463,6 +9534,10 @@ fn to_value(line: &Line) -> Value {
             put("command", text(command.tag()));
             put("note", text(note));
             Kind::OperatorNote
+        }
+        Event::ForkQueued { question } => {
+            put("question", text(question));
+            Kind::ForkQueued
         }
         Event::WrapAccepted { call, from, entry } => {
             put("call", count(*call));
@@ -11394,17 +11469,17 @@ mod tests {
 
     /// #583, #878, #904, #555, #931, #936, #910, #942, #926, #932, #948, #971, #1016, #1021,
     /// #1022, #1031, #1030, #1037, #1038, #1050, #1094, the withdrawn chip,
-    /// N3's asks, the queued fork (N4), and the move at the boundary (N2):
-    /// this module writes v47.
+    /// N3's asks, the queued fork (N4), the move at the boundary (N2), and
+    /// the queued fork's own line (audit 7): this module writes v48.
     #[test]
-    fn this_module_writes_v47_and_reads_every_version_before_it() {
-        assert_eq!(super::VERSION, 47);
+    fn this_module_writes_v48_and_reads_every_version_before_it() {
+        assert_eq!(super::VERSION, 48);
         assert_eq!(
             super::READS,
             &[
                 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22,
                 23, 24, 25, 26, 27, 28, 29, 30, 31, 32, 33, 34, 35, 36, 37, 38, 39, 40, 41, 42, 43,
-                44, 45, 46, 47
+                44, 45, 46, 47, 48
             ]
         );
     }
@@ -12350,6 +12425,10 @@ mod tests {
                 tail_tokens: 9,
             },
         ]);
+        // v48 (audit 7): the operator's fork, queued while a turn ran.
+        events.push(Event::ForkQueued {
+            question: "why 5182?".to_owned(),
+        });
         events
             .into_iter()
             .enumerate()
@@ -13715,7 +13794,7 @@ mod tests {
             tags(Kind::ALL.iter().map(|it| it.tag()).collect()),
             "session.start ask settlement request refused delta stop.asked response \
              cancelled request.failed turn.settled idle.gap progress tool_call fork \
-             fork.settled patch meditation delivered recalled flag meditation.held patch.refused pruned wrapped wrap.accepted operator.note phase.ruled phase.proposed phase.answered phase.started tangent.open tangent.close capture reminded background.ended notice timeout.near fork.skipped fork.shadowed suggestion correction phase.noted trunk.clamped trunk.waited warrant.gated request.retried grade meditation.skipped"
+             fork.settled patch meditation delivered recalled flag meditation.held patch.refused pruned wrapped wrap.accepted operator.note fork.queued phase.ruled phase.proposed phase.answered phase.started tangent.open tangent.close capture reminded background.ended notice timeout.near fork.skipped fork.shadowed suggestion correction phase.noted trunk.clamped trunk.waited warrant.gated request.retried grade meditation.skipped"
         );
         assert_eq!(
             tags(FailReason::ALL.iter().map(|it| it.tag()).collect()),

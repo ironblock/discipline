@@ -96,12 +96,12 @@ test('a span selected and wrapped with the mouse is the span the wrap keeps, as 
 });
 
 /** The fork action at a step, during a turn, its posts gathered and answered `{queued: true}` (N4). */
-async function forkingMidTurn(queued: string[], moment: Partial<GestureMoment> = {}): Promise<Command[]> {
+async function forkingMidTurn(moment: Partial<GestureMoment> = {}): Promise<Command[]> {
   const sent: Command[] = [];
   const host = document.createElement('div');
   document.body.append(host);
   root = createRoot(host);
-  const during: GestureMoment = { awaiting: false, queueing: true, onTrunk: () => true, onQueued: (question) => queued.push(question), ...moment };
+  const during: GestureMoment = { awaiting: false, queueing: true, onTrunk: () => true, ...moment };
   await act(async () =>
     root!.render(
       <GestureContext.Provider value={async (command) => (sent.push(command), { ok: true, answer: { queued: true } })}>
@@ -115,19 +115,17 @@ async function forkingMidTurn(queued: string[], moment: Partial<GestureMoment> =
 }
 
 test('a fork asked during a turn names no line, and is queued for the next step', async () => {
-  const queued: string[] = [];
-  const sent = await forkingMidTurn(queued);
+  const sent = await forkingMidTurn();
   await userEvent.click(page.getByRole('button', { name: 'Fork at call call-1' }));
   await expect.element(page.getByRole('heading', { name: "fork at the turn's next step" })).toBeVisible();
   await userEvent.click(page.getByRole('textbox', { name: 'Your own question at call call-1' }));
   await userEvent.keyboard('why that file?');
   await userEvent.click(page.getByRole('button', { name: 'Ask at call call-1' }));
   await expect.poll(() => sent).toEqual([{ kind: 'fork', text: 'why that file?' }]);
-  expect(queued).toEqual(['why that file?']);
 });
 
 test('while a fork is queued, the fork action waits, saying what is queued', async () => {
-  await forkingMidTurn([], { queued: 'why that file?' });
+  await forkingMidTurn({ queued: 'why that file?' });
   const action = page.getByRole('button', { name: 'Fork at call call-1' });
   await expect.element(action).toBeDisabled();
   await expect.element(action).toHaveAttribute('title', 'a fork is queued for the next step: why that file?');

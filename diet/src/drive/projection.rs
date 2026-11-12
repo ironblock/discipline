@@ -1246,6 +1246,9 @@ impl<'a> Walk<'a> {
             // The operator's note on a gesture (#1037): no row; the gesture has
             // its own.
             | Line::OperatorNote { .. }
+            // The operator's fork queued while a turn ran (audit 7): no row;
+            // the fork that fires has its own.
+            | Line::ForkQueued { .. }
             | Line::Capture { .. }
             // The operator's ruling on a phase proposal (#124): a meditation it
             // declares has its own row.

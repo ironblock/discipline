@@ -1531,6 +1531,24 @@ export const AuditForkQueuesDuringATurn: Story = {
   },
 };
 
+/** Audit 7 (2026-11-11): a page mounted mid-turn -- reloaded, or a second window -- reads the queued fork off its log line. */
+const queuedInTurn = (log: string) => {
+  const lines = inTurn(log).split('\n');
+  return [...lines, JSON.stringify({ seq: lines.length, t: 99, kind: 'fork.queued', question: 'why that file?' })].join('\n');
+};
+export const AuditQueuedForkSurvivesAReload: Story = {
+  name: 'audit 7: a page mounted mid-turn shows the fork already queued',
+  args: { drive: true, web: posting(queuedInTurn(gestures)) },
+  play: async ({ canvasElement }) => {
+    const page = within(canvasElement.ownerDocument.body);
+    await waitFor(async () => expect(says(canvasElement)).toBe('working · esc cancels'));
+    await waitFor(async () => expect(canvasElement.querySelector('.ex-session__queued')?.textContent).toBe('fork queued for the next step: why that file?'));
+    const fork = await page.findByRole('button', { name: 'Fork at step 7' });
+    await expect(fork).toBeDisabled();
+    await expect(fork.getAttribute('title')).toBe('a fork is queued for the next step: why that file?');
+  },
+};
+
 /** Audit finding 10: a suggestion's Accept fires a fork, so it waits for the session to await too; Reject does not. */
 export const AuditAcceptWaitsForAwaiting: Story = {
   name: 'audit 10: a suggestion’s Accept is disabled while a turn runs',
