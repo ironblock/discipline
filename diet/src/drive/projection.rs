@@ -887,6 +887,18 @@ fn tools_of(
         .collect()
 }
 
+/// `tools`, then each earlier form a log may have sent them in, for a head
+/// check to try in turn: `bash` before its description (#558), the timed
+/// background line before it named `task_stop` as a tool (#1133), and the
+/// phase tool before it said "the user" (dogma 21).
+fn earlier_tools(tools: &[ToolDefinition]) -> Vec<Vec<ToolDefinition>> {
+    std::iter::once(tools.to_vec())
+        .chain(earlier_bash(tools))
+        .chain(super::tool_loop::with_bash_before_the_task_stop_tool(tools))
+        .chain(super::session::with_the_phase_tool_before_the_user(tools))
+        .collect()
+}
+
 /// `tools` with `bash` as it was declared before its description (#558),
 /// when `tools` declares `bash`.
 fn earlier_bash(tools: &[ToolDefinition]) -> Option<Vec<ToolDefinition>> {
@@ -1847,16 +1859,11 @@ impl<'a> Walk<'a> {
                 tools,
             })
         };
-        // A log written before `bash` carried its description (#558) sent
-        // the definition I0 captured: its heads rebuild with that one, and
-        // the digest still decides.
-        let verified = std::iter::once(tools.clone())
-            .chain(earlier_bash(&tools))
-            // And one before the timed background line named `task_stop` as
-            // a tool.
-            .chain(super::tool_loop::with_bash_before_the_task_stop_tool(
-                &tools,
-            ))
+        // A log written before a model-facing tool text changed sent the
+        // earlier text: its heads rebuild with that one, and the digest
+        // still decides (`earlier_tools`).
+        let verified = earlier_tools(&tools)
+            .into_iter()
             .map(head)
             .find(|rebuilt| rebuilt.digest() == logged);
         // A head whose attachment could not be read back is never verified,
@@ -1959,11 +1966,8 @@ impl<'a> Walk<'a> {
         let tools = self.tools.clone().ok()?;
         let mut messages = self.trunk.clone();
         messages.push(Message::new(Role::User, String::new()));
-        std::iter::once(tools.clone())
-            .chain(earlier_bash(&tools))
-            .chain(super::tool_loop::with_bash_before_the_task_stop_tool(
-                &tools,
-            ))
+        earlier_tools(&tools)
+            .into_iter()
             .map(|tools| {
                 Head::of(&RequestShape {
                     model: self.model.clone(),
@@ -2346,6 +2350,33 @@ mod tests {
         FailReason, HeadMessage, Lane, Role, SettleReason, State, Timings, Usage, VERSION,
     };
     use crate::formats::record::Record;
+
+    /// A log written before #1133 and before dogma 21 sent both the timed
+    /// background line that did not name `task_stop` as a tool and the phase
+    /// tool that said "the operator": its heads rebuild only with both.
+    #[test]
+    fn a_log_before_both_tool_text_changes_has_its_tools_among_the_earlier_forms() {
+        use super::super::{session, tool_loop};
+        let phases = ["plan".to_owned(), "build".to_owned()];
+        let tools = vec![
+            tool_loop::bash_tool_timed(true, Some(180_000)),
+            session::phase_tool(&phases),
+        ];
+        let mut sent = tools.clone();
+        sent[0].description = sent[0].description.as_deref().map(|text| {
+            text.replace(
+                tool_loop::BACKGROUND_RUNNING,
+                tool_loop::BACKGROUND_RUNNING_BEFORE_THE_TASK_STOP_TOOL,
+            )
+        });
+        sent[1].description = Some(session::PHASE_TOOL_BEFORE_THE_USER.to_owned());
+        assert_ne!(sent[0], tools[0], "the bash line changed");
+        assert_ne!(sent[1], tools[1], "the phase tool changed");
+        assert!(
+            earlier_tools(&tools).contains(&sent),
+            "the tools a log sent before both changes are not among the earlier forms"
+        );
+    }
 
     /// #609's c2: a session's self-capture tools are rebuilt from the set its
     /// lever names, c1 where it names none, so a c2 session's described

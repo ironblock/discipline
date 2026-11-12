@@ -185,7 +185,17 @@ pub mod vocabulary;
 ///   phase {to}. You stay in phase {from}." The maintainer's approved
 ///   wording, cut to the fact, saying "the user" by his rule (relayed by
 ///   Dispatch). No template and no set already pinned changed.
-pub const VERSION: u32 = 20;
+/// * 21: the model-facing "the operator" says "the user", the maintainer's
+///   rule (relayed by Dispatch), in seven templates and the word alone:
+///   `PHASE_OPERATOR_PROPOSAL`, `PHASE_PROPOSED`, `PHASE_TOOL`,
+///   `AUDIT_Q_HUMAN`, `AUDIT_Q_RECONCILE`, `AUDIT_Q_HUMAN_RECONCILE` and
+///   `AUDIT_Q_CADENCE_RECONCILE`, the reconciling asks quoting the edited
+///   note's marker as `[edited by the user]`, as it now renders. The t2
+///   audit set joins, t1 with `AUDIT_Q_HUMAN` saying "the user", and is the
+///   tools route's default; a regimen's `audit_asks = "t1"` keeps t1. No set
+///   already pinned changed: t1, and the t2 and t3 fork-ask sets' priming,
+///   still say "operator".
+pub const VERSION: u32 = 21;
 
 /// The digest of `diet/dogma/MANIFEST.tsv` that [`VERSION`] was declared
 /// against.
@@ -195,7 +205,7 @@ pub const VERSION: u32 = 20;
 /// that recomputes it fails until both lines are edited together. Without it
 /// the manifest could be regenerated after an edit and the version left at
 /// what it was, which is a bump that never happened.
-pub const MANIFEST_DIGEST: &str = "dc1521e4f057e035";
+pub const MANIFEST_DIGEST: &str = "ffce6b2f5945d971";
 
 /// The per-model operating points, as TOML text, exactly as pinned.
 ///
@@ -1072,6 +1082,20 @@ mod tests {
                 holes_in(template.text()),
                 template.holes().to_vec(),
                 "{template}'s declared holes disagree with its text"
+            );
+        }
+    }
+
+    // Model-facing text says "the user", never "the operator": the
+    // maintainer's rule. A template's name is not model-facing; its text is.
+    #[test]
+    fn no_template_says_the_operator() {
+        for template in Template::ALL {
+            assert!(
+                !template.text().to_lowercase().contains("operator"),
+                "{} says \"operator\" to the model: {}",
+                template.name(),
+                template.text()
             );
         }
     }

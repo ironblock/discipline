@@ -1525,7 +1525,7 @@ mod tests {
             Some(crate::dogma::Template::AuditQHuman)
         );
         assert!(
-            seen[0].text.contains("the operator declared one"),
+            seen[0].text.contains("the user declared one"),
             "the dogma's own words for this boundary, not the cadence's: {}",
             seen[0].text
         );
