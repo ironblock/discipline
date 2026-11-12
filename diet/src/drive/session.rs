@@ -13812,12 +13812,12 @@ pub fn phase_tool_before_v38() -> crate::client::shape::ToolDefinition {
     phase_tool_with(typed("string"), typed("string"))
 }
 
-/// The phase tool's description before dogma 20 said "the user": what every
+/// The phase tool's description before dogma 21, which said "the operator": what every
 /// log before it sent, so its heads still rebuild (the digest decides).
 pub const PHASE_TOOL_BEFORE_THE_USER: &str = "Propose moving the session to another phase and say why, or answer the operator's proposal with accept. Advisory: it records a request for a ruling and writes no fact. A proposal of your own ends your turn.";
 
 /// `tools` with the phase tool, if it is there, described as it was before
-/// dogma 20 ([`PHASE_TOOL_BEFORE_THE_USER`]), its schema as declared.
+/// dogma 21 ([`PHASE_TOOL_BEFORE_THE_USER`]), its schema as declared.
 #[must_use]
 pub fn with_the_phase_tool_before_the_user(
     tools: &[crate::client::shape::ToolDefinition],
