@@ -30542,7 +30542,7 @@ pub(in crate::drive) mod tests {
         let entry = session
             .keep(answered, "5182, because 5173 is taken", Some("decisions"))
             .expect("kept from the reasoning");
-        assert!(entry.starts_with("operator-"));
+        assert!(entry.starts_with("user-"), "{entry}");
         session
             .keep(answered, "dev server.\nIt runs", None)
             .expect("kept across the line break");
@@ -31462,7 +31462,7 @@ pub(in crate::drive) mod tests {
             .keep_anchored(answered, ("5173", "ours."), Some("decisions"))
             .expect("kept by anchors");
         assert_eq!(span, "5173 is taken — so 5182 is ours.");
-        assert!(entry.starts_with("operator-"));
+        assert!(entry.starts_with("user-"), "{entry}");
         assert_eq!(
             session.keep_anchored(answered, ("Ports", "ours."), None),
             Err(Rejected::Refused(Refusal::AnchorNotUnique))
@@ -35156,7 +35156,8 @@ pub(in crate::drive) mod tests {
             .last()
             .and_then(|line| line.shown.clone())
             .expect("a result shown");
-        assert_eq!(shown, format!("refused: operator-entry: {operator}"));
+        assert_eq!(shown, format!("refused: user-entry: {operator}"));
+        assert!(operator.starts_with("user-"), "{operator}");
         assert!(
             !live_entries(&session)
                 .iter()
@@ -35235,7 +35236,7 @@ pub(in crate::drive) mod tests {
             Some(&(
                 "refused".to_owned(),
                 Vec::new(),
-                Some(format!("operator-entry: {operator}"))
+                Some(format!("user-entry: {operator}"))
             )),
             "{refused:?}"
         );
