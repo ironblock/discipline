@@ -47,8 +47,8 @@ describe("a rewrite's wall-clock fields", () => {
 
   it('give byte-identical examples when the same log is written twice', () => {
     const today = run([7, 9]);
-    const first = kitchenSinkExample(today, { migration: [], log: run([2, 3]) }, []);
-    const second = kitchenSinkExample(today, first as { migration: string[]; log: LogLine[] }, []);
+    const first = kitchenSinkExample(today, { migration: [], log: run([2, 3]) }, [], 'c'.repeat(64));
+    const second = kitchenSinkExample(today, first as { migration: string[]; log: LogLine[] }, [], 'c'.repeat(64));
     expect(serialize(second)).toBe(serialize(first));
     expect(latencies((first as { log: LogLine[] }).log)).toEqual([2, 3]);
     expect((first as { migration: string[] }).migration.some((line) => line.includes('latency_ms') && line.includes('carried'))).toBe(true);

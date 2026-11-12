@@ -67,13 +67,35 @@ writes (#798), committed as `src/drive/examples/kitchen-sink.json` by
 `node exercise/scripts/kitchen-sink.mjs write`: the scenario run on the canned
 substrate, its own paths, process and job ids scrubbed (`src/drive/scenario-log.ts`),
 and **retimed** -- every `t` placed on assumed rates (`src/drive/retime.ts`),
-not measured, which the example's `timing` and its `retimed:` line say. Its
-`check`, in verify's `exercise` check, fails when the committed log is not what
-the scenario writes today, lane by lane. It is admitted by the same `admit`,
+not measured, which the example's `timing` and its `retimed:` line say. It is admitted by the same `admit`,
 under the same snapshot, with an `Authored:` line carrying the sentence where a
-recording carries its `Scrubbed:` line. After a change to the scenario or to
-what diet writes: `node exercise/scripts/kitchen-sink.mjs write`, then
-`python3 exercise/scripts/admission.py admit kitchen-sink`.
+recording carries its `Scrubbed:` line.
+
+**The sink lags** (the maintainer's ruling, 2026-11-11). Its `check`, in
+verify's `exercise` check, compares the committed log with what the scenario
+writes today, lane by lane, and:
+
+- **fails** when `diet/scenarios/kitchen-sink.jsonl` is not the file the
+  example was written from (its `scenario_sha256`): a PR that changes the
+  scenario writes the example too (`node exercise/scripts/kitchen-sink.mjs write`,
+  then `python3 exercise/scripts/admission.py admit kitchen-sink`);
+- **warns** when only the code changed what the scenario writes: `STALE`, built
+  at the example's `build_commit`, with each lane that differs. On CI the
+  warning is an annotation and the lane diff is in the job's summary, so a
+  reviewer sees the behaviour change. Nothing fails, so a PR merges without
+  writing the example and develop stays green;
+- passes when each lane is what the scenario writes.
+
+`exercise/scripts/regenerate-kitchen-sink.sh` catches the example up in one
+command: from a clean branch at develop's head, it builds, writes, admits,
+checks with `check --current` (which fails on a stale example), and commits.
+Dispatch runs it after a merge leaves develop's sink stale, or routes it to a
+seat, and merges it ahead of the queue. A PR whose tests need its new behaviour
+in the example may write the example itself, as before.
+
+The tests and stories read the example's values through `src/drive/moments.ts`
+(#875), by a line's kind and content, never pinned: a stale example is a real
+earlier run of the scenario, so what they read stays true of it.
 
 **Driving `diet`.** `?drive` drives `diet`'s own session, served over HTTP
 by `diet-drive serve` (`src/drive/http.ts`); the page reaches it same-origin
