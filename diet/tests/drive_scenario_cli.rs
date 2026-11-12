@@ -1160,6 +1160,42 @@ fn a_phased_sessions_request_heads_are_rebuilt_from_its_log() {
     let _ = std::fs::remove_dir_all(&dir);
 }
 
+/// Audit 14: a `rule-phase` step that names no call rules the model's
+/// pending proposal, as MCP's `rule_phase` does: a replay of a derived
+/// script need not reproduce the run's call ids.
+#[test]
+fn a_ruling_that_names_no_call_rules_the_pending_proposal() {
+    let dir = scratch("ruling-no-call");
+    let scenarios = root().join("diet/scenarios");
+    let shipped = std::fs::read_to_string(scenarios.join("two-phases.jsonl")).expect("shipped");
+    let mut lines: Vec<String> = Vec::new();
+    for line in shipped.lines() {
+        let mut value: serde_json::Value = serde_json::from_str(line).expect("JSON");
+        if value.get("scenario").is_some() {
+            for key in ["regimen", "head"] {
+                let at = scenarios.join(value[key].as_str().expect("a path"));
+                value[key] = serde_json::json!(at.to_str().expect("a path"));
+            }
+        }
+        if value["step"] == "rule-phase" {
+            value.as_object_mut().expect("an object").remove("call");
+        }
+        lines.push(value.to_string());
+    }
+    let scenario = dir.join("two-phases-no-call.jsonl");
+    std::fs::write(&scenario, lines.join("\n") + "\n").expect("written");
+    let out = dir.join("out");
+    let (code, said) = run(&scenario, &out);
+    assert_eq!(code, Some(0), "{said}");
+    let log = std::fs::read_to_string(out.join("session.log")).expect("the log");
+    assert!(
+        log.lines().any(|line| line.contains("\"kind\":\"phase.ruled\"")
+            && line.contains("\"call\":\"call-p\"")),
+        "the pending proposal was ruled:\n{log}"
+    );
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
 /// #884: a window meditation that splits a running turn (#813) refills the
 /// trunk mid-turn, and the record rebuilds every request's head after it:
 /// the sidecar of the shipped split-turn scenario names none it could not.

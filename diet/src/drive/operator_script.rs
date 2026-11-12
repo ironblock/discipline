@@ -1232,6 +1232,62 @@ mod tests {
         );
     }
 
+    /// Audit 14: serve admits a keep, a wrap, a flag, an edit and a retire
+    /// while a turn runs (#1038, #1113), but a scripted step runs between
+    /// turns: each one logged mid-turn is refused, naming its line, never
+    /// moved after the turn. Logged after the turn settled, it derives.
+    #[test]
+    fn a_gesture_made_mid_turn_is_refused_naming_its_line() {
+        let turn = json!({"kind": "settlement", "from": "awaiting", "to": "turn"});
+        let gestures = [
+            json!({"kind": "flag", "turn": 1, "entry": "e", "note": "n"}),
+            json!({"kind": "patch", "lane": "operator", "op": "add", "entry": {"id": "operator-1", "text": "x"}}),
+            json!({"kind": "patch", "lane": "operator", "op": "supersede", "supersedes": "e", "entry": {"id": "operator-2", "text": "y"}}),
+            json!({"kind": "patch", "lane": "operator", "op": "retire", "entry": {"id": "operator-1"}}),
+            json!({"kind": "wrap.accepted", "call": 1, "from": 1, "entry": "operator-1"}),
+        ];
+        for gesture in gestures {
+            let kind = gesture["kind"].as_str().expect("a kind").to_owned();
+            let mid_turn = refusal(&[turn.clone(), gesture.clone()]);
+            assert_eq!(
+                (mid_turn.seq, mid_turn.kind.as_deref()),
+                (Some(2), Some(kind.as_str())),
+                "{mid_turn}"
+            );
+            assert!(mid_turn.to_string().contains("mid-turn"), "{mid_turn}");
+        }
+    }
+
+    /// Audit 14: the model's proposal ruled derives as a ruling on the
+    /// pending one -- no call id, which a replay against a served model
+    /// never reproduces -- and its operator line compares the ruling, not
+    /// the model's id.
+    #[test]
+    fn a_ruling_derives_without_the_runs_call_id() {
+        let lines = log(
+            "h",
+            &[
+                json!({"kind": "phase.proposed", "call": "call_c44dca3e", "to": "build"}),
+                json!({"kind": "phase.ruled", "call": "call_c44dca3e", "choice": "keep", "to": "build"}),
+            ],
+        );
+        let derived = derived(&lines, None).expect("derived");
+        let ruling = derived
+            .steps
+            .iter()
+            .find(|step| step["step"] == "rule-phase")
+            .expect("a rule-phase step");
+        assert!(ruling.get("call").is_none(), "{ruling}");
+        assert_eq!(ruling["choice"], json!("keep"));
+        let text: String = lines.iter().map(|line| Value::Object(line.clone()).to_string() + "\n").collect();
+        let compared = operator_lines(&text).expect("its lines");
+        let ruled = compared
+            .iter()
+            .find(|line| line["kind"] == "phase.ruled")
+            .expect("the ruling");
+        assert!(ruled.get("call").is_none(), "{ruled}");
+    }
+
     /// #908: the moves it writes keep their place -- the first ask fixed,
     /// a later one marked with the response it followed -- and the head is
     /// what the replay's start begins from: the instruction files' render
