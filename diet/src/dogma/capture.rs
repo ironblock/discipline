@@ -21,15 +21,15 @@ pub struct CaptureSet {
     files: &'static [(&'static str, &'static str)],
 }
 
+/// c1's contract: what `capture::tools` reads when no set is named.
+pub const C1_CONTRACT: &str = include_str!("../../dogma/self-capture/c1/contract.jsonl");
+
 /// Today's contract and reminder words, moved into the dogma unchanged
 /// (#609): `capture::tools`' as it shipped.
 pub const C1: CaptureSet = CaptureSet {
     name: "c1",
     files: &[
-        (
-            "contract.jsonl",
-            include_str!("../../dogma/self-capture/c1/contract.jsonl"),
-        ),
+        ("contract.jsonl", C1_CONTRACT),
         (
             "reminder.txt",
             include_str!("../../dogma/self-capture/c1/reminder.txt"),
@@ -119,10 +119,7 @@ pub const C4: CaptureSet = CaptureSet {
 pub const DISTINCT_WORDS: CaptureSet = CaptureSet {
     name: "test-distinct-words",
     files: &[
-        (
-            "contract.jsonl",
-            include_str!("../../dogma/self-capture/c1/contract.jsonl"),
-        ),
+        ("contract.jsonl", C1_CONTRACT),
         (
             "reminder.txt",
             "A test set's reminder: nothing was recorded for a while.",
@@ -259,6 +256,23 @@ mod tests {
         };
         assert_eq!(resolve(&C3), resolve(&C2));
         assert_ne!(C3.contract(), C2.contract());
+    }
+
+    /// c4's reminder, sweep and `resolve_entry` are c3's, byte for byte, as
+    /// its doc says (the audit of 2026-11-11 found no test held it).
+    #[test]
+    fn c4_keeps_c3s_reminder_sweep_and_resolve_entry() {
+        for file in ["reminder.txt", "sweep.txt"] {
+            assert_eq!(C4.text(file), C3.text(file), "{file}");
+        }
+        let resolve = |set: &super::CaptureSet| {
+            set.contract()
+                .lines()
+                .find(|line| line.contains("\"tool\":\"resolve_entry\""))
+                .map(str::to_owned)
+        };
+        assert_eq!(resolve(&C4), resolve(&C3));
+        assert_ne!(C4.contract(), C3.contract());
     }
 
     /// c1 is the words `capture::tools` shipped with.
