@@ -242,7 +242,8 @@ impl Serve {
                 head = Some(status);
             }
             // Each complete event, ended by a blank line; a named event
-            // (`waiting`, `answered`) carries no `id:` and is not a log line.
+            // (`waiting`, `answered`) carries no `id:` and is not a log line,
+            // nor is `skipped`, which has one.
             while let Some(end) = pending.windows(2).position(|window| window == b"\n\n") {
                 let event: Vec<u8> = pending.drain(..end + 2).collect();
                 let event = String::from_utf8_lossy(&event);
@@ -259,8 +260,11 @@ impl Serve {
                 if line.get("seq").and_then(Value::as_u64) >= Some(last) {
                     reached = true;
                 }
+                // A seq serve declares and leaves out (a hidden shadow, #1114):
+                // no log line, so none is handed back, though it may end the read.
+                let skipped = event.lines().any(|line| line == "event: skipped");
                 let kind = line.get("kind").and_then(Value::as_str).unwrap_or_default();
-                if kinds.is_empty() || kinds.iter().any(|wanted| wanted == kind) {
+                if !skipped && (kinds.is_empty() || kinds.iter().any(|wanted| wanted == kind)) {
                     if lines.len() as u64 >= limit {
                         more = true;
                         break;
@@ -1736,6 +1740,70 @@ mod tests {
             }
         });
         Serve::new(&format!("http://{address}"), None).expect("an address")
+    }
+
+    /// A serve whose `/state` names `last` as its last seq and whose
+    /// `/events` streams `sse` and closes, on a thread for as long as the
+    /// test runs.
+    fn streaming_serve(last: u64, sse: &'static str) -> Serve {
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").expect("a port");
+        let address = std::net::TcpListener::local_addr(&listener).expect("its address");
+        std::thread::spawn(move || {
+            for stream in listener.incoming() {
+                let Ok(mut stream) = stream else { continue };
+                let mut head = Vec::new();
+                let mut byte = [0_u8; 1];
+                while !head.ends_with(b"\r\n\r\n") && stream.read(&mut byte).is_ok_and(|n| n == 1) {
+                    head.push(byte[0]);
+                }
+                if head.starts_with(b"GET /events") {
+                    let _ = write!(
+                        stream,
+                        "HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\nConnection: close\r\n\r\n{sse}"
+                    );
+                } else {
+                    let answer = json!({"last_seq": last}).to_string();
+                    let _ = write!(
+                        stream,
+                        "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{answer}",
+                        answer.len()
+                    );
+                }
+            }
+        });
+        Serve::new(&format!("http://{address}"), None).expect("an address")
+    }
+
+    /// Audit 10: serve declares a hidden shadow's seq as `event: skipped`
+    /// (#1114), which is no log line: `events` leaves it out, kinds or none,
+    /// and it counts against no limit -- and a skipped last seq still ends
+    /// the read.
+    #[test]
+    fn events_leave_out_a_skipped_seq() {
+        const SSE: &str = "id: 1-0\ndata: {\"kind\":\"ask\",\"seq\":0}\n\n\
+             event: skipped\nid: 1-1\ndata: {\"seq\":1}\n\n\
+             id: 1-2\ndata: {\"kind\":\"turn.settled\",\"seq\":2}\n\n\
+             event: skipped\nid: 1-3\ndata: {\"seq\":3}\n\n";
+        let serve = streaming_serve(3, SSE);
+        let read = serve.events(None, (&[], false), 200).expect("read");
+        let seqs: Vec<&Value> = read["events"]
+            .as_array()
+            .expect("events")
+            .iter()
+            .map(|line| &line["seq"])
+            .collect();
+        assert_eq!(seqs, [&json!(0), &json!(2)], "{read}");
+        assert_eq!(read["more"], false, "{read}");
+        let limited = serve.events(None, (&[], false), 2).expect("read");
+        assert_eq!(
+            limited["events"].as_array().map(Vec::len),
+            Some(2),
+            "{limited}"
+        );
+        assert_eq!(
+            limited["more"], false,
+            "a skipped seq is no line: {limited}"
+        );
     }
 
     /// A driver attached to `serve`, having started `child` as it, waiting
