@@ -1626,6 +1626,8 @@ pub struct Interview {
     pub role: Role,
     /// The ask set its forks ask in (#595).
     pub asks: &'static crate::dogma::asks::AskSet,
+    /// The set a tools-route audit asks in: t2 unless the regimen names t1.
+    pub audits: &'static crate::dogma::audits::AuditSet,
     /// How archived items are recalled at an ask (#566): off, the default.
     pub recall: super::archive::Recall,
     /// What a fork sees of the trunk (#567): all of it, or its last whole
@@ -2223,6 +2225,9 @@ pub fn primed(head: &str, priming: Option<&str>) -> String {
 /// The regimen key for the fork ask set (#595).
 pub const FORK_ASKS: &str = "fork_asks";
 
+/// The regimen key for the tools-route audit set: `t1` or `t2`, the default.
+pub const AUDIT_ASKS: &str = "audit_asks";
+
 /// The regimen key for how a fork answers (#610).
 pub const CAPTURE_MODALITY: &str = "capture_modality";
 
@@ -2257,6 +2262,18 @@ pub fn fork_asks(regimen: &Regimen) -> &'static crate::dogma::asks::AskSet {
             crate::dogma::asks::set(name).unwrap_or(crate::dogma::asks::DEFAULT)
         }
         _ => crate::dogma::asks::DEFAULT,
+    }
+}
+
+/// The tools-route audit set the regimen names, leniently as [`fork_asks`]:
+/// a set by its name, or else [`crate::dogma::audits::DEFAULT`].
+#[must_use]
+pub fn audit_asks(regimen: &Regimen) -> &'static crate::dogma::audits::AuditSet {
+    match regimen.get(AUDIT_ASKS) {
+        Some(crate::formats::regimen::Value::String(name)) => {
+            crate::dogma::audits::set(name).unwrap_or(crate::dogma::audits::DEFAULT)
+        }
+        _ => crate::dogma::audits::DEFAULT,
     }
 }
 
@@ -12247,7 +12264,7 @@ fn audit_asked(
     };
     let asking = |items: &[(crate::object::EntryId, String)]| {
         if tools {
-            crate::meditation::audit_ask_tools(reason, items, crate::dogma::audits::DEFAULT)
+            crate::meditation::audit_ask_tools(reason, items, interview.audits)
         } else {
             crate::meditation::audit_ask_marked(reason, items, &marks)
         }
@@ -13848,6 +13865,22 @@ pub fn phase_tool_before_v38() -> crate::client::shape::ToolDefinition {
         )]))
     };
     phase_tool_with(typed("string"), typed("string"))
+}
+
+/// The phase tool's description before dogma 21, which said "the operator": what every
+/// log before it sent, so its heads still rebuild (the digest decides).
+pub const PHASE_TOOL_BEFORE_THE_USER: &str = "Propose moving the session to another phase and say why, or answer the operator's proposal with accept. Advisory: it records a request for a ruling and writes no fact. A proposal of your own ends your turn.";
+
+/// `tools` with the phase tool, if it is there, described as it was before
+/// dogma 21 ([`PHASE_TOOL_BEFORE_THE_USER`]), its schema as declared.
+#[must_use]
+pub fn with_the_phase_tool_before_the_user(
+    tools: &[crate::client::shape::ToolDefinition],
+) -> Option<Vec<crate::client::shape::ToolDefinition>> {
+    let at = tools.iter().position(|tool| tool.name == PHASE_TOOL)?;
+    let mut earlier = tools.to_vec();
+    earlier[at].description = Some(PHASE_TOOL_BEFORE_THE_USER.to_owned());
+    Some(earlier)
 }
 
 /// The phase tool with `to` and `reason` as given.
@@ -24638,6 +24671,7 @@ pub(in crate::drive) mod tests {
             self_capture: None,
             capture_contract: crate::dogma::capture::DEFAULT,
             asks: &crate::dogma::asks::V3,
+            audits: crate::dogma::audits::DEFAULT,
             capture: crate::dogma::asks::Modality::Fields,
             fork_tail: None,
             fork_slots: 0,
@@ -25958,9 +25992,10 @@ pub(in crate::drive) mod tests {
             .map(|(id, content)| format!("{id}\t{content}"))
             .collect::<Vec<_>>()
             .join("\n");
+        // t2, the default: t1 is asked only where a regimen names it.
         assert_eq!(
             question,
-            crate::dogma::audits::T1
+            crate::dogma::audits::T2
                 .fill(
                     crate::dogma::Template::AuditQHuman,
                     crate::meditation::AUDIT_CATEGORY,
@@ -26462,9 +26497,8 @@ pub(in crate::drive) mod tests {
             .expect("an audit");
         assert_eq!(asked, crate::dogma::Template::AuditQHumanReconcile);
         assert!(
-            question.ends_with(
-                "\n3. decision: for the one team that files bugs [edited by the operator]"
-            ),
+            question
+                .ends_with("\n3. decision: for the one team that files bugs [edited by the user]"),
             "{question}"
         );
         assert!(
@@ -26478,7 +26512,7 @@ pub(in crate::drive) mod tests {
         // The refill marks the changes the meditation carried.
         let refill = refill_of(session);
         let edited_line = format!(
-            "{operator}\tuser said\tdecision: for the one team that files bugs [edited by the operator]\n"
+            "{operator}\tuser said\tdecision: for the one team that files bugs [edited by the user]\n"
         );
         assert!(refill.contains(&edited_line), "{refill}");
         assert!(
@@ -27052,7 +27086,7 @@ pub(in crate::drive) mod tests {
             )]
         );
         let refill = refill_of(&session);
-        assert!(refill.contains(" [edited by the operator]\n"), "{refill}");
+        assert!(refill.contains(" [edited by the user]\n"), "{refill}");
         session.ask("go on", None).expect("accepted");
         wait_until(&session, "turn two", |log: &[Logged]| {
             turns_settled(log) == 2
@@ -27076,7 +27110,7 @@ pub(in crate::drive) mod tests {
             ]
         );
         let refill = refill_of(&session);
-        assert!(!refill.contains(" [edited by the operator]"), "{refill}");
+        assert!(!refill.contains(" [edited by the user]"), "{refill}");
         reads_whole(&session);
         // #688: the record reads back; the meditation that addressed both carries
         // them and no `unaddressed`, the one before both.

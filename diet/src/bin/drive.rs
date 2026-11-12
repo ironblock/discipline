@@ -1980,6 +1980,8 @@ fn serving_interview(
             // #609: c1 unless the regimen names another set.
             capture_contract: session::self_capture_contract(&read),
             asks,
+            // The tools-route audit set: t2 unless the regimen names t1.
+            audits: session::audit_asks(&read),
             capture,
             // #564: when a fork fires, and on what; one per gap unless declared.
             cadence: session::interview_cadence(&read),

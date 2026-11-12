@@ -121,7 +121,7 @@ pub fn render(object: &WorkingObject, phase: Option<&str>) -> String {
 pub type Marks = std::collections::BTreeMap<crate::object::EntryId, String>;
 
 /// The marker on a note the operator's edit wrote (#150).
-pub const EDITED: &str = " [edited by the operator]";
+pub const EDITED: &str = " [edited by the user]";
 
 /// The marker on a note the operator flagged with `note` (#150).
 #[must_use]
@@ -723,6 +723,21 @@ pub fn source(entry: &crate::object::Entry) -> String {
 /// [`working_set_bytes`] against what is actually emitted -- can find the
 /// section without re-deriving the header's shape.
 pub const WORKING_SET_HEADER: &str = "# working set\n";
+
+#[cfg(test)]
+mod marker_tests {
+    use super::{EDITED, flagged};
+
+    // Model-facing text says "the user", never "the operator": the
+    // maintainer's rule. The markers ride on notes the model is shown.
+    #[test]
+    fn the_markers_say_the_user() {
+        for marker in [EDITED.to_owned(), flagged("a concern")] {
+            assert!(!marker.contains("operator"), "{marker}");
+        }
+        assert_eq!(EDITED, " [edited by the user]");
+    }
+}
 
 #[cfg(test)]
 mod phase_moves_tests {

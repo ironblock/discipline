@@ -35,11 +35,25 @@ pub const T1: AuditSet = AuditSet {
     files: audit_files!("t1": "AUDIT_Q", "AUDIT_Q_CADENCE", "AUDIT_Q_HUMAN"),
 };
 
-/// Every set, in the order they were added.
-pub const SETS: &[&AuditSet] = &[&T1];
+/// t1 with its human-boundary ask saying "the user", never "the operator":
+/// the maintainer's rule for model-facing text. t1 stays as it was pinned.
+pub const T2: AuditSet = AuditSet {
+    name: "t2",
+    files: audit_files!("t2": "AUDIT_Q", "AUDIT_Q_CADENCE", "AUDIT_Q_HUMAN"),
+};
 
-/// The set a tools-route audit asks in: the only one.
-pub const DEFAULT: &AuditSet = &T1;
+/// Every set, in the order they were added.
+pub const SETS: &[&AuditSet] = &[&T1, &T2];
+
+/// The set named `name`, if there is one.
+#[must_use]
+pub fn set(name: &str) -> Option<&'static AuditSet> {
+    SETS.iter().copied().find(|set| set.name == name)
+}
+
+/// The set a tools-route audit asks in where the regimen names none: t2,
+/// which says "the user" (the maintainer's rule); t1 only where named.
+pub const DEFAULT: &AuditSet = &T2;
 
 impl AuditSet {
     /// This set's text for the audit `template`, if it has one.
@@ -87,7 +101,7 @@ impl AuditSet {
 
 #[cfg(test)]
 mod tests {
-    use super::{SETS, T1};
+    use super::{SETS, T1, T2};
     use crate::dogma::{MANIFEST, Template};
     use std::collections::BTreeSet;
     use std::path::Path;
@@ -145,17 +159,25 @@ mod tests {
         assert_eq!(on_disk, embedded);
     }
 
-    /// t1 has a text for each pinned audit template, each opening as the
-    /// fields route's own does, listing the notes, and naming the tools in
-    /// place of the line grammar.
+    /// t1 is as it was pinned: a set is never edited, so a run under it
+    /// still reproduces. Its human-boundary ask still says "the operator",
+    /// which t2 does not.
     #[test]
-    fn t1_opens_as_the_fields_asks_and_names_the_record_tools() {
+    fn t1_is_pinned_as_it_was() {
+        assert_eq!(T1.digest(), "1ee725e5b3d75912");
+    }
+
+    /// t2 has a text for each pinned audit template, each opening as the
+    /// fields route's own does today, listing the notes, and naming the tools
+    /// in place of the line grammar.
+    #[test]
+    fn t2_opens_as_the_fields_asks_and_names_the_record_tools() {
         for template in [
             Template::AuditQ,
             Template::AuditQCadence,
             Template::AuditQHuman,
         ] {
-            let text = T1.text(template).expect("a text");
+            let text = T2.text(template).expect("a text");
             let opening = template
                 .text()
                 .split_once(" For each note")
@@ -169,7 +191,7 @@ mod tests {
             assert!(!text.contains("KEEP"));
         }
         assert_eq!(
-            T1.fill(Template::AuditQ, "all", "a\tdecision: one"),
+            T2.fill(Template::AuditQ, "all", "a\tdecision: one"),
             Some(
                 "We're at a phase boundary, so I want to audit our working notes (all).\n\n\
                  a\tdecision: one\n\n\

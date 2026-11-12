@@ -38,9 +38,9 @@
 {"reply":{"when":"Ready to build","text":"Proposing the build phase.","calls":[{"id":"call-p2","name":"propose_phase_transition","arguments":"{\"to\": \"build\", \"reason\": \"the plan has its steps\"}"}],"delay_ms":400}}
 {"reply":{"when":"Build now","text":"Proposing the build phase again.","calls":[{"id":"call-p3","name":"propose_phase_transition","arguments":"{\"to\": \"build\", \"reason\": \"the steps are written down\"}"}],"delay_ms":400}}
 {"reply":{"when":"Build the list","text":"Building the list.","delay_ms":400}}
-{"reply":{"when":"The operator proposes moving from phase build to phase test","text":"Agreed.","calls":[{"id":"call-a1","name":"propose_phase_transition","arguments":"{\"to\": \"test\", \"reason\": \"the list is built\", \"accept\": true}"}],"delay_ms":400}}
+{"reply":{"when":"The user proposes moving from phase build to phase test","text":"Agreed.","calls":[{"id":"call-a1","name":"propose_phase_transition","arguments":"{\"to\": \"test\", \"reason\": \"the list is built\", \"accept\": true}"}],"delay_ms":400}}
 {"reply":{"when":"accepted","text":"Moving to test.","delay_ms":300}}
-{"reply":{"when":"The operator proposes moving from phase test to phase build","text":"Not yet.","calls":[{"id":"call-a2","name":"propose_phase_transition","arguments":"{\"to\": \"build\", \"reason\": \"the list is not tested yet\", \"accept\": false}"}],"delay_ms":400}}
+{"reply":{"when":"The user proposes moving from phase test to phase build","text":"Not yet.","calls":[{"id":"call-a2","name":"propose_phase_transition","arguments":"{\"to\": \"build\", \"reason\": \"the list is not tested yet\", \"accept\": false}"}],"delay_ms":400}}
 {"reply":{"when":"declined","text":"Staying in test until the list is tested.","delay_ms":300}}
 {"reply":{"when":"Side question","text":"Writing the side note.","calls":[{"id":"call-w2","name":"write","arguments":"{\"path\": \"side.md\", \"content\": \"side: the list could be sorted\\n\"}"}],"delay_ms":400}}
 {"reply":{"when":"Successfully created and wrote to new file: side.md","text":"Side note written.","delay_ms":300}}
@@ -152,7 +152,7 @@
 {"expect":"phase.ruled","where":{"choice":"keep","call":"call-p3","phase_document.name":"build"},"name":"kept","after":"proposed-again"}
 {"expect":"phase.noted","where":{"text~":"now in the build phase"},"after":"kept"}
 {"expect":"phase.proposed","where":{"by":"operator","to":"test","meditate":"false"},"name":"operator-test"}
-{"expect":"notice","where":{"text~":"The operator proposes moving from phase build to phase test"},"after":"operator-test"}
+{"expect":"notice","where":{"text~":"The user proposes moving from phase build to phase test"},"after":"operator-test"}
 {"expect":"phase.answered","where":{"call":"call-a1","accepted":"true"},"name":"accepted","after":"operator-test"}
 {"expect":"phase.ruled","where":{"by":"model","choice":"keep","to":"test"},"after":"accepted"}
 {"expect":"phase.proposed","where":{"by":"operator","to":"build","meditate":"false"},"name":"operator-build"}

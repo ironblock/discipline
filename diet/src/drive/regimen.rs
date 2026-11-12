@@ -1226,7 +1226,7 @@ fn meditation_audit_lever(regimen: &Regimen) -> String {
         && crate::drive::session::capture_modality(regimen)
             == Ok(crate::dogma::asks::Modality::Tools)
     {
-        let set = crate::dogma::audits::DEFAULT;
+        let set = crate::drive::session::audit_asks(regimen);
         format!("on:{}:{}", set.name, set.digest())
     } else {
         on
@@ -1489,8 +1489,13 @@ mod tests {
         };
         assert_eq!(lever(""), "off");
         assert_eq!(lever("meditation_audit = \"on\"\n"), "on");
+        // t2 by default; t1 where the regimen names it.
         assert_eq!(
             lever("meditation_audit = \"on\"\ncapture_modality = \"tools\"\n"),
+            format!("on:t2:{}", crate::dogma::audits::T2.digest())
+        );
+        assert_eq!(
+            lever("meditation_audit = \"on\"\ncapture_modality = \"tools\"\naudit_asks = \"t1\"\n"),
             format!("on:t1:{}", crate::dogma::audits::T1.digest())
         );
         assert_eq!(lever("capture_modality = \"tools\"\n"), "off");
