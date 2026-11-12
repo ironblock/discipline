@@ -3000,6 +3000,9 @@ struct State {
     /// The line naming the session's working directory, when it has tools:
     /// on the first ask, and again in every refill, which drops that note.
     start_cwd: Option<String>,
+    /// The worktree's files at the session's start (N5), by path to digest:
+    /// what a refill's line of the files the model changed counts from.
+    worktree_at_start: Option<BTreeMap<String, String>>,
     /// Who vouches for the note the latest self-capture call wrote, under a
     /// contract whose `update_record` takes no field kind (#1016): read by
     /// its result and its `patch` lines, and taken.
@@ -3171,6 +3174,7 @@ impl State {
             // As every path the model is shown: a scenario's roots rewritten
             // to their placeholders (path-free scenario outputs).
             start_cwd: tools.map(|tools| start_cwd_note(&tools.shown_roots.text(&tools.cwd))),
+            worktree_at_start: tools.and_then(|tools| super::carry::digests(&tools.worktree).ok()),
             vouched: None,
             confirmed: None,
             jobs: BTreeMap::new(),
@@ -9898,6 +9902,23 @@ fn refilled(
     // The working directory, said again, the last of the render's computed
     // lines: the first ask's note is gone with the trunk this replaces. In the
     // render, so the meditation's line logs it and a log rebuilds it.
+    // The files the model changed since the session started (N5), counted
+    // from the worktree as it stands, before the working directory: that
+    // stays the render's last line. A native refill carries Pi's own
+    // `<modified-files>` list and nothing else after it (#1012).
+    let changed = state
+        .worktree
+        .as_deref()
+        .filter(|_| native.is_none())
+        .zip(state.worktree_at_start.as_ref())
+        .and_then(|(worktree, before)| {
+            let after = super::carry::digests(worktree).ok()?;
+            crate::meditation::changed::line(before, &after)
+        });
+    let render = match changed {
+        Some(line) => format!("{render}\n\n{}", state.shown_roots.text(&line)),
+        None => render,
+    };
     let render = match state.start_cwd.as_deref() {
         Some(cwd) => format!("{render}\n\n{cwd}"),
         None => render,
@@ -32299,6 +32320,74 @@ pub(in crate::drive) mod tests {
         assert!(
             refill.contains(&render),
             "the refill carries the render: {refill}"
+        );
+        tidy(&[&tree]);
+    }
+
+    /// The files the model changed ride every refill (N5), counted from the
+    /// worktree, never from the commands it ran: a file written by a Python
+    /// heredoc, which no edit tool's path names, is on the line, and a file
+    /// only read is not.
+    #[test]
+    fn a_refill_names_the_files_the_model_changed_counted_from_the_worktree() {
+        let tree = scratch("changed-files-refill");
+        std::fs::write(tree.join("notes.md"), "port 5182 is free\n").expect("a note");
+        let written = "python3 - <<'EOF'\nfrom pathlib import Path\nPath('report.txt').write_text('done\\n')\nEOF";
+        let session = Session::open_with(
+            Canned::new(vec![
+                vec![bash("call-1", "cat notes.md")],
+                vec![bash("call-2", written)],
+                deltas(&["Wrote it."]),
+            ]),
+            looping(),
+            None,
+            Some(tools(
+                Confinement::Unconfined,
+                &tree,
+                &["cat"],
+                None,
+                Decider::Operator,
+            )),
+            None,
+            Some(interviewing(&[])),
+        );
+        session
+            .ask("look, then write the report", None)
+            .expect("accepted");
+        // A here-doc is read as dynamic: the operator lets it run.
+        assert_eq!(waiting_on(&session).id, "call-2");
+        assert_eq!(session.approve("call-2", Decision::Once), Ok(()));
+        let log = wait_until(&session, "the turn", settled);
+        assert!(
+            tree.join("report.txt").exists(),
+            "the heredoc ran and wrote its file"
+        );
+        let called = seq_of(&log, |event| matches!(event, Event::ToolCalled(_)));
+        session
+            .keep(called, "port 5182 is free", None)
+            .expect("kept");
+        session.declare_meditation(None).expect("admitted");
+        wait_until(&session, "the meditation", meditated);
+        let render = session
+            .events_from(0)
+            .iter()
+            .find_map(|logged| match &logged.event {
+                Event::Meditated { render, .. } => Some(render.clone()),
+                _ => None,
+            })
+            .expect("a meditation");
+        let line = render
+            .lines()
+            .find(|line| line.contains("report.txt"))
+            .unwrap_or_else(|| panic!("the refill names the file the heredoc wrote: {render}"));
+        assert!(
+            !line.contains("notes.md"),
+            "a file only read is not on the line: {line}"
+        );
+        let refill = session.trunk().last().expect("the refill").content.clone();
+        assert!(
+            refill.contains(line),
+            "the refill carries the line: {refill}"
         );
         tidy(&[&tree]);
     }
