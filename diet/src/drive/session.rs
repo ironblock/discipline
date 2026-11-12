@@ -9921,9 +9921,9 @@ fn refilled(
     // lists appended (#1012); nothing after it, no acknowledgement (#1009)
     // and no restored files or images (#1012).
     let render = native.map_or(rendered.text, |summary| summary.text.clone());
-    // The working directory, said again, the last of the render's computed
-    // lines: the first ask's note is gone with the trunk this replaces. In the
-    // render, so the meditation's line logs it and a log rebuilds it.
+    // The files the model changed (N5), then the working directory, said
+    // again: the first ask's note is gone with the trunk this replaces. In
+    // the render, so the meditation's line logs them and a log rebuilds them.
     let render = render_as_sent(state, render, native.is_some());
     if native.is_some() {
         render_budget = None;

@@ -4191,8 +4191,18 @@ mod tests {
             .map(|logged| logged.seq)
             .expect("an answer");
         session.keep(answered, "port is 5182", None).expect("kept");
+        // A file changed since the session opened (N5): counted from the
+        // worktree, whoever wrote it.
+        std::fs::write(tree.join("report.txt"), "done\n").expect("a report");
         let (code, preview) = get_json(&server, "/refill-preview");
         assert_eq!(code, 200, "{preview}");
+        let previewed = preview["render"].as_str().expect("a render");
+        assert!(
+            previewed.ends_with(
+                "\n\nYou changed these files since the session started: report.txt (new).\n\nYou are in ~/git/a-worktree."
+            ),
+            "the changed-files line, then the working directory: {previewed}"
+        );
         session.declare_meditation(None).expect("a meditation");
         let (render, outputs) = wait_until(&session, "the meditation", |log| {
             log.iter()
