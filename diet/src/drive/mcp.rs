@@ -717,7 +717,8 @@ fn last_tools() -> Vec<Value> {
         tool(
             "refill_preview",
             "What the next refill would carry (GET /refill-preview, #1038): the render as it \
-             is sent (working memory, then the working-directory line), the tool `outputs` and \
+             is sent (working memory, then the changed-files line and \
+             the working-directory line), the tool `outputs` and \
              user `asks` sections after it, any `background` commands still running, the whole \
              `refill` message the model is sent and its `refill_tokens`; the render's own \
              tokens, and the live entries by id -- each whole in the render, or shortened or \
