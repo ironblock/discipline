@@ -26442,9 +26442,8 @@ pub(in crate::drive) mod tests {
             .expect("an audit");
         assert_eq!(asked, crate::dogma::Template::AuditQHumanReconcile);
         assert!(
-            question.ends_with(
-                "\n3. decision: for the one team that files bugs [edited by the user]"
-            ),
+            question
+                .ends_with("\n3. decision: for the one team that files bugs [edited by the user]"),
             "{question}"
         );
         assert!(

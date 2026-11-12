@@ -890,12 +890,19 @@ fn tools_of(
 /// `tools`, then each earlier form a log may have sent them in, for a head
 /// check to try in turn: `bash` before its description (#558), the timed
 /// background line before it named `task_stop` as a tool (#1133), and the
-/// phase tool before it said "the user" (dogma 21).
+/// phase tool before it said "the user" (dogma 21), and both of the last
+/// two, as a log written before either sent them.
 fn earlier_tools(tools: &[ToolDefinition]) -> Vec<Vec<ToolDefinition>> {
+    use super::session::with_the_phase_tool_before_the_user;
+    let bash_before_task_stop = super::tool_loop::with_bash_before_the_task_stop_tool(tools);
+    let before_both = bash_before_task_stop
+        .as_deref()
+        .and_then(with_the_phase_tool_before_the_user);
     std::iter::once(tools.to_vec())
         .chain(earlier_bash(tools))
-        .chain(super::tool_loop::with_bash_before_the_task_stop_tool(tools))
-        .chain(super::session::with_the_phase_tool_before_the_user(tools))
+        .chain(bash_before_task_stop)
+        .chain(with_the_phase_tool_before_the_user(tools))
+        .chain(before_both)
         .collect()
 }
 
