@@ -2,7 +2,7 @@
   "title": "The kitchen sink: every lever, written by a scenario",
   "migration": [
     "Authored: this is an example of everything working the way we think it should, not a real session",
-    "written by diet-drive scenario diet/scenarios/kitchen-sink.jsonl (sha256 8b093cee3ce092878c36193fbac0a34fd8b5b46832b855017ae0462e1530c2eb) on the canned scenario substrate: every line is diet's own, the model's replies are the scenario's",
+    "written by diet-drive scenario diet/scenarios/kitchen-sink.jsonl (sha256 dde315910a0d51a852ccd80cfe98923c2d217bde1edd8ce13a5896f1e290861e) on the canned scenario substrate: every line is diet's own, the model's replies are the scenario's",
     "the run's temporary and home paths are written /work/..., and its background jobs bg_1, bg_2, ... (src/drive/scenario-log.ts)",
     "retimed: every t is placed on assumed rates (src/drive/retime.ts), not measured, and reads nothing of the run's clock: a tool's run is its timeout_ms when it timed out, else 150 ms",
     "stitched: each wall-clock field (a gate's latency_ms, a trunk wait's wait_ms; never compared) is carried from the example this one replaced, by lane and place (src/drive/scenario-log.ts): 193 carried, 0 this run's own",
@@ -11,12 +11,12 @@
   ],
   "carried": {},
   "timing": "retimed",
-  "scenario_sha256": "8b093cee3ce092878c36193fbac0a34fd8b5b46832b855017ae0462e1530c2eb",
+  "scenario_sha256": "dde315910a0d51a852ccd80cfe98923c2d217bde1edd8ce13a5896f1e290861e",
   "log": [
     {
       "approvals_off": true,
       "bash_timeout_ms": 120000,
-      "build_commit": "832f746eedefa2ed45bc2d2290976079cc2ee515",
+      "build_commit": "813953fbbb6af4ada6784c9a0239b663a974352f",
       "build_dirty": false,
       "compaction_persists": true,
       "fork_asks": "v4",
@@ -93,7 +93,7 @@
       },
       "model": "scenario",
       "notes_in_the_ask": true,
-      "opened": 1794456492626,
+      "opened": 1794503519114,
       "opening_phase": "plan",
       "phase_document": {
         "digest": "c3c3afe17657994b1403ed749e7352bdf4ad1eb47c688b6e60bb0e122db95e8e",
@@ -235,7 +235,7 @@
     },
     {
       "beside": 0,
-      "head_sha256": "aa704378f5b523abe0a0b0aa06ef50debebfc5d9917fcd5e35918ac14971d903",
+      "head_sha256": "71086b4d4bae9e55a9b4d20d72d1f403c7b3fff68e3f3de4cd646fd662979c1e",
       "kind": "request",
       "lane": "trunk",
       "max_tokens": 512,
@@ -398,7 +398,7 @@
     },
     {
       "fork": 17,
-      "head_sha256": "558c5fbd0d389588f2c0eb078afbad9af481d8507fb9eda956aeb0216b008002",
+      "head_sha256": "c05159a1d2c3151492aa7cb3436117de478309c551b1311b85e059bfb89f235b",
       "kind": "request",
       "lane": "interview",
       "max_tokens": 512,
@@ -409,7 +409,7 @@
     },
     {
       "beside": 1,
-      "head_sha256": "e6271a1385fe5914c5953cfa13755fdb0acbdf98b62472c2fbf12b8f5eba91cd",
+      "head_sha256": "2a1da281fc2ac63fd9dfc0cd4f1a3c6e46e77d6c82939311f9b95a4e6047bfc2",
       "kind": "request",
       "lane": "trunk",
       "max_tokens": 512,
@@ -590,7 +590,7 @@
     },
     {
       "fork": 32,
-      "head_sha256": "c3bfed67bedd8b55ede8a9b0eef0205a96567ba364e0682c29422a8ea923f3f4",
+      "head_sha256": "19dbfb17f9fd5e7fa3362517bd7cbef1feb38368e6ed324fe3391b6ffe6c9fcf",
       "kind": "request",
       "lane": "interview",
       "max_tokens": 512,
@@ -683,7 +683,7 @@
     },
     {
       "beside": 0,
-      "head_sha256": "c3bfed67bedd8b55ede8a9b0eef0205a96567ba364e0682c29422a8ea923f3f4",
+      "head_sha256": "19dbfb17f9fd5e7fa3362517bd7cbef1feb38368e6ed324fe3391b6ffe6c9fcf",
       "kind": "request",
       "lane": "trunk",
       "max_tokens": 512,
@@ -834,7 +834,7 @@
     },
     {
       "fork": 52,
-      "head_sha256": "8ebc871f81216d4573339274f5132411c5842c9db7a583e8e30f6cb39fd2929e",
+      "head_sha256": "d2fd7e566f409adae241406f43af5b0f5563332eb18c357ccabbe265a8d5c164",
       "kind": "request",
       "lane": "interview",
       "max_tokens": 512,
@@ -845,7 +845,7 @@
     },
     {
       "beside": 1,
-      "head_sha256": "bf7b51f018f09e0a1a95467295cf1910dd37d3d39e402e45e209be25f506689d",
+      "head_sha256": "ab8a9c6e896c552bc9fea2b0aaebc2c8deff5cbfa4eb2441e31020a6ad19527b",
       "kind": "request",
       "lane": "trunk",
       "max_tokens": 512,
@@ -1057,7 +1057,7 @@
     },
     {
       "fork": 69,
-      "head_sha256": "8d37c0cdcce3eb36063f7ad5a3bfb0687357346292dae7e4790f15cf019b04ba",
+      "head_sha256": "f8650fca4a754902f2dca1563af6aa596841491d3d782e80cde301ec32f167ba",
       "kind": "request",
       "lane": "interview",
       "max_tokens": 512,
@@ -1068,7 +1068,7 @@
     },
     {
       "beside": 1,
-      "head_sha256": "8db3b99f355d0daca6c838a18d1099a6cdb7a8a645ffe73b5d1c8dd1dc5e9f9b",
+      "head_sha256": "8088c547541fa832311bcb8f787d25d88c9f08fa6a1c0a045f128cd94247b75c",
       "kind": "request",
       "lane": "trunk",
       "max_tokens": 512,
@@ -1268,7 +1268,7 @@
     },
     {
       "fork": 84,
-      "head_sha256": "857dae1b4bff5f54e7034d21383def4c7bfdbef212828bf21113f3482712b501",
+      "head_sha256": "b9b733f2b2fc19b0de751c7f99a5602a37ccc829440bac028e5840abeb2b8a00",
       "kind": "request",
       "lane": "interview",
       "max_tokens": 512,
@@ -1279,7 +1279,7 @@
     },
     {
       "beside": 1,
-      "head_sha256": "4fd52c87698cce99e99e1ebc3881f78498185fe0c114dddfb962605051671f61",
+      "head_sha256": "f2e206fe869acd95b55b114078ebd9df0461a75838351a1f6e5a5e938b4d38ab",
       "kind": "request",
       "lane": "trunk",
       "max_tokens": 512,
@@ -1476,7 +1476,7 @@
     },
     {
       "beside": 0,
-      "head_sha256": "029f507f2bc47de17f70a6f841414496a552fc683d54fae018e15c2e948e00e8",
+      "head_sha256": "a2fe1dc637274316ed3bf1e3debdb61b848da9a19adb42155fae21a5298eeca3",
       "kind": "request",
       "lane": "trunk",
       "max_tokens": 512,
@@ -1642,7 +1642,7 @@
     },
     {
       "beside": 0,
-      "head_sha256": "7f611699849dc73eefaa65118280f5a232f508a63b374a3e63fee67d74574401",
+      "head_sha256": "00797a56d1f436ace272733a32070d57a32deb3948d6b2024f3704688adc5111",
       "kind": "request",
       "lane": "trunk",
       "max_tokens": 512,
@@ -1801,7 +1801,7 @@
     },
     {
       "fork": 124,
-      "head_sha256": "611a6259e6faa305b8176c016bf09dab575e3ed37261125ec6ef9360fa4598c8",
+      "head_sha256": "922ce38b4504cfc48ba489d2183fcfc7bd9dbe3c8b2b86234332e2a279fad73a",
       "kind": "request",
       "lane": "interview",
       "max_tokens": 512,
@@ -1836,8 +1836,8 @@
         ]
       },
       "placement": "message",
-      "prefix_hash_after": "1842cb236c3665175f35825f0a8bba5ba4a1d6031b66c09cc9b0a52075472320",
-      "prefix_hash_before": "029f507f2bc47de17f70a6f841414496a552fc683d54fae018e15c2e948e00e8",
+      "prefix_hash_after": "701cf1188514fac9db3e9af2db9357234bd90711784c612c2c1ce7ac7991ac2d",
+      "prefix_hash_before": "a2fe1dc637274316ed3bf1e3debdb61b848da9a19adb42155fae21a5298eeca3",
       "prompt_tokens": 16995,
       "reason": "window",
       "render": "# regime\ndogma_version: 0\nphase: orient\nframe_version: 2\n\n# working set\ninterview-t1-0\ninterview-t1-1\ninterview-t1-f32-0\ninterview-t2-0\ninterview-t2-1\ninterview-t2-f84-1\nmechanical/listed:shot.png\nmechanical/notes.md\nmechanical/shot.png\nr6/call-r1/decision\n10 older entries elided\n\n\nYou changed these files since the session started: notes.md (new), shot.png (new).\n\nYou are in /scenario/worktree.",
@@ -1920,7 +1920,7 @@
     },
     {
       "beside": 0,
-      "head_sha256": "e1dcaa19be6e0873f1e15f8911b91737d108af948887bcb4ede3b367eefde698",
+      "head_sha256": "8fc673500f85b1f93753e154d0489bf51dda6c23c22fb1ff0e9d2078d232c67a",
       "kind": "request",
       "lane": "trunk",
       "max_tokens": 512,
@@ -2088,8 +2088,8 @@
         ]
       },
       "placement": "message",
-      "prefix_hash_after": "b7485e5c21aff355e08a1786ade124af390e80b70983188a924b574e6e497ff2",
-      "prefix_hash_before": "2ffcb915f08d1d7ed37b5979b72a345eb49d83884bf6ce974c75aa134bd2809f",
+      "prefix_hash_after": "1e42c4bd9c43208caeccd12905fab1819b377ce839219c0fe8e96fda5478dbae",
+      "prefix_hash_before": "192250178c43f485bbe6a41099d47b9789c449018679c89104fbc82e0b639baf",
       "prompt_tokens": 17010,
       "reason": "window",
       "render": "# regime\ndogma_version: 0\nphase: orient\nframe_version: 2\n\n# working set\ninterview-t1-0\ninterview-t1-1\ninterview-t1-f32-0\ninterview-t2-0\ninterview-t2-1\ninterview-t2-f84-1\nmechanical/listed:shot.png\nmechanical/notes.md\nmechanical/shot.png\nr6/call-r1/decision\n10 older entries elided\n\n\nYou changed these files since the session started: notes.md (new), shot.png (new).\n\nYou are in /scenario/worktree.",
@@ -2109,7 +2109,7 @@
     },
     {
       "beside": 0,
-      "head_sha256": "b7485e5c21aff355e08a1786ade124af390e80b70983188a924b574e6e497ff2",
+      "head_sha256": "1e42c4bd9c43208caeccd12905fab1819b377ce839219c0fe8e96fda5478dbae",
       "kind": "request",
       "lane": "trunk",
       "max_tokens": 459,
@@ -2246,7 +2246,7 @@
       "to": "capture"
     },
     {
-      "head_sha256": "4c156ab94eb1e74a5c67065fee014ae37ff87f2522ccb21126382bf1692a8109",
+      "head_sha256": "184416d31197137e204a75dffeb33a2ff7c002b9e5ba2d26559b00f269125704",
       "kind": "request",
       "lane": "warm",
       "max_tokens": 1,
@@ -2302,8 +2302,8 @@
         ]
       },
       "placement": "message",
-      "prefix_hash_after": "e49ee2c21a7c86b78745e7fa50f9a56793c3a277f9eb0fc4f693159072cb814a",
-      "prefix_hash_before": "1696216dadc02a73823fca9ca8672b488451167afd8e3aa4ca291a154a60772a",
+      "prefix_hash_after": "58ebe68be530603ef937f2711f9b148842de079633e8d0da2a008fff0dbad60e",
+      "prefix_hash_before": "611aa6b7e8dd0136ca220f382c8db3b7cd4ca305ee0373909060296e015278e3",
       "reason": "budget",
       "render": "# regime\ndogma_version: 0\nphase: orient\nframe_version: 2\n\n# working set\ninterview-t1-0\tyou said, when asked\tlearned: notes.md reads back exactly as it was written\ninterview-t1-1\tyou said, when asked\tplan: write it, then read it back\ninterview-t1-f32-0\tyou said, when asked\tdecision: notes.md holds one line per decision\ninterview-t2-0\tyou said, when asked\tlearned: notes.md now holds the first decision\ninterview-t2-1\tyou said, when asked\tevidence: the write of notes.md\ninterview-t2-f84-1\tyou said, when asked\tevidence: decision: one line per decision\nmechanical/listed:shot.png\tfiles: listed shot.png\nmechanical/notes.md\tfiles: notes.md\nmechanical/shot.png\tfiles: shot.png\nr6/call-r1/decision\tyou noted\tnotes.md holds one line per decision\n\n\nYou changed these files since the session started: notes.md (new), shot.png (new).\n\nYou are in /scenario/worktree.",
       "render_budget_tokens": 120,
@@ -2353,7 +2353,7 @@
     },
     {
       "beside": 0,
-      "head_sha256": "e49ee2c21a7c86b78745e7fa50f9a56793c3a277f9eb0fc4f693159072cb814a",
+      "head_sha256": "58ebe68be530603ef937f2711f9b148842de079633e8d0da2a008fff0dbad60e",
       "kind": "request",
       "lane": "trunk",
       "max_tokens": 512,
@@ -2476,7 +2476,7 @@
     },
     {
       "beside": 0,
-      "head_sha256": "28f7497c86d6109c5516e4edf527d271050c47f08e63016eae1456cc1de38fc9",
+      "head_sha256": "15ad8ed60d836ce03e815baf7c20537027ee04ec34ca32d322750838fa0d0496",
       "kind": "request",
       "lane": "trunk",
       "max_tokens": 512,
@@ -2599,7 +2599,7 @@
     },
     {
       "beside": 0,
-      "head_sha256": "f71d042397e360e294df7220351a82b142422ff8cb9b72085037089e5535487c",
+      "head_sha256": "7ecd1d15a48a22872fc179990b533065657030a2eb6b751bdd791b4bbbce7c36",
       "kind": "request",
       "lane": "trunk",
       "max_tokens": 512,
@@ -2756,7 +2756,7 @@
     },
     {
       "fork": 194,
-      "head_sha256": "8f000c29c3961b198727fde989f365892db40e4386988c1dc0186c0e767428b3",
+      "head_sha256": "63a4bb650dac4ce912b2d4a6ad9dc74b6f6bbdd581d304cb2a3f3af0d2a48696",
       "kind": "request",
       "lane": "interview",
       "max_tokens": 512,
@@ -2815,7 +2815,7 @@
     },
     {
       "beside": 0,
-      "head_sha256": "e229015b3fdfa5634f537a6852d7647b33bf3c9f8e19ad06a2284bcda7aee4a5",
+      "head_sha256": "5613cebf261f6b20a36ca65b7e54c959b8d8a6cd8ad161ce955651db9bcc2fab",
       "kind": "request",
       "lane": "trunk",
       "max_tokens": 512,
@@ -2976,7 +2976,7 @@
     },
     {
       "fork": 209,
-      "head_sha256": "090e8b44efa04adbe58ed5f0f8c5456c7b2c34a044ca0cbe6a5f417dc192170f",
+      "head_sha256": "eb770c44d86f3d502b6610fa9213e6012523165b11557e80f034a412f8fba315",
       "kind": "request",
       "lane": "interview",
       "max_tokens": 512,
@@ -2987,7 +2987,7 @@
     },
     {
       "beside": 1,
-      "head_sha256": "79e571b565369ebf87499dfa73871873c469cd2a374b14b1f618cc7cb4313a8e",
+      "head_sha256": "c0a3c36d84f1c22bbb9b36020a4a63fadd2ba7b9e7e04feaf2dfe10f12fa953b",
       "kind": "request",
       "lane": "trunk",
       "max_tokens": 512,
@@ -3064,7 +3064,7 @@
     },
     {
       "fork": 215,
-      "head_sha256": "090e8b44efa04adbe58ed5f0f8c5456c7b2c34a044ca0cbe6a5f417dc192170f",
+      "head_sha256": "eb770c44d86f3d502b6610fa9213e6012523165b11557e80f034a412f8fba315",
       "kind": "request",
       "lane": "interview",
       "max_tokens": 512,
@@ -3135,7 +3135,7 @@
     },
     {
       "fork": 221,
-      "head_sha256": "090e8b44efa04adbe58ed5f0f8c5456c7b2c34a044ca0cbe6a5f417dc192170f",
+      "head_sha256": "eb770c44d86f3d502b6610fa9213e6012523165b11557e80f034a412f8fba315",
       "kind": "request",
       "lane": "interview",
       "max_tokens": 512,
@@ -3201,7 +3201,7 @@
     },
     {
       "fork": 226,
-      "head_sha256": "090e8b44efa04adbe58ed5f0f8c5456c7b2c34a044ca0cbe6a5f417dc192170f",
+      "head_sha256": "eb770c44d86f3d502b6610fa9213e6012523165b11557e80f034a412f8fba315",
       "kind": "request",
       "lane": "interview",
       "max_tokens": 512,
@@ -3376,7 +3376,7 @@
     },
     {
       "fork": 239,
-      "head_sha256": "9e06cbb6cad954b3ca980af843afa8f2904ba757c22a07bc07953e39c2230f67",
+      "head_sha256": "de5b41f1bf3514fbb1417ba97744d8e64430e08808186e8ee151edfd35f1e568",
       "kind": "request",
       "lane": "interview",
       "max_tokens": 512,
@@ -3456,7 +3456,7 @@
     },
     {
       "beside": 0,
-      "head_sha256": "b87f1ec86e3a68a6912ee252b72b8b30472a88d9a670cf7a576b0dcc7a9cb1f5",
+      "head_sha256": "978aab5008356fe01ab5b96f47ec6c024d5f6ce6efe9aae8eeeef107ddf06524",
       "kind": "request",
       "lane": "trunk",
       "max_tokens": 512,
@@ -3600,7 +3600,7 @@
     },
     {
       "beside": 0,
-      "head_sha256": "61c3c52bd45669ab2865517ac4c270b4336ae6892e1be51974ed101350852e64",
+      "head_sha256": "cec25598643f20fa431f5fa4f9b7fe938b912060fe2c0e26f6e034beb509abcb",
       "kind": "request",
       "lane": "trunk",
       "max_tokens": 512,
@@ -3744,7 +3744,7 @@
     },
     {
       "beside": 0,
-      "head_sha256": "13bce7bdae130fff840ce17ca853cba8eb1a19fc9a38b1707b9c23db4a4b661f",
+      "head_sha256": "6d757f10364dad4932784ba7efdd498a625c4feaa76543af5da41107a87ea74f",
       "kind": "request",
       "lane": "trunk",
       "max_tokens": 512,
@@ -3884,7 +3884,7 @@
     },
     {
       "fork": 275,
-      "head_sha256": "f35081a5a0ce93d0056ebfaa7bf40ae89f2d5d74f80eb6fa7fe9acc3ef333145",
+      "head_sha256": "c130425d481b750bae42829ee6da88d6761551e8c27815b485dd728fbb4654c3",
       "kind": "request",
       "lane": "interview",
       "max_tokens": 512,
@@ -3895,7 +3895,7 @@
     },
     {
       "beside": 1,
-      "head_sha256": "97eb4a01b5a75d5840387165b1580898a3fb92ea53ec4472902a9033589fccd6",
+      "head_sha256": "5c2a6bbbbbfa273a6d14f01805c4adae67219b8799d9718d803ca15be70c741c",
       "kind": "request",
       "lane": "trunk",
       "max_tokens": 512,
@@ -4123,7 +4123,7 @@
     },
     {
       "beside": 0,
-      "head_sha256": "7c9dc6bd1122c244351f552aa90f84d164e55d3990d1ce78d5d9af9fdf3c9772",
+      "head_sha256": "ee5fc3405ff095604328417a01c37484b9014795e9c05892b1e3ffa7c9ac508b",
       "kind": "request",
       "lane": "trunk",
       "max_tokens": 512,
@@ -4295,7 +4295,7 @@
     },
     {
       "fork": 306,
-      "head_sha256": "e6ff2be67bba9800a4bb25b3930c2c0ce6e048e8592606785801a2688663999d",
+      "head_sha256": "887c3a97f8d15e7c9ddb4b46cf1ea7643d7e50f27543c10ca678151204e49c07",
       "kind": "request",
       "lane": "interview",
       "max_tokens": 512,
@@ -4332,8 +4332,8 @@
         ]
       },
       "placement": "message",
-      "prefix_hash_after": "78a6b4d408c5bcb157555be479f075da805898c6478bc9debb8c363710c1beb6",
-      "prefix_hash_before": "7c9dc6bd1122c244351f552aa90f84d164e55d3990d1ce78d5d9af9fdf3c9772",
+      "prefix_hash_after": "cc9a4e90d6b3de4a01617d8ffce3c5678335d1eeb0554e0055b32372f5b08ad4",
+      "prefix_hash_before": "ee5fc3405ff095604328417a01c37484b9014795e9c05892b1e3ffa7c9ac508b",
       "prompt_tokens": 5617,
       "reason": "window",
       "render": "# regime\ndogma_version: 0\nphase: orient\nframe_version: 2\n\n# working set\ninterview-t1-0\ninterview-t1-1\ninterview-t1-f32-0\ninterview-t2-0\ninterview-t2-1\ninterview-t2-f84-1\ninterview-t6-0\nmechanical/listed:shot.png\nmechanical/notes.md\nmechanical/shot.png\nr6/call-r1/decision\n11 older entries elided\n\n\nYou changed these files since the session started: notes.md (new), shot.png (new).\n\nYou are in /scenario/worktree.",
@@ -4362,7 +4362,7 @@
     },
     {
       "beside": 1,
-      "head_sha256": "559eb7df8dc38b1bfb4cf844b03bd1993c46fbe975300b94d9ed957b11a69cb2",
+      "head_sha256": "a45e719f14d072e1337baffa6a528dbbb00d1c0f931fa1d275be7315aafa9596",
       "kind": "request",
       "lane": "trunk",
       "max_tokens": 512,
@@ -4585,7 +4585,7 @@
     },
     {
       "fork": 324,
-      "head_sha256": "d138c234fb71db0c58b6ee709e63a46c54e2df105fd07875b1e986e05e6bc7bb",
+      "head_sha256": "a850fbd0c7beebb253e4af09991b48f5a8239fe3786267602df22540c47f4c9f",
       "kind": "request",
       "lane": "interview",
       "max_tokens": 512,
@@ -4596,7 +4596,7 @@
     },
     {
       "beside": 1,
-      "head_sha256": "cd42daafb8e903e807e30d7aed6f4c571b66c9ced6eaa32997589e244d50a4d2",
+      "head_sha256": "7f2f12b168fc2fa8e5374ea07cca1876c06ffb2c7816490671f6abfaeabe02c2",
       "kind": "request",
       "lane": "trunk",
       "max_tokens": 512,
@@ -4804,7 +4804,7 @@
     },
     {
       "beside": 0,
-      "head_sha256": "8b2c31f3193055aabd0846c5a1c8119702613fff5fa6c3d76057a462ede37d13",
+      "head_sha256": "64dae6ad944238a2ebb3c0bca47329e1d33914b7e9d02efd11465d2fd1dc3455",
       "kind": "request",
       "lane": "trunk",
       "max_tokens": 512,
@@ -4938,7 +4938,7 @@
     },
     {
       "beside": 0,
-      "head_sha256": "3c4f8b5ea669d07ff26d9aa6ae1531eedd4294d56bc792728e0ba1d3ef1aefe5",
+      "head_sha256": "ab998c763bb74b499883440a698d8496b5c9dbc29b84d4dc8ed5d74a61d09d35",
       "kind": "request",
       "lane": "trunk",
       "max_tokens": 512,
@@ -5090,7 +5090,7 @@
     },
     {
       "beside": 0,
-      "head_sha256": "176e9b03575eedfb525a5f6c1869edafeab8e0275d04553b6ddcfbbd50c17525",
+      "head_sha256": "b36db4d145f00791574bb86c99d2a202ed10789ec51080e2d970ef6eb8b1eac1",
       "kind": "request",
       "lane": "trunk",
       "max_tokens": 512,
@@ -5227,7 +5227,7 @@
     },
     {
       "fork": 373,
-      "head_sha256": "28b50e4cb113097f677ccfb4fe3d931458b8a072917697b66b47d128691064c2",
+      "head_sha256": "6fd444e96eb61859f9e93e90347c6648687bf350b1648a549800ef8f5fc779a1",
       "kind": "request",
       "lane": "interview",
       "max_tokens": 512,
@@ -5345,7 +5345,7 @@
     },
     {
       "beside": 0,
-      "head_sha256": "99505c2d6e7790a3752fcc7863da2636ca43bc431ed71e58e299707ce6bfd2c6",
+      "head_sha256": "8bf0131bf4b913896584710b77a2e9ba393cf9ceeaeeda16cbfb6dbcceac337f",
       "kind": "request",
       "lane": "trunk",
       "max_tokens": 512,
@@ -5489,7 +5489,7 @@
     },
     {
       "beside": 0,
-      "head_sha256": "078baf80b4cbfdbc777488d1b22470c2784e03b603a2969448f57f1699ccdd7e",
+      "head_sha256": "d927bf8ca89e9dda86f78f810a2956e08041c87d8400aa6c93c1db59037f4b42",
       "kind": "request",
       "lane": "trunk",
       "max_tokens": 512,
@@ -5633,7 +5633,7 @@
     },
     {
       "beside": 0,
-      "head_sha256": "f3acef43896da5eb8ebabe60a80a77009627a991d506b70008bc9ba0ddc4eaf7",
+      "head_sha256": "ce925e608a65c4de43957d9574eff80548624b6ae067e05dfa1d595d6322e813",
       "kind": "request",
       "lane": "trunk",
       "max_tokens": 512,
@@ -5777,7 +5777,7 @@
     },
     {
       "beside": 0,
-      "head_sha256": "0552992574ea28dbf2a1494dd3eaf162b74b47e4d3cc7d30dfcb222c023d73fb",
+      "head_sha256": "e0e57e16d36c3a329b19464a765a7c0c3e82eef566c06c41c5a54a7687fb4f29",
       "kind": "request",
       "lane": "trunk",
       "max_tokens": 512,
@@ -5934,7 +5934,7 @@
     },
     {
       "beside": 0,
-      "head_sha256": "d512cfa4b3c2551f19c50678c3fbe554ea1d436ea5cdf8f8b44f1faaf73c16cb",
+      "head_sha256": "4c26024aafe6258641425649c5f102ace03da3bcdba52cce4c5c36a345232332",
       "kind": "request",
       "lane": "trunk",
       "max_tokens": 512,
@@ -6089,7 +6089,7 @@
     },
     {
       "beside": 0,
-      "head_sha256": "38d01e1fa57ba835a204bdbacfab2b80bd5595a7d2812faf58dc4fc9d0a78730",
+      "head_sha256": "338f4814956c3178df2a88007ced4ea77e7842d8789512f45dceba7ade055fd8",
       "kind": "request",
       "lane": "trunk",
       "max_tokens": 512,
@@ -6245,7 +6245,7 @@
     },
     {
       "fork": 447,
-      "head_sha256": "38d01e1fa57ba835a204bdbacfab2b80bd5595a7d2812faf58dc4fc9d0a78730",
+      "head_sha256": "338f4814956c3178df2a88007ced4ea77e7842d8789512f45dceba7ade055fd8",
       "kind": "request",
       "lane": "interview",
       "max_tokens": 512,
@@ -6317,7 +6317,7 @@
     },
     {
       "beside": 0,
-      "head_sha256": "6a141c3cdcd9f8f644d4f37de5ba5b79615acf0e76b3c050391f488ad99467e1",
+      "head_sha256": "73081e75c3753317e3508ffa432b22a9e9de6d0d0ce379cc3254aadb9988ff70",
       "kind": "request",
       "lane": "trunk",
       "max_tokens": 512,
@@ -6480,7 +6480,7 @@
     },
     {
       "fork": 467,
-      "head_sha256": "d2f6524b0f385ca80c7085ac2b778bc6a0eb11b90ca58c5e4ce3de293300bae1",
+      "head_sha256": "64a050d88f556707d4b95ba3f5c3a96f380d74375c8f8f22621bfb457f642a7b",
       "kind": "request",
       "lane": "interview",
       "max_tokens": 512,
@@ -6491,7 +6491,7 @@
     },
     {
       "beside": 1,
-      "head_sha256": "86127d655d30f827363cc4a00aefea34923747fb4762be88dca49a64fc5bd5c8",
+      "head_sha256": "e295a92974f16a09680f2632b20881dbc3e7587840f4e00d18e584efbec899de",
       "kind": "request",
       "lane": "trunk",
       "max_tokens": 512,
@@ -6707,7 +6707,7 @@
     },
     {
       "beside": 0,
-      "head_sha256": "8d45ca10ee1db11a4a13979164148f15eb9cb2db3fcc875ad98902bcc0aea9f4",
+      "head_sha256": "f23ba6eeb33d754abda5662f2daa864d99e39cf1d9a46cf8f653b7342a682ce2",
       "kind": "request",
       "lane": "trunk",
       "max_tokens": 512,
@@ -6834,7 +6834,7 @@
     },
     {
       "fork": 495,
-      "head_sha256": "2ee39aa90b0d2e201e87c61a16dcf03616e5a638d63f91d488ea6e45116c2780",
+      "head_sha256": "9e554bd2fe4afbfe0573b9df82b26ef614d4716bd396c2d561f60503de59dcc3",
       "kind": "request",
       "lane": "interview",
       "max_tokens": 512,
@@ -6927,7 +6927,7 @@
     },
     {
       "fork": 503,
-      "head_sha256": "61db2cfe62d03329cf39822a1705decdc5506249063b2f031f73c03c952a8631",
+      "head_sha256": "998b278a0b3dc2e85918e5a0c2d78a65b956919b5d7ebef603cb1a0ea8a3d7b5",
       "kind": "request",
       "lane": "audit",
       "max_tokens": 512,
@@ -6950,7 +6950,7 @@
     },
     {
       "fork": 505,
-      "head_sha256": "61db2cfe62d03329cf39822a1705decdc5506249063b2f031f73c03c952a8631",
+      "head_sha256": "998b278a0b3dc2e85918e5a0c2d78a65b956919b5d7ebef603cb1a0ea8a3d7b5",
       "kind": "request",
       "lane": "audit",
       "max_tokens": 512,
@@ -7024,7 +7024,7 @@
       "t": 110407
     },
     {
-      "head_sha256": "c81ba38c3419c122e34ef866593a0e799d3c566766fcff6d468be405cb032a18",
+      "head_sha256": "196431c192a466a50fd7ca76b03952f26a73934de1b2d7d7e61abaf281a31f5f",
       "kind": "request",
       "lane": "warm",
       "max_tokens": 1,
@@ -7082,8 +7082,8 @@
         ]
       },
       "placement": "message",
-      "prefix_hash_after": "593b955a4aac30163f8a52daade880216827912576c5b6ba828aed789fbbaa35",
-      "prefix_hash_before": "61db2cfe62d03329cf39822a1705decdc5506249063b2f031f73c03c952a8631",
+      "prefix_hash_after": "d5dcbe798f1d5a7cc43f8dd54976173b8f55d89ade42e00455f8187f8158fcd8",
+      "prefix_hash_before": "998b278a0b3dc2e85918e5a0c2d78a65b956919b5d7ebef603cb1a0ea8a3d7b5",
       "reason": "cadence",
       "render": "# regime\ndogma_version: 0\nphase: orient\nframe_version: 2\n\n# working set\ninterview-t1-1\tyou said, when asked\tplan: write it, then read it back\ninterview-t1-f32-0\tyou said, when asked\tdecision: notes.md holds one line per decision\ninterview-t14-2\tyou said, when asked\tdecision: notes.md holds the decisions as a Markdown list\ninterview-t2-0\tyou said, when asked\tlearned: notes.md now holds the first decision\ninterview-t2-1\tyou said, when asked\tevidence: the write of notes.md\ninterview-t2-f84-1\tyou said, when asked\tevidence: decision: one line per decision\ninterview-t6-0\tyou said, when asked\tgotcha: missing.txt does not exist — IMPLICATION: create it before showing it\ninterview-t8-0\tyou said, when asked\tevidence: xxxxxxxxxx\ninterview-t8-1\tyou said, when asked\tpointer: the long line is 9000 x's (the output of call-b2)\nmechanical/listed:shot.png\tfiles: listed shot.png\nmechanical/notes.md\tfiles: notes.md\nmechanical/shot.png\tfiles: shot.png\nr374/refute-1.1\tyou said, when asked\tfact: the build takes longer than the step's timeout\nr374/refute-1.1-claim\tyou said, when asked\twas: fact: the build finishes in a few seconds (held at 7/10), wrong because the command timed out after 16000ms [call call-b7]\n\n\nYou changed these files since the session started: notes.md (new), shot.png (new).\n\nYou are in /scenario/worktree.",
       "render_budget_tokens": 120,
@@ -7134,7 +7134,7 @@
     },
     {
       "beside": 0,
-      "head_sha256": "593b955a4aac30163f8a52daade880216827912576c5b6ba828aed789fbbaa35",
+      "head_sha256": "d5dcbe798f1d5a7cc43f8dd54976173b8f55d89ade42e00455f8187f8158fcd8",
       "kind": "request",
       "lane": "trunk",
       "max_tokens": 512,
@@ -7187,7 +7187,7 @@
       "outcome": "ran",
       "request": 520,
       "seq": 524,
-      "shown": "proposed: the move to plan waits for the operator's ruling. Your turn ends here; say nothing more.",
+      "shown": "proposed: the move to plan waits for the user's ruling. Your turn ends here; say nothing more.",
       "t": 115670,
       "turn": 15
     },
@@ -7264,7 +7264,7 @@
       "of_turn": 15,
       "prefix_shared": false,
       "question": "Answer from this turn alone.\nWhat did this turn establish that a later turn would need? Answer with the fields LEARNED, EVIDENCE and STUCK, one per line, and write NONE for a field with nothing to record.\n",
-      "reserved": 702,
+      "reserved": 701,
       "seq": 529,
       "t": 115695,
       "timing": "during_turn",
@@ -7274,12 +7274,12 @@
     },
     {
       "fork": 529,
-      "head_sha256": "abda61a291081c5abdcb1c582e6a40e864de11c04c0e194df714d9d4dc67f6a6",
+      "head_sha256": "eb8f6c202a0937b2fa84cbde85cc3fc1550d198c7d7fc7b3ffcae2118e28079a",
       "kind": "request",
       "lane": "interview",
       "max_tokens": 512,
       "seq": 530,
-      "sized_tokens": 1442,
+      "sized_tokens": 1441,
       "t": 115755,
       "turn": 15
     },
@@ -7412,12 +7412,12 @@
     },
     {
       "fork": 540,
-      "head_sha256": "abda61a291081c5abdcb1c582e6a40e864de11c04c0e194df714d9d4dc67f6a6",
+      "head_sha256": "eb8f6c202a0937b2fa84cbde85cc3fc1550d198c7d7fc7b3ffcae2118e28079a",
       "kind": "request",
       "lane": "audit",
       "max_tokens": 512,
       "seq": 541,
-      "sized_tokens": 1581,
+      "sized_tokens": 1580,
       "t": 116265,
       "turn": 15
     },
@@ -7435,12 +7435,12 @@
     },
     {
       "fork": 542,
-      "head_sha256": "abda61a291081c5abdcb1c582e6a40e864de11c04c0e194df714d9d4dc67f6a6",
+      "head_sha256": "eb8f6c202a0937b2fa84cbde85cc3fc1550d198c7d7fc7b3ffcae2118e28079a",
       "kind": "request",
       "lane": "audit",
       "max_tokens": 512,
       "seq": 543,
-      "sized_tokens": 1540,
+      "sized_tokens": 1539,
       "t": 116330,
       "turn": 15
     },
@@ -7509,12 +7509,12 @@
       "t": 116860
     },
     {
-      "head_sha256": "13fd87d3598461ca5a933785da0c9a2ae829959364bdba5186b2c8a9fcc4be2e",
+      "head_sha256": "a069c0c248bdf02f5d9b45c0a4ea40ce90bab9781592f5baa5f684e6ff790e9f",
       "kind": "request",
       "lane": "warm",
       "max_tokens": 1,
       "seq": 550,
-      "sized_tokens": 1429,
+      "sized_tokens": 1428,
       "t": 116920,
       "turn": 15
     },
@@ -7548,7 +7548,7 @@
       "carried_entries": 13,
       "carried_output_bytes": 1106,
       "carried_outputs": 4,
-      "carried_tokens": 379,
+      "carried_tokens": 378,
       "carried_turns": 4,
       "carry": "render",
       "frame": "2",
@@ -7575,8 +7575,8 @@
         ]
       },
       "placement": "message",
-      "prefix_hash_after": "0bfc62abf3f68877521bfa91d49fb7ec0af6e663ebcb8ad6c7b5b6a740c6d139",
-      "prefix_hash_before": "abda61a291081c5abdcb1c582e6a40e864de11c04c0e194df714d9d4dc67f6a6",
+      "prefix_hash_after": "eaac39de6797719b57c33322248dbf8682efd984980e6e65a47aac99000ac427",
+      "prefix_hash_before": "eb8f6c202a0937b2fa84cbde85cc3fc1550d198c7d7fc7b3ffcae2118e28079a",
       "reason": "phase",
       "render": "# regime\ndogma_version: 0\nphase: plan\nframe_version: 2\n\n# working set\ninterview-t1-1\tyou said, when asked\tplan: write it, then read it back\ninterview-t1-f32-0\tyou said, when asked\tdecision: notes.md holds one line per decision\ninterview-t14-2\tyou said, when asked\tdecision: notes.md holds the decisions as a Markdown list\ninterview-t2-0\tyou said, when asked\tlearned: notes.md now holds the first decision\ninterview-t2-1\tyou said, when asked\tevidence: the write of notes.md\ninterview-t2-f84-1\tyou said, when asked\tevidence: decision: one line per decision\ninterview-t6-0\tyou said, when asked\tgotcha: missing.txt does not exist — IMPLICATION: create it before showing it\ninterview-t8-0\tyou said, when asked\tevidence: xxxxxxxxxx\ninterview-t8-1\tyou said, when asked\tpointer: the long line is 9000 x's (the output of call-b2)\nmechanical/listed:shot.png\tfiles: listed shot.png\nmechanical/notes.md\tfiles: notes.md\nmechanical/shot.png\tfiles: shot.png\nr374/refute-1.1\tyou said, when asked\tfact: the build takes longer than the step's timeout\nr374/refute-1.1-claim\tyou said, when asked\twas: fact: the build finishes in a few seconds (held at 7/10), wrong because the command timed out after 16000ms [call call-b7]\n\n\nYou changed these files since the session started: notes.md (new), shot.png (new).\n\nYou are in /scenario/worktree.",
       "render_budget_tokens": 120,
@@ -7588,7 +7588,7 @@
       "t": 117303,
       "tail_tokens": 400,
       "tool_outputs": "reference",
-      "trunk_sha256": "5557778e6459ef584d1fc5072e9f2ec5861dc8695f229ed1734b2750c025efbe",
+      "trunk_sha256": "1a370ae475c57e99a677f92f020427c675f11ed5be87fc60e12e63124eda6ea3",
       "warm": {
         "cache_n": 0,
         "predicted_n": 7,
@@ -7632,12 +7632,12 @@
     },
     {
       "beside": 0,
-      "head_sha256": "0bfc62abf3f68877521bfa91d49fb7ec0af6e663ebcb8ad6c7b5b6a740c6d139",
+      "head_sha256": "eaac39de6797719b57c33322248dbf8682efd984980e6e65a47aac99000ac427",
       "kind": "request",
       "lane": "trunk",
       "max_tokens": 512,
       "seq": 558,
-      "sized_tokens": 1442,
+      "sized_tokens": 1441,
       "t": 123013,
       "turn": 16
     },
@@ -7784,23 +7784,23 @@
     },
     {
       "fork": 568,
-      "head_sha256": "07092403846be74c133474d1e80e9ad5a881869dac85d7e60479d81ccc235539",
+      "head_sha256": "03907b3e71609e49eda497ee961ac5d4f94ac402cc61e9618bc0eb83fbb7269a",
       "kind": "request",
       "lane": "interview",
       "max_tokens": 512,
       "seq": 569,
-      "sized_tokens": 1540,
+      "sized_tokens": 1539,
       "t": 124270,
       "turn": 16
     },
     {
       "beside": 1,
-      "head_sha256": "937d80081c246c892739976c7a30b717d94df16151933ff6a4d5123667600261",
+      "head_sha256": "d87467d875d8234edd472af051874911b9d024f016b4b35ee342acdb0ee2ead8",
       "kind": "request",
       "lane": "trunk",
       "max_tokens": 512,
       "seq": 570,
-      "sized_tokens": 1479,
+      "sized_tokens": 1478,
       "t": 124330,
       "turn": 16
     },
@@ -7999,12 +7999,12 @@
     },
     {
       "beside": 0,
-      "head_sha256": "0bfc62abf3f68877521bfa91d49fb7ec0af6e663ebcb8ad6c7b5b6a740c6d139",
+      "head_sha256": "eaac39de6797719b57c33322248dbf8682efd984980e6e65a47aac99000ac427",
       "kind": "request",
       "lane": "trunk",
       "max_tokens": 512,
       "seq": 587,
-      "sized_tokens": 1441,
+      "sized_tokens": 1440,
       "t": 128979,
       "turn": 17
     },
@@ -8171,23 +8171,23 @@
     },
     {
       "fork": 597,
-      "head_sha256": "3bb8d8dee6d9b359e8b047dbb5662ea557048b6ae7f642de3c9149bc37a0d153",
+      "head_sha256": "16295e01c20c6c72fd51ff4361b0bd3f1df734468663c25982cd809715343a44",
       "kind": "request",
       "lane": "interview",
       "max_tokens": 512,
       "seq": 598,
-      "sized_tokens": 1533,
+      "sized_tokens": 1532,
       "t": 130041,
       "turn": 17
     },
     {
       "beside": 1,
-      "head_sha256": "5147e12c3d5549da6de2619442eeb30e913bf769ea1fd91d4e3e8c944d040b4a",
+      "head_sha256": "c48476e9ae5edeb70ef8e9ffde543f133fb847785c0dd1bdf78470d1a880e6fc",
       "kind": "request",
       "lane": "trunk",
       "max_tokens": 512,
       "seq": 599,
-      "sized_tokens": 1466,
+      "sized_tokens": 1465,
       "t": 130101,
       "turn": 17
     },
@@ -8374,12 +8374,12 @@
     },
     {
       "fork": 614,
-      "head_sha256": "3bb8d8dee6d9b359e8b047dbb5662ea557048b6ae7f642de3c9149bc37a0d153",
+      "head_sha256": "16295e01c20c6c72fd51ff4361b0bd3f1df734468663c25982cd809715343a44",
       "kind": "request",
       "lane": "interview",
       "max_tokens": 512,
       "seq": 615,
-      "sized_tokens": 1473,
+      "sized_tokens": 1472,
       "t": 130718,
       "turn": 17
     },
@@ -8464,8 +8464,8 @@
       "entry": "operator-620",
       "from": 617,
       "kind": "wrapped",
-      "prefix_after": "d9756ab84247dd354d0f6e3e8b26ca56db9d0e1d3e43268be516a29a2b13875d",
-      "prefix_before": "75f2187528bb7d41fb61b848748a61af6b14664fc0a783351fa2f02d4b70827a",
+      "prefix_after": "677294732c7ee7451a11502d27def72d4c81bba48c3150ecf24a130cc3f1a22a",
+      "prefix_before": "bf0396c3ac19cb17f4e442d4745cb54754f4783c78a23139202d5c833a0367a8",
       "seq": 624,
       "t": 134768,
       "tail_tokens": 24,
@@ -8474,12 +8474,12 @@
     },
     {
       "beside": 0,
-      "head_sha256": "d9756ab84247dd354d0f6e3e8b26ca56db9d0e1d3e43268be516a29a2b13875d",
+      "head_sha256": "677294732c7ee7451a11502d27def72d4c81bba48c3150ecf24a130cc3f1a22a",
       "kind": "request",
       "lane": "trunk",
       "max_tokens": 512,
       "seq": 625,
-      "sized_tokens": 1479,
+      "sized_tokens": 1478,
       "t": 134828,
       "turn": 18
     },
@@ -8527,7 +8527,7 @@
       "outcome": "ran",
       "request": 625,
       "seq": 629,
-      "shown": "proposed: the move to build waits for the operator's ruling. Your turn ends here; say nothing more.",
+      "shown": "proposed: the move to build waits for the user's ruling. Your turn ends here; say nothing more.",
       "t": 135916,
       "turn": 18
     },
@@ -8615,7 +8615,7 @@
       "of_turn": 18,
       "prefix_shared": false,
       "question": "Answer from this turn alone.\nWhat did this turn establish that a later turn would need? Answer with the fields LEARNED, EVIDENCE and STUCK, one per line, and write NONE for a field with nothing to record.\n",
-      "reserved": 703,
+      "reserved": 702,
       "seq": 635,
       "t": 135941,
       "timing": "during_turn",
@@ -8625,12 +8625,12 @@
     },
     {
       "fork": 635,
-      "head_sha256": "1e315d4d1f893914a52630982a5c70f69a7db79d2bbe2dcff71d07c67748e245",
+      "head_sha256": "5aa5c8593df5e7e1b8cac5346fe01f3a598e4be7f3bab061394f4734d937440a",
       "kind": "request",
       "lane": "interview",
       "max_tokens": 512,
       "seq": 636,
-      "sized_tokens": 1582,
+      "sized_tokens": 1580,
       "t": 136001,
       "turn": 18
     },
@@ -8757,12 +8757,12 @@
     },
     {
       "beside": 0,
-      "head_sha256": "1e315d4d1f893914a52630982a5c70f69a7db79d2bbe2dcff71d07c67748e245",
+      "head_sha256": "5aa5c8593df5e7e1b8cac5346fe01f3a598e4be7f3bab061394f4734d937440a",
       "kind": "request",
       "lane": "trunk",
       "max_tokens": 512,
       "seq": 649,
-      "sized_tokens": 1560,
+      "sized_tokens": 1558,
       "t": 139936,
       "turn": 19
     },
@@ -8810,7 +8810,7 @@
       "outcome": "ran",
       "request": 649,
       "seq": 653,
-      "shown": "proposed: the move to build waits for the operator's ruling. Your turn ends here; say nothing more.",
+      "shown": "proposed: the move to build waits for the user's ruling. Your turn ends here; say nothing more.",
       "t": 141108,
       "turn": 19
     },
@@ -8887,7 +8887,7 @@
       "of_turn": 19,
       "prefix_shared": false,
       "question": "Answer from this turn alone.\nWhat did this turn establish that a later turn would need? Answer with the fields LEARNED, EVIDENCE and STUCK, one per line, and write NONE for a field with nothing to record.\n",
-      "reserved": 705,
+      "reserved": 704,
       "seq": 658,
       "t": 141133,
       "timing": "during_turn",
@@ -8897,12 +8897,12 @@
     },
     {
       "fork": 658,
-      "head_sha256": "bc36a0d96283d80ab43db1613966852d8947b8577d20683c11e1d2abb23c142c",
+      "head_sha256": "add2cffd7a5d28137fb910123bd08327e0a0dc4a8acd5116291cf5c9ffcf70e9",
       "kind": "request",
       "lane": "interview",
       "max_tokens": 512,
       "seq": 659,
-      "sized_tokens": 1665,
+      "sized_tokens": 1662,
       "t": 141193,
       "turn": 19
     },
@@ -9069,12 +9069,12 @@
     },
     {
       "beside": 0,
-      "head_sha256": "bc36a0d96283d80ab43db1613966852d8947b8577d20683c11e1d2abb23c142c",
+      "head_sha256": "add2cffd7a5d28137fb910123bd08327e0a0dc4a8acd5116291cf5c9ffcf70e9",
       "kind": "request",
       "lane": "trunk",
       "max_tokens": 512,
       "seq": 673,
-      "sized_tokens": 1877,
+      "sized_tokens": 1874,
       "t": 144728,
       "turn": 20
     },
@@ -9218,17 +9218,17 @@
       "kind": "notice",
       "seq": 686,
       "t": 149182,
-      "text": "The operator proposes moving from phase build to phase test. Before anything else, answer with propose_phase_transition: to = \"test\" and accept = true to agree, or accept = false and your reason to decline.",
+      "text": "The user proposes moving from phase build to phase test. Before anything else, answer with propose_phase_transition: to = \"test\" and accept = true to agree, or accept = false and your reason to decline.",
       "turn": 21
     },
     {
       "beside": 0,
-      "head_sha256": "0034aeb63f73b7331fedaef6dd07556a4c173f051315ff2c01faea8e77ccffb6",
+      "head_sha256": "2e4983b70d5ce1595b6f1bbef6ff39a71cbddc1623cd8c89aafaf854705d870c",
       "kind": "request",
       "lane": "trunk",
       "max_tokens": 512,
       "seq": 687,
-      "sized_tokens": 1937,
+      "sized_tokens": 1933,
       "t": 149242,
       "turn": 21
     },
@@ -9392,23 +9392,23 @@
     },
     {
       "fork": 698,
-      "head_sha256": "c726e0a514d204083551fdda8d1d3d68ee2e5834e441bf1ba97a646744752e19",
+      "head_sha256": "58eaf3433772ca9d993a0dc0d45e4fe14a765ab2a5402ad99528545bfcf5cc88",
       "kind": "request",
       "lane": "interview",
       "max_tokens": 512,
       "seq": 699,
-      "sized_tokens": 2014,
+      "sized_tokens": 2010,
       "t": 150360,
       "turn": 21
     },
     {
       "beside": 1,
-      "head_sha256": "0a6d5816526e305ad21fbe12a32296154a96ecace943d3314261598da8f6a05b",
+      "head_sha256": "22ec8318769f41a4417eb70e8fdb91574d5f6b9f744a75e492649ff30fe27fc9",
       "kind": "request",
       "lane": "trunk",
       "max_tokens": 512,
       "seq": 700,
-      "sized_tokens": 1962,
+      "sized_tokens": 1958,
       "t": 150420,
       "turn": 21
     },
@@ -9584,19 +9584,19 @@
       "kind": "fork",
       "lane": "audit",
       "of_turn": 21,
-      "question": "We've reached a scheduled checkpoint (a cadence fired — this is not necessarily a phase boundary), so I want to audit our working notes (working notes). The operator changed some of them since the last boundary: a note marked [edited by the operator] is their correction, and a note marked [flagged: …] carries their concern. For each note below, reply with EXACTLY one line, each starting with its number:\n<n>. KEEP\nor <n>. UPDATE: <the corrected one-line note>\nor <n>. REMOVE — <one-clause reason>\nor <n>. REMOVE — dup of #<k>  (when it duplicates another note here)\nAddress every marked note: KEEP an edited note — it stands as the operator wrote it — and UPDATE or REMOVE any note of yours it makes wrong; KEEP a flagged note if the concern does not hold, or UPDATE or REMOVE it if it does. Judge against everything that has actually happened in this session. Output 8 lines and nothing else.\n\n1. gotcha: missing.txt does not exist — IMPLICATION: create it before showing it\n2. evidence: xxxxxxxxxx\n3. pointer: the long line is 9000 x's (the output of call-b2)\n4. files: shot.png\n5. files: side.md\n6. decision: notes.md holds the decisions as a sorted Markdown list [edited by the operator]\n7. the list could be sorted\n8. To sort the list.",
+      "question": "We've reached a scheduled checkpoint (a cadence fired — this is not necessarily a phase boundary), so I want to audit our working notes (working notes). The user changed some of them since the last boundary: a note marked [edited by the user] is their correction, and a note marked [flagged: …] carries their concern. For each note below, reply with EXACTLY one line, each starting with its number:\n<n>. KEEP\nor <n>. UPDATE: <the corrected one-line note>\nor <n>. REMOVE — <one-clause reason>\nor <n>. REMOVE — dup of #<k>  (when it duplicates another note here)\nAddress every marked note: KEEP an edited note — it stands as the user wrote it — and UPDATE or REMOVE any note of yours it makes wrong; KEEP a flagged note if the concern does not hold, or UPDATE or REMOVE it if it does. Judge against everything that has actually happened in this session. Output 8 lines and nothing else.\n\n1. gotcha: missing.txt does not exist — IMPLICATION: create it before showing it\n2. evidence: xxxxxxxxxx\n3. pointer: the long line is 9000 x's (the output of call-b2)\n4. files: shot.png\n5. files: side.md\n6. decision: notes.md holds the decisions as a sorted Markdown list [edited by the user]\n7. the list could be sorted\n8. To sort the list.",
       "seq": 714,
       "t": 150916,
       "why": "meditation"
     },
     {
       "fork": 714,
-      "head_sha256": "0e97527697b4392391afd9f405b6bb784d077c4c2bbaa5e5702bb8b7d6119959",
+      "head_sha256": "1a89fd3e734693ad28aaa2cf2c155b5a2279236022cf0ed42b37f58d09c5f684",
       "kind": "request",
       "lane": "audit",
       "max_tokens": 512,
       "seq": 715,
-      "sized_tokens": 2277,
+      "sized_tokens": 2269,
       "t": 150976,
       "turn": 21
     },
@@ -9614,12 +9614,12 @@
     },
     {
       "fork": 716,
-      "head_sha256": "0e97527697b4392391afd9f405b6bb784d077c4c2bbaa5e5702bb8b7d6119959",
+      "head_sha256": "1a89fd3e734693ad28aaa2cf2c155b5a2279236022cf0ed42b37f58d09c5f684",
       "kind": "request",
       "lane": "audit",
       "max_tokens": 512,
       "seq": 717,
-      "sized_tokens": 2156,
+      "sized_tokens": 2152,
       "t": 151041,
       "turn": 21
     },
@@ -9688,12 +9688,12 @@
       "t": 151576
     },
     {
-      "head_sha256": "c40dd1687ba27d63a66df26f8e617f0415e8ae50b274202c2655be0c13c09621",
+      "head_sha256": "a1e26808f09adbf2f4a115c5bce3f53b37f0956bd6652566333a62952bca18bb",
       "kind": "request",
       "lane": "warm",
       "max_tokens": 1,
       "seq": 724,
-      "sized_tokens": 1630,
+      "sized_tokens": 1628,
       "t": 151636,
       "turn": 21
     },
@@ -9727,7 +9727,7 @@
       "carried_entries": 16,
       "carried_output_bytes": 1507,
       "carried_outputs": 5,
-      "carried_tokens": 353,
+      "carried_tokens": 352,
       "carried_turns": 2,
       "carry": "render",
       "frame": "2",
@@ -9739,7 +9739,7 @@
           "kind": "edit"
         }
       ],
-      "outputs": "\n# tool outputs\nThe following tool results were produced before context was compacted. They are listed as reference only: each was saved whole, and can be read at its path.\n\n- turn 12: bash args={\"command\":\"echo tidy-check\"}: 11 bytes, sha256 894b3e513a386f06c0ad569485c7b910a7eccef6d100dcd97d9878fad9a1132a, saved at /scenario/recording/files/894b3e513a386f06c0ad569485c7b910a7eccef6d100dcd97d9878fad9a1132a\n- turn 13: resolve_entry args={\"entry\": \"r6/call-r1/decision\", \"verdict\": \"done\"}: 29 bytes, sha256 3b88422a3020fac4bd731100fb242c405437f91f7c7cd94fe6fefbb50f4b2932, saved at /scenario/recording/files/3b88422a3020fac4bd731100fb242c405437f91f7c7cd94fe6fefbb50f4b2932\n- turn 15: propose_phase_transition args={\"to\": \"plan\", \"reason\": \"the scope is settled\"}: 98 bytes, sha256 8c231d4a67a4939faef2f6343ea72df7c142ef1c4ebf6f2fb0658b6b224fde6e, saved at /scenario/recording/files/8c231d4a67a4939faef2f6343ea72df7c142ef1c4ebf6f2fb0658b6b224fde6e\n- turn 18: propose_phase_transition args={\"to\": \"build\", \"reason\": \"the plan has its steps\"}: 99 bytes, sha256 53999f70cc1e7f696753f5e7d2b2c2aeaa57e42953080911bc850150951f4ac4, saved at /scenario/recording/files/53999f70cc1e7f696753f5e7d2b2c2aeaa57e42953080911bc850150951f4ac4\n- turn 19: propose_phase_transition args={\"to\": \"build\", \"reason\": \"the steps are written down\"}: 99 bytes, sha256 53999f70cc1e7f696753f5e7d2b2c2aeaa57e42953080911bc850150951f4ac4, saved at /scenario/recording/files/53999f70cc1e7f696753f5e7d2b2c2aeaa57e42953080911bc850150951f4ac4\n",
+      "outputs": "\n# tool outputs\nThe following tool results were produced before context was compacted. They are listed as reference only: each was saved whole, and can be read at its path.\n\n- turn 12: bash args={\"command\":\"echo tidy-check\"}: 11 bytes, sha256 894b3e513a386f06c0ad569485c7b910a7eccef6d100dcd97d9878fad9a1132a, saved at /scenario/recording/files/894b3e513a386f06c0ad569485c7b910a7eccef6d100dcd97d9878fad9a1132a\n- turn 13: resolve_entry args={\"entry\": \"r6/call-r1/decision\", \"verdict\": \"done\"}: 29 bytes, sha256 3b88422a3020fac4bd731100fb242c405437f91f7c7cd94fe6fefbb50f4b2932, saved at /scenario/recording/files/3b88422a3020fac4bd731100fb242c405437f91f7c7cd94fe6fefbb50f4b2932\n- turn 15: propose_phase_transition args={\"to\": \"plan\", \"reason\": \"the scope is settled\"}: 94 bytes, sha256 5a1591c1d76704e900ce468d817f038b11a00a0432af95d3735d19cb626481ae, saved at /scenario/recording/files/5a1591c1d76704e900ce468d817f038b11a00a0432af95d3735d19cb626481ae\n- turn 18: propose_phase_transition args={\"to\": \"build\", \"reason\": \"the plan has its steps\"}: 95 bytes, sha256 4497c03ec6de8a9ec0be3788c34763282f1e0f6d50a48387d466bb2baef881bf, saved at /scenario/recording/files/4497c03ec6de8a9ec0be3788c34763282f1e0f6d50a48387d466bb2baef881bf\n- turn 19: propose_phase_transition args={\"to\": \"build\", \"reason\": \"the steps are written down\"}: 95 bytes, sha256 4497c03ec6de8a9ec0be3788c34763282f1e0f6d50a48387d466bb2baef881bf, saved at /scenario/recording/files/4497c03ec6de8a9ec0be3788c34763282f1e0f6d50a48387d466bb2baef881bf\n",
       "phase_document": {
         "digest": "8dfa023131c075e1f5d018fa3b5f51e9142426293453635e803c18ef4cc0a637",
         "ground_rules": "Check the work against the plan: run the tests and anything else the plan named, and read what they report. Fix what fails, or record it with update_record. When everything passes, say what you ran and what it showed.",
@@ -9752,20 +9752,20 @@
         ]
       },
       "placement": "message",
-      "prefix_hash_after": "24fdcb801586d93ee59e96e377de1c1c7dc386d4594594590573707ed08279b6",
-      "prefix_hash_before": "0e97527697b4392391afd9f405b6bb784d077c4c2bbaa5e5702bb8b7d6119959",
+      "prefix_hash_after": "f3ba32b64e67872dfbc1fabd29339a280b6a4215305a06771e7be55ca877362e",
+      "prefix_hash_before": "1a89fd3e734693ad28aaa2cf2c155b5a2279236022cf0ed42b37f58d09c5f684",
       "reason": "cadence",
-      "render": "# regime\ndogma_version: 0\nphase: test\nframe_version: 2\n\n# working set\ninterview-t1-1\tyou said, when asked\tplan: write it, then read it back\ninterview-t1-f32-0\tyou said, when asked\tdecision: notes.md holds one line per decision\ninterview-t2-0\tyou said, when asked\tlearned: notes.md now holds the first decision\ninterview-t2-1\tyou said, when asked\tevidence: the write of notes.md\ninterview-t2-f84-1\tyou said, when asked\tevidence: decision: one line per decision\ninterview-t6-0\tyou said, when asked\tgotcha: missing.txt does not exist — IMPLICATION: create it before showing it\ninterview-t8-0\tyou said, when asked\tevidence: xxxxxxxxxx\ninterview-t8-1\tyou said, when asked\tpointer: the long line is 9000 x's (the output of call-b2)\nmechanical/listed:shot.png\tfiles: listed shot.png\nmechanical/notes.md\tfiles: notes.md\nmechanical/shot.png\tfiles: shot.png\nmechanical/side.md\tfiles: side.md\noperator-554\tuser said\tdecision: notes.md holds the decisions as a sorted Markdown list [edited by the operator]\noperator-612\tuser kept, from tool output [side]\tthe list could be sorted\noperator-620\tuser kept, from your answer\tTo sort the list.\nr374/refute-1.1\tyou said, when asked\tfact: the build takes longer than the step's timeout\nr374/refute-1.1-claim\tyou said, when asked\twas: fact: the build finishes in a few seconds (held at 7/10), wrong because the command timed out after 16000ms [call call-b7]\n\n\nYou changed these files since the session started: notes.md (new), shot.png (new), side.md (new).\n\nYou are in /scenario/worktree.",
+      "render": "# regime\ndogma_version: 0\nphase: test\nframe_version: 2\n\n# working set\ninterview-t1-1\tyou said, when asked\tplan: write it, then read it back\ninterview-t1-f32-0\tyou said, when asked\tdecision: notes.md holds one line per decision\ninterview-t2-0\tyou said, when asked\tlearned: notes.md now holds the first decision\ninterview-t2-1\tyou said, when asked\tevidence: the write of notes.md\ninterview-t2-f84-1\tyou said, when asked\tevidence: decision: one line per decision\ninterview-t6-0\tyou said, when asked\tgotcha: missing.txt does not exist — IMPLICATION: create it before showing it\ninterview-t8-0\tyou said, when asked\tevidence: xxxxxxxxxx\ninterview-t8-1\tyou said, when asked\tpointer: the long line is 9000 x's (the output of call-b2)\nmechanical/listed:shot.png\tfiles: listed shot.png\nmechanical/notes.md\tfiles: notes.md\nmechanical/shot.png\tfiles: shot.png\nmechanical/side.md\tfiles: side.md\noperator-554\tuser said\tdecision: notes.md holds the decisions as a sorted Markdown list [edited by the user]\noperator-612\tuser kept, from tool output [side]\tthe list could be sorted\noperator-620\tuser kept, from your answer\tTo sort the list.\nr374/refute-1.1\tyou said, when asked\tfact: the build takes longer than the step's timeout\nr374/refute-1.1-claim\tyou said, when asked\twas: fact: the build finishes in a few seconds (held at 7/10), wrong because the command timed out after 16000ms [call call-b7]\n\n\nYou changed these files since the session started: notes.md (new), shot.png (new), side.md (new).\n\nYou are in /scenario/worktree.",
       "render_budget_tokens": 120,
       "render_fits": false,
       "render_over_budget": "tier",
       "render_reduced": 0,
-      "render_tokens": 347,
+      "render_tokens": 346,
       "seq": 727,
       "t": 152019,
       "tail_tokens": 400,
       "tool_outputs": "reference",
-      "trunk_sha256": "726d13e6cf386e4b72d7753ccf54dbd8dfc2a89fb6b11a8ce83880901db18df2",
+      "trunk_sha256": "9ed07f4b9678b192fcc6779b134dae68e98874a7f8340e4727460e3d1a65b0c6",
       "unaddressed": [],
       "warm": {
         "cache_n": 0,
@@ -9805,17 +9805,17 @@
       "kind": "notice",
       "seq": 731,
       "t": 156139,
-      "text": "The operator proposes moving from phase test to phase build. Before anything else, answer with propose_phase_transition: to = \"build\" and accept = true to agree, or accept = false and your reason to decline.",
+      "text": "The user proposes moving from phase test to phase build. Before anything else, answer with propose_phase_transition: to = \"build\" and accept = true to agree, or accept = false and your reason to decline.",
       "turn": 22
     },
     {
       "beside": 0,
-      "head_sha256": "24fdcb801586d93ee59e96e377de1c1c7dc386d4594594590573707ed08279b6",
+      "head_sha256": "f3ba32b64e67872dfbc1fabd29339a280b6a4215305a06771e7be55ca877362e",
       "kind": "request",
       "lane": "trunk",
       "max_tokens": 512,
       "seq": 732,
-      "sized_tokens": 1687,
+      "sized_tokens": 1684,
       "t": 156199,
       "turn": 22
     },
@@ -9958,23 +9958,23 @@
     },
     {
       "fork": 742,
-      "head_sha256": "33472c9138022f9a170e392556d0d1c06b1ef3acf32cc1d0bc6bc814f94145d6",
+      "head_sha256": "9d640835b187a6b6192f1761ca07dab2ec2a6edcd3702a22da35796b3aded8e3",
       "kind": "request",
       "lane": "interview",
       "max_tokens": 512,
       "seq": 743,
-      "sized_tokens": 1767,
+      "sized_tokens": 1764,
       "t": 157400,
       "turn": 22
     },
     {
       "beside": 1,
-      "head_sha256": "9ab7d7ec63b6903b28a730c13070116a05237e57f123f19f127f2a7bd3756b09",
+      "head_sha256": "12ec3c7bdc8510466b90c761024580078fdd4260d4c60bf80cbbedf7341e2071",
       "kind": "request",
       "lane": "trunk",
       "max_tokens": 512,
       "seq": 744,
-      "sized_tokens": 1715,
+      "sized_tokens": 1712,
       "t": 157460,
       "turn": 22
     },
@@ -10171,19 +10171,19 @@
       "kind": "fork",
       "lane": "audit",
       "of_turn": 22,
-      "question": "We're at a phase boundary — the operator declared one, so I want to audit our working notes (working notes). The operator changed some of them since the last boundary: a note marked [edited by the operator] is their correction, and a note marked [flagged: …] carries their concern. For each note below, reply with EXACTLY one line, each starting with its number:\n<n>. KEEP\nor <n>. UPDATE: <the corrected one-line note>\nor <n>. REMOVE — <one-clause reason>\nor <n>. REMOVE — dup of #<k>  (when it duplicates another note here)\nAddress every marked note: KEEP an edited note — it stands as the operator wrote it — and UPDATE or REMOVE any note of yours it makes wrong; KEEP a flagged note if the concern does not hold, or UPDATE or REMOVE it if it does. Judge against everything that has actually happened in this session. Output 8 lines and nothing else.\n\n1. gotcha: missing.txt does not exist — IMPLICATION: create it before showing it\n2. evidence: xxxxxxxxxx\n3. pointer: the long line is 9000 x's (the output of call-b2)\n4. files: shot.png\n5. files: side.md\n6. decision: notes.md holds the decisions as a sorted Markdown list [flagged: still sorted?]\n7. the list could be sorted\n8. To sort the list.",
+      "question": "We're at a phase boundary — the user declared one, so I want to audit our working notes (working notes). The user changed some of them since the last boundary: a note marked [edited by the user] is their correction, and a note marked [flagged: …] carries their concern. For each note below, reply with EXACTLY one line, each starting with its number:\n<n>. KEEP\nor <n>. UPDATE: <the corrected one-line note>\nor <n>. REMOVE — <one-clause reason>\nor <n>. REMOVE — dup of #<k>  (when it duplicates another note here)\nAddress every marked note: KEEP an edited note — it stands as the user wrote it — and UPDATE or REMOVE any note of yours it makes wrong; KEEP a flagged note if the concern does not hold, or UPDATE or REMOVE it if it does. Judge against everything that has actually happened in this session. Output 8 lines and nothing else.\n\n1. gotcha: missing.txt does not exist — IMPLICATION: create it before showing it\n2. evidence: xxxxxxxxxx\n3. pointer: the long line is 9000 x's (the output of call-b2)\n4. files: shot.png\n5. files: side.md\n6. decision: notes.md holds the decisions as a sorted Markdown list [flagged: still sorted?]\n7. the list could be sorted\n8. To sort the list.",
       "seq": 760,
       "t": 161151,
       "why": "meditation"
     },
     {
       "fork": 760,
-      "head_sha256": "4c14f701ba1de51a5cf1d3482294375231b9fa116586d7f9357e6c7f2a6000f7",
+      "head_sha256": "a52be5032589818f59f156afe83b4c5f3db80593c562f4eb520fbb87e6a290a3",
       "kind": "request",
       "lane": "audit",
       "max_tokens": 512,
       "seq": 761,
-      "sized_tokens": 2026,
+      "sized_tokens": 2019,
       "t": 161211,
       "turn": 22
     },
@@ -10194,19 +10194,19 @@
       "kind": "fork",
       "lane": "audit",
       "of_turn": 22,
-      "question": "We're at a phase boundary — the operator declared one, so I want to audit our working notes (working notes). For each note below, reply with EXACTLY one line, each starting with its number:\n<n>. KEEP\nor <n>. UPDATE: <the corrected one-line note>\nor <n>. REMOVE — <one-clause reason>\nor <n>. REMOVE — dup of #<k>  (when it duplicates another note here)\nJudge against everything that has actually happened in this session. Output 7 lines and nothing else.\n\n1. plan: write it, then read it back\n2. decision: notes.md holds one line per decision\n3. learned: notes.md now holds the first decision\n4. evidence: the write of notes.md\n5. evidence: decision: one line per decision\n6. files: listed shot.png\n7. files: notes.md",
+      "question": "We're at a phase boundary — the user declared one, so I want to audit our working notes (working notes). For each note below, reply with EXACTLY one line, each starting with its number:\n<n>. KEEP\nor <n>. UPDATE: <the corrected one-line note>\nor <n>. REMOVE — <one-clause reason>\nor <n>. REMOVE — dup of #<k>  (when it duplicates another note here)\nJudge against everything that has actually happened in this session. Output 7 lines and nothing else.\n\n1. plan: write it, then read it back\n2. decision: notes.md holds one line per decision\n3. learned: notes.md now holds the first decision\n4. evidence: the write of notes.md\n5. evidence: decision: one line per decision\n6. files: listed shot.png\n7. files: notes.md",
       "seq": 762,
       "t": 161216,
       "why": "meditation"
     },
     {
       "fork": 762,
-      "head_sha256": "4c14f701ba1de51a5cf1d3482294375231b9fa116586d7f9357e6c7f2a6000f7",
+      "head_sha256": "a52be5032589818f59f156afe83b4c5f3db80593c562f4eb520fbb87e6a290a3",
       "kind": "request",
       "lane": "audit",
       "max_tokens": 512,
       "seq": 763,
-      "sized_tokens": 1905,
+      "sized_tokens": 1901,
       "t": 161276,
       "turn": 22
     },
@@ -10280,19 +10280,19 @@
       "kind": "fork",
       "lane": "audit",
       "of_turn": 22,
-      "question": "We're at a phase boundary — the operator declared one, so I want to audit our working notes (working notes). The operator changed some of them since the last boundary: a note marked [edited by the operator] is their correction, and a note marked [flagged: …] carries their concern. For each note below, reply with EXACTLY one line, each starting with its number:\n<n>. KEEP\nor <n>. UPDATE: <the corrected one-line note>\nor <n>. REMOVE — <one-clause reason>\nor <n>. REMOVE — dup of #<k>  (when it duplicates another note here)\nAddress every marked note: KEEP an edited note — it stands as the operator wrote it — and UPDATE or REMOVE any note of yours it makes wrong; KEEP a flagged note if the concern does not hold, or UPDATE or REMOVE it if it does. Judge against everything that has actually happened in this session. Output 1 lines and nothing else.\n\n1. decision: notes.md holds the decisions as a sorted Markdown list [flagged: still sorted?]",
+      "question": "We're at a phase boundary — the user declared one, so I want to audit our working notes (working notes). The user changed some of them since the last boundary: a note marked [edited by the user] is their correction, and a note marked [flagged: …] carries their concern. For each note below, reply with EXACTLY one line, each starting with its number:\n<n>. KEEP\nor <n>. UPDATE: <the corrected one-line note>\nor <n>. REMOVE — <one-clause reason>\nor <n>. REMOVE — dup of #<k>  (when it duplicates another note here)\nAddress every marked note: KEEP an edited note — it stands as the user wrote it — and UPDATE or REMOVE any note of yours it makes wrong; KEEP a flagged note if the concern does not hold, or UPDATE or REMOVE it if it does. Judge against everything that has actually happened in this session. Output 1 lines and nothing else.\n\n1. decision: notes.md holds the decisions as a sorted Markdown list [flagged: still sorted?]",
       "seq": 770,
       "t": 161816,
       "why": "meditation"
     },
     {
       "fork": 770,
-      "head_sha256": "4c14f701ba1de51a5cf1d3482294375231b9fa116586d7f9357e6c7f2a6000f7",
+      "head_sha256": "a52be5032589818f59f156afe83b4c5f3db80593c562f4eb520fbb87e6a290a3",
       "kind": "request",
       "lane": "audit",
       "max_tokens": 512,
       "seq": 771,
-      "sized_tokens": 1963,
+      "sized_tokens": 1956,
       "t": 161876,
       "turn": 22
     },
@@ -10361,12 +10361,12 @@
       "to": "capture"
     },
     {
-      "head_sha256": "a783ed2da5237e16377c05419fe8c034bc3c6b61d6591130da4ff89f7ae3cf3c",
+      "head_sha256": "b6ff32fdac8b8d551a5eb7b62b70144f8afa7ee459fadc34ac417e65d3f8904f",
       "kind": "request",
       "lane": "warm",
       "max_tokens": 1,
       "seq": 779,
-      "sized_tokens": 1113,
+      "sized_tokens": 1111,
       "t": 162186,
       "turn": 22
     },
@@ -10398,7 +10398,7 @@
       "asks": "\n# user messages\nThe user's messages before context was compacted, verbatim, in the order they were sent:\n\n## turn 1\nScope: a notes file, notes.md, holding one line per decision; read it back after each write.\n\n## turn 2\nWrite notes.md with the first decision, tighten it, then read it back.\n\n## turn 3\nMake a tiny PNG with bash, then read it.\n\n## turn 4\nWhat is in the picture I attached?\n\n## turn 5\nFind the decisions in the Markdown files.\n\n## turn 6\nShow missing.txt.\n\n## turn 7\nBuild in the background, and start a watcher you then stop.\n\n## turn 8\nPrint a long line with python3, then a long listing.\n\n## turn 9\nIs notes.md still as written?\n\n## turn 10\nWait for the server to come up.\n\n## turn 11\nCount to four, one command per number.\n\n## turn 12\nTidy up the worktree.\n\n## turn 13\nIs the scope done?\n\n## turn 14\nChange of scope: notes.md holds the decisions as a Markdown list.\n\n## turn 15\nOriented enough? Say if we should move on.\n\n## turn 16\nSide question: write side.md with a note on sorting.\n\n## turn 17\nBack to the list.\n\n## turn 18\nReady to build? Say if we should move on.\n\n## turn 19\nBuild now? Say if we should move on.\n\n## turn 20\nBuild the list in notes.md.\n",
       "at_turn": 22,
       "carried_entries": 16,
-      "carried_tokens": 180,
+      "carried_tokens": 178,
       "carried_turns": 2,
       "carry": "render",
       "frame": "2",
@@ -10426,8 +10426,8 @@
         ]
       },
       "placement": "message",
-      "prefix_hash_after": "8329c2b57fa58b1a1e6065824b7a3a503dbeabb2197ce9ff8c1a64b0d8b56635",
-      "prefix_hash_before": "4c14f701ba1de51a5cf1d3482294375231b9fa116586d7f9357e6c7f2a6000f7",
+      "prefix_hash_after": "2cf46ef74fbc8bbda70c206e160f7af5b6d835c623e2c8530c0ad8d99ba3ebab",
+      "prefix_hash_before": "a52be5032589818f59f156afe83b4c5f3db80593c562f4eb520fbb87e6a290a3",
       "reason": "operator",
       "refilled_anyway": true,
       "render": "# regime\ndogma_version: 0\nphase: build\nframe_version: 2\n\n# working set\ninterview-t1-1\tyou said, when asked\tplan: write it, then read it back\ninterview-t1-f32-0\tyou said, when asked\tdecision: notes.md holds one line per decision\ninterview-t2-0\tyou said, when asked\tlearned: notes.md now holds the first decision\ninterview-t2-1\tyou said, when asked\tevidence: the write of notes.md\ninterview-t2-f84-1\tyou said, when asked\tevidence: decision: one line per decision\ninterview-t6-0\tyou said, when asked\tgotcha: missing.txt does not exist — IMPLICATION: create it before showing it\ninterview-t8-0\tyou said, when asked\tevidence: xxxxxxxxxx\ninterview-t8-1\tyou said, when asked\tpointer: the long line is 9000 x's (the output of call-b2)\nmechanical/listed:shot.png\tfiles: listed shot.png\nmechanical/notes.md\tfiles: notes.md\nmechanical/shot.png\tfiles: shot.png\nmechanical/side.md\tfiles: side.md\noperator-554\tuser said\tdecision: notes.md holds the decisions as a sorted Markdown list [flagged: still sorted?]\noperator-612\tuser kept, from tool output [side]\tthe list could be sorted\noperator-620\tuser kept, from your answer\tTo sort the list.\nr374/refute-1.1\tyou said, when asked\tfact: the build takes longer than the step's timeout\nr374/refute-1.1-claim\tyou said, when asked\twas: fact: the build finishes in a few seconds (held at 7/10), wrong because the command timed out after 16000ms [call call-b7]\n\n\nYou changed these files since the session started: notes.md (new), shot.png (new), side.md (new).\n\nYou are in /scenario/worktree.",
@@ -10440,7 +10440,7 @@
       "t": 164064,
       "tail_tokens": 400,
       "tool_outputs": "reference",
-      "trunk_sha256": "ccd858819a27256d7431d5d9fcc65c22a53bc4a935b1badab033acbe295a495b",
+      "trunk_sha256": "5f1bd461af6c441654259431a373baeb89c4cdfffc229f52fdc3c95dc46d379a",
       "unaddressed": [
         "operator-554"
       ],
@@ -10474,12 +10474,12 @@
     },
     {
       "beside": 0,
-      "head_sha256": "8329c2b57fa58b1a1e6065824b7a3a503dbeabb2197ce9ff8c1a64b0d8b56635",
+      "head_sha256": "2cf46ef74fbc8bbda70c206e160f7af5b6d835c623e2c8530c0ad8d99ba3ebab",
       "kind": "request",
       "lane": "trunk",
       "max_tokens": 512,
       "seq": 786,
-      "sized_tokens": 1127,
+      "sized_tokens": 1125,
       "t": 167059,
       "turn": 23
     },
@@ -10634,23 +10634,23 @@
     },
     {
       "fork": 797,
-      "head_sha256": "c7d862ecd4152c2c0f006a8af2f3584b8ad13711beebeea91d5718c7e643c2de",
+      "head_sha256": "3c18e8c25bf99e5541dc82cbb8fcbe9a1e66a51286edfc7f1bf4ab09130190e5",
       "kind": "request",
       "lane": "interview",
       "max_tokens": 512,
       "seq": 798,
-      "sized_tokens": 1205,
+      "sized_tokens": 1203,
       "t": 168043,
       "turn": 23
     },
     {
       "beside": 1,
-      "head_sha256": "bff3715d4e0cac687dd508daeee57b6260bc04f26ba1da620e42551bc257bfb4",
+      "head_sha256": "828ca401e76c40a2ace5546aa435c5bf70f6f6fe5403576397ae5a106a7d5916",
       "kind": "request",
       "lane": "trunk",
       "max_tokens": 512,
       "seq": 799,
-      "sized_tokens": 1153,
+      "sized_tokens": 1151,
       "t": 168103,
       "turn": 23
     },
