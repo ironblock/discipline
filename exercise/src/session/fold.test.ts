@@ -155,6 +155,33 @@ describe('fold over what it does not know', () => {
   });
 });
 
+describe('fold over a fork queued mid-turn (audit 7)', () => {
+  /** The specimen mid-turn, and lines written straight after it. */
+  const midTurn = (...extra: readonly Record<string, unknown>[]) => {
+    const log = [...snapshot(SPECIMEN, { beat: 2, t: 20_000 })];
+    const t = log.at(-1)!.t;
+    return fold([...log, ...extra.map((line, i) => ({ t: t + i + 1, seq: log.length + i, ...line }) as unknown as LogLine)]);
+  };
+
+  it('reads the queued fork back off its line, so a reloaded page shows it', () => {
+    const s = midTurn({ kind: 'fork.queued', question: 'why that file?' });
+    expect(s.state).toBe('turn');
+    expect(s.queuedFork?.question).toBe('why that file?');
+    expect(s.unknown.size).toBe(0);
+  });
+
+  it('clears it when the fork that names its t fires', () => {
+    const queued = midTurn({ kind: 'fork.queued', question: 'why that file?' });
+    const posted = queued.queuedFork?.t;
+    expect(posted).toBeDefined();
+    const s = midTurn(
+      { kind: 'fork.queued', question: 'why that file?' },
+      { kind: 'fork', lane: 'interview', slot: 1, why: 'operator', trigger: 'operator', ask: 'generic', question: 'why that file?', timing: 'during_turn', queued_at: posted },
+    );
+    expect(s.queuedFork).toBeUndefined();
+  });
+});
+
 describe('fold over what went wrong', () => {
   /** The specimen at a cursor, edited: the same helper stories use, without a DOM. */
   const variant = (beatNo: number, t: number | undefined, edit: (e: Unplaced) => Unplaced | readonly Unplaced[]) => folded(scriptOf(beatNo, t).flatMap((e) => edit(e)));

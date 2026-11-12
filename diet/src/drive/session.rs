@@ -32406,6 +32406,58 @@ pub(in crate::drive) mod tests {
         tidy(&[&tree]);
     }
 
+    /// Audit 7: the operator's fork queued while a turn runs is logged as
+    /// it is posted -- a `fork.queued` line with its question -- so a page
+    /// reloaded, or a second one, reads it back off the log; the `fork` that
+    /// fires names that line's `t` as its `queued_at`.
+    #[test]
+    fn a_queued_fork_is_logged_as_it_is_posted() {
+        let tree = scratch("fork-queued-logged");
+        let gate = Gate::new();
+        let session = wrapping(
+            &tree,
+            vec![
+                vec![Step::Hold(gate.clone()), bash("call-1", "cat notes.md")],
+                deltas(&["Read it."]),
+            ],
+            vec![deltas(&["Because the port is free."])],
+        );
+        session.ask("look", None).expect("accepted");
+        assert!(
+            gate.wait_for_a_waiter(Duration::from_secs(10)),
+            "the step never reached the gate"
+        );
+        assert_eq!(
+            session.fork(None, &OperatorAsk::Text("why 5182?".to_owned())),
+            Ok(Forking::Queued)
+        );
+        let queued_line = |log: &[Logged]| {
+            log.iter().find_map(|logged| {
+                let Ok(line) = crate::formats::record::json::line(&render(logged))
+                else {
+                    return None;
+                };
+                (line.get("kind") == Some(&Value::String("fork.queued".to_owned())))
+                    .then(|| (logged.t, line))
+            })
+        };
+        let Some((posted, line)) = queued_line(&session.events_from(0)) else {
+            unreachable!("a fork.queued line as it is posted");
+        };
+        assert_eq!(
+            line.get("question"),
+            Some(&Value::String("why 5182?".to_owned()))
+        );
+        gate.open();
+        let log = wait_until(&session, "the turn", settled);
+        let [(_, Event::Forked { queued_at, .. })] = &operator_forks(&log)[..] else {
+            unreachable!("one operator fork: {:?}", operator_forks(&log));
+        };
+        assert_eq!(*queued_at, Some(posted), "the fork names its queued line's t");
+        reads_whole(&session);
+        tidy(&[&tree]);
+    }
+
     /// N4: a fork queued while the turn runs, the turn cancelled before its
     /// next request: it fires at the gap, as a fork posted then would.
     #[test]
