@@ -56,7 +56,7 @@
 {"reply":{"text":"."}}
 {"reply":{"text":"."}}
 {"reply":{"text":"."}}
-{"reply":{"when":"refused: operator-entry","text":"Left as it is.","delay_ms":300}}
+{"reply":{"when":"refused: user-entry","text":"Left as it is.","delay_ms":300}}
 {"reply":{"when":"Output 8 lines and nothing else","text":"1. KEEP\n2. KEEP\n3. KEEP\n4. KEEP\n5. KEEP\n6. KEEP\n7. KEEP\n8. KEEP\n"}}
 {"reply":{"when":"Output 8 lines and nothing else","text":"1. KEEP\n2. KEEP\n3. KEEP\n4. KEEP\n5. KEEP\n6. KEEP\n7. KEEP\n8. KEEP\n"}}
 {"reply":{"when":"Output 8 lines and nothing else","text":"1. KEEP\n2. KEEP\n3. KEEP\n4. KEEP\n5. KEEP\n6. KEEP\n7. KEEP\n8. KEEP\n"}}

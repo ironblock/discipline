@@ -5072,10 +5072,7 @@ impl<S: Streaming + 'static> Session<S> {
             .tangent
             .as_ref()
             .map(|(tangent, _)| tangent.id().to_owned());
-        let (Ok(voids), Ok(new)) = (
-            crate::object::EntryId::new(id),
-            crate::object::EntryId::new(&format!("operator-{seq}")),
-        ) else {
+        let (Ok(voids), Ok(new)) = (crate::object::EntryId::new(id), user_entry_id(seq)) else {
             unreachable!("an id the object holds, and one this session coins");
         };
         let patch = Patch::Supersede {
@@ -10383,7 +10380,7 @@ impl Event {
 fn restates(state: &State, id: &str, content: &str) -> Option<Refusal> {
     let interview = state.interview.as_ref()?;
     let voids = crate::object::EntryId::new(id).ok()?;
-    let new = crate::object::EntryId::new(&format!("operator-{}", state.log.len())).ok()?;
+    let new = user_entry_id(state.log.len()).ok()?;
     let mut trial = interview.object.clone();
     trial
         .apply(&Patch::Supersede {
@@ -10502,7 +10499,7 @@ fn ruled(state: &State, change: &Patch) -> Option<Patch> {
             refuted,
             ..
         } => Patch::Supersede {
-            id: crate::object::EntryId::new(&format!("operator-{}", state.log.len())).ok()?,
+            id: user_entry_id(state.log.len()).ok()?,
             content: content.clone(),
             voids: voids.clone(),
             provenance,
@@ -11178,7 +11175,7 @@ fn apply_wraps(
 /// The operator's entry a keep of `span` adds (#1021): coined from the
 /// log's position, the operator's lane, no field kind.
 fn kept_patch(state: &State, span: &str) -> Patch {
-    let Ok(id) = crate::object::EntryId::new(&format!("operator-{}", state.log.len())) else {
+    let Ok(id) = user_entry_id(state.log.len()) else {
         unreachable!("an id this session coins");
     };
     Patch::Add {
@@ -11330,18 +11327,33 @@ fn written_by(lines: &[Event]) -> Vec<String> {
         .collect()
 }
 
-/// Why a capture none of whose patches was kept was refused (#689): the
-/// first `patch.refused` line's reason and the entry it would have changed,
-/// `operator-entry: <id>`.
+/// Why a capture none of whose patches was kept was refused (#689), as the
+/// model reads it: the entry it would have changed, `user-entry: <id>`.
 fn operator_refused(refusals: &[Event]) -> Option<String> {
     refusals.iter().find_map(|line| match line {
-        Event::PatchRefused { entry, .. } => Some(format!("{OPERATOR_ENTRY}: {entry}")),
+        Event::PatchRefused { entry, .. } => Some(format!("{USER_ENTRY}: {entry}")),
         _ => None,
     })
 }
 
-/// Why a model's patch is refused (#150): its target is the operator's.
+/// Why a model's patch is refused (#150): its target is the operator's. The
+/// `patch.refused` line's reason, log vocabulary the model never reads.
 const OPERATOR_ENTRY: &str = "operator-entry";
+
+/// [`OPERATOR_ENTRY`] as the model reads it: model-facing text says "the
+/// user".
+const USER_ENTRY: &str = "user-entry";
+
+/// What an entry id the session coins for the operator starts with. The
+/// model reads these ids on every refill, so they say "user". A log written
+/// before this coined `operator-<seq>`; nothing reads the prefix as
+/// provenance (`Object::by_operator` reads the entry's provenance).
+pub const USER_ENTRY_ID_PREFIX: &str = "user-";
+
+/// The id of the operator's entry coined at log position `seq`.
+fn user_entry_id(seq: usize) -> Result<crate::object::EntryId, crate::object::ObjectError> {
+    crate::object::EntryId::new(&format!("{USER_ENTRY_ID_PREFIX}{seq}"))
+}
 
 /// `interview`'s working memory rendered for a refill under `budget`, the
 /// operator's changes the meditation carries marked (#150).
