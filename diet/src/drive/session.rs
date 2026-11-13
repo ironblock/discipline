@@ -18703,6 +18703,13 @@ pub(in crate::drive) mod tests {
             .map(|message| message.role)
             .collect();
         assert_eq!(roles, [Role::User, Role::User], "{:?}", sent[0].messages);
+        // Its question quotes what the user said, in those words.
+        let question = &sent[0].messages.last().expect("its question").content;
+        assert!(
+            question.contains("The user said:\nRun the loader."),
+            "{question}"
+        );
+        assert!(!question.contains("operator"), "{question}");
         tidy(&[&tree]);
     }
 
@@ -24107,6 +24114,17 @@ pub(in crate::drive) mod tests {
         assert!(line.approval.is_none());
         assert!(!tree.join("marker").exists());
         assert_eq!(settled_as(&log), Some(SettleReason::Final));
+        // The result the model was sent says who declined it: the user.
+        let sent = session.shared.transport.sent();
+        let result = &sent
+            .last()
+            .and_then(|request| request.messages.last())
+            .expect("the request after the call")
+            .content;
+        assert_eq!(
+            result,
+            "(the drive did not run this command: the user declined it.)\n"
+        );
         tidy(&[&tree]);
     }
 
