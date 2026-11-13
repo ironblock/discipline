@@ -2005,7 +2005,15 @@ impl<'a> Walk<'a> {
             diff: Vec::new(),
         });
         match at {
-            Some(at) => self.events.insert(at.min(self.events.len()), row),
+            Some(at) => {
+                let at = at.min(self.events.len());
+                self.events.insert(at, row);
+                // A capture row written since sits one later now (#1144's
+                // review): its fork's next patch counts on it there.
+                for place in self.captures.values_mut().filter(|place| **place >= at) {
+                    *place += 1;
+                }
+            }
             None => self.events.push(row),
         }
     }
@@ -3742,10 +3750,6 @@ mod tests {
         validates(&projected);
     }
 
-    /// A v5 session with two forks, projected and validated: turn 1's
-    /// scoping fork settled `value` with three patches, a plain turn 2, and
-    /// turn 3's read fork, declined.
-    #[allow(clippy::too_many_lines)] // one session's lines, written out
     /// #1144's review: a warm head's row is put in its request's place when
     /// its meditation line arrives, and a fork's capture row written between
     /// them -- a gap fork's patch landing during the meditation -- is still
@@ -3777,6 +3781,10 @@ mod tests {
         )));
     }
 
+    /// A v5 session with two forks, projected and validated: turn 1's
+    /// scoping fork settled `value` with three patches, a plain turn 2, and
+    /// turn 3's read fork, declined.
+    #[allow(clippy::too_many_lines)] // one session's lines, written out
     fn two_forks() -> Projection {
         let fork = |at: u64, of_turn: u32, why: log::Warrant| Line::Fork {
             after_meditation: None,
