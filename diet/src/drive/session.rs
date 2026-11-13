@@ -15310,7 +15310,7 @@ fn refutation_arrival(state: &mut State, seq: u64, text: &str) -> Option<Firing>
     let due = RefuteDue {
         trigger: seq.to_string(),
         pointer: format!("log seq {seq}"),
-        source: format!("The operator said:\n{text}"),
+        source: format!("The user said:\n{text}"),
     };
     refutation_asked(state, &due, candidates)
 }

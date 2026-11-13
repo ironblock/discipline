@@ -1620,7 +1620,7 @@ pub fn refusal_text(reason: log::ToolRefusal, detail: &str) -> String {
              no approval grants.)\n"
         ),
         log::ToolRefusal::Declined => {
-            "(the drive did not run this command: the operator declined it.)\n".to_owned()
+            "(the drive did not run this command: the user declined it.)\n".to_owned()
         }
         log::ToolRefusal::Unparsable => format!(
             "(the drive did not run this call: its arguments are not the JSON object \
