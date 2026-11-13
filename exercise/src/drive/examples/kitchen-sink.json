@@ -2,7 +2,7 @@
   "title": "The kitchen sink: every lever, written by a scenario",
   "migration": [
     "Authored: this is an example of everything working the way we think it should, not a real session",
-    "written by diet-drive scenario diet/scenarios/kitchen-sink.jsonl (sha256 dde315910a0d51a852ccd80cfe98923c2d217bde1edd8ce13a5896f1e290861e) on the canned scenario substrate: every line is diet's own, the model's replies are the scenario's",
+    "written by diet-drive scenario diet/scenarios/kitchen-sink.jsonl (sha256 2d9bfde08527c13393870383ff3cbd1533295f2a962355e95ca142230fbbf039) on the canned scenario substrate: every line is diet's own, the model's replies are the scenario's",
     "the run's temporary and home paths are written /work/..., and its background jobs bg_1, bg_2, ... (src/drive/scenario-log.ts)",
     "retimed: every t is placed on assumed rates (src/drive/retime.ts), not measured, and reads nothing of the run's clock: a tool's run is its timeout_ms when it timed out, else 150 ms",
     "stitched: each wall-clock field (a gate's latency_ms, a trunk wait's wait_ms; never compared) is carried from the example this one replaced, by lane and place (src/drive/scenario-log.ts): 193 carried, 0 this run's own",
@@ -11,12 +11,12 @@
   ],
   "carried": {},
   "timing": "retimed",
-  "scenario_sha256": "dde315910a0d51a852ccd80cfe98923c2d217bde1edd8ce13a5896f1e290861e",
+  "scenario_sha256": "2d9bfde08527c13393870383ff3cbd1533295f2a962355e95ca142230fbbf039",
   "log": [
     {
       "approvals_off": true,
       "bash_timeout_ms": 120000,
-      "build_commit": "813953fbbb6af4ada6784c9a0239b663a974352f",
+      "build_commit": "e60ff6556bd5ebfdc87677c669a969a30eaf77cd",
       "build_dirty": false,
       "compaction_persists": true,
       "fork_asks": "v4",
@@ -93,7 +93,7 @@
       },
       "model": "scenario",
       "notes_in_the_ask": true,
-      "opened": 1794503519114,
+      "opened": 1794530038260,
       "opening_phase": "plan",
       "phase_document": {
         "digest": "c3c3afe17657994b1403ed749e7352bdf4ad1eb47c688b6e60bb0e122db95e8e",
@@ -1822,7 +1822,7 @@
       "frame": "2",
       "kind": "meditation",
       "native_reserve": 33000,
-      "object_sha256": "c743e85236196ae227c0aa29f7be430a70880ec0cc8723a4d4cdfbee3916e556",
+      "object_sha256": "0e01ce787a4602a23d5725e7367ba3c33750bc671d369d4fa8b346e45a533072",
       "outputs": "\n# tool outputs\nThe following tool results were produced before context was compacted. They are listed as reference only: each was saved whole, and can be read at its path.\n\n- turn 3: bash args={\"command\":\"printf '\\\\211PNG\\\\r\\\\n\\\\032\\\\n0000' > shot.png && ls shot.png\"}: 9 bytes, sha256 d6378885937f9c1a137ed8ddf9b4b56039bb4df9d543d06f84c474b51856f765, saved at /scenario/recording/files/d6378885937f9c1a137ed8ddf9b4b56039bb4df9d543d06f84c474b51856f765\n",
       "phase_document": {
         "digest": "703ed3071af8e07b5783800ffcd39a0d73c95509b0e521b250ecd7b9292b96fb",
@@ -1836,11 +1836,11 @@
         ]
       },
       "placement": "message",
-      "prefix_hash_after": "701cf1188514fac9db3e9af2db9357234bd90711784c612c2c1ce7ac7991ac2d",
+      "prefix_hash_after": "4bbeec97eeb36313ee3c348008b1b2171915632e48726ceb94529c08cdc4fcf7",
       "prefix_hash_before": "a2fe1dc637274316ed3bf1e3debdb61b848da9a19adb42155fae21a5298eeca3",
       "prompt_tokens": 16995,
       "reason": "window",
-      "render": "# regime\ndogma_version: 0\nphase: orient\nframe_version: 2\n\n# working set\ninterview-t1-0\ninterview-t1-1\ninterview-t1-f32-0\ninterview-t2-0\ninterview-t2-1\ninterview-t2-f84-1\nmechanical/listed:shot.png\nmechanical/notes.md\nmechanical/shot.png\nr6/call-r1/decision\n10 older entries elided\n\n\nYou changed these files since the session started: notes.md (new), shot.png (new).\n\nYou are in /scenario/worktree.",
+      "render": "# regime\ndogma_version: 21\nphase: orient\nframe_version: 2\n\n# working set\ninterview-t1-0\ninterview-t1-1\ninterview-t1-f32-0\ninterview-t2-0\ninterview-t2-1\ninterview-t2-f84-1\nmechanical/listed:shot.png\nmechanical/notes.md\nmechanical/shot.png\nr6/call-r1/decision\n10 older entries elided\n\n\nYou changed these files since the session started: notes.md (new), shot.png (new).\n\nYou are in /scenario/worktree.",
       "render_budget_tokens": 0,
       "render_fits": false,
       "render_over_budget": "elide",
@@ -1851,7 +1851,7 @@
       "t": 26607,
       "tail_tokens": 400,
       "tool_outputs": "reference",
-      "trunk_sha256": "d46a9e84c4a7a6bbb245020531db83cfad026b8810ad0560922b971e70c8c957",
+      "trunk_sha256": "a03ff8a984c1f9c6d9895ec233caaa63383a7736df5e46d00446a53c1886d016",
       "turn_steps_compacted": 1,
       "turn_steps_kept": 1,
       "window": 37615,
@@ -1920,7 +1920,7 @@
     },
     {
       "beside": 0,
-      "head_sha256": "8fc673500f85b1f93753e154d0489bf51dda6c23c22fb1ff0e9d2078d232c67a",
+      "head_sha256": "e11d2eccbbb273a3baff6edf3f2560929207da4631af35c501d5bfa5db5edcf0",
       "kind": "request",
       "lane": "trunk",
       "max_tokens": 512,
@@ -2074,7 +2074,7 @@
       "kind": "meditation",
       "native_reserve": 33000,
       "newest_turn_tokens": 16422,
-      "object_sha256": "c743e85236196ae227c0aa29f7be430a70880ec0cc8723a4d4cdfbee3916e556",
+      "object_sha256": "0e01ce787a4602a23d5725e7367ba3c33750bc671d369d4fa8b346e45a533072",
       "outputs": "\n# tool outputs\nThe following tool results were produced before context was compacted. They are listed as reference only: each was saved whole, and can be read at its path.\n\n- turn 1: update_record args={\"field\": \"decision\", \"content\": \"notes.md holds one line per decision\"}: 29 bytes, sha256 0b80d6fc6aaccad8c612e9a4bd7229ec2cd88c2cb7076cec16509ffa8630adbd, saved at /scenario/recording/files/0b80d6fc6aaccad8c612e9a4bd7229ec2cd88c2cb7076cec16509ffa8630adbd\n- turn 2: write args={\"path\":\"notes.md\"}: 53 bytes, sha256 aedbc95c605c0418a73bfb45f686bb2a708c2e573278c7db19efbeb83e8c12cb, saved at /scenario/recording/files/aedbc95c605c0418a73bfb45f686bb2a708c2e573278c7db19efbeb83e8c12cb\n- turn 2: edit args={\"file_path\":\"notes.md\"}: 125 bytes, sha256 0ef9a1eaae866e2bd48eb4e64254cc89e9b1ccf393e79e1208c32c069affa06c, saved at /scenario/recording/files/0ef9a1eaae866e2bd48eb4e64254cc89e9b1ccf393e79e1208c32c069affa06c\n- turn 2: read args={\"path\":\"notes.md\"}: 37 bytes, sha256 d38d308c9cee552c75d8adf7f0fcf9a871c1b3df5791ad0f076bfd603282a4dd, saved at /scenario/recording/files/d38d308c9cee552c75d8adf7f0fcf9a871c1b3df5791ad0f076bfd603282a4dd\n- turn 3: read args={\"path\":\"shot.png\"}: 12 bytes, sha256 7343d363d427f598455ae5f102d2f7e8c95efa14a6f454b8acc352c9458cac11, saved at /scenario/recording/files/7343d363d427f598455ae5f102d2f7e8c95efa14a6f454b8acc352c9458cac11\n",
       "phase_document": {
         "digest": "703ed3071af8e07b5783800ffcd39a0d73c95509b0e521b250ecd7b9292b96fb",
@@ -2088,11 +2088,11 @@
         ]
       },
       "placement": "message",
-      "prefix_hash_after": "1e42c4bd9c43208caeccd12905fab1819b377ce839219c0fe8e96fda5478dbae",
-      "prefix_hash_before": "192250178c43f485bbe6a41099d47b9789c449018679c89104fbc82e0b639baf",
+      "prefix_hash_after": "b035f5dcc6beaa6f1a8a84ae94de8967859d9f4beab6406331409560128db75e",
+      "prefix_hash_before": "3f17a51383db49d7c986c7fb9be79e63efb29b0654634a2d88e5de385740bf7d",
       "prompt_tokens": 17010,
       "reason": "window",
-      "render": "# regime\ndogma_version: 0\nphase: orient\nframe_version: 2\n\n# working set\ninterview-t1-0\ninterview-t1-1\ninterview-t1-f32-0\ninterview-t2-0\ninterview-t2-1\ninterview-t2-f84-1\nmechanical/listed:shot.png\nmechanical/notes.md\nmechanical/shot.png\nr6/call-r1/decision\n10 older entries elided\n\n\nYou changed these files since the session started: notes.md (new), shot.png (new).\n\nYou are in /scenario/worktree.",
+      "render": "# regime\ndogma_version: 21\nphase: orient\nframe_version: 2\n\n# working set\ninterview-t1-0\ninterview-t1-1\ninterview-t1-f32-0\ninterview-t2-0\ninterview-t2-1\ninterview-t2-f84-1\nmechanical/listed:shot.png\nmechanical/notes.md\nmechanical/shot.png\nr6/call-r1/decision\n10 older entries elided\n\n\nYou changed these files since the session started: notes.md (new), shot.png (new).\n\nYou are in /scenario/worktree.",
       "render_budget_tokens": 0,
       "render_fits": false,
       "render_over_budget": "elide",
@@ -2103,13 +2103,13 @@
       "t": 31342,
       "tail_tokens": 400,
       "tool_outputs": "reference",
-      "trunk_sha256": "447cfaf8910d8195a26268f24a849f93b75f06d9908fec7699ae140fa43a823d",
+      "trunk_sha256": "d083a0ca339357789bafa2bfb1200f36a6fb1e9893a228dfd2bf6ebe4baf3359",
       "window": 37615,
       "worktree_sha256": "63b3828745e24ce486aea446540c6faddb67f5fb0c16946c4c977e830f8908d8"
     },
     {
       "beside": 0,
-      "head_sha256": "1e42c4bd9c43208caeccd12905fab1819b377ce839219c0fe8e96fda5478dbae",
+      "head_sha256": "b035f5dcc6beaa6f1a8a84ae94de8967859d9f4beab6406331409560128db75e",
       "kind": "request",
       "lane": "trunk",
       "max_tokens": 459,
@@ -2289,7 +2289,7 @@
       "frame": "2",
       "kind": "meditation",
       "newest_turn_tokens": 16413,
-      "object_sha256": "c743e85236196ae227c0aa29f7be430a70880ec0cc8723a4d4cdfbee3916e556",
+      "object_sha256": "0e01ce787a4602a23d5725e7367ba3c33750bc671d369d4fa8b346e45a533072",
       "phase_document": {
         "digest": "703ed3071af8e07b5783800ffcd39a0d73c95509b0e521b250ecd7b9292b96fb",
         "ground_rules": "Discuss the user's intent, consider possible approaches, and provide multiple options with trade-offs when possible. When finished with orientation, call for a phase transition with propose_phase_transition.",
@@ -2302,10 +2302,10 @@
         ]
       },
       "placement": "message",
-      "prefix_hash_after": "58ebe68be530603ef937f2711f9b148842de079633e8d0da2a008fff0dbad60e",
-      "prefix_hash_before": "611aa6b7e8dd0136ca220f382c8db3b7cd4ca305ee0373909060296e015278e3",
+      "prefix_hash_after": "c85c347e48e19f5a11e4dfb34e76b617a61eab37924f2912e1bb363ad3f4c8a7",
+      "prefix_hash_before": "05427c6481a2a7be8acebb6ef01b61fd9b89f62df8d44af289220ccf9535cda7",
       "reason": "budget",
-      "render": "# regime\ndogma_version: 0\nphase: orient\nframe_version: 2\n\n# working set\ninterview-t1-0\tyou said, when asked\tlearned: notes.md reads back exactly as it was written\ninterview-t1-1\tyou said, when asked\tplan: write it, then read it back\ninterview-t1-f32-0\tyou said, when asked\tdecision: notes.md holds one line per decision\ninterview-t2-0\tyou said, when asked\tlearned: notes.md now holds the first decision\ninterview-t2-1\tyou said, when asked\tevidence: the write of notes.md\ninterview-t2-f84-1\tyou said, when asked\tevidence: decision: one line per decision\nmechanical/listed:shot.png\tfiles: listed shot.png\nmechanical/notes.md\tfiles: notes.md\nmechanical/shot.png\tfiles: shot.png\nr6/call-r1/decision\tyou noted\tnotes.md holds one line per decision\n\n\nYou changed these files since the session started: notes.md (new), shot.png (new).\n\nYou are in /scenario/worktree.",
+      "render": "# regime\ndogma_version: 21\nphase: orient\nframe_version: 2\n\n# working set\ninterview-t1-0\tyou said, when asked\tlearned: notes.md reads back exactly as it was written\ninterview-t1-1\tyou said, when asked\tplan: write it, then read it back\ninterview-t1-f32-0\tyou said, when asked\tdecision: notes.md holds one line per decision\ninterview-t2-0\tyou said, when asked\tlearned: notes.md now holds the first decision\ninterview-t2-1\tyou said, when asked\tevidence: the write of notes.md\ninterview-t2-f84-1\tyou said, when asked\tevidence: decision: one line per decision\nmechanical/listed:shot.png\tfiles: listed shot.png\nmechanical/notes.md\tfiles: notes.md\nmechanical/shot.png\tfiles: shot.png\nr6/call-r1/decision\tyou noted\tnotes.md holds one line per decision\n\n\nYou changed these files since the session started: notes.md (new), shot.png (new).\n\nYou are in /scenario/worktree.",
       "render_budget_tokens": 120,
       "render_fits": false,
       "render_over_budget": "tier",
@@ -2315,7 +2315,7 @@
       "t": 32813,
       "tail_tokens": 400,
       "tool_outputs": "reference",
-      "trunk_sha256": "f4023f3abcf7e7237e59b599fd2c072286b808e5932a72ae37e08046a186b270",
+      "trunk_sha256": "ab6a01bdaf55ff5a04eb7e8d25834368001f575410d5c706f224f30656c2c7c1",
       "warm": {
         "cache_n": 0,
         "predicted_n": 7,
@@ -2353,7 +2353,7 @@
     },
     {
       "beside": 0,
-      "head_sha256": "58ebe68be530603ef937f2711f9b148842de079633e8d0da2a008fff0dbad60e",
+      "head_sha256": "c85c347e48e19f5a11e4dfb34e76b617a61eab37924f2912e1bb363ad3f4c8a7",
       "kind": "request",
       "lane": "trunk",
       "max_tokens": 512,
@@ -2476,7 +2476,7 @@
     },
     {
       "beside": 0,
-      "head_sha256": "15ad8ed60d836ce03e815baf7c20537027ee04ec34ca32d322750838fa0d0496",
+      "head_sha256": "94e5c83417997cc4c04cfc668cd05f6a1f85e481d68a770dd2d274600ee7c78b",
       "kind": "request",
       "lane": "trunk",
       "max_tokens": 512,
@@ -2599,7 +2599,7 @@
     },
     {
       "beside": 0,
-      "head_sha256": "7ecd1d15a48a22872fc179990b533065657030a2eb6b751bdd791b4bbbce7c36",
+      "head_sha256": "41ae63c126910af65a9ef035b8f47d24598dd67d684f42328cf5f0199dfaf890",
       "kind": "request",
       "lane": "trunk",
       "max_tokens": 512,
@@ -2756,7 +2756,7 @@
     },
     {
       "fork": 194,
-      "head_sha256": "63a4bb650dac4ce912b2d4a6ad9dc74b6f6bbdd581d304cb2a3f3af0d2a48696",
+      "head_sha256": "b72c60ddd958486c28c56a8218234460e501daac3739935fea1342b459797160",
       "kind": "request",
       "lane": "interview",
       "max_tokens": 512,
@@ -2815,7 +2815,7 @@
     },
     {
       "beside": 0,
-      "head_sha256": "5613cebf261f6b20a36ca65b7e54c959b8d8a6cd8ad161ce955651db9bcc2fab",
+      "head_sha256": "090ae917a5e9c294de626ce4b8fea685024aacabaf418d84d41b38eaa508dac0",
       "kind": "request",
       "lane": "trunk",
       "max_tokens": 512,
@@ -2976,7 +2976,7 @@
     },
     {
       "fork": 209,
-      "head_sha256": "eb770c44d86f3d502b6610fa9213e6012523165b11557e80f034a412f8fba315",
+      "head_sha256": "a8072c308a8d3c7267499d7224e2f0b8d9468dd75ee6f00935eaf8ffe6ffb05b",
       "kind": "request",
       "lane": "interview",
       "max_tokens": 512,
@@ -2987,7 +2987,7 @@
     },
     {
       "beside": 1,
-      "head_sha256": "c0a3c36d84f1c22bbb9b36020a4a63fadd2ba7b9e7e04feaf2dfe10f12fa953b",
+      "head_sha256": "bced2fb7c9833971a11b721da12f02e6f4adc2fe656dbb9850b4d342dfe541bc",
       "kind": "request",
       "lane": "trunk",
       "max_tokens": 512,
@@ -3064,7 +3064,7 @@
     },
     {
       "fork": 215,
-      "head_sha256": "eb770c44d86f3d502b6610fa9213e6012523165b11557e80f034a412f8fba315",
+      "head_sha256": "a8072c308a8d3c7267499d7224e2f0b8d9468dd75ee6f00935eaf8ffe6ffb05b",
       "kind": "request",
       "lane": "interview",
       "max_tokens": 512,
@@ -3135,7 +3135,7 @@
     },
     {
       "fork": 221,
-      "head_sha256": "eb770c44d86f3d502b6610fa9213e6012523165b11557e80f034a412f8fba315",
+      "head_sha256": "a8072c308a8d3c7267499d7224e2f0b8d9468dd75ee6f00935eaf8ffe6ffb05b",
       "kind": "request",
       "lane": "interview",
       "max_tokens": 512,
@@ -3201,7 +3201,7 @@
     },
     {
       "fork": 226,
-      "head_sha256": "eb770c44d86f3d502b6610fa9213e6012523165b11557e80f034a412f8fba315",
+      "head_sha256": "a8072c308a8d3c7267499d7224e2f0b8d9468dd75ee6f00935eaf8ffe6ffb05b",
       "kind": "request",
       "lane": "interview",
       "max_tokens": 512,
@@ -3456,7 +3456,7 @@
     },
     {
       "beside": 0,
-      "head_sha256": "978aab5008356fe01ab5b96f47ec6c024d5f6ce6efe9aae8eeeef107ddf06524",
+      "head_sha256": "b49dea1e2fa370164f03276f6fb96c04717a5eab1e464bec20849fb6feabc0e6",
       "kind": "request",
       "lane": "trunk",
       "max_tokens": 512,
@@ -3600,7 +3600,7 @@
     },
     {
       "beside": 0,
-      "head_sha256": "cec25598643f20fa431f5fa4f9b7fe938b912060fe2c0e26f6e034beb509abcb",
+      "head_sha256": "f446933ca8551aec0a08ac86c8bf3d034f5859bf0c63a9b536fb455b62c94730",
       "kind": "request",
       "lane": "trunk",
       "max_tokens": 512,
@@ -3744,7 +3744,7 @@
     },
     {
       "beside": 0,
-      "head_sha256": "6d757f10364dad4932784ba7efdd498a625c4feaa76543af5da41107a87ea74f",
+      "head_sha256": "e39d6bcd65ac783a2992dd1a2bf23362556b81bb0c059c28d61cf5280fbc0095",
       "kind": "request",
       "lane": "trunk",
       "max_tokens": 512,
@@ -3884,7 +3884,7 @@
     },
     {
       "fork": 275,
-      "head_sha256": "c130425d481b750bae42829ee6da88d6761551e8c27815b485dd728fbb4654c3",
+      "head_sha256": "c9dce0f34d3355c85abea996bc087c93297695abcc99fec5b8c71ca1e1691e63",
       "kind": "request",
       "lane": "interview",
       "max_tokens": 512,
@@ -3895,7 +3895,7 @@
     },
     {
       "beside": 1,
-      "head_sha256": "5c2a6bbbbbfa273a6d14f01805c4adae67219b8799d9718d803ca15be70c741c",
+      "head_sha256": "c22b408a07bddf97aa64c9b3b96f30506e5951699575caf0e596791ed522f4be",
       "kind": "request",
       "lane": "trunk",
       "max_tokens": 512,
@@ -4123,7 +4123,7 @@
     },
     {
       "beside": 0,
-      "head_sha256": "ee5fc3405ff095604328417a01c37484b9014795e9c05892b1e3ffa7c9ac508b",
+      "head_sha256": "26de2246c36ffdeb8d9c3aa0850ba7922513720691fb4887085eef3f14f77bbb",
       "kind": "request",
       "lane": "trunk",
       "max_tokens": 512,
@@ -4295,7 +4295,7 @@
     },
     {
       "fork": 306,
-      "head_sha256": "887c3a97f8d15e7c9ddb4b46cf1ea7643d7e50f27543c10ca678151204e49c07",
+      "head_sha256": "7e77dfaeebc30528dfbdfc21ff20a420a92a875a197003f5f7f67beeb8b51549",
       "kind": "request",
       "lane": "interview",
       "max_tokens": 512,
@@ -4318,7 +4318,7 @@
       "kind": "meditation",
       "native_reserve": 33000,
       "newest_turn_tokens": 416,
-      "object_sha256": "e2583143a56e4eecf559d5407e4c7c40bbc8075839336f50ad89aa6541f129a8",
+      "object_sha256": "2d8d7cda4190ca76547f8a863079e85dbcab05e8b737c11ef0ddf1931ede2686",
       "outputs": "\n# tool outputs\nThe following tool results were produced before context was compacted. They are listed as reference only: each was saved whole, and can be read at its path.\n\n- turn 5: grep args={\"path\":\".\"}: 122 bytes, sha256 e2ac52d4dcfe32cadf2090f28e211140e33606a6d6b9b549487ba08f8e16fdfc, saved at /scenario/recording/files/e2ac52d4dcfe32cadf2090f28e211140e33606a6d6b9b549487ba08f8e16fdfc\n- turn 5: glob args={\"pattern\": \"*.md\"}: 164 bytes, sha256 a5888ea60691d90d952aa7cd54ef2138f31675e0e6de315c72fe4a507458a70b, saved at /scenario/recording/files/a5888ea60691d90d952aa7cd54ef2138f31675e0e6de315c72fe4a507458a70b\n- turn 6: bash args={\"command\":\"cat missing.txt\"}: 44 bytes, sha256 d9c819357969b391253af64a3451321c3942d71fbaf55dbdeb1c9b784995d7db, saved at /scenario/recording/files/d9c819357969b391253af64a3451321c3942d71fbaf55dbdeb1c9b784995d7db\n- turn 7: bash args={\"command\":\"sleep 5; echo built\"}: 593 bytes, sha256 98d489a06aac961b079dfae83e953c476a17325cb33dd372dd794b5acdb169e3, saved at /scenario/recording/files/98d489a06aac961b079dfae83e953c476a17325cb33dd372dd794b5acdb169e3\n- turn 7: bash args={\"command\":\"sleep 60\"}: 593 bytes, sha256 1374be6d9f9f05d62e3e392b52e623b9b11aadb1fae4ae0dd9cff609ca72799d, saved at /scenario/recording/files/1374be6d9f9f05d62e3e392b52e623b9b11aadb1fae4ae0dd9cff609ca72799d\n- turn 7: task_stop args={\"task_id\": \"bg_2\"}: 160 bytes, sha256 d5803609e239be1ef0d39263aaa0019cf1ab007d6ffecf77818698915325ec98, saved at /scenario/recording/files/d5803609e239be1ef0d39263aaa0019cf1ab007d6ffecf77818698915325ec98\n",
       "phase_document": {
         "digest": "703ed3071af8e07b5783800ffcd39a0d73c95509b0e521b250ecd7b9292b96fb",
@@ -4332,22 +4332,22 @@
         ]
       },
       "placement": "message",
-      "prefix_hash_after": "cc9a4e90d6b3de4a01617d8ffce3c5678335d1eeb0554e0055b32372f5b08ad4",
-      "prefix_hash_before": "ee5fc3405ff095604328417a01c37484b9014795e9c05892b1e3ffa7c9ac508b",
+      "prefix_hash_after": "b284ac3f1b45df9a4550337ee0360c948a392c578131787de53f67999b836035",
+      "prefix_hash_before": "26de2246c36ffdeb8d9c3aa0850ba7922513720691fb4887085eef3f14f77bbb",
       "prompt_tokens": 5617,
       "reason": "window",
-      "render": "# regime\ndogma_version: 0\nphase: orient\nframe_version: 2\n\n# working set\ninterview-t1-0\ninterview-t1-1\ninterview-t1-f32-0\ninterview-t2-0\ninterview-t2-1\ninterview-t2-f84-1\ninterview-t6-0\nmechanical/listed:shot.png\nmechanical/notes.md\nmechanical/shot.png\nr6/call-r1/decision\n11 older entries elided\n\n\nYou changed these files since the session started: notes.md (new), shot.png (new).\n\nYou are in /scenario/worktree.",
+      "render": "# regime\ndogma_version: 21\nphase: orient\nframe_version: 2\n\n# working set\ninterview-t1-0\ninterview-t1-1\ninterview-t1-f32-0\ninterview-t2-0\ninterview-t2-1\ninterview-t2-f84-1\ninterview-t6-0\nmechanical/listed:shot.png\nmechanical/notes.md\nmechanical/shot.png\nr6/call-r1/decision\n11 older entries elided\n\n\nYou changed these files since the session started: notes.md (new), shot.png (new).\n\nYou are in /scenario/worktree.",
       "render_budget_tokens": 0,
       "render_fits": false,
       "render_over_budget": "elide",
       "render_reduced": 11,
-      "render_tokens": 74,
+      "render_tokens": 75,
       "render_window_line": 4000,
       "seq": 308,
       "t": 58831,
       "tail_tokens": 400,
       "tool_outputs": "reference",
-      "trunk_sha256": "9c4948af887c6008cf4c8da6a2dddc0cfb7656d674206e68b3fd48935b2a9bdc",
+      "trunk_sha256": "495cec89bd7a519127184f661ae3e93ae1c019f1f6a0f6540eb4fec4a138452b",
       "turn_steps_compacted": 0,
       "turn_steps_kept": 1,
       "window": 37615,
@@ -4362,7 +4362,7 @@
     },
     {
       "beside": 1,
-      "head_sha256": "a45e719f14d072e1337baffa6a528dbbb00d1c0f931fa1d275be7315aafa9596",
+      "head_sha256": "0c703abdcc6e85472cb28c3fe120f1695577f18a02c45a2a8110656e6111032e",
       "kind": "request",
       "lane": "trunk",
       "max_tokens": 512,
@@ -4585,7 +4585,7 @@
     },
     {
       "fork": 324,
-      "head_sha256": "a850fbd0c7beebb253e4af09991b48f5a8239fe3786267602df22540c47f4c9f",
+      "head_sha256": "103a7ffecc110ef1bca7406dd7720eade1f4e30ed87e8d2931c543e1dd9198d8",
       "kind": "request",
       "lane": "interview",
       "max_tokens": 512,
@@ -4596,7 +4596,7 @@
     },
     {
       "beside": 1,
-      "head_sha256": "7f2f12b168fc2fa8e5374ea07cca1876c06ffb2c7816490671f6abfaeabe02c2",
+      "head_sha256": "b2f511506d48638ed9912d69f9bd07b738ad592abe5c95575ab1c50fc0cfd83f",
       "kind": "request",
       "lane": "trunk",
       "max_tokens": 512,
@@ -4804,7 +4804,7 @@
     },
     {
       "beside": 0,
-      "head_sha256": "64dae6ad944238a2ebb3c0bca47329e1d33914b7e9d02efd11465d2fd1dc3455",
+      "head_sha256": "0a79afdb353757eabfccfca3dfe512a9122c1df68f6ae74f3642e61b2eddd43f",
       "kind": "request",
       "lane": "trunk",
       "max_tokens": 512,
@@ -4938,7 +4938,7 @@
     },
     {
       "beside": 0,
-      "head_sha256": "ab998c763bb74b499883440a698d8496b5c9dbc29b84d4dc8ed5d74a61d09d35",
+      "head_sha256": "1ebaadf8e344b91d9b7442fd51c1691851f9311fa3a17e4d988de9887dcc9120",
       "kind": "request",
       "lane": "trunk",
       "max_tokens": 512,
@@ -5090,7 +5090,7 @@
     },
     {
       "beside": 0,
-      "head_sha256": "b36db4d145f00791574bb86c99d2a202ed10789ec51080e2d970ef6eb8b1eac1",
+      "head_sha256": "61e279d02c4e6658a373eca6dd8956d08162e3a8ad23b6f4cb24442b96e8a3af",
       "kind": "request",
       "lane": "trunk",
       "max_tokens": 512,
@@ -5345,7 +5345,7 @@
     },
     {
       "beside": 0,
-      "head_sha256": "8bf0131bf4b913896584710b77a2e9ba393cf9ceeaeeda16cbfb6dbcceac337f",
+      "head_sha256": "5c6f635e04169b0b8ddf870defd02a1537a14c004ede3bd019060ced95fdf91c",
       "kind": "request",
       "lane": "trunk",
       "max_tokens": 512,
@@ -5489,7 +5489,7 @@
     },
     {
       "beside": 0,
-      "head_sha256": "d927bf8ca89e9dda86f78f810a2956e08041c87d8400aa6c93c1db59037f4b42",
+      "head_sha256": "78fdf3e5b44a685069fa7839d1dd26a6cf71137ecba020b1fa5375e6837706d3",
       "kind": "request",
       "lane": "trunk",
       "max_tokens": 512,
@@ -5633,7 +5633,7 @@
     },
     {
       "beside": 0,
-      "head_sha256": "ce925e608a65c4de43957d9574eff80548624b6ae067e05dfa1d595d6322e813",
+      "head_sha256": "f00c66b121259658de5af3410bfd7adea19e97bcdae2e269228367921cad5671",
       "kind": "request",
       "lane": "trunk",
       "max_tokens": 512,
@@ -5777,7 +5777,7 @@
     },
     {
       "beside": 0,
-      "head_sha256": "e0e57e16d36c3a329b19464a765a7c0c3e82eef566c06c41c5a54a7687fb4f29",
+      "head_sha256": "bcf8382676f54d6b64724099325789dfb3dad3f0eabb32aca103fa94cc2e5004",
       "kind": "request",
       "lane": "trunk",
       "max_tokens": 512,
@@ -5934,7 +5934,7 @@
     },
     {
       "beside": 0,
-      "head_sha256": "4c26024aafe6258641425649c5f102ace03da3bcdba52cce4c5c36a345232332",
+      "head_sha256": "786addc969952e1b040c910f5e753277ef97b5254ed45b30e1e8d711dc10dc36",
       "kind": "request",
       "lane": "trunk",
       "max_tokens": 512,
@@ -6089,7 +6089,7 @@
     },
     {
       "beside": 0,
-      "head_sha256": "338f4814956c3178df2a88007ced4ea77e7842d8789512f45dceba7ade055fd8",
+      "head_sha256": "2ae3113a73ecf25d51f91f996c67a92b5986350027956b1acffa3ad889d641dd",
       "kind": "request",
       "lane": "trunk",
       "max_tokens": 512,
@@ -6245,7 +6245,7 @@
     },
     {
       "fork": 447,
-      "head_sha256": "338f4814956c3178df2a88007ced4ea77e7842d8789512f45dceba7ade055fd8",
+      "head_sha256": "2ae3113a73ecf25d51f91f996c67a92b5986350027956b1acffa3ad889d641dd",
       "kind": "request",
       "lane": "interview",
       "max_tokens": 512,
@@ -6317,7 +6317,7 @@
     },
     {
       "beside": 0,
-      "head_sha256": "73081e75c3753317e3508ffa432b22a9e9de6d0d0ce379cc3254aadb9988ff70",
+      "head_sha256": "531ca833a86cdee101c26308761956d875b7e67b4ebf1b41081e4aec01d1be21",
       "kind": "request",
       "lane": "trunk",
       "max_tokens": 512,
@@ -6480,7 +6480,7 @@
     },
     {
       "fork": 467,
-      "head_sha256": "64a050d88f556707d4b95ba3f5c3a96f380d74375c8f8f22621bfb457f642a7b",
+      "head_sha256": "e747368d88b73ede2808c93dc2c41c4967631959da0ccd9ae92422038d6a993c",
       "kind": "request",
       "lane": "interview",
       "max_tokens": 512,
@@ -6491,7 +6491,7 @@
     },
     {
       "beside": 1,
-      "head_sha256": "e295a92974f16a09680f2632b20881dbc3e7587840f4e00d18e584efbec899de",
+      "head_sha256": "ab5bd81dc9a72e59682aa53f147e36453379e28289cfd10ff43f976b2bdde31c",
       "kind": "request",
       "lane": "trunk",
       "max_tokens": 512,
@@ -6707,7 +6707,7 @@
     },
     {
       "beside": 0,
-      "head_sha256": "f23ba6eeb33d754abda5662f2daa864d99e39cf1d9a46cf8f653b7342a682ce2",
+      "head_sha256": "1ab326943fcb74b5f370e66794ee4fcc55756cd0eb0b9ecf3937e35e3e01d49b",
       "kind": "request",
       "lane": "trunk",
       "max_tokens": 512,
@@ -6927,7 +6927,7 @@
     },
     {
       "fork": 503,
-      "head_sha256": "998b278a0b3dc2e85918e5a0c2d78a65b956919b5d7ebef603cb1a0ea8a3d7b5",
+      "head_sha256": "a0caa4a96251809af98590605b4917b805f229c3dea2f4a033da18608b3b889a",
       "kind": "request",
       "lane": "audit",
       "max_tokens": 512,
@@ -6950,7 +6950,7 @@
     },
     {
       "fork": 505,
-      "head_sha256": "998b278a0b3dc2e85918e5a0c2d78a65b956919b5d7ebef603cb1a0ea8a3d7b5",
+      "head_sha256": "a0caa4a96251809af98590605b4917b805f229c3dea2f4a033da18608b3b889a",
       "kind": "request",
       "lane": "audit",
       "max_tokens": 512,
@@ -7024,7 +7024,7 @@
       "t": 110407
     },
     {
-      "head_sha256": "196431c192a466a50fd7ca76b03952f26a73934de1b2d7d7e61abaf281a31f5f",
+      "head_sha256": "b3d937befa7ffb3c3f9ce515be2ea97e8782b4edbda8cd837b6ce6adaf7666cc",
       "kind": "request",
       "lane": "warm",
       "max_tokens": 1,
@@ -7068,7 +7068,7 @@
       "carry": "render",
       "frame": "2",
       "kind": "meditation",
-      "object_sha256": "a7ed0f23701e658a39c7f9dbcd632695cfa6f01e7901727c6af96f58583d1557",
+      "object_sha256": "71452e90e7af2eba7d6ea8468e921a274a125053ebf6a45b3878f9052c330096",
       "outputs": "\n# tool outputs\nThe following tool results were produced before context was compacted. They are listed as reference only: each was saved whole, and can be read at its path.\n\n- turn 8: bash args={\"command\":\"python3 -c \\\"print('x' * 20000)\\\"\"}: 20001 bytes, sha256 a168e7ecc1c0f191c22ad3221fd52fa3e5e4d8883d085099d3fbf500cadf3f8a, saved at /scenario/recording/files/a168e7ecc1c0f191c22ad3221fd52fa3e5e4d8883d085099d3fbf500cadf3f8a\n- turn 8: bash args={\"command\":\"seq 1 2000\"}: 8893 bytes, sha256 6251e5743b6fd6a7d606130bdf7c15077ce85ebd3a0fdee284d15a46df199e38, saved at /scenario/recording/files/6251e5743b6fd6a7d606130bdf7c15077ce85ebd3a0fdee284d15a46df199e38\n",
       "phase_document": {
         "digest": "703ed3071af8e07b5783800ffcd39a0d73c95509b0e521b250ecd7b9292b96fb",
@@ -7082,10 +7082,10 @@
         ]
       },
       "placement": "message",
-      "prefix_hash_after": "d5dcbe798f1d5a7cc43f8dd54976173b8f55d89ade42e00455f8187f8158fcd8",
-      "prefix_hash_before": "998b278a0b3dc2e85918e5a0c2d78a65b956919b5d7ebef603cb1a0ea8a3d7b5",
+      "prefix_hash_after": "2f46bd7d625b61dbff6786c816de483d21777b316036df82965ebe46a214b84b",
+      "prefix_hash_before": "a0caa4a96251809af98590605b4917b805f229c3dea2f4a033da18608b3b889a",
       "reason": "cadence",
-      "render": "# regime\ndogma_version: 0\nphase: orient\nframe_version: 2\n\n# working set\ninterview-t1-1\tyou said, when asked\tplan: write it, then read it back\ninterview-t1-f32-0\tyou said, when asked\tdecision: notes.md holds one line per decision\ninterview-t14-2\tyou said, when asked\tdecision: notes.md holds the decisions as a Markdown list\ninterview-t2-0\tyou said, when asked\tlearned: notes.md now holds the first decision\ninterview-t2-1\tyou said, when asked\tevidence: the write of notes.md\ninterview-t2-f84-1\tyou said, when asked\tevidence: decision: one line per decision\ninterview-t6-0\tyou said, when asked\tgotcha: missing.txt does not exist — IMPLICATION: create it before showing it\ninterview-t8-0\tyou said, when asked\tevidence: xxxxxxxxxx\ninterview-t8-1\tyou said, when asked\tpointer: the long line is 9000 x's (the output of call-b2)\nmechanical/listed:shot.png\tfiles: listed shot.png\nmechanical/notes.md\tfiles: notes.md\nmechanical/shot.png\tfiles: shot.png\nr374/refute-1.1\tyou said, when asked\tfact: the build takes longer than the step's timeout\nr374/refute-1.1-claim\tyou said, when asked\twas: fact: the build finishes in a few seconds (held at 7/10), wrong because the command timed out after 16000ms [call call-b7]\n\n\nYou changed these files since the session started: notes.md (new), shot.png (new).\n\nYou are in /scenario/worktree.",
+      "render": "# regime\ndogma_version: 21\nphase: orient\nframe_version: 2\n\n# working set\ninterview-t1-1\tyou said, when asked\tplan: write it, then read it back\ninterview-t1-f32-0\tyou said, when asked\tdecision: notes.md holds one line per decision\ninterview-t14-2\tyou said, when asked\tdecision: notes.md holds the decisions as a Markdown list\ninterview-t2-0\tyou said, when asked\tlearned: notes.md now holds the first decision\ninterview-t2-1\tyou said, when asked\tevidence: the write of notes.md\ninterview-t2-f84-1\tyou said, when asked\tevidence: decision: one line per decision\ninterview-t6-0\tyou said, when asked\tgotcha: missing.txt does not exist — IMPLICATION: create it before showing it\ninterview-t8-0\tyou said, when asked\tevidence: xxxxxxxxxx\ninterview-t8-1\tyou said, when asked\tpointer: the long line is 9000 x's (the output of call-b2)\nmechanical/listed:shot.png\tfiles: listed shot.png\nmechanical/notes.md\tfiles: notes.md\nmechanical/shot.png\tfiles: shot.png\nr374/refute-1.1\tyou said, when asked\tfact: the build takes longer than the step's timeout\nr374/refute-1.1-claim\tyou said, when asked\twas: fact: the build finishes in a few seconds (held at 7/10), wrong because the command timed out after 16000ms [call call-b7]\n\n\nYou changed these files since the session started: notes.md (new), shot.png (new).\n\nYou are in /scenario/worktree.",
       "render_budget_tokens": 120,
       "render_fits": false,
       "render_over_budget": "tier",
@@ -7095,7 +7095,7 @@
       "t": 110850,
       "tail_tokens": 400,
       "tool_outputs": "reference",
-      "trunk_sha256": "36416617cd57bb4f7e8ccfdd50928bd5ff216f572d80b65f50ddad8fb52e4479",
+      "trunk_sha256": "f3c68e76e8f9ecdf947d1a53feb13ea3842cc846216483ed8f3b471d4c132ec4",
       "warm": {
         "cache_n": 0,
         "predicted_n": 7,
@@ -7134,7 +7134,7 @@
     },
     {
       "beside": 0,
-      "head_sha256": "d5dcbe798f1d5a7cc43f8dd54976173b8f55d89ade42e00455f8187f8158fcd8",
+      "head_sha256": "2f46bd7d625b61dbff6786c816de483d21777b316036df82965ebe46a214b84b",
       "kind": "request",
       "lane": "trunk",
       "max_tokens": 512,
@@ -7274,7 +7274,7 @@
     },
     {
       "fork": 529,
-      "head_sha256": "eb8f6c202a0937b2fa84cbde85cc3fc1550d198c7d7fc7b3ffcae2118e28079a",
+      "head_sha256": "2a556c198449790bf4f3f7c362fd0383161e528409493adf76d920e215881cb4",
       "kind": "request",
       "lane": "interview",
       "max_tokens": 512,
@@ -7412,7 +7412,7 @@
     },
     {
       "fork": 540,
-      "head_sha256": "eb8f6c202a0937b2fa84cbde85cc3fc1550d198c7d7fc7b3ffcae2118e28079a",
+      "head_sha256": "2a556c198449790bf4f3f7c362fd0383161e528409493adf76d920e215881cb4",
       "kind": "request",
       "lane": "audit",
       "max_tokens": 512,
@@ -7435,7 +7435,7 @@
     },
     {
       "fork": 542,
-      "head_sha256": "eb8f6c202a0937b2fa84cbde85cc3fc1550d198c7d7fc7b3ffcae2118e28079a",
+      "head_sha256": "2a556c198449790bf4f3f7c362fd0383161e528409493adf76d920e215881cb4",
       "kind": "request",
       "lane": "audit",
       "max_tokens": 512,
@@ -7509,7 +7509,7 @@
       "t": 116860
     },
     {
-      "head_sha256": "a069c0c248bdf02f5d9b45c0a4ea40ce90bab9781592f5baa5f684e6ff790e9f",
+      "head_sha256": "9702f707bc736a5e5c6c156fcf8651590a132900bc91679ad9407bde4d2b0230",
       "kind": "request",
       "lane": "warm",
       "max_tokens": 1,
@@ -7553,7 +7553,7 @@
       "carry": "render",
       "frame": "2",
       "kind": "meditation",
-      "object_sha256": "a7ed0f23701e658a39c7f9dbcd632695cfa6f01e7901727c6af96f58583d1557",
+      "object_sha256": "71452e90e7af2eba7d6ea8468e921a274a125053ebf6a45b3878f9052c330096",
       "outputs": "\n# tool outputs\nThe following tool results were produced before context was compacted. They are listed as reference only: each was saved whole, and can be read at its path.\n\n- turn 10: bash args={\"command\":\"sleep 30\"}: 98 bytes, sha256 982df996395efea89420c265324be791d77a83390a151782a20dd122403a949c, saved at /scenario/recording/files/982df996395efea89420c265324be791d77a83390a151782a20dd122403a949c\n- turn 11: bash args={\"command\":\"echo count-one\"}: 10 bytes, sha256 7e0143d929fe4a2f57413136aa502510f6dbddd21a06a6037c791b119ddb3983, saved at /scenario/recording/files/7e0143d929fe4a2f57413136aa502510f6dbddd21a06a6037c791b119ddb3983\n- turn 11: bash args={\"command\":\"echo count-two\"}: 10 bytes, sha256 710280b2b72f06ea698589dd7a570da98e7c33eed872b04c3869f53ff8944c1d, saved at /scenario/recording/files/710280b2b72f06ea698589dd7a570da98e7c33eed872b04c3869f53ff8944c1d\n- turn 11: bash args={\"command\":\"echo count-three\"}: 12 bytes, sha256 02b4be205d3db534b504e27651d49628a5b0f276e80bcbc2c73b67a28c254cb9, saved at /scenario/recording/files/02b4be205d3db534b504e27651d49628a5b0f276e80bcbc2c73b67a28c254cb9\n",
       "phase": {
         "from": "orient",
@@ -7575,20 +7575,20 @@
         ]
       },
       "placement": "message",
-      "prefix_hash_after": "eaac39de6797719b57c33322248dbf8682efd984980e6e65a47aac99000ac427",
-      "prefix_hash_before": "eb8f6c202a0937b2fa84cbde85cc3fc1550d198c7d7fc7b3ffcae2118e28079a",
+      "prefix_hash_after": "b5ea10ad75cb8d356fab98c93b47729288cc71201c02dbbfe76a12a9e100c225",
+      "prefix_hash_before": "2a556c198449790bf4f3f7c362fd0383161e528409493adf76d920e215881cb4",
       "reason": "phase",
-      "render": "# regime\ndogma_version: 0\nphase: plan\nframe_version: 2\n\n# working set\ninterview-t1-1\tyou said, when asked\tplan: write it, then read it back\ninterview-t1-f32-0\tyou said, when asked\tdecision: notes.md holds one line per decision\ninterview-t14-2\tyou said, when asked\tdecision: notes.md holds the decisions as a Markdown list\ninterview-t2-0\tyou said, when asked\tlearned: notes.md now holds the first decision\ninterview-t2-1\tyou said, when asked\tevidence: the write of notes.md\ninterview-t2-f84-1\tyou said, when asked\tevidence: decision: one line per decision\ninterview-t6-0\tyou said, when asked\tgotcha: missing.txt does not exist — IMPLICATION: create it before showing it\ninterview-t8-0\tyou said, when asked\tevidence: xxxxxxxxxx\ninterview-t8-1\tyou said, when asked\tpointer: the long line is 9000 x's (the output of call-b2)\nmechanical/listed:shot.png\tfiles: listed shot.png\nmechanical/notes.md\tfiles: notes.md\nmechanical/shot.png\tfiles: shot.png\nr374/refute-1.1\tyou said, when asked\tfact: the build takes longer than the step's timeout\nr374/refute-1.1-claim\tyou said, when asked\twas: fact: the build finishes in a few seconds (held at 7/10), wrong because the command timed out after 16000ms [call call-b7]\n\n\nYou changed these files since the session started: notes.md (new), shot.png (new).\n\nYou are in /scenario/worktree.",
+      "render": "# regime\ndogma_version: 21\nphase: plan\nframe_version: 2\n\n# working set\ninterview-t1-1\tyou said, when asked\tplan: write it, then read it back\ninterview-t1-f32-0\tyou said, when asked\tdecision: notes.md holds one line per decision\ninterview-t14-2\tyou said, when asked\tdecision: notes.md holds the decisions as a Markdown list\ninterview-t2-0\tyou said, when asked\tlearned: notes.md now holds the first decision\ninterview-t2-1\tyou said, when asked\tevidence: the write of notes.md\ninterview-t2-f84-1\tyou said, when asked\tevidence: decision: one line per decision\ninterview-t6-0\tyou said, when asked\tgotcha: missing.txt does not exist — IMPLICATION: create it before showing it\ninterview-t8-0\tyou said, when asked\tevidence: xxxxxxxxxx\ninterview-t8-1\tyou said, when asked\tpointer: the long line is 9000 x's (the output of call-b2)\nmechanical/listed:shot.png\tfiles: listed shot.png\nmechanical/notes.md\tfiles: notes.md\nmechanical/shot.png\tfiles: shot.png\nr374/refute-1.1\tyou said, when asked\tfact: the build takes longer than the step's timeout\nr374/refute-1.1-claim\tyou said, when asked\twas: fact: the build finishes in a few seconds (held at 7/10), wrong because the command timed out after 16000ms [call call-b7]\n\n\nYou changed these files since the session started: notes.md (new), shot.png (new).\n\nYou are in /scenario/worktree.",
       "render_budget_tokens": 120,
       "render_fits": false,
       "render_over_budget": "tier",
       "render_reduced": 0,
-      "render_tokens": 301,
+      "render_tokens": 302,
       "seq": 553,
       "t": 117303,
       "tail_tokens": 400,
       "tool_outputs": "reference",
-      "trunk_sha256": "1a370ae475c57e99a677f92f020427c675f11ed5be87fc60e12e63124eda6ea3",
+      "trunk_sha256": "a0961fa4f7f5fc0b1a87f2567fdcc5ca63fb150e4d88a09a3834902dd0bbf46f",
       "warm": {
         "cache_n": 0,
         "predicted_n": 7,
@@ -7598,7 +7598,7 @@
     },
     {
       "entry": {
-        "id": "operator-554",
+        "id": "user-554",
         "text": "decision: notes.md holds the decisions as a sorted Markdown list"
       },
       "kind": "patch",
@@ -7632,7 +7632,7 @@
     },
     {
       "beside": 0,
-      "head_sha256": "eaac39de6797719b57c33322248dbf8682efd984980e6e65a47aac99000ac427",
+      "head_sha256": "b5ea10ad75cb8d356fab98c93b47729288cc71201c02dbbfe76a12a9e100c225",
       "kind": "request",
       "lane": "trunk",
       "max_tokens": 512,
@@ -7784,7 +7784,7 @@
     },
     {
       "fork": 568,
-      "head_sha256": "03907b3e71609e49eda497ee961ac5d4f94ac402cc61e9618bc0eb83fbb7269a",
+      "head_sha256": "88870d7c90e7c588daf3d46dbef1d1d21f5c991a05bf2d916c28dee20a037bec",
       "kind": "request",
       "lane": "interview",
       "max_tokens": 512,
@@ -7795,7 +7795,7 @@
     },
     {
       "beside": 1,
-      "head_sha256": "d87467d875d8234edd472af051874911b9d024f016b4b35ee342acdb0ee2ead8",
+      "head_sha256": "1984a05760026fb4e6ff0bb69b66717c7bbe6365168b2c03f6ee93f5a0a1a1ff",
       "kind": "request",
       "lane": "trunk",
       "max_tokens": 512,
@@ -7999,7 +7999,7 @@
     },
     {
       "beside": 0,
-      "head_sha256": "eaac39de6797719b57c33322248dbf8682efd984980e6e65a47aac99000ac427",
+      "head_sha256": "b5ea10ad75cb8d356fab98c93b47729288cc71201c02dbbfe76a12a9e100c225",
       "kind": "request",
       "lane": "trunk",
       "max_tokens": 512,
@@ -8171,7 +8171,7 @@
     },
     {
       "fork": 597,
-      "head_sha256": "16295e01c20c6c72fd51ff4361b0bd3f1df734468663c25982cd809715343a44",
+      "head_sha256": "cc22466672e7a9492bb245a97d38ba7e7f3193e26975825987de2343649bdc41",
       "kind": "request",
       "lane": "interview",
       "max_tokens": 512,
@@ -8182,7 +8182,7 @@
     },
     {
       "beside": 1,
-      "head_sha256": "c48476e9ae5edeb70ef8e9ffde543f133fb847785c0dd1bdf78470d1a880e6fc",
+      "head_sha256": "4674982aa299726b42f657048f4ededf03a4f7d18fe994c6c1602067780b15a8",
       "kind": "request",
       "lane": "trunk",
       "max_tokens": 512,
@@ -8342,7 +8342,7 @@
       "entry": {
         "authority": "operator",
         "category": "side",
-        "id": "operator-612",
+        "id": "user-612",
         "kept_from": "tool-result",
         "text": "the list could be sorted"
       },
@@ -8374,7 +8374,7 @@
     },
     {
       "fork": 614,
-      "head_sha256": "16295e01c20c6c72fd51ff4361b0bd3f1df734468663c25982cd809715343a44",
+      "head_sha256": "cc22466672e7a9492bb245a97d38ba7e7f3193e26975825987de2343649bdc41",
       "kind": "request",
       "lane": "interview",
       "max_tokens": 512,
@@ -8425,7 +8425,7 @@
     {
       "entry": {
         "authority": "operator",
-        "id": "operator-620",
+        "id": "user-620",
         "kept_from": "answer",
         "text": "To sort the list."
       },
@@ -8437,7 +8437,7 @@
     },
     {
       "call": 591,
-      "entry": "operator-620",
+      "entry": "user-620",
       "from": 617,
       "kind": "wrap.accepted",
       "seq": 621,
@@ -8461,11 +8461,11 @@
       "bytes_after": 17,
       "bytes_before": 31,
       "call": 591,
-      "entry": "operator-620",
+      "entry": "user-620",
       "from": 617,
       "kind": "wrapped",
-      "prefix_after": "677294732c7ee7451a11502d27def72d4c81bba48c3150ecf24a130cc3f1a22a",
-      "prefix_before": "bf0396c3ac19cb17f4e442d4745cb54754f4783c78a23139202d5c833a0367a8",
+      "prefix_after": "5fb0f7283a85d8680b0f1e2a33a3a958894ea6e94c2126666aceedf59a372a4d",
+      "prefix_before": "1e1b78eb30487ac17b120c847f659bb40a02a9d02092ce2bdc7e3fc9a2f4956d",
       "seq": 624,
       "t": 134768,
       "tail_tokens": 24,
@@ -8474,7 +8474,7 @@
     },
     {
       "beside": 0,
-      "head_sha256": "677294732c7ee7451a11502d27def72d4c81bba48c3150ecf24a130cc3f1a22a",
+      "head_sha256": "5fb0f7283a85d8680b0f1e2a33a3a958894ea6e94c2126666aceedf59a372a4d",
       "kind": "request",
       "lane": "trunk",
       "max_tokens": 512,
@@ -8625,7 +8625,7 @@
     },
     {
       "fork": 635,
-      "head_sha256": "5aa5c8593df5e7e1b8cac5346fe01f3a598e4be7f3bab061394f4734d937440a",
+      "head_sha256": "55582a576e4be1fd3c584255a8c1a425c176b92ced1e86e49026c52878dd34ff",
       "kind": "request",
       "lane": "interview",
       "max_tokens": 512,
@@ -8757,7 +8757,7 @@
     },
     {
       "beside": 0,
-      "head_sha256": "5aa5c8593df5e7e1b8cac5346fe01f3a598e4be7f3bab061394f4734d937440a",
+      "head_sha256": "55582a576e4be1fd3c584255a8c1a425c176b92ced1e86e49026c52878dd34ff",
       "kind": "request",
       "lane": "trunk",
       "max_tokens": 512,
@@ -8897,7 +8897,7 @@
     },
     {
       "fork": 658,
-      "head_sha256": "add2cffd7a5d28137fb910123bd08327e0a0dc4a8acd5116291cf5c9ffcf70e9",
+      "head_sha256": "a3674aaf83082dc6dfea2d8c5006bad44f2f6dab8bfdbbed39bef3e7d800c6f9",
       "kind": "request",
       "lane": "interview",
       "max_tokens": 512,
@@ -9069,7 +9069,7 @@
     },
     {
       "beside": 0,
-      "head_sha256": "add2cffd7a5d28137fb910123bd08327e0a0dc4a8acd5116291cf5c9ffcf70e9",
+      "head_sha256": "a3674aaf83082dc6dfea2d8c5006bad44f2f6dab8bfdbbed39bef3e7d800c6f9",
       "kind": "request",
       "lane": "trunk",
       "max_tokens": 512,
@@ -9223,7 +9223,7 @@
     },
     {
       "beside": 0,
-      "head_sha256": "2e4983b70d5ce1595b6f1bbef6ff39a71cbddc1623cd8c89aafaf854705d870c",
+      "head_sha256": "04001d2ffb46d255c65811eeb50b4a620392691b8944280a4631dddaa7189eb0",
       "kind": "request",
       "lane": "trunk",
       "max_tokens": 512,
@@ -9392,7 +9392,7 @@
     },
     {
       "fork": 698,
-      "head_sha256": "58eaf3433772ca9d993a0dc0d45e4fe14a765ab2a5402ad99528545bfcf5cc88",
+      "head_sha256": "ae2f65b3cc5e94c09b62629752a46290f4e31aacdb475bf6956085f66749fb5d",
       "kind": "request",
       "lane": "interview",
       "max_tokens": 512,
@@ -9403,7 +9403,7 @@
     },
     {
       "beside": 1,
-      "head_sha256": "22ec8318769f41a4417eb70e8fdb91574d5f6b9f744a75e492649ff30fe27fc9",
+      "head_sha256": "9bb0e6dc1f952e58437ae1c9af707767bbeda38d01fad5a082410a094292e67a",
       "kind": "request",
       "lane": "trunk",
       "max_tokens": 512,
@@ -9591,7 +9591,7 @@
     },
     {
       "fork": 714,
-      "head_sha256": "1a89fd3e734693ad28aaa2cf2c155b5a2279236022cf0ed42b37f58d09c5f684",
+      "head_sha256": "1b3b9ec708d0fad2aa618a1fda5a5d40fb830e3421be9e63e80ae0714076ecbc",
       "kind": "request",
       "lane": "audit",
       "max_tokens": 512,
@@ -9614,7 +9614,7 @@
     },
     {
       "fork": 716,
-      "head_sha256": "1a89fd3e734693ad28aaa2cf2c155b5a2279236022cf0ed42b37f58d09c5f684",
+      "head_sha256": "1b3b9ec708d0fad2aa618a1fda5a5d40fb830e3421be9e63e80ae0714076ecbc",
       "kind": "request",
       "lane": "audit",
       "max_tokens": 512,
@@ -9688,12 +9688,12 @@
       "t": 151576
     },
     {
-      "head_sha256": "a1e26808f09adbf2f4a115c5bce3f53b37f0956bd6652566333a62952bca18bb",
+      "head_sha256": "41b2c9d356ce29e4fbb9d07c6d70df09a79aa65b3589707490fa6b623e981313",
       "kind": "request",
       "lane": "warm",
       "max_tokens": 1,
       "seq": 724,
-      "sized_tokens": 1628,
+      "sized_tokens": 1625,
       "t": 151636,
       "turn": 21
     },
@@ -9732,10 +9732,10 @@
       "carry": "render",
       "frame": "2",
       "kind": "meditation",
-      "object_sha256": "f696bc6d0c892cb8f5ab93e331a39b0cba8f0e35c8de61d080c3ebf142c9b303",
+      "object_sha256": "e8265c426d86f6800f535c96bee071a71855d99da22469b03f7a68de38c25486",
       "operator_changes": [
         {
-          "entry": "operator-554",
+          "entry": "user-554",
           "kind": "edit"
         }
       ],
@@ -9752,20 +9752,20 @@
         ]
       },
       "placement": "message",
-      "prefix_hash_after": "f3ba32b64e67872dfbc1fabd29339a280b6a4215305a06771e7be55ca877362e",
-      "prefix_hash_before": "1a89fd3e734693ad28aaa2cf2c155b5a2279236022cf0ed42b37f58d09c5f684",
+      "prefix_hash_after": "39bd54474f5533953f80562d3e60bdfd6d0d4096f6198ff892ad347431ba8acc",
+      "prefix_hash_before": "1b3b9ec708d0fad2aa618a1fda5a5d40fb830e3421be9e63e80ae0714076ecbc",
       "reason": "cadence",
-      "render": "# regime\ndogma_version: 0\nphase: test\nframe_version: 2\n\n# working set\ninterview-t1-1\tyou said, when asked\tplan: write it, then read it back\ninterview-t1-f32-0\tyou said, when asked\tdecision: notes.md holds one line per decision\ninterview-t2-0\tyou said, when asked\tlearned: notes.md now holds the first decision\ninterview-t2-1\tyou said, when asked\tevidence: the write of notes.md\ninterview-t2-f84-1\tyou said, when asked\tevidence: decision: one line per decision\ninterview-t6-0\tyou said, when asked\tgotcha: missing.txt does not exist — IMPLICATION: create it before showing it\ninterview-t8-0\tyou said, when asked\tevidence: xxxxxxxxxx\ninterview-t8-1\tyou said, when asked\tpointer: the long line is 9000 x's (the output of call-b2)\nmechanical/listed:shot.png\tfiles: listed shot.png\nmechanical/notes.md\tfiles: notes.md\nmechanical/shot.png\tfiles: shot.png\nmechanical/side.md\tfiles: side.md\noperator-554\tuser said\tdecision: notes.md holds the decisions as a sorted Markdown list [edited by the user]\noperator-612\tuser kept, from tool output [side]\tthe list could be sorted\noperator-620\tuser kept, from your answer\tTo sort the list.\nr374/refute-1.1\tyou said, when asked\tfact: the build takes longer than the step's timeout\nr374/refute-1.1-claim\tyou said, when asked\twas: fact: the build finishes in a few seconds (held at 7/10), wrong because the command timed out after 16000ms [call call-b7]\n\n\nYou changed these files since the session started: notes.md (new), shot.png (new), side.md (new).\n\nYou are in /scenario/worktree.",
+      "render": "# regime\ndogma_version: 21\nphase: test\nframe_version: 2\n\n# working set\ninterview-t1-1\tyou said, when asked\tplan: write it, then read it back\ninterview-t1-f32-0\tyou said, when asked\tdecision: notes.md holds one line per decision\ninterview-t2-0\tyou said, when asked\tlearned: notes.md now holds the first decision\ninterview-t2-1\tyou said, when asked\tevidence: the write of notes.md\ninterview-t2-f84-1\tyou said, when asked\tevidence: decision: one line per decision\ninterview-t6-0\tyou said, when asked\tgotcha: missing.txt does not exist — IMPLICATION: create it before showing it\ninterview-t8-0\tyou said, when asked\tevidence: xxxxxxxxxx\ninterview-t8-1\tyou said, when asked\tpointer: the long line is 9000 x's (the output of call-b2)\nmechanical/listed:shot.png\tfiles: listed shot.png\nmechanical/notes.md\tfiles: notes.md\nmechanical/shot.png\tfiles: shot.png\nmechanical/side.md\tfiles: side.md\nr374/refute-1.1\tyou said, when asked\tfact: the build takes longer than the step's timeout\nr374/refute-1.1-claim\tyou said, when asked\twas: fact: the build finishes in a few seconds (held at 7/10), wrong because the command timed out after 16000ms [call call-b7]\nuser-554\tuser said\tdecision: notes.md holds the decisions as a sorted Markdown list [edited by the user]\nuser-612\tuser kept, from tool output [side]\tthe list could be sorted\nuser-620\tuser kept, from your answer\tTo sort the list.\n\n\nYou changed these files since the session started: notes.md (new), shot.png (new), side.md (new).\n\nYou are in /scenario/worktree.",
       "render_budget_tokens": 120,
       "render_fits": false,
       "render_over_budget": "tier",
       "render_reduced": 0,
-      "render_tokens": 346,
+      "render_tokens": 344,
       "seq": 727,
       "t": 152019,
       "tail_tokens": 400,
       "tool_outputs": "reference",
-      "trunk_sha256": "9ed07f4b9678b192fcc6779b134dae68e98874a7f8340e4727460e3d1a65b0c6",
+      "trunk_sha256": "aaab1318afb161219995aef5e6aaa911ae05247c0c20ce60369d58267bf34bfd",
       "unaddressed": [],
       "warm": {
         "cache_n": 0,
@@ -9810,12 +9810,12 @@
     },
     {
       "beside": 0,
-      "head_sha256": "f3ba32b64e67872dfbc1fabd29339a280b6a4215305a06771e7be55ca877362e",
+      "head_sha256": "39bd54474f5533953f80562d3e60bdfd6d0d4096f6198ff892ad347431ba8acc",
       "kind": "request",
       "lane": "trunk",
       "max_tokens": 512,
       "seq": 732,
-      "sized_tokens": 1684,
+      "sized_tokens": 1681,
       "t": 156199,
       "turn": 22
     },
@@ -9958,23 +9958,23 @@
     },
     {
       "fork": 742,
-      "head_sha256": "9d640835b187a6b6192f1761ca07dab2ec2a6edcd3702a22da35796b3aded8e3",
+      "head_sha256": "5c23c66f77e213c6f6d1d617cbf9958692000c73b4a4110a967d2248db237a79",
       "kind": "request",
       "lane": "interview",
       "max_tokens": 512,
       "seq": 743,
-      "sized_tokens": 1764,
+      "sized_tokens": 1761,
       "t": 157400,
       "turn": 22
     },
     {
       "beside": 1,
-      "head_sha256": "12ec3c7bdc8510466b90c761024580078fdd4260d4c60bf80cbbedf7341e2071",
+      "head_sha256": "0501e5fc32324e8eb71beae03cca4232e342f36fa64169275fb4310defe7e328",
       "kind": "request",
       "lane": "trunk",
       "max_tokens": 512,
       "seq": 744,
-      "sized_tokens": 1712,
+      "sized_tokens": 1709,
       "t": 157460,
       "turn": 22
     },
@@ -10150,7 +10150,7 @@
       "to": "build"
     },
     {
-      "entry": "operator-554",
+      "entry": "user-554",
       "kind": "flag",
       "note": "still sorted?",
       "seq": 758,
@@ -10178,12 +10178,12 @@
     },
     {
       "fork": 760,
-      "head_sha256": "a52be5032589818f59f156afe83b4c5f3db80593c562f4eb520fbb87e6a290a3",
+      "head_sha256": "e7549ced2f8de4f02e005bd9cdf084ec8cb99b27b608f35d07d4e335bb236832",
       "kind": "request",
       "lane": "audit",
       "max_tokens": 512,
       "seq": 761,
-      "sized_tokens": 2019,
+      "sized_tokens": 2016,
       "t": 161211,
       "turn": 22
     },
@@ -10201,12 +10201,12 @@
     },
     {
       "fork": 762,
-      "head_sha256": "a52be5032589818f59f156afe83b4c5f3db80593c562f4eb520fbb87e6a290a3",
+      "head_sha256": "e7549ced2f8de4f02e005bd9cdf084ec8cb99b27b608f35d07d4e335bb236832",
       "kind": "request",
       "lane": "audit",
       "max_tokens": 512,
       "seq": 763,
-      "sized_tokens": 1901,
+      "sized_tokens": 1898,
       "t": 161276,
       "turn": 22
     },
@@ -10287,12 +10287,12 @@
     },
     {
       "fork": 770,
-      "head_sha256": "a52be5032589818f59f156afe83b4c5f3db80593c562f4eb520fbb87e6a290a3",
+      "head_sha256": "e7549ced2f8de4f02e005bd9cdf084ec8cb99b27b608f35d07d4e335bb236832",
       "kind": "request",
       "lane": "audit",
       "max_tokens": 512,
       "seq": 771,
-      "sized_tokens": 1956,
+      "sized_tokens": 1953,
       "t": 161876,
       "turn": 22
     },
@@ -10342,7 +10342,7 @@
       "seq": 776,
       "t": 162116,
       "unaddressed": [
-        "operator-554"
+        "user-554"
       ]
     },
     {
@@ -10361,12 +10361,12 @@
       "to": "capture"
     },
     {
-      "head_sha256": "b6ff32fdac8b8d551a5eb7b62b70144f8afa7ee459fadc34ac417e65d3f8904f",
+      "head_sha256": "1036f2206679568104b616ec66abb08e2ffc4a9e8c49e9b141cfb6a187d70e63",
       "kind": "request",
       "lane": "warm",
       "max_tokens": 1,
       "seq": 779,
-      "sized_tokens": 1111,
+      "sized_tokens": 1109,
       "t": 162186,
       "turn": 22
     },
@@ -10403,10 +10403,10 @@
       "carry": "render",
       "frame": "2",
       "kind": "meditation",
-      "object_sha256": "f696bc6d0c892cb8f5ab93e331a39b0cba8f0e35c8de61d080c3ebf142c9b303",
+      "object_sha256": "e8265c426d86f6800f535c96bee071a71855d99da22469b03f7a68de38c25486",
       "operator_changes": [
         {
-          "entry": "operator-554",
+          "entry": "user-554",
           "kind": "flag"
         }
       ],
@@ -10426,23 +10426,23 @@
         ]
       },
       "placement": "message",
-      "prefix_hash_after": "2cf46ef74fbc8bbda70c206e160f7af5b6d835c623e2c8530c0ad8d99ba3ebab",
-      "prefix_hash_before": "a52be5032589818f59f156afe83b4c5f3db80593c562f4eb520fbb87e6a290a3",
+      "prefix_hash_after": "75f492d982f2bb99dc89259dc53b708412ea437b840ff098f27d44b89d19eee0",
+      "prefix_hash_before": "e7549ced2f8de4f02e005bd9cdf084ec8cb99b27b608f35d07d4e335bb236832",
       "reason": "operator",
       "refilled_anyway": true,
-      "render": "# regime\ndogma_version: 0\nphase: build\nframe_version: 2\n\n# working set\ninterview-t1-1\tyou said, when asked\tplan: write it, then read it back\ninterview-t1-f32-0\tyou said, when asked\tdecision: notes.md holds one line per decision\ninterview-t2-0\tyou said, when asked\tlearned: notes.md now holds the first decision\ninterview-t2-1\tyou said, when asked\tevidence: the write of notes.md\ninterview-t2-f84-1\tyou said, when asked\tevidence: decision: one line per decision\ninterview-t6-0\tyou said, when asked\tgotcha: missing.txt does not exist — IMPLICATION: create it before showing it\ninterview-t8-0\tyou said, when asked\tevidence: xxxxxxxxxx\ninterview-t8-1\tyou said, when asked\tpointer: the long line is 9000 x's (the output of call-b2)\nmechanical/listed:shot.png\tfiles: listed shot.png\nmechanical/notes.md\tfiles: notes.md\nmechanical/shot.png\tfiles: shot.png\nmechanical/side.md\tfiles: side.md\noperator-554\tuser said\tdecision: notes.md holds the decisions as a sorted Markdown list [flagged: still sorted?]\noperator-612\tuser kept, from tool output [side]\tthe list could be sorted\noperator-620\tuser kept, from your answer\tTo sort the list.\nr374/refute-1.1\tyou said, when asked\tfact: the build takes longer than the step's timeout\nr374/refute-1.1-claim\tyou said, when asked\twas: fact: the build finishes in a few seconds (held at 7/10), wrong because the command timed out after 16000ms [call call-b7]\n\n\nYou changed these files since the session started: notes.md (new), shot.png (new), side.md (new).\n\nYou are in /scenario/worktree.",
+      "render": "# regime\ndogma_version: 21\nphase: build\nframe_version: 2\n\n# working set\ninterview-t1-1\tyou said, when asked\tplan: write it, then read it back\ninterview-t1-f32-0\tyou said, when asked\tdecision: notes.md holds one line per decision\ninterview-t2-0\tyou said, when asked\tlearned: notes.md now holds the first decision\ninterview-t2-1\tyou said, when asked\tevidence: the write of notes.md\ninterview-t2-f84-1\tyou said, when asked\tevidence: decision: one line per decision\ninterview-t6-0\tyou said, when asked\tgotcha: missing.txt does not exist — IMPLICATION: create it before showing it\ninterview-t8-0\tyou said, when asked\tevidence: xxxxxxxxxx\ninterview-t8-1\tyou said, when asked\tpointer: the long line is 9000 x's (the output of call-b2)\nmechanical/listed:shot.png\tfiles: listed shot.png\nmechanical/notes.md\tfiles: notes.md\nmechanical/shot.png\tfiles: shot.png\nmechanical/side.md\tfiles: side.md\nr374/refute-1.1\tyou said, when asked\tfact: the build takes longer than the step's timeout\nr374/refute-1.1-claim\tyou said, when asked\twas: fact: the build finishes in a few seconds (held at 7/10), wrong because the command timed out after 16000ms [call call-b7]\nuser-554\tuser said\tdecision: notes.md holds the decisions as a sorted Markdown list [flagged: still sorted?]\nuser-612\tuser kept, from tool output [side]\tthe list could be sorted\nuser-620\tuser kept, from your answer\tTo sort the list.\n\n\nYou changed these files since the session started: notes.md (new), shot.png (new), side.md (new).\n\nYou are in /scenario/worktree.",
       "render_budget_tokens": 120,
       "render_fits": false,
       "render_over_budget": "tier",
       "render_reduced": 0,
-      "render_tokens": 348,
+      "render_tokens": 345,
       "seq": 782,
       "t": 164064,
       "tail_tokens": 400,
       "tool_outputs": "reference",
-      "trunk_sha256": "5f1bd461af6c441654259431a373baeb89c4cdfffc229f52fdc3c95dc46d379a",
+      "trunk_sha256": "22af30c411f03579cfb32fbc9f9a871a151f69de86e967bd2b44f0b07870ed38",
       "unaddressed": [
-        "operator-554"
+        "user-554"
       ],
       "warm": {
         "cache_n": 0,
@@ -10474,12 +10474,12 @@
     },
     {
       "beside": 0,
-      "head_sha256": "2cf46ef74fbc8bbda70c206e160f7af5b6d835c623e2c8530c0ad8d99ba3ebab",
+      "head_sha256": "75f492d982f2bb99dc89259dc53b708412ea437b840ff098f27d44b89d19eee0",
       "kind": "request",
       "lane": "trunk",
       "max_tokens": 512,
       "seq": 786,
-      "sized_tokens": 1125,
+      "sized_tokens": 1123,
       "t": 167059,
       "turn": 23
     },
@@ -10494,9 +10494,9 @@
       "kind": "delta",
       "request": 786,
       "seq": 788,
-      "t": 167798,
+      "t": 167771,
       "tool_call": {
-        "arguments": "{\"entry\": \"operator-620\", \"verdict\": \"done\"}",
+        "arguments": "{\"entry\": \"user-620\", \"verdict\": \"done\"}",
         "id": "call-v2",
         "index": 0,
         "name": "resolve_entry"
@@ -10506,7 +10506,7 @@
       "finish_reason": "tool_calls",
       "kind": "response",
       "seq": 789,
-      "t": 167803,
+      "t": 167776,
       "text": "It is.",
       "timings": {
         "cache_n": 0,
@@ -10526,29 +10526,29 @@
       "outcome": "refused",
       "request": 786,
       "seq": 790,
-      "t": 167808,
+      "t": 167781,
       "tool": "resolve_entry",
-      "why": "operator-entry: operator-620"
+      "why": "user-entry: user-620"
     },
     {
-      "entry": "operator-620",
+      "entry": "user-620",
       "kind": "patch.refused",
       "lane": "self-capture",
       "op": "resolve",
       "reason": "operator-entry",
       "seq": 791,
-      "t": 167808
+      "t": 167781
     },
     {
-      "arguments": "{\"entry\": \"operator-620\", \"verdict\": \"done\"}",
+      "arguments": "{\"entry\": \"user-620\", \"verdict\": \"done\"}",
       "id": "call-v2",
       "kind": "tool_call",
       "name": "resolve_entry",
       "outcome": "ran",
       "request": 786,
       "seq": 792,
-      "shown": "refused: operator-entry: operator-620",
-      "t": 167958,
+      "shown": "refused: user-entry: user-620",
+      "t": 167931,
       "turn": 23
     },
     {
@@ -10564,7 +10564,7 @@
       "revision": "0000000000000000000000000000000000000000",
       "score": "0.040000",
       "seq": 793,
-      "t": 167963,
+      "t": 167936,
       "threshold": "0.5"
     },
     {
@@ -10580,7 +10580,7 @@
       "revision": "0000000000000000000000000000000000000000",
       "score": "0.040000",
       "seq": 794,
-      "t": 167968,
+      "t": 167941,
       "threshold": "0.5"
     },
     {
@@ -10596,7 +10596,7 @@
       "revision": "0000000000000000000000000000000000000000",
       "score": "0.040000",
       "seq": 795,
-      "t": 167973,
+      "t": 167946,
       "threshold": "0.5"
     },
     {
@@ -10612,7 +10612,7 @@
       "revision": "0000000000000000000000000000000000000000",
       "score": "0.040000",
       "seq": 796,
-      "t": 167978,
+      "t": 167951,
       "threshold": "0.5"
     },
     {
@@ -10624,9 +10624,9 @@
       "of_turn": 23,
       "prefix_shared": false,
       "question": "Answer from this turn alone.\nWhat did this turn establish that a later turn would need? Answer with the fields LEARNED, EVIDENCE and STUCK, one per line, and write NONE for a field with nothing to record.\n",
-      "reserved": 678,
+      "reserved": 675,
       "seq": 797,
-      "t": 167983,
+      "t": 167956,
       "timing": "during_turn",
       "trigger": "call:unknown:call-v2",
       "view_overridden": "last_turn",
@@ -10634,38 +10634,38 @@
     },
     {
       "fork": 797,
-      "head_sha256": "3c18e8c25bf99e5541dc82cbb8fcbe9a1e66a51286edfc7f1bf4ab09130190e5",
+      "head_sha256": "5d26a904c8dc7899969782433be30b65d865bc161752a45c09ed5147983547ea",
       "kind": "request",
       "lane": "interview",
       "max_tokens": 512,
       "seq": 798,
-      "sized_tokens": 1203,
-      "t": 168043,
+      "sized_tokens": 1198,
+      "t": 168016,
       "turn": 23
     },
     {
       "beside": 1,
-      "head_sha256": "828ca401e76c40a2ace5546aa435c5bf70f6f6fe5403576397ae5a106a7d5916",
+      "head_sha256": "a5c92546b68c0e90b781826d55c5fa8323b5048dfee817a76c9f5481772caea7",
       "kind": "request",
       "lane": "trunk",
       "max_tokens": 512,
       "seq": 799,
-      "sized_tokens": 1151,
-      "t": 168103,
+      "sized_tokens": 1146,
+      "t": 168076,
       "turn": 23
     },
     {
       "kind": "delta",
       "request": 798,
       "seq": 800,
-      "t": 168218,
+      "t": 168191,
       "text": "."
     },
     {
       "finish_reason": "stop",
       "kind": "response",
       "seq": 801,
-      "t": 168223,
+      "t": 168196,
       "text": ".",
       "timings": {
         "cache_n": 0,
@@ -10690,20 +10690,20 @@
         }
       ],
       "seq": 802,
-      "t": 168228
+      "t": 168201
     },
     {
       "kind": "delta",
       "request": 799,
       "seq": 803,
-      "t": 168564,
+      "t": 168537,
       "text": "Left as it is."
     },
     {
       "finish_reason": "stop",
       "kind": "response",
       "seq": 804,
-      "t": 168569,
+      "t": 168542,
       "text": "Left as it is.",
       "timings": {
         "cache_n": 0,
@@ -10720,14 +10720,14 @@
       "kind": "turn.settled",
       "reason": "final",
       "seq": 805,
-      "t": 168569,
+      "t": 168542,
       "turn": 23
     },
     {
       "from": "turn",
       "kind": "settlement",
       "seq": 806,
-      "t": 168574,
+      "t": 168547,
       "to": "capture"
     },
     {
@@ -10743,7 +10743,7 @@
       "revision": "0000000000000000000000000000000000000000",
       "score": "0.040000",
       "seq": 807,
-      "t": 168574,
+      "t": 168547,
       "threshold": "0.5"
     },
     {
@@ -10759,7 +10759,7 @@
       "revision": "0000000000000000000000000000000000000000",
       "score": "0.040000",
       "seq": 808,
-      "t": 168579,
+      "t": 168552,
       "threshold": "0.5"
     },
     {
@@ -10775,7 +10775,7 @@
       "revision": "0000000000000000000000000000000000000000",
       "score": "0.040000",
       "seq": 809,
-      "t": 168584,
+      "t": 168557,
       "threshold": "0.5"
     },
     {
@@ -10791,14 +10791,14 @@
       "revision": "0000000000000000000000000000000000000000",
       "score": "0.040000",
       "seq": 810,
-      "t": 168589,
+      "t": 168562,
       "threshold": "0.5"
     },
     {
       "from": "capture",
       "kind": "settlement",
       "seq": 811,
-      "t": 168589,
+      "t": 168562,
       "to": "awaiting"
     },
     {
@@ -10806,24 +10806,24 @@
       "outcome": "rejected",
       "refused": 791,
       "seq": 812,
-      "t": 168594
+      "t": 168567
     },
     {
       "entry": {
-        "id": "operator-612",
+        "id": "user-612",
         "text": "the list could be sorted"
       },
       "kind": "patch",
       "lane": "operator",
       "op": "retire",
       "seq": 813,
-      "t": 168599
+      "t": 168572
     },
     {
       "from": "awaiting",
       "kind": "settlement",
       "seq": 814,
-      "t": 168604,
+      "t": 168577,
       "to": "ended"
     }
   ]

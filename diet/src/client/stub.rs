@@ -621,10 +621,10 @@ fn with_entries(act: Act, body: &str) -> Act {
     named(act, &resolve)
 }
 
-/// The last `operator-<digits>` in `body` standing as a word of its own: the
+/// The last `user-<digits>` in `body` standing as a word of its own: the
 /// id serve coins an operator's entry by.
 fn last_operator_entry(body: &str) -> Option<String> {
-    const PREFIX: &str = "operator-";
+    const PREFIX: &str = crate::drive::session::USER_ENTRY_ID_PREFIX;
     body.match_indices(PREFIX)
         .filter_map(|(at, _)| {
             if body[..at].chars().next_back().is_some_and(entry_char) {
@@ -1127,7 +1127,7 @@ mod tests {
     }
 
     /// A reply's `$operator-entry` is the last operator entry id its request
-    /// carries -- `operator-`, then the seq serve coined it at -- so a
+    /// carries -- `user-`, then the seq serve coined it at -- so a
     /// scenario's model can name an entry the operator kept without
     /// counting the log ahead of the run (the app audit's page walk, F20);
     /// it stays as written when the request carries none.
@@ -1140,11 +1140,11 @@ mod tests {
                 _ => unreachable!("an answer stays an answer"),
             };
         assert_eq!(
-            named("# working set\noperator-15\ta note\noperator-23\tits text"),
-            "retire operator-23"
+            named("# working set\nuser-15\ta note\nuser-23\tits text"),
+            "retire user-23"
         );
         assert_eq!(
-            named("no operator-entry here, nor xoperator-9"),
+            named("no operator-entry here, nor xuser-9"),
             "retire $operator-entry"
         );
     }
@@ -1232,9 +1232,9 @@ mod tests {
                     "retire $operator-entry, not $$operator-entry; resolve $entry:call-r1/decision, not $$entry:call-r1/decision"
                         .to_owned()
                 ),
-                "operator-15\tits text\nr5/call-r1/decision"
+                "user-15\tits text\nr5/call-r1/decision"
             )),
-            "retire operator-15, not $operator-entry; resolve r5/call-r1/decision, not $entry:call-r1/decision"
+            "retire user-15, not $operator-entry; resolve r5/call-r1/decision, not $entry:call-r1/decision"
         );
         // A request that carries none: the placeholder stays, and its double is still it, once.
         assert_eq!(
