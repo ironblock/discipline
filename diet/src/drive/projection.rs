@@ -3746,6 +3746,37 @@ mod tests {
     /// scoping fork settled `value` with three patches, a plain turn 2, and
     /// turn 3's read fork, declined.
     #[allow(clippy::too_many_lines)] // one session's lines, written out
+    /// #1144's review: a warm head's row is put in its request's place when
+    /// its meditation line arrives, and a fork's capture row written between
+    /// them -- a gap fork's patch landing during the meditation -- is still
+    /// the row its fork's later patches count on.
+    #[test]
+    fn a_capture_written_before_the_warms_row_is_put_in_place_still_counts() {
+        let mut walk = Walk::over(&[], "s".to_owned(), None);
+        // A warm head before this one, so this one's is a move with a row.
+        walk.side_heads.insert(Lane::Warm, ("a".repeat(64), None));
+        walk.request(20, (1, Lane::Warm, None), Some(&"b".repeat(64)))
+            .expect("a request");
+        walk.forks.insert(7);
+        walk.patch(21, 7, log::PatchOp::Add);
+        // The meditation line's step: the warm's row, put in its place.
+        walk.resolve_warm(true);
+        walk.patch(22, 7, log::PatchOp::Add);
+        let counted: Vec<u32> = walk
+            .events
+            .iter()
+            .filter_map(|event| match event {
+                Event::Capture { id, entries, .. } if id == "c/7" => Some(*entries),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(counted, [2], "{:?}", walk.events);
+        assert!(walk.events.iter().any(|event| matches!(
+            event,
+            Event::PrefixChanged { at_request, .. } if at_request == "q/20"
+        )));
+    }
+
     fn two_forks() -> Projection {
         let fork = |at: u64, of_turn: u32, why: log::Warrant| Line::Fork {
             after_meditation: None,
