@@ -30638,6 +30638,15 @@ pub(in crate::drive) mod tests {
             )),
             "{rendered}"
         );
+        // The working record a judgment fork carries (#595), where the id is
+        // the entry's only provenance: it says "user" too.
+        let record = crate::meditation::render::entries(&interview.object);
+        assert!(
+            record.contains(&format!("{entry}\tkeep the schema to two tables\n")),
+            "{record}"
+        );
+        assert!(entry.starts_with(USER_ENTRY_ID_PREFIX), "{entry}");
+        assert!(!record.contains("operator"), "{record}");
         drop(state);
         reads_whole(&session);
     }
