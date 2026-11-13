@@ -277,6 +277,37 @@ pub fn regime_registered(regimen: &Regimen, registry: &str) -> Result<Regime, St
             ..trunk
         });
     }
+    dogma_in_force(regime)
+}
+
+/// `regime` as a drive runs it: its `dogma_version` the dogma this build
+/// carries and sends ([`crate::dogma::VERSION`]), which its record's start
+/// and every refill's header say (the audit of 2026-11-11). The words a
+/// session sends are this binary's, whatever a regimen types, so the build
+/// is what the field can truthfully name.
+///
+/// A regimen's own `dogma_version` is checked, not taken: one naming
+/// another version was written for other words and is refused. `0` is
+/// read as naming none: dogma 0's twenty frozen templates are carried by no
+/// build that drives a session, so no drive regimen can mean them, and
+/// every regimen written before this check types it.
+///
+/// # Errors
+///
+/// A regimen naming a version that is neither `0` nor this build's.
+pub fn dogma_in_force(mut regime: Regime) -> Result<Regime, String> {
+    let carried = crate::dogma::VERSION;
+    match regime.dogma_version {
+        0 => {}
+        declared if declared == carried => {}
+        declared => {
+            return Err(format!(
+                "`dogma_version = {declared}` names a dogma this build does not carry: it \
+                 carries dogma {carried}, and a drive sends that dogma's words"
+            ));
+        }
+    }
+    regime.dogma_version = carried;
     Ok(regime)
 }
 
@@ -1402,7 +1433,46 @@ fn command_levers(regimen: &Regimen, (cap, cap_from): (u32, &str)) -> [String; 4
 
 #[cfg(test)]
 mod tests {
-    use super::{UNDECLARED, meditation_audit_concurrency_lever, regime_of, serve_levers};
+    use super::{
+        UNDECLARED, meditation_audit_concurrency_lever, regime_of, regime_registered, serve_levers,
+    };
+
+    /// The audit of 2026-11-11 (`dogma-version-hand-typed`,
+    /// `dogma-version-never-recorded`): the regime a drive runs under, its
+    /// record's and its refill header's, says the dogma this build carries
+    /// -- the manual T1 regimen, as written, types 0.
+    #[test]
+    fn a_drives_regime_says_the_dogma_this_build_carries() {
+        let regimen = crate::formats::regimen::parse(include_str!(
+            "../../../drafts/t1-session-one-flashnext-manual.regimen.toml"
+        ))
+        .expect("the manual T1 regimen parses");
+        let regime = regime_registered(&regimen, crate::drive::registry::REGISTRY)
+            .expect("the manual T1 regimen crosses into a regime");
+        assert_eq!(regime.dogma_version, crate::dogma::VERSION);
+        let object = crate::object::WorkingObject::open(regime);
+        let header = crate::meditation::render::render(&object, None);
+        assert!(
+            header.contains(&format!("dogma_version: {}\n", crate::dogma::VERSION)),
+            "{header}"
+        );
+    }
+
+    /// A drive regimen that names a dogma this build does not carry is
+    /// refused, naming both: it was written for other words.
+    #[test]
+    fn a_drive_regimen_naming_another_dogma_is_refused() {
+        let text = include_str!("../../../drafts/t1-session-one-flashnext-manual.regimen.toml")
+            .replace("dogma_version = 0", "dogma_version = 7");
+        let regimen = crate::formats::regimen::parse(&text).expect("a regimen");
+        let refused = regime_registered(&regimen, crate::drive::registry::REGISTRY)
+            .expect_err("dogma 7 is not this build's");
+        assert!(
+            refused.contains("dogma_version = 7")
+                && refused.contains(&crate::dogma::VERSION.to_string()),
+            "{refused}"
+        );
+    }
 
     /// #150's gate on the start row: `carry`, `refuse`, or undeclared for
     /// a value serve refuses.
