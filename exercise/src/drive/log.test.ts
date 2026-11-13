@@ -248,6 +248,15 @@ describe("diet's valid v0 logs, as the surface reads them", () => {
     expect(fold(logOf('an-answered-turn.jsonl')).levers.table).toBeUndefined();
   });
 
+  it('folds the imperative a v6 operator fork was sent with onto its branch, before its question (audit 9)', () => {
+    const file = 'a-v49-an-operator-fork-naming-its-imperative.jsonl';
+    const [branch] = [...fold(logOf(file)).branches.values()].flat();
+    expect(branch?.question).toBe('Why that file?');
+    expect(branch?.imperative).toBe('Answer from this turn alone. No tool can run here: answer in text, from what you have already read.');
+    const [plain] = [...fold(logOf('a-v48-a-queued-fork-logged-as-it-is-posted.jsonl')).branches.values()].flat();
+    expect(plain?.imperative).toBeUndefined();
+  });
+
   it('folds an offboard fork’s seat onto its branch, with its prefill and wall time, and a warm fork’s as before (#570, #615)', () => {
     // diet's v5 forks, the first one moved offboard -- WRITTEN HERE: no diet fixture has an offboard fork yet.
     const file = 'a-v5-scoping-fork-that-patched-and-a-read-fork-that-declined.jsonl';

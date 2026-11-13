@@ -346,6 +346,8 @@ export interface BranchNode extends Provenance, Partial<Generation> {
   readonly queuedAt?: number;
   readonly why: string;
   readonly question: string;
+  /** The line it was sent before its question (log v49's `imperative`, audit 9): an operator's fork under v6. */
+  readonly imperative?: string;
   /** AHEAD (`slots`): prefix tokens shared with the trunk; `diet`'s fork line does not say. */
   readonly prefixTokens?: number;
   /** The offboard seat it ran on (#615): the registry's id and model, with its cold prefill and wall time. Absent when warm. */
@@ -1563,6 +1565,7 @@ export function fold(written: readonly LogLine[]): Session {
       ...(fork.queued_at !== undefined ? { queuedAt: fork.queued_at } : {}),
       why: fork.why,
       question: fork.question,
+      ...(fork.imperative !== undefined ? { imperative: fork.imperative } : {}),
       ...(fork.prefix_tokens !== undefined ? { prefixTokens: fork.prefix_tokens } : {}),
       ...(fork.trigger !== undefined ? { trigger: fork.trigger } : {}),
       ...(fork.substrate !== undefined && fork.model !== undefined

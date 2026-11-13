@@ -4,8 +4,8 @@
 // i64, and a JavaScript number is exact only to 2^53. A `timings`
 // millisecond may carry a fraction, written as the server wrote it.
 
-export const VERSION = 48;
-export const READS = [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32, 33, 34, 35, 36, 37, 38, 39, 40, 41, 42, 43, 44, 45, 46, 47, 48] as const;
+export const VERSION = 49;
+export const READS = [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32, 33, 34, 35, 36, 37, 38, 39, 40, 41, 42, 43, 44, 45, 46, 47, 48, 49] as const;
 export const PRESENCE_WINDOW_MS = 2000;
 
 export const KINDS = ["session.start", "ask", "settlement", "request", "refused", "delta", "stop.asked", "response", "cancelled", "request.failed", "turn.settled", "idle.gap", "progress", "tool_call", "fork", "fork.settled", "patch", "meditation", "delivered", "recalled", "flag", "meditation.held", "patch.refused", "pruned", "wrapped", "wrap.accepted", "operator.note", "fork.queued", "phase.ruled", "phase.proposed", "phase.answered", "phase.started", "tangent.open", "tangent.close", "capture", "reminded", "background.ended", "notice", "timeout.near", "fork.skipped", "fork.shadowed", "suggestion", "correction", "phase.noted", "trunk.clamped", "trunk.waited", "warrant.gated", "request.retried", "grade", "meditation.skipped"] as const;
@@ -474,7 +474,7 @@ export type SessionStartLine = {
   seq: number;
   t: number;
   kind: "session.start";
-  version: 0 | 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9 | 10 | 11 | 12 | 13 | 14 | 15 | 16 | 17 | 18 | 19 | 20 | 21 | 22 | 23 | 24 | 25 | 26 | 27 | 28 | 29 | 30 | 31 | 32 | 33 | 34 | 35 | 36 | 37 | 38 | 39 | 40 | 41 | 42 | 43 | 44 | 45 | 46 | 47 | 48;
+  version: 0 | 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9 | 10 | 11 | 12 | 13 | 14 | 15 | 16 | 17 | 18 | 19 | 20 | 21 | 22 | 23 | 24 | 25 | 26 | 27 | 28 | 29 | 30 | 31 | 32 | 33 | 34 | 35 | 36 | 37 | 38 | 39 | 40 | 41 | 42 | 43 | 44 | 45 | 46 | 47 | 48 | 49;
   opened: number;
   model: string;
   head: HeadMessage[];
@@ -697,6 +697,7 @@ export type ForkLine = {
   chunk?: number;
   offered?: string[];
   queued_at?: number;
+  imperative?: string;
 } & ({ substrate: string; model: string } | { substrate?: never; model?: never });
 
 export type ForkSettledLine = {

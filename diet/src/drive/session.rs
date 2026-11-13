@@ -713,6 +713,10 @@ pub enum Event {
         /// for the turn (N4): posted while a turn ran, it fired at the next
         /// request boundary or at the gap. Absent, it fired as it was posted.
         queued_at: Option<u64>,
+        /// The line sent before `question` (audit 9): an operator's fork
+        /// under a set whose operator forks carry the fields route's
+        /// imperative (v6). Absent, `question` was sent alone.
+        imperative: Option<String>,
     },
     /// A meditation's audit (#504): a fork off the warm trunk on the `audit` lane,
     /// the dogma's pinned ask after it, before the refill.
@@ -6736,7 +6740,9 @@ pub fn line_of(logged: &Logged) -> log::Line {
             reserved,
             offered,
             queued_at,
+            imperative,
         } => log::Event::Fork {
+            imperative: imperative.clone(),
             offered: offered.clone(),
             queued_at: *queued_at,
             after_meditation: None,
@@ -6779,6 +6785,7 @@ pub fn line_of(logged: &Logged) -> log::Line {
         } => log::Event::Fork {
             offered: None,
             queued_at: None,
+            imperative: None,
             chunk: *chunk,
             after_meditation: *after_meditation,
             lane: log::Lane::Audit,
@@ -14515,8 +14522,8 @@ fn fire_on<S>(
         prefix.unwrap_or_else(|| viewed(&state.trunk, shared.template.messages.len(), view));
     // A fork the operator fires -- their own words, or a pinned ask -- is
     // sent with the fields route's imperative first on either route, since
-    // its answer is read as text (#1050); its line logs the question alone,
-    // and `session.start` names the set.
+    // its answer is read as text (#1050); its line logs the question and,
+    // beside it, the imperative it was sent with (audit 9).
     let imperative = state
         .interview
         .as_ref()
@@ -14567,6 +14574,7 @@ fn fire_on<S>(
         reserved: None,
         offered,
         queued_at,
+        imperative: imperative.map(str::to_owned),
     });
     // Beside the forks cut during the turn still in flight (#782), each
     // prompt holds its own part of the pool.
@@ -15918,6 +15926,9 @@ fn fire_cut<S>(shared: &Shared<S>, state: &mut State, cut: Cut) -> Launched {
         reserved: Some((reserved, counted_shared)),
         offered,
         queued_at: None,
+        // A fork cut during the turn is a warrant's; the operator's waits
+        // for the boundary and fires through `fire_on`.
+        imperative: None,
     });
     if short {
         state.push(Event::ForkSettled {
@@ -20630,6 +20641,7 @@ pub(in crate::drive) mod tests {
                 reserved: None,
                 offered: None,
                 queued_at: None,
+                imperative: None,
             },
             Event::Requested {
                 turn: 1,
@@ -21315,6 +21327,7 @@ pub(in crate::drive) mod tests {
                 chunk: None,
                 offered: None,
                 queued_at: None,
+                imperative: None,
             },
             log::Event::Request {
                 turn: 1,
@@ -21495,6 +21508,7 @@ pub(in crate::drive) mod tests {
                 chunk: Some(1),
                 offered: None,
                 queued_at: None,
+                imperative: None,
             },
             log::Event::Flag {
                 turn: 2,
@@ -30845,6 +30859,52 @@ pub(in crate::drive) mod tests {
             sent.last().expect("the fork's request").messages.clone(),
             wrote,
         )
+    }
+
+    /// The audit of 2026-11-11 (`operator-imperative-hidden-from-page`):
+    /// under v6 the operator's own words are sent with the fields route's
+    /// imperative before them, and the `fork` line says so -- the log names
+    /// what was sent, not the operator's words alone.
+    #[test]
+    fn under_v6_the_operators_fork_line_says_the_imperative_it_was_sent_with() {
+        let mut interview = interviewing(&[]);
+        interview.asks = &crate::dogma::asks::V6;
+        let imperative = interview
+            .asks
+            .operator_imperative()
+            .expect("v6 sends the operator's fork with an imperative");
+        let session = Session::open_with(
+            Canned::new([deltas(&["The schema has two tables."])]),
+            template(),
+            None,
+            None,
+            None,
+            Some(interview),
+        )
+        .forking_through(Canned::new([deltas(&["Because of joins."])]));
+        session.ask("what is the schema?", None).expect("accepted");
+        wait_until(&session, "the turn", settled);
+        let Ok(Forking::Fired(_)) =
+            session.fork(None, &OperatorAsk::Text("Why two tables?".to_owned()))
+        else {
+            unreachable!("fired at the gap");
+        };
+        let (_, messages, _) = operator_forked(&session);
+        assert_eq!(
+            messages.last().map(|message| message.content.clone()),
+            Some(format!("{imperative}\nWhy two tables?")),
+            "the imperative is sent first"
+        );
+        let logged = session
+            .events_from(0)
+            .into_iter()
+            .find(|logged| matches!(logged.event, Event::Forked { .. }))
+            .expect("the fork's line");
+        let line = log::render(&line_of(&logged));
+        assert!(
+            line.contains(imperative),
+            "the fork's line names the imperative it was sent with: {line}"
+        );
     }
 
     /// #1021: the operator forks at the trunk's end in their own words: the

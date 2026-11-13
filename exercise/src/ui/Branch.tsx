@@ -103,7 +103,16 @@ export function Branch({ node, open: initiallyOpen = false }: { readonly node: F
       >
         {open ? (
           <div className="ex-branch__exchange">
-            <p className="ex-branch__question">{node.question}</p>
+            {/* What it was sent (audit 9): the imperative a v6 operator fork carries, then the question. */}
+            <p className="ex-branch__question">
+              {node.imperative !== undefined ? (
+                <>
+                  {node.imperative}
+                  <br />
+                </>
+              ) : null}
+              {node.question}
+            </p>
             {/* What it reasoned (the app audit, finding 3), as the trunk draws reasoning: a fork's answer may be only there. */}
             {node.reasoning !== undefined && node.reasoning !== '' ? <BranchReasoning text={node.reasoning} /> : null}
             {node.text !== undefined && node.text !== '' ? <TaggedAnswer text={node.text} /> : null}

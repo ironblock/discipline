@@ -259,6 +259,8 @@ export interface Fork extends At {
   readonly cut?: number;
   /** When the operator posted it, on the session's clock (log v46, N4): a fork queued while a turn ran. */
   readonly queued_at?: number;
+  /** The line sent before its question (log v49, audit 9): an operator's fork under v6. */
+  readonly imperative?: string;
 }
 
 /** How a fork ended. */
