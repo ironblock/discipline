@@ -27335,6 +27335,94 @@ pub(in crate::drive) mod tests {
         reads_whole(&session);
     }
 
+    /// The audit of 2026-11-11 (`warm-lane-never-rebuilt`): the record's
+    /// projection rebuilds a warm request's head -- the refilled trunk it
+    /// sends -- so a warm head that moves from the last is attributed, as a
+    /// trunk move is, never `unattributed`.
+    #[test]
+    fn the_projection_rebuilds_the_warm_lanes_head_and_attributes_its_move() {
+        let mut interview = interviewing(&[]);
+        interview.meditations.warm = true;
+        // A kept tail, so the second refill's trunk -- and its warm's head --
+        // is not the first's.
+        interview.meditations.tail_tokens = 10_000;
+        let session = Session::open_with(
+            Canned::new([
+                deltas(&["The port is 5182."]),
+                deltas(&["x"]),
+                deltas(&["It is free."]),
+                deltas(&["y"]),
+            ]),
+            template(),
+            None,
+            None,
+            None,
+            Some(interview),
+        );
+        session.ask("which port?", None).expect("accepted");
+        let log = wait_until(&session, "the first turn", settled);
+        let answered = seq_of(&log, |event| matches!(event, Event::Answered { .. }));
+        session.keep(answered, "port is 5182", None).expect("kept");
+        session.declare_meditation(None).expect("admitted");
+        wait_until(&session, "the first meditation", meditated);
+        session.ask("is it free?", None).expect("accepted");
+        wait_until(&session, "the second turn", |log| {
+            log.iter()
+                .filter(|logged| matches!(logged.event, Event::TurnSettled { .. }))
+                .count()
+                == 2
+        });
+        session.declare_meditation(None).expect("admitted");
+        let log = wait_until(&session, "the second meditation", |log| {
+            log.iter()
+                .filter(|logged| matches!(logged.event, Event::Meditated { .. }))
+                .count()
+                == 2
+        });
+        let warms: Vec<u64> = log
+            .iter()
+            .filter(|logged| {
+                matches!(
+                    logged.event,
+                    Event::Requested {
+                        lane: Lane::Warm,
+                        ..
+                    }
+                )
+            })
+            .map(|logged| logged.seq)
+            .collect();
+        let [_, second] = warms[..] else {
+            panic!("two warms: {warms:?}");
+        };
+        let lines: Vec<log::Line> = log.iter().map(line_of).collect();
+        let projected =
+            crate::drive::projection::project(&lines, &regime(), None).expect("projected");
+        let moved: Vec<&crate::formats::record::Event> = projected
+            .events
+            .iter()
+            .filter(|event| {
+                matches!(
+                    event,
+                    crate::formats::record::Event::PrefixChanged { at_request, .. }
+                        if *at_request == format!("q/{second}")
+                )
+            })
+            .collect();
+        assert_eq!(moved.len(), 1, "the second warm's head moved: {moved:?}");
+        assert!(
+            !matches!(
+                moved[0],
+                crate::formats::record::Event::PrefixChanged {
+                    reason: crate::formats::record::PrefixReason::Unattributed,
+                    ..
+                }
+            ),
+            "the warm's move is rebuilt and attributed: {moved:?}"
+        );
+        reads_whole(&session);
+    }
+
     /// A warmed meditation's measured prompt is paired with the warm's own
     /// estimate, so the trunk request after it is sized from that measure
     /// plus what was added since -- not from the estimate of the trunk before

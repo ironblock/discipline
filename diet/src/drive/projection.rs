@@ -619,6 +619,8 @@ pub fn project_in(
     for line in &lines[1..] {
         walk.line(line)?;
     }
+    // A warm no meditation line followed: its head is not rebuilt.
+    walk.resolve_warm(false);
     let mut events = vec![Event::Start {
         regime: Box::new(regime.clone()),
         source: Source::Live,
@@ -738,6 +740,11 @@ struct Walk<'a> {
     /// record names every move of a lane's head, and an interview head moves
     /// with the trunk it is cut from.
     side_heads: BTreeMap<Lane, (String, Option<Head>)>,
+    /// A warm request whose head waits for its meditation's line (the audit
+    /// of 2026-11-11): its `seq`, its logged digest, and where its row goes.
+    /// The warm sends the refilled trunk, which the meditation's line --
+    /// logged after it, with the warm's timings -- is what rebuilds.
+    warm_pending: Option<(u64, String, usize)>,
     /// The forks whose head is the trunk's own (#157): a whole-trunk view,
     /// on the trunk's server -- what [`Walk::side_head_change`] can rebuild.
     whole_trunk_forks: BTreeSet<u64>,
@@ -997,6 +1004,7 @@ impl<'a> Walk<'a> {
             refilled: false,
             version: 0,
             side_heads: BTreeMap::new(),
+            warm_pending: None,
             whole_trunk_forks: BTreeSet::new(),
             calls: BTreeMap::new(),
             call_lines: BTreeMap::new(),
@@ -1666,6 +1674,8 @@ impl<'a> Walk<'a> {
         // An attachment the old trunk carried and could not be read back is
         // not on the refilled one.
         self.trunk_unrebuilt = None;
+        // The warm sent before this line sent the trunk just rebuilt.
+        self.resolve_warm(true);
         let turned = self
             .events
             .iter()
@@ -1804,6 +1814,11 @@ impl<'a> Walk<'a> {
         if lane == Lane::Trunk {
             self.turn_of.insert(seq, turn);
             self.head_change(seq, turn, head_sha256);
+        } else if lane == Lane::Warm {
+            // Its head is the refilled trunk, which the meditation's line
+            // after it rebuilds: its row waits for that line, in its place.
+            self.resolve_warm(false);
+            self.warm_pending = Some((seq, head_sha256.to_owned(), self.events.len()));
         } else {
             self.side_head_change(seq, (lane, fork), head_sha256);
         }
@@ -1936,6 +1951,36 @@ impl<'a> Walk<'a> {
         let verified = fork
             .filter(|fork| self.whole_trunk_forks.contains(fork))
             .and_then(|_| self.rebuilt_trunk_head(logged));
+        self.side_head_moved(seq, lane, logged, verified, None);
+    }
+
+    /// The warm request waiting for its meditation's line (the audit of
+    /// 2026-11-11), its row written in its place: when `refilled`, its head
+    /// is the trunk just rebuilt -- the warm sends that trunk, so its head
+    /// leaves out the trunk's last message, as a request's leaves out its
+    /// ask -- verified by digest; else (no meditation line followed, as a
+    /// native summary's warm has none) it is not rebuilt.
+    fn resolve_warm(&mut self, refilled: bool) {
+        let Some((seq, logged, at)) = self.warm_pending.take() else {
+            return;
+        };
+        let verified = refilled
+            .then(|| self.rebuilt_head(&self.trunk, &logged))
+            .flatten();
+        self.side_head_moved(seq, Lane::Warm, &logged, verified, Some(at));
+    }
+
+    /// A side lane's head now `logged`, `verified` when it was rebuilt: a
+    /// move from the lane's last head is a row, attributed when both heads
+    /// were rebuilt, pushed -- or put `at` its request's place.
+    fn side_head_moved(
+        &mut self,
+        seq: u64,
+        lane: Lane,
+        logged: &str,
+        verified: Option<Head>,
+        at: Option<usize>,
+    ) {
         let previous = self
             .side_heads
             .insert(lane, (logged.to_owned(), verified.clone()));
@@ -1953,12 +1998,24 @@ impl<'a> Walk<'a> {
                 .map(|change| change.event(id.clone(), at_request.clone())),
             _ => None,
         };
-        self.events.push(row.unwrap_or(Event::PrefixChanged {
+        let row = row.unwrap_or(Event::PrefixChanged {
             id,
             at_request,
             reason: PrefixReason::Unattributed,
             diff: Vec::new(),
-        }));
+        });
+        match at {
+            Some(at) => {
+                let at = at.min(self.events.len());
+                self.events.insert(at, row);
+                // A capture row written since sits one later now (#1144's
+                // review): its fork's next patch counts on it there.
+                for place in self.captures.values_mut().filter(|place| **place >= at) {
+                    *place += 1;
+                }
+            }
+            None => self.events.push(row),
+        }
     }
 
     /// The head a request on the projected trunk carries, when `logged` is
@@ -1967,19 +2024,27 @@ impl<'a> Walk<'a> {
     /// definition an older log sent, #558). Never while the trunk carries
     /// something the log cannot rebuild.
     fn rebuilt_trunk_head(&self, logged: &str) -> Option<Head> {
+        let mut messages = self.trunk.clone();
+        messages.push(Message::new(Role::User, String::new()));
+        self.rebuilt_head(&messages, logged)
+    }
+
+    /// The head a request sending `messages` carries, when `logged` is its
+    /// digest -- `client::head` leaves out the last message -- under the
+    /// session's tools (or an earlier form of them, #558). Never while the
+    /// trunk carries something the log cannot rebuild.
+    fn rebuilt_head(&self, messages: &[Message], logged: &str) -> Option<Head> {
         if self.trunk_unrebuilt.is_some() {
             return None;
         }
         let tools = self.tools.clone().ok()?;
-        let mut messages = self.trunk.clone();
-        messages.push(Message::new(Role::User, String::new()));
         earlier_tools(&tools)
             .into_iter()
             .map(|tools| {
                 Head::of(&RequestShape {
                     model: self.model.clone(),
                     cache_prefix: None,
-                    messages: messages.clone(),
+                    messages: messages.to_vec(),
                     sampler: SamplerCard::empty(),
                     limits: Limits {
                         attempt: std::time::Duration::ZERO,
@@ -3683,6 +3748,37 @@ mod tests {
         });
         assert!(tool, "the row it names is the pruned call's");
         validates(&projected);
+    }
+
+    /// #1144's review: a warm head's row is put in its request's place when
+    /// its meditation line arrives, and a fork's capture row written between
+    /// them -- a gap fork's patch landing during the meditation -- is still
+    /// the row its fork's later patches count on.
+    #[test]
+    fn a_capture_written_before_the_warms_row_is_put_in_place_still_counts() {
+        let mut walk = Walk::over(&[], "s".to_owned(), None);
+        // A warm head before this one, so this one's is a move with a row.
+        walk.side_heads.insert(Lane::Warm, ("a".repeat(64), None));
+        walk.request(20, (1, Lane::Warm, None), Some(&"b".repeat(64)))
+            .expect("a request");
+        walk.forks.insert(7);
+        walk.patch(21, 7, log::PatchOp::Add);
+        // The meditation line's step: the warm's row, put in its place.
+        walk.resolve_warm(true);
+        walk.patch(22, 7, log::PatchOp::Add);
+        let counted: Vec<u32> = walk
+            .events
+            .iter()
+            .filter_map(|event| match event {
+                Event::Capture { id, entries, .. } if id == "c/7" => Some(*entries),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(counted, [2], "{:?}", walk.events);
+        assert!(walk.events.iter().any(|event| matches!(
+            event,
+            Event::PrefixChanged { at_request, .. } if at_request == "q/20"
+        )));
     }
 
     /// A v5 session with two forks, projected and validated: turn 1's
