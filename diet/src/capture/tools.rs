@@ -108,7 +108,7 @@ pub const CANONICAL_LANE: &str = "main";
 /// they will register is this file's bytes, not a rendering of a struct that
 /// happens to agree with it today.
 /// The contract, as the dogma pins it: self-capture set `c1` (#609).
-const CONTRACT: &str = include_str!("../../dogma/self-capture/c1/contract.jsonl");
+const CONTRACT: &str = crate::dogma::capture::C1_CONTRACT;
 
 // ---------------------------------------------------------------------------
 // the contract
@@ -1479,10 +1479,19 @@ impl AskKind {
     /// must not be an order.
     #[must_use]
     pub fn opening(self) -> &'static str {
-        match self {
-            Self::Reminder => include_str!("../../dogma/self-capture/c1/reminder.txt"),
-            Self::Sweep => include_str!("../../dogma/self-capture/c1/sweep.txt"),
-        }
+        self.opening_in(crate::dogma::capture::DEFAULT)
+    }
+
+    /// The words this kind asks in under `set` (the audit of 2026-11-11):
+    /// its `reminder.txt` or `sweep.txt`, the set a session declares.
+    #[must_use]
+    pub fn opening_in(self, set: &crate::dogma::capture::CaptureSet) -> &'static str {
+        let file = match self {
+            Self::Reminder => "reminder.txt",
+            Self::Sweep => "sweep.txt",
+        };
+        set.text(file)
+            .unwrap_or_else(|| unreachable!("set {} has no {file}", set.name))
     }
 }
 
@@ -1495,18 +1504,18 @@ pub struct Ask {
     pub at_turn: u32,
     /// What the router put off in that turn, when it put something off.
     pub about: Option<String>,
+    /// The contract set whose words it asks in.
+    pub set: &'static crate::dogma::capture::CaptureSet,
 }
 
 impl Ask {
-    /// The ask, in words.
+    /// The ask, in words: its set's.
     #[must_use]
     pub fn text(&self) -> String {
+        let opening = self.kind.opening_in(self.set);
         match &self.about {
-            Some(about) => format!(
-                "{} It went by without an answer: {about}.",
-                self.kind.opening()
-            ),
-            None => self.kind.opening().to_owned(),
+            Some(about) => format!("{opening} It went by without an answer: {about}."),
+            None => opening.to_owned(),
         }
     }
 }
@@ -1521,17 +1530,26 @@ impl Ask {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Reminder {
     cadence: Cadence,
+    set: &'static crate::dogma::capture::CaptureSet,
     since: u32,
     silent: BTreeSet<u32>,
     deferred: BTreeMap<u32, String>,
 }
 
 impl Reminder {
-    /// A reminder on `cadence`.
+    /// A reminder on `cadence`, in the default set's words.
     #[must_use]
     pub fn on(cadence: Cadence) -> Self {
+        Self::in_set(cadence, crate::dogma::capture::DEFAULT)
+    }
+
+    /// A reminder on `cadence` whose asks are `set`'s words: the set a
+    /// session declares (the audit of 2026-11-11).
+    #[must_use]
+    pub fn in_set(cadence: Cadence, set: &'static crate::dogma::capture::CaptureSet) -> Self {
         Self {
             cadence,
+            set,
             since: 0,
             silent: BTreeSet::new(),
             deferred: BTreeMap::new(),
@@ -1565,6 +1583,7 @@ impl Reminder {
             kind: AskKind::Reminder,
             at_turn: turn,
             about: self.deferred.get(&turn).cloned(),
+            set: self.set,
         })
     }
 
@@ -1598,6 +1617,7 @@ impl Reminder {
                 kind: AskKind::Sweep,
                 at_turn,
                 about: self.deferred.get(&at_turn).cloned(),
+                set: self.set,
             })
             .collect()
     }
@@ -2779,8 +2799,31 @@ mod tests {
             kind: AskKind::Reminder,
             at_turn: 3,
             about: None,
+            set: crate::dogma::capture::DEFAULT,
         };
         assert_eq!(ask.text(), AskKind::Reminder.opening());
+    }
+
+    /// The audit of 2026-11-11 (`reminder-reads-c1`): a reminder's asks and
+    /// its sweep's are its set's words -- a test set's, whose words are its
+    /// own -- and no c1 file is read outside the dogma's capture sets.
+    #[test]
+    fn a_reminder_and_its_sweep_ask_in_the_words_of_its_set() {
+        let set = &crate::dogma::capture::DISTINCT_WORDS;
+        let mut reminder = Reminder::in_set(Cadence::every(1).expect("a cadence"), set);
+        let ask = reminder.observe(1, false).expect("the cadence came round");
+        assert_eq!(ask.text(), set.text("reminder.txt").expect("a reminder"));
+        let swept = reminder.recovery_sweep(1..2);
+        assert_eq!(
+            swept.iter().map(Ask::text).collect::<Vec<_>>(),
+            [set.text("sweep.txt").expect("a sweep")]
+        );
+        let source = include_str!("tools.rs");
+        let c1 = ["self-capture", "/c1/"].concat();
+        assert!(
+            !source.contains(&c1),
+            "capture::tools reads no c1 file of its own"
+        );
     }
 
     #[test]

@@ -3118,10 +3118,13 @@ impl State {
             pending_gap: None,
             phase,
             tangent: None,
-            reminder: interview
-                .as_ref()
-                .and_then(|interview| interview.self_capture)
-                .map(crate::capture::tools::Reminder::on),
+            // In the words of the set the session declares (the audit of
+            // 2026-11-11), never c1's whatever it names.
+            reminder: interview.as_ref().and_then(|interview| {
+                interview.self_capture.map(|cadence| {
+                    crate::capture::tools::Reminder::in_set(cadence, interview.capture_contract)
+                })
+            }),
             recorded_this_turn: false,
             captures_this_turn: 0,
             reminder_due: None,
@@ -35679,6 +35682,53 @@ pub(in crate::drive) mod tests {
             second[0], sent[0].messages[0],
             "the system prompt is unchanged"
         );
+        reads_whole(&session);
+    }
+
+    /// The audit of 2026-11-11 (`reminder-reads-c1`): the reminder a session
+    /// sends is its contract set's words, not c1's -- latent while every
+    /// shipped set shares c1's, so a test set with words of its own holds it.
+    #[test]
+    fn the_self_capture_reminder_is_the_words_of_the_set_in_force() {
+        let distinct = &crate::dogma::capture::DISTINCT_WORDS;
+        let reminder = distinct.text("reminder.txt").expect("a reminder");
+        assert_ne!(
+            Some(reminder),
+            crate::dogma::capture::C1.text("reminder.txt"),
+            "the test set's words are its own"
+        );
+        let mut interview = interviewing(&[]);
+        interview.self_capture = Some(crate::capture::tools::Cadence::every(1).expect("a cadence"));
+        interview.capture_contract = distinct;
+        let mut shape = template();
+        declare_self_capture(&mut shape, Some(&interview));
+        let session = Session::open_with(
+            Canned::new(vec![deltas(&["one"]), deltas(&["two"])]),
+            shape,
+            None,
+            None,
+            None,
+            Some(interview),
+        );
+        session.ask("first", None).expect("accepted");
+        wait_until(&session, "turn one", settled);
+        session.ask("second", None).expect("accepted");
+        let log = wait_until(&session, "turn two", |log| {
+            log.iter()
+                .filter(|logged| matches!(logged.event, Event::TurnSettled { .. }))
+                .count()
+                == 2
+        });
+        let logged_reminders: Vec<&str> = log
+            .iter()
+            .filter_map(|logged| match &logged.event {
+                Event::Reminded { text, .. } => Some(text.as_str()),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(logged_reminders, [reminder]);
+        let sent = session.shared.transport.sent();
+        assert_eq!(sent[1].messages.last(), Some(&noted("second", &[reminder])));
         reads_whole(&session);
     }
 
