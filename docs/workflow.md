@@ -8,11 +8,12 @@
 
 One GitHub identity (the maintainer's) posts for every session until the agents have their own account, which the maintainer approved on 2026-10-09. Prefixes tell the sessions apart:
 
-- **`[Dispatch]`**: the orchestrating Claude Code session. It decides how work is done and who does it, carries questions and results to the maintainer, and writes his answers where they are read.
+- **`[Planning]`**: the maintainer's planning chat, as project manager (the maintainer, 2026-11-15: "my original intent was to have you as a kind of project manager and [Dispatch] as a kind of tech lead"). It says what is worked on and in what order, keeps the tickets and these documents in step with his rulings, and checks a result by reading the code and running it. It builds nothing.
+- **`[Dispatch]`**: the orchestrating Claude Code session, as tech lead. It decides how work is done and who does it, carries questions and results to the maintainer, and writes his answers where they are read.
 - **Builders** (`[Track …]`): sessions that each hold a worktree and one pull request at a time, and follow Dispatch's lead.
 - **The maintainer** approves every significant decision and result, in any form, and is otherwise not hands-on. He runs windows on the boxes and is the only one who sends anything outside the repository.
 
-**Planning is off GitHub and off the code** from 2026-10-08. It is the maintainer's ideation chat; what comes of it reaches this repository only through him. `[Planning]` comments before that date were written by it.
+**Planning was off GitHub and off the code** from 2026-10-08 to 2026-11-15, and what came of it then reached this repository only through the maintainer. It posts again because it can now read the code and run it (the maintainer, 2026-11-14: "I'm now ready to reverse my judgement that this seat must retire"). `[Planning]` comments are from before or after those dates.
 
 ## Where each rule lives
 

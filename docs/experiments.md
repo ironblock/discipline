@@ -53,6 +53,7 @@ From 2026-10-15 (taken by the maintainer then; `scripts/check-results.py --claim
 | the embedding shortlist vs MiniLM | embedding tier | the sense register; pairs/STS on short technical English | after the first drive; no box |
 | mimicry and capture under native tool calls (#20, #21) | forks | the first driven sessions' typed outcomes | T1 |
 | the tool-shape census (#80) | distribution matching | the same operation under several signatures; well-formed-call rate | nothing: the tool loop (#298) has landed |
+| a ledger as a file (#976) | memory payload | the Lite held-out tasks in a blank session: with no file, with the generated surface rows (`diet/scenarios/lite/ledger.py`), and with a mapped ledger; cost to the right answer | a ledger mapped at the reference's pin |
 | T1 vs T3 across substrates | substrate | the same trajectory on the floor and in the archived Sonnet 5 session | the adapter (#500, #501) |
 | one claim re-fired on all three rungs (#394) | substrate | an existing claim under a pre-registered three-rung rule | the bottom rung's admission and #396 |
 | placement vs pruning at equal VRAM (#199) | substrate format | heat-mapped placement of Q2_0 against the Coder build; pre-registration follows the routing profile | a routing profile from the archive's drives |
