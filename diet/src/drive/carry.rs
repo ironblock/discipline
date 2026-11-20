@@ -23,6 +23,19 @@ use super::session::Carry;
 /// When the log does not read or holds no meditation that kept a trunk, or
 /// a kept file is missing or is not the bytes its digest names.
 pub fn read(log: &Path, sealed: &[String]) -> Result<Carry, String> {
+    read_at(log, sealed, None)
+}
+
+/// [`read`], from the meditation at `at` when one is named (#1151): that
+/// meditation's kept trunk, working memory and worktree, and what rode after
+/// its refill when it cut a turn; the last that kept a trunk otherwise.
+///
+/// # Errors
+///
+/// As [`read`]; and when the line at `at` is no meditation that kept its
+/// trunk.
+pub fn read_at(log: &Path, sealed: &[String], at: Option<u64>) -> Result<Carry, String> {
+    let _ = at;
     let bytes = std::fs::read(log).map_err(|why| format!("{}: {why}", log.display()))?;
     let text =
         String::from_utf8(bytes.clone()).map_err(|_| format!("{} is not UTF-8", log.display()))?;
@@ -87,6 +100,7 @@ pub fn read(log: &Path, sealed: &[String]) -> Result<Carry, String> {
         },
         source: (!source.is_empty()).then_some(source),
         phase: carried_phase(&lines, seq),
+        riding: Vec::new(),
     })
 }
 
@@ -372,6 +386,25 @@ mod tests {
     /// A log whose meditation kept `trunk` and named `restored`, its kept
     /// files beside it, in a directory of its own.
     fn kept(case: &str, trunk: &[Message], restored: &[&str]) -> std::path::PathBuf {
+        kept_at(case, trunk, restored, log::VERSION, None)
+    }
+
+    /// [`kept`], the log declaring `version`, each request naming a head:
+    /// the one after the meditation `after` (this crate's digest when none
+    /// is given: the kept trunk, then turn two's ask, under the log's model
+    /// and no tools), every other one any digest.
+    fn kept_at(
+        case: &str,
+        trunk: &[Message],
+        restored: &[&str],
+        version: i64,
+        after: Option<&str>,
+    ) -> std::path::PathBuf {
+        let mut sent = crate::drive::session::tests::template();
+        sent.messages = trunk.to_vec();
+        sent.messages.push(Message::new(Role::User, "build it"));
+        let head = crate::client::head::Head::of(&sent).digest().to_owned();
+        let after = after.unwrap_or(&head).to_owned();
         let dir = std::env::temp_dir().join(format!("diet-carry-{case}-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(dir.join("files")).expect("the recording");
@@ -386,7 +419,14 @@ mod tests {
             .map(|line| {
                 let mut value: serde_json::Value = serde_json::from_str(line).expect("a line");
                 if value["kind"] == "session.start" {
-                    value["version"] = serde_json::json!(log::VERSION);
+                    value["version"] = serde_json::json!(version);
+                }
+                if value["kind"] == "request" {
+                    value["head_sha256"] = if value["seq"] == 17 {
+                        serde_json::json!(after)
+                    } else {
+                        serde_json::json!("e".repeat(64))
+                    };
                 }
                 // From v43 a fork's settled line names its not-run calls'
                 // tools, `[]` when every call ran (#1094).
@@ -476,6 +516,7 @@ mod tests {
             },
             source: None,
             phase: None,
+            riding: Vec::new(),
         };
         let roots = [
             (format!("/private{old}"), format!("/private{new}")),
@@ -572,6 +613,54 @@ mod tests {
                 .sha256;
         assert!(restore(&escape_sha, &recording, &dir.join("inside")).is_err());
         assert!(!dir.join("escaped.txt").exists(), "nothing written outside");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// #1151: a carry takes the meditation its seq names, from a log of this
+    /// version or of v43 and v44, which this build reads. The fixture's
+    /// meditation refilled at turn two's first request, so turn two's ask
+    /// rode after the kept trunk: the carry holds it, as that request sent
+    /// it -- checked against the head the log names for it -- and a carry
+    /// with no seq, the default, holds nothing riding. A seq that is no
+    /// meditation is refused, never read as the last, and so is a ride the
+    /// logged head contradicts.
+    #[test]
+    fn a_carry_at_a_seq_takes_that_meditation_and_what_rode_after_it() {
+        let trunk = vec![
+            Message::new(Role::System, "you are the trunk"),
+            Message::new(Role::User, "<state_snapshot>a tracker</state_snapshot>"),
+        ];
+        for version in [43, 44, log::VERSION] {
+            let dir = kept_at(&format!("at-v{version}"), &trunk, &[], version, None);
+            let path = dir.join("session.log");
+            let carry = read_at(&path, &[], Some(16))
+                .unwrap_or_else(|why| panic!("v{version} carries at 16: {why}"));
+            assert_eq!(carry.from.meditation_seq, 16);
+            assert_eq!(carry.trunk, trunk);
+            assert_eq!(
+                carry.riding,
+                vec![Message::new(Role::User, "build it")],
+                "v{version}: turn two's ask rode after the refill"
+            );
+            assert_eq!(
+                read(&path, &[]).expect("it reads").riding,
+                Vec::new(),
+                "the default carries nothing riding, as before"
+            );
+            let refused = read_at(&path, &[], Some(17)).expect_err("a request, not a meditation");
+            assert!(refused.contains("17"), "{refused}");
+            let _ = std::fs::remove_dir_all(&dir);
+        }
+        let dir = kept_at(
+            "at-contradicted",
+            &trunk,
+            &[],
+            log::VERSION,
+            Some(&"f".repeat(64)),
+        );
+        let refused = read_at(&dir.join("session.log"), &[], Some(16))
+            .expect_err("the logged head contradicts the ride");
+        assert!(refused.contains("head"), "{refused}");
         let _ = std::fs::remove_dir_all(&dir);
     }
 

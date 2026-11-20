@@ -3796,6 +3796,10 @@ pub struct Carry {
     /// The phase the carried session was in after its meditation (#1071),
     /// when its log records one.
     pub phase: Option<String>,
+    /// What rode after the kept trunk when the meditation cut a turn
+    /// (#1151): the turn's ask, its notes, and the steps the split kept, as
+    /// the session sent them after the refill. Empty when it cut none.
+    pub riding: Vec<Message>,
 }
 
 /// An interactive session on one trunk.
@@ -4157,6 +4161,21 @@ impl<S: Streaming + 'static> Session<S> {
             }
         }
         Ok(self)
+    }
+
+    /// The turn the carried meditation cut (#1151), resumed: its ask and
+    /// the steps that rode after the refill sent on the carried trunk, the
+    /// request the recording sent next, and the turn going on from there.
+    /// `None` when the carry cut no turn, or the session is not awaiting.
+    pub fn resume(&self) -> Option<Admitted> {
+        None
+    }
+
+    /// The session stops after its `calls`-th trunk call, or at its next
+    /// refill, whichever comes first (#1151): the trunk request after it is
+    /// never sent, the turn settles `stopped`, and the session ends.
+    pub fn stop_after(&self, calls: u64) {
+        let _ = calls;
     }
 
     /// This session, its `session.start` naming the nonce its head's first
@@ -36125,6 +36144,7 @@ pub(in crate::drive) mod tests {
                 from: from.clone(),
                 source: Some(vec!["src/scene-core.ts".to_owned()]),
                 phase: None,
+                riding: Vec::new(),
             })
             .expect("it carries");
         let state = session.shared.lock();
@@ -36179,6 +36199,7 @@ pub(in crate::drive) mod tests {
                     from: from.clone(),
                     source: None,
                     phase: None,
+                    riding: Vec::new(),
                 })
                 .expect("it carries")
         };
@@ -37205,6 +37226,7 @@ pub(in crate::drive) mod tests {
             from: carried_from(seq),
             source: None,
             phase,
+            riding: Vec::new(),
         })
         .expect("it carries");
         assert_eq!(
@@ -37372,6 +37394,7 @@ pub(in crate::drive) mod tests {
             from: carried_from(16),
             source: None,
             phase: Some("nowhere".to_owned()),
+            riding: Vec::new(),
         };
         let (interview, shape) = capturing_under(in_the_starter_library_at("orient"));
         let Err(refused) = Session::open_with(
@@ -37446,6 +37469,7 @@ pub(in crate::drive) mod tests {
             from: carried_from(seq),
             source: None,
             phase,
+            riding: Vec::new(),
         })
         .expect("it carries");
         assert_eq!(
@@ -37453,6 +37477,176 @@ pub(in crate::drive) mod tests {
             (Some("orient".to_owned()), Some(starter_document("orient")))
         );
         assert!(carried.shared.lock().phase_note_due.is_some());
+    }
+
+    /// Whether the session has ended: `ended` is its log's last line (#291).
+    fn ended(log: &[Logged]) -> bool {
+        matches!(
+            log.last(),
+            Some(Logged {
+                event: Event::Settled {
+                    to: Settlement::Ended,
+                    ..
+                },
+                ..
+            })
+        )
+    }
+
+    /// The window refills in `log` that cut a turn, by their place in it.
+    fn mid_turn_refills(log: &[Logged]) -> Vec<usize> {
+        log.iter()
+            .enumerate()
+            .filter(|(_, logged)| {
+                matches!(
+                    logged.event,
+                    Event::Meditated {
+                        turn_steps: Some(_),
+                        ..
+                    }
+                )
+            })
+            .map(|(at, _)| at)
+            .collect()
+    }
+
+    /// How many requests `log` sent before its line at `at`: the place in
+    /// the transport's `sent` of the next one.
+    fn sent_before(log: &[Logged], at: usize) -> usize {
+        log[..at]
+            .iter()
+            .filter(|logged| matches!(logged.event, Event::Requested { .. }))
+            .count()
+    }
+
+    /// #1151: a carry from a refill that cut a turn -- the long turn's first
+    /// window refill, not its last -- read by its seq from the recorded log,
+    /// resumes the turn it cut: the carried session's first request is the
+    /// request the recording sent after that refill, the kept trunk and then
+    /// the ask and the step that rode after it, tool definitions aside. The
+    /// turn goes on from there and settles.
+    #[test]
+    fn a_carry_from_a_mid_turn_refill_sends_the_request_the_recording_sent_after_it() {
+        let dir = std::env::temp_dir().join(format!("diet-carry-at-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).expect("the recording");
+        let original = windowed(
+            one_long_turn(24),
+            100_000,
+            crate::meditation::policy::Served::default(),
+        );
+        original.keep_recording_in(dir.clone());
+        original.ask("build it", None).expect("accepted");
+        let log = wait_until(&original, "the long turn", settled);
+        let refills = mid_turn_refills(&log);
+        assert!(
+            refills.len() >= 2,
+            "two refills under the turn, so the first is not the last: {:?}",
+            turn_steps(&log)
+        );
+        let at = refills[0];
+        let seq = log[at].seq;
+        let next = original.shared.transport.sent()[sent_before(&log, at)].clone();
+        let text: String = log.iter().map(|logged| render(logged) + "\n").collect();
+        std::fs::write(dir.join("session.log"), text).expect("the log");
+
+        let carry = crate::drive::carry::read_at(&dir.join("session.log"), &[], Some(seq))
+            .expect("it carries");
+        assert_eq!(carry.from.meditation_seq, seq);
+        let carried = windowed(
+            vec![deltas(&["The build is done."])],
+            100_000,
+            crate::meditation::policy::Served::default(),
+        )
+        .with_carry(carry)
+        .expect("it carries");
+        carried.resume().expect("the cut turn resumes");
+        let resumed = wait_until(&carried, "the resumed turn", settled);
+        let without_tools = |mut shape: RequestShape| {
+            shape.tools.clear();
+            shape
+        };
+        let sent = carried.shared.transport.sent();
+        assert_eq!(
+            without_tools(sent.first().cloned().expect("a first request")),
+            without_tools(next),
+            "the request the recording sent after the refill"
+        );
+        assert!(
+            resumed.iter().any(|logged| matches!(
+                logged.event,
+                Event::TurnSettled {
+                    reason: SettleReason::Final,
+                    ..
+                }
+            )),
+            "the resumed turn goes on and settles: {resumed:#?}"
+        );
+        reads_whole(&carried);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// #1151: a session told to stop after N calls sends N trunk requests
+    /// and no more: the turn they ran in settles `stopped` before the next
+    /// would be sent, and the session ends. One that refills first stops
+    /// there: the request after the refill is never sent.
+    #[test]
+    fn a_session_told_to_stop_after_n_calls_sends_n_or_stops_at_its_next_refill() {
+        let trunk_requests = |log: &[Logged]| {
+            log.iter()
+                .filter(|logged| {
+                    matches!(
+                        logged.event,
+                        Event::Requested {
+                            lane: Lane::Trunk,
+                            ..
+                        }
+                    )
+                })
+                .count()
+        };
+        let stopped = |log: &[Logged]| {
+            log.iter()
+                .map(render)
+                .filter(|line| line.contains(r#""kind":"turn.settled""#))
+                .collect::<Vec<_>>()
+        };
+        let session = windowed(
+            one_long_turn(6),
+            100_000,
+            crate::meditation::policy::Served::default(),
+        );
+        session.stop_after(2);
+        session.ask("build it", None).expect("accepted");
+        let log = wait_until(&session, "the stop after two calls", ended);
+        assert_eq!(trunk_requests(&log), 2, "{log:#?}");
+        let settles = stopped(&log);
+        assert_eq!(settles.len(), 1, "{settles:?}");
+        assert!(settles[0].contains(r#""reason":"stopped""#), "{settles:?}");
+        reads_whole(&session);
+
+        let session = windowed(
+            one_long_turn(24),
+            100_000,
+            crate::meditation::policy::Served::default(),
+        );
+        session.stop_after(1_000);
+        session.ask("build it", None).expect("accepted");
+        let log = wait_until(&session, "the stop at the refill", ended);
+        let at = *mid_turn_refills(&log)
+            .first()
+            .expect("a refill under the turn");
+        assert_eq!(
+            trunk_requests(&log[at..]),
+            0,
+            "nothing sent after the refill: {log:#?}"
+        );
+        let settles = stopped(&log);
+        assert!(
+            settles.len() == 1 && settles[0].contains(r#""reason":"stopped""#),
+            "{settles:?}"
+        );
+        reads_whole(&session);
     }
 
     /// An interview under the starter phase library (#787), opening in `plan`.

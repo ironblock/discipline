@@ -3549,6 +3549,267 @@ fn a_carried_session_restores_the_worktree_its_refill_left() {
     let _ = std::fs::remove_dir_all(&dir);
 }
 
+/// #1151: a run from a chosen refill of a log that names no run -- what a
+/// live drive writes, which `--from-carry` alone refuses -- carried at its
+/// first meditation's seq, not its last: the start names the log's digest
+/// and that seq, the trunk and worktree that meditation kept by their
+/// digests, its first request sends that trunk (the head the recording
+/// sent after that refill, not after the last), and its command reads that
+/// worktree's file. The seam's script runs from its first step. Told to
+/// stop after one call, it sends one and its turn settles `stopped`. An arm
+/// of a batch can carry its own trunk beside the baseline's kept one, the
+/// trunk its one difference, named on its start.
+#[test]
+#[allow(clippy::too_many_lines)]
+fn a_run_from_a_chosen_refill_of_a_live_log_carries_that_refills_trunk_and_worktree() {
+    let dir = scratch("carry-at");
+    let path = commanding(&dir, "same.toml", 4);
+    let regimen = std::fs::read_to_string(&path).expect("the regimen");
+    std::fs::write(
+        &path,
+        regimen.replace(
+            "[limits]",
+            "interview_warrant = [\"read\"]\nmeditation_empty = \"refill\"\n[limits]",
+        ),
+    )
+    .expect("the regimen");
+    let call = |id: &str, command: &str| serde_json::json!([{"id": id, "name": "bash", "arguments": serde_json::json!({"command": command}).to_string()}]);
+    let head = serde_json::json!({"scenario": "carry-at", "regimen": "same.toml", "head": root().join("diet/drive/heads/floor.md")});
+    let script = |lines: &[serde_json::Value]| {
+        let mut text: String = std::iter::once(&head)
+            .chain(lines)
+            .map(|line| line.to_string() + "\n")
+            .collect();
+        for _ in 0..16 {
+            text.push_str(&serde_json::json!({"reply": {"text": "Done."}}).to_string());
+            text.push('\n');
+        }
+        text
+    };
+    let first = dir.join("first.jsonl");
+    std::fs::write(
+        &first,
+        script(&[
+            serde_json::json!({"reply": {"when": "Write one", "text": "Writing.", "calls": call("c1", "echo one > notes.txt")}}),
+            serde_json::json!({"reply": {"when": "Write two", "text": "Writing.", "calls": call("c2", "echo two > notes.txt")}}),
+            serde_json::json!({"step": "ask", "text": "Write one."}),
+            serde_json::json!({"step": "declare-meditation"}),
+            serde_json::json!({"step": "ask", "text": "Write two."}),
+            serde_json::json!({"step": "declare-meditation"}),
+            serde_json::json!({"step": "ask", "text": "Is it written?"}),
+            serde_json::json!({"step": "end"}),
+        ]),
+    )
+    .expect("the scenario");
+    let seam = dir.join("seam.jsonl");
+    std::fs::write(
+        &seam,
+        script(&[
+            serde_json::json!({"reply": {"when": "Read the note", "text": "Reading.", "calls": call("c3", "cat notes.txt")}}),
+            serde_json::json!({"step": "ask", "text": "Read the note."}),
+            serde_json::json!({"step": "end"}),
+        ]),
+    )
+    .expect("the scenario");
+    let drive = |verb: &str, file: &Path, args: &[&std::ffi::OsStr]| {
+        let ran = Command::new(DRIVE)
+            .current_dir(root())
+            .arg(verb)
+            .arg(file)
+            .args(args)
+            .arg("--no-assemble")
+            .output()
+            .expect("diet-drive runs");
+        let stdout = String::from_utf8_lossy(&ran.stdout).into_owned();
+        let said: serde_json::Value =
+            serde_json::from_str(stdout.lines().last().unwrap_or("")).unwrap_or_default();
+        (
+            ran.status.code(),
+            said,
+            format!("{stdout}{}", String::from_utf8_lossy(&ran.stderr)),
+        )
+    };
+    // The recorded drive: a single run, so its log names no run.
+    let out = dir.join("out-first");
+    let (code, _, said) = drive("scenario", &first, &["--out".as_ref(), out.as_os_str()]);
+    assert_eq!(code, Some(0), "{said}");
+    let recorded = out.join("session.log");
+    assert!(
+        first_line(&recorded).get("run").is_none(),
+        "a live log's shape"
+    );
+    let meditations = logged(&recorded, "meditation");
+    assert_eq!(meditations.len(), 2, "{meditations:?}");
+    let (one, two) = (&meditations[0], &meditations[1]);
+    let head_after = |meditation: &serde_json::Value| {
+        logged(&recorded, "request")
+            .into_iter()
+            .find(|request| {
+                request["lane"] == "trunk" && request["seq"].as_u64() > meditation["seq"].as_u64()
+            })
+            .map(|request| request["head_sha256"].clone())
+            .expect("a trunk request after the refill")
+    };
+    assert_ne!(head_after(one), head_after(two), "two trunks");
+    // `--from-carry` alone takes the last meditation and the script after
+    // it, and a log that names no run is refused.
+    let (code, said, _) = drive(
+        "scenario",
+        &seam,
+        &[
+            "--out".as_ref(),
+            dir.join("out-refused").as_os_str(),
+            "--from-carry".as_ref(),
+            recorded.as_os_str(),
+        ],
+    );
+    assert_eq!(code, Some(1), "{said}");
+    assert!(
+        said["failure"]
+            .as_str()
+            .unwrap_or("")
+            .contains("names no run"),
+        "{said}"
+    );
+    // At the first meditation's seq: accepted, and carried from it.
+    let at = one["seq"].to_string();
+    let out_at = dir.join("out-at");
+    let (code, _, said) = drive(
+        "scenario",
+        &seam,
+        &[
+            "--out".as_ref(),
+            out_at.as_os_str(),
+            "--from-carry".as_ref(),
+            recorded.as_os_str(),
+            "--carry-at".as_ref(),
+            at.as_ref(),
+        ],
+    );
+    assert_eq!(code, Some(0), "{said}");
+    let log = out_at.join("session.log");
+    let start = first_line(&log);
+    let from = &start["carried_from"];
+    assert_eq!(
+        from["log_sha256"],
+        diet::digest::sha256_hex(&std::fs::read(&recorded).expect("the log")).as_str(),
+        "{start}"
+    );
+    assert_eq!(from["meditation_seq"], one["seq"], "{start}");
+    assert_eq!(from["trunk_sha256"], one["trunk_sha256"], "{start}");
+    assert_eq!(from["worktree_sha256"], one["worktree_sha256"], "{start}");
+    assert_eq!(from["worktree_from"], "meditation", "{start}");
+    let carried_head = logged(&log, "request")
+        .into_iter()
+        .find(|request| request["lane"] == "trunk")
+        .map(|request| request["head_sha256"].clone())
+        .expect("a trunk request");
+    assert_eq!(
+        carried_head,
+        head_after(one),
+        "the first refill's trunk, sent"
+    );
+    let read = logged(&log, "tool_call")
+        .into_iter()
+        .find(|call| call["id"] == "c3")
+        .expect("the read");
+    let shown = read["shown"].as_str().unwrap_or("");
+    assert!(
+        shown.contains("one") && !shown.contains("two"),
+        "the first refill's worktree: {read}"
+    );
+    let asks: Vec<String> = logged(&log, "ask")
+        .iter()
+        .map(|ask| ask["text"].as_str().unwrap_or("").to_owned())
+        .collect();
+    assert_eq!(
+        asks,
+        ["Read the note."],
+        "the seam's script, from its first step"
+    );
+    // Told to stop after one call: one, and the turn settles `stopped`.
+    let out_stop = dir.join("out-stop");
+    let (code, _, said) = drive(
+        "scenario",
+        &seam,
+        &[
+            "--out".as_ref(),
+            out_stop.as_os_str(),
+            "--from-carry".as_ref(),
+            recorded.as_os_str(),
+            "--carry-at".as_ref(),
+            at.as_ref(),
+            "--stop-after".as_ref(),
+            "1".as_ref(),
+        ],
+    );
+    assert_eq!(code, Some(0), "{said}");
+    let log = out_stop.join("session.log");
+    let trunk_calls = logged(&log, "request")
+        .into_iter()
+        .filter(|request| request["lane"] == "trunk")
+        .count();
+    assert_eq!(trunk_calls, 1, "one call");
+    let settled: Vec<serde_json::Value> = logged(&log, "turn.settled");
+    assert_eq!(settled.len(), 1, "{settled:?}");
+    assert_eq!(settled[0]["reason"], "stopped", "{settled:?}");
+    // A batch whose arm carries its own trunk beside the baseline's kept one.
+    let kept = std::fs::read_to_string(
+        out.join("files")
+            .join(one["trunk_sha256"].as_str().expect("a kept trunk")),
+    )
+    .expect("the kept trunk");
+    let mut variant: serde_json::Value = serde_json::from_str(&kept).expect("messages");
+    let system = variant[0]["content"]
+        .as_str()
+        .expect("a system message")
+        .to_owned();
+    variant[0]["content"] = serde_json::Value::String(format!("{system}\n\nA variant."));
+    let variant_text = variant.to_string();
+    std::fs::write(dir.join("variant.json"), &variant_text).expect("the variant");
+    let manifest = dir.join("ARMS.toml");
+    std::fs::write(
+        &manifest,
+        "baseline = \"kept\"\npurpose = \"smoke\"\n[arm.kept]\nregimen = \"same.toml\"\n\
+         [arm.variant]\nregimen = \"same.toml\"\ncarry_trunk = \"variant.json\"\n",
+    )
+    .expect("the manifest");
+    let arms_out = dir.join("out-arms");
+    let (code, said, all) = drive(
+        "arms",
+        &seam,
+        &[
+            "--arms".as_ref(),
+            manifest.as_os_str(),
+            "--repeat".as_ref(),
+            "1".as_ref(),
+            "--out".as_ref(),
+            arms_out.as_os_str(),
+            "--from-carry".as_ref(),
+            recorded.as_os_str(),
+            "--carry-at".as_ref(),
+            at.as_ref(),
+        ],
+    );
+    assert_eq!(code, Some(0), "{all}");
+    assert!(
+        said["against"]["variant"].get("carry_trunk").is_some(),
+        "the batch names the arm's difference: {said}"
+    );
+    let start = |arm: &str| first_line(&arms_out.join(arm).join("repeat-01").join("session.log"));
+    assert_eq!(
+        start("variant")["carried_from"]["variant_sha256"],
+        diet::digest::sha256_hex(variant_text.as_bytes()).as_str()
+    );
+    assert!(
+        start("kept")["carried_from"]
+            .get("variant_sha256")
+            .is_none(),
+        "the baseline carries the kept trunk"
+    );
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
 /// #948 (v27): a run from a recorded refill can send a delivery variant of
 /// its trunk in the kept one's place (`--carry-trunk`), named on its start
 /// line beside the trunk it varies; a variant byte-identical to the kept
