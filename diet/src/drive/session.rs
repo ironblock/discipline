@@ -449,6 +449,9 @@ pub enum Event {
         /// The task it asks, or answers the grade of (#942), when a
         /// scenario's `grade` step names one.
         task: Option<String>,
+        /// The turn a carried refill cut, resumed (#1151): the meditation
+        /// it was cut at and how many steps rode after it.
+        resumed: Option<log::Resumed>,
     },
     /// A call was made to the model. Every event the call produces names
     /// this event by its sequence number.
@@ -2868,6 +2871,8 @@ struct State {
     /// What rode after a carried trunk (#1151), until the turn it cut is
     /// resumed.
     riding: Vec<Message>,
+    /// The files the ask that rode had attached (#1151), until it is resumed.
+    riding_files: Vec<(log::RecordedFile, Vec<u8>)>,
     /// The latest prompt the operator decided, by its request and call id:
     /// what `serve`'s `answered` event names.
     answered: Option<(u64, String)>,
@@ -3167,6 +3172,7 @@ impl State {
             ending: false,
             stop_after: None,
             riding: Vec::new(),
+            riding_files: Vec::new(),
             answered: None,
             interview,
             forking: None,
@@ -3614,8 +3620,18 @@ impl State {
             self.reminder_due = Some(ask.text());
         }
         self.move_to(Settlement::Awaiting);
-        if self.ending {
+        // The session's stop, come with this turn (#1151's review): no turn
+        // opens past it, so no ask is taken to settle `stopped` unsent.
+        if self.ending || self.stop_due() {
             self.ending = false;
+            self.move_to(Settlement::Ended);
+        }
+    }
+
+    /// On to `ended` when the session's stop has come (#1151's review),
+    /// once a turn settled outside [`turn_over`].
+    fn ended_if_stopped(&mut self) {
+        if self.settlement == Settlement::Awaiting && self.stop_due() {
             self.move_to(Settlement::Ended);
         }
     }
@@ -4113,6 +4129,18 @@ impl<S: Streaming + 'static> Session<S> {
     pub fn with_carry(self, carry: Carry) -> Result<Self, String> {
         {
             let mut state = self.shared.lock();
+            // The working directory the carried trunk names (#1151's review):
+            // its refill said where its commands ran, and this session's run
+            // where its first ask will say. Another is refused, never sent,
+            // unless the carry was rerooted into this one.
+            if let Some(here) = state.start_cwd.as_deref()
+                && let Some(there) = other_cwd(&carry.trunk, here)
+            {
+                return Err(format!(
+                    "the carried trunk says `{there}`, and this session's commands run where it \
+                     says `{here}`: --carried-root FROM=TO reroots the carry into this worktree"
+                ));
+            }
             // The head sent is the carried trunk's, so the start names the
             // nonce it carries, not the one this session drew (#969).
             let carried_nonce = carry
@@ -4122,6 +4150,7 @@ impl<S: Streaming + 'static> Session<S> {
             state.trunk = carry.trunk;
             // What rode after it (#1151), for `resume` to send.
             state.riding = carry.riding;
+            state.riding_files = carry.riding_files;
             // The phase the carried session was in (#1071), when the graph
             // has it: its rules ride in the carried refill, so no note is due
             // unless that refill has no system prompt to hold them. With none
@@ -4215,6 +4244,31 @@ impl<S: Streaming + 'static> Session<S> {
             return None;
         }
         let riding = std::mem::take(&mut state.riding);
+        // The ask's files, kept in this session's recording as an ask's are;
+        // with none, named as the first session's recording kept them.
+        let files: Vec<log::RecordedFile> = std::mem::take(&mut state.riding_files)
+            .into_iter()
+            .map(|(file, bytes)| {
+                state
+                    .recording
+                    .as_deref()
+                    .and_then(|dir| super::attach::kept_whole(dir, &bytes, &file.media_type).ok())
+                    .unwrap_or(file)
+            })
+            .collect();
+        let meditation_seq = match state.log.first().map(|logged| &logged.event) {
+            Some(Event::Started {
+                carried_from: Some(from),
+                ..
+            }) => from.meditation_seq,
+            _ => 0,
+        };
+        // The steps that rode count against the turn's step budget (#1151's
+        // review): the resumed request is the step after them.
+        let ridden = riding
+            .iter()
+            .filter(|message| message.role == Role::Assistant)
+            .count() as u64;
         state.turns += 1;
         state.step_counters.covered.clear();
         state.gap_firings.clear();
@@ -4224,9 +4278,21 @@ impl<S: Streaming + 'static> Session<S> {
             turn,
             text: riding[0].content.clone(),
             scoping: false,
-            files: Vec::new(),
+            files,
             task: None,
+            resumed: Some(log::Resumed {
+                meditation_seq,
+                turn_steps_kept: ridden,
+            }),
         });
+        // Its notes, each on a line of its own as the walk rebuilds an
+        // ask's notes; they ride in the message as they rode.
+        for note in &riding[0].notes {
+            state.push(Event::Notified {
+                turn,
+                text: note.clone(),
+            });
+        }
         state.move_to(Settlement::Turn);
         let mut shape = self.shared.template.clone();
         shape.messages.clone_from(&state.trunk);
@@ -4238,7 +4304,12 @@ impl<S: Streaming + 'static> Session<S> {
             .flatten();
         drop(state);
         self.shared.changed.notify_all();
-        spawn_turn(&self.shared, (shape, riding, turn), (first, None, deferred));
+        let steps = u32::try_from(ridden).unwrap_or(u32::MAX).saturating_add(1);
+        spawn_turn(
+            &self.shared,
+            (shape, riding, (turn, steps)),
+            (first, None, deferred),
+        );
         Some(Admitted { seq, turn })
     }
 
@@ -4468,6 +4539,7 @@ impl<S: Streaming + 'static> Session<S> {
             scoping,
             files,
             task,
+            resumed: None,
         });
         state.move_to(Settlement::Turn);
         let mut shape = self.shared.template.clone();
@@ -4553,7 +4625,7 @@ impl<S: Streaming + 'static> Session<S> {
         self.shared.changed.notify_all();
         spawn_turn(
             &self.shared,
-            (shape, opening, turn),
+            (shape, opening, (turn, 1)),
             (first, arrival, deferred),
         );
         Ok(Admitted { seq, turn })
@@ -6504,7 +6576,9 @@ pub fn line_of(logged: &Logged) -> log::Line {
             scoping,
             files,
             task,
+            resumed,
         } => log::Event::Ask {
+            resumed: *resumed,
             task: task.clone(),
             turn: *turn,
             text: text.clone(),
@@ -7538,12 +7612,14 @@ fn call<S: Streaming + 'static>(
     shape: &RequestShape,
     cancel: &Cancel,
     opening: Vec<Message>,
-    turn: u32,
+    (turn, steps): (u32, u32),
     request: u64,
 ) {
     let mut shape = shape.clone();
     let mut request = request;
-    let mut steps = 1;
+    // The first request's step: 1, or the step after those that rode into
+    // a resumed turn (#1151).
+    let mut steps = steps;
     // The turn's exchange so far: its ask, then each step's calls and their
     // results. It joins the trunk when the turn settles `final` or
     // `max_steps` (Q12); settling `failed` or `timeout` after a step, the
@@ -7794,6 +7870,7 @@ fn step<S: Streaming + 'static>(
                 reason: SettleReason::Cancelled,
             });
             state.move_to(Settlement::Awaiting);
+            state.ended_if_stopped();
         }
         Ok(StreamEnded::Rejected {
             status,
@@ -7861,6 +7938,7 @@ fn step<S: Streaming + 'static>(
                 reason: SettleReason::Failed,
             });
             state.move_to(Settlement::Awaiting);
+            state.ended_if_stopped();
         }
         Err(failure) => {
             let reason = settle_reason_of(&failure);
@@ -7907,6 +7985,7 @@ fn step<S: Streaming + 'static>(
             state.keep_ran_steps();
             state.push(Event::TurnSettled { turn, reason });
             state.move_to(Settlement::Awaiting);
+            state.ended_if_stopped();
         }
     }
     drop(state);
@@ -9104,7 +9183,7 @@ fn stop_turn(template: &RequestShape, state: &mut State, turn: u32) {
 /// far, then the gap's work.
 fn spawn_turn<S: Streaming + 'static>(
     shared: &Arc<Shared<S>>,
-    (shape, opening, turn): (RequestShape, Vec<Message>, u32),
+    (shape, opening, (turn, steps)): (RequestShape, Vec<Message>, (u32, u32)),
     (first, arrival, deferred): (Option<(u64, Cancel)>, Option<Fired>, bool),
 ) {
     let thread = Arc::clone(shared);
@@ -9130,7 +9209,7 @@ fn spawn_turn<S: Streaming + 'static>(
                             .flatten()
                     });
                 if let Some((request, cancel)) = first {
-                    call(&shared, &shape, &cancel, opening, turn, request);
+                    call(&shared, &shape, &cancel, opening, (turn, steps), request);
                 }
                 // A fork the operator queued, the turn over first (N4).
                 queued_at_the_gap(&shared);
@@ -11861,6 +11940,7 @@ fn summary_failed(state: &mut State, turn: u32) {
         reason: SettleReason::SummaryFailed,
     });
     state.move_to(Settlement::Awaiting);
+    state.ended_if_stopped();
 }
 
 /// Whether a meditation has nothing to refill from: no turn has settled, the
@@ -14001,6 +14081,27 @@ pub fn start_cwd_note(cwd: &str) -> String {
     crate::dogma::Template::StartCwd
         .fill(&[(crate::dogma::Hole::Cwd, cwd)])
         .expect("START_CWD's one hole is `cwd`")
+}
+
+/// The first line of `trunk`'s user and system messages -- their content
+/// and their notes -- that names a working directory as [`start_cwd_note`]
+/// words it, when it is not `here` (#1151's review): what a carried refill
+/// says of where its commands ran.
+fn other_cwd(trunk: &[Message], here: &str) -> Option<String> {
+    let marked = start_cwd_note("\u{1}");
+    let (before, after) = marked.split_once('\u{1}')?;
+    trunk
+        .iter()
+        .filter(|message| matches!(message.role, Role::User | Role::System))
+        .flat_map(|message| std::iter::once(&message.content).chain(&message.notes))
+        .flat_map(|text| text.lines())
+        .find(|line| {
+            line.len() > before.len() + after.len()
+                && line.starts_with(before)
+                && line.ends_with(after)
+                && *line != here
+        })
+        .map(str::to_owned)
 }
 
 /// The note on the next ask that tells the model the operator declined its
@@ -17693,6 +17794,7 @@ pub(in crate::drive) mod tests {
                     scoping: false,
                     files: Vec::new(),
                     task: None,
+                    resumed: None,
                 },
                 Event::Settled {
                     from: Settlement::Awaiting,
@@ -20651,6 +20753,7 @@ pub(in crate::drive) mod tests {
                 scoping: true,
                 files: vec![attached_file()],
                 task: None,
+                resumed: None,
             },
             Event::Settled {
                 from: Settlement::Awaiting,
@@ -21320,6 +21423,7 @@ pub(in crate::drive) mod tests {
                 scoping: Some(true),
                 files: Some(vec![attached_file()]),
                 task: None,
+                resumed: None,
             },
             log::Event::Settlement {
                 from: log::State::Awaiting,
@@ -34084,6 +34188,7 @@ pub(in crate::drive) mod tests {
                 scoping: false,
                 files: Vec::new(),
                 task: None,
+                resumed: None,
             },
         };
         let log = [

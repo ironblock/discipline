@@ -101,12 +101,13 @@ pub fn read_at(log: &Path, sealed: &[String], at: Option<u64>) -> Result<Carry, 
         .collect();
     // What rode after the refill (#1151), only for a meditation named by
     // its seq: the default carry, the last refill's, is as it was.
-    let riding = match at {
+    let ride = match at {
         Some(_) => crate::drive::projection::riding(&lines, Some(recording), (seq, &trunk))
-            .map_err(|why| format!("{}: {why}", log.display()))?
-            .unwrap_or_default(),
-        None => Vec::new(),
+            .map_err(|why| format!("{}: {why}", log.display()))?,
+        None => None,
     };
+    let (riding, riding_files) =
+        ride.map_or_else(Default::default, |ride| (ride.messages, ride.files));
     Ok(Carry {
         trunk,
         object,
@@ -122,7 +123,7 @@ pub fn read_at(log: &Path, sealed: &[String], at: Option<u64>) -> Result<Carry, 
         source: (!source.is_empty()).then_some(source),
         phase: carried_phase(&lines, seq),
         riding,
-        riding_files: Vec::new(),
+        riding_files,
     })
 }
 

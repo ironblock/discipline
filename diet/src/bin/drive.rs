@@ -131,13 +131,18 @@ fn carry_usage(out: &mut String) {
     out.push_str("from any log, a live drive's or a scenario's (#1151). Its worktree snapshot\n");
     out.push_str("is restored into --worktree, which must be empty; and when the refill cut a\n");
     out.push_str("turn, that turn resumes at start: the first request is the kept trunk, then\n");
-    out.push_str("the ask and the steps that rode after it, rebuilt from LOG and checked\n");
-    out.push_str("against the head LOG names for the request it sent after the refill. A\n");
+    out.push_str("the ask, its notes and every step the refill kept, rebuilt from LOG. The\n");
+    out.push_str("head of the request LOG sent after the refill checks all of it but its last\n");
+    out.push_str("message; LOG's next trunk request before another refill checks that one.\n");
+    out.push_str("The ask names where it resumed from (`resumed_meditation_seq`,\n");
+    out.push_str("`resumed_turn_steps_kept`, log v50). A carried trunk naming another working\n");
+    out.push_str("directory than this session's is refused unless --carried-root reroots it. A\n");
     out.push_str("carried session sends this build's tools and wording, so its baseline is\n");
     out.push_str("a carry with no lever moved, never the recorded continuation.\n");
     out.push_str("--stop-after N: the session stops after its Nth trunk call, or at its\n");
     out.push_str("next refill, whichever comes first: the next trunk request is never sent,\n");
-    out.push_str("the turn settles `stopped` (log v50), and the session ends (#1151).\n");
+    out.push_str("the turn settles `stopped` (log v50), and the session ends; a turn that\n");
+    out.push_str("settles with the stop come ends it too (#1151).\n");
     out.push_str("--carried-root FROM=TO: with --carry, the carried text's worktree root\n");
     out.push_str("FROM replaced with this session's TO, each whole occurrence; repeatable,\n");
     out.push_str("applied in order; the start line names how many and what was sent (v28).\n");
@@ -3306,7 +3311,7 @@ fn scenario(args: &[String]) -> ExitCode {
             "usage: diet-drive scenario FILE --out DIR [--endpoint URL --model NAME \
              [--key-file FILE]] [--regimen FILE] [--worktree DIR] [--no-assemble] [--dry-run] \
              [--repeat N [--stop-file PATH] [--void-cap K]] [--from-carry LOG [--carry-at SEQ] \
-             [--stop-after N] [--carry-worktree DIR] \
+             [--stop-after N] [--carried-root DIR] [--carry-worktree DIR] \
              [--carry-trunk FILE] [--only-task TASK]] [--phase-tool-description FILE]",
         )
     };
@@ -3415,10 +3420,11 @@ type BatchFlags = (
 );
 
 /// The carry's flags `scenario` and `arms` take (#948, #1151).
-const CARRY_FLAGS: [&str; 7] = [
+const CARRY_FLAGS: [&str; 8] = [
     "--from-carry",
     "--carry-at",
     "--stop-after",
+    "--carried-root",
     "--carry-worktree",
     "--carry-trunk",
     "--phase-tool-description",
@@ -3429,7 +3435,9 @@ const CARRY_FLAGS: [&str; 7] = [
 /// recorded refill, carried from that log's last meditation and taking up
 /// the script after it; `--carry-at SEQ`, carried from the meditation at
 /// SEQ instead, of any log, the script run from its first step (#1151);
-/// `--stop-after N`, the carried session's stop; `--carry-worktree DIR`, its
+/// `--stop-after N`, the carried session's stop; `--carried-root DIR`, the
+/// recorded drive's worktree root, rerooted into the run's own as a fresh
+/// session's is (#948, #1151's review); `--carry-worktree DIR`, its
 /// worktree for a log written before v26; `--carry-trunk FILE`, a delivery
 /// variant of its trunk; `--phase-tool-description FILE`, the phase tool's
 /// description; `--only-task TASK`, a first-move probe of one task from the
@@ -3448,6 +3456,14 @@ fn carry_flag(options: &mut diet::drive::scenario::RunOptions, flag: &str, value
             Ok(calls) if calls > 0 => options.stop_after = Some(calls),
             _ => return false,
         },
+        "--carried-root" => {
+            let given = std::path::PathBuf::from(value);
+            if !given.is_absolute() {
+                return false;
+            }
+            let resolved = std::fs::canonicalize(&given).unwrap_or_else(|_| given.clone());
+            options.carried_root = Some((given, resolved));
+        }
         "--carry-worktree" => options.carry_worktree = Some(value.into()),
         "--carry-trunk" => options.carry_trunk = Some(value.into()),
         "--only-task" => options.only_task = Some(value.to_owned()),
@@ -3586,7 +3602,7 @@ fn arms(args: &[String]) -> ExitCode {
             EXIT_USAGE,
             "usage: diet-drive arms FILE --arms ARMS.toml --repeat N --out DIR [--endpoint URL \
              --model NAME [--key-file FILE]] [--no-assemble] [--stop-file PATH] [--void-cap K] [--dry-run] \
-             [--from-carry LOG [--carry-at SEQ] [--stop-after N] [--carry-worktree DIR] \
+             [--from-carry LOG [--carry-at SEQ] [--stop-after N] [--carried-root DIR] [--carry-worktree DIR] \
              [--carry-trunk FILE] [--only-task TASK]] \
              [--phase-tool-description FILE]",
         )

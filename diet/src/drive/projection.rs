@@ -677,26 +677,45 @@ fn walk_of<'a>(
     Ok(walk)
 }
 
+/// What rode after a refilled trunk (#1151): the running turn's ask with
+/// its notes, then the steps the split kept, and the ask's files with their
+/// bytes, read back from the recording.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Ride {
+    /// The messages, in the order they were sent after the trunk.
+    pub messages: Vec<Message>,
+    /// The ask's attached files, each with its bytes.
+    pub files: Vec<(log::RecordedFile, Vec<u8>)>,
+}
+
 /// What rode after the trunk the meditation at `seq` refilled, when it cut
-/// a turn (#1151): the running turn's ask with its notes, then the steps the
-/// split kept, rebuilt from `lines` as every trunk head is, the ask's files
-/// read back from `recording`. Checked against the head the log names for
-/// the turn's next trunk request, sent on `trunk` -- the trunk the
-/// meditation kept -- when the log sent one and its tools rebuild here.
-/// `None` when the meditation cut no turn: it was made between turns, or
-/// before the first.
+/// a turn (#1151): the running turn's ask with its notes, then every step
+/// the split kept, rebuilt from `lines` as every trunk head is, the ask's
+/// files read back from `recording`. `None` when the meditation cut no
+/// turn: it was made between turns, or before the first.
+///
+/// What is checked, against `trunk` (the trunk the meditation kept) and
+/// the heads the log names: the turn's next trunk request after the refill
+/// must have the head of `trunk` and what rode, which covers every message
+/// but the last (`client::head` leaves the last out). The last is checked
+/// against the next trunk request after that one, when the log sent one
+/// before another refill or tangent and it still carries what rode as it
+/// rode. Neither check is made where the log's tools do not rebuild here.
+/// A ride with no request after the refill is not checked at all, and is
+/// refused from a log that was itself carried (`carried_from`).
 ///
 /// # Errors
 ///
 /// When the log does not begin with its session, the line at `seq` is no
-/// meditation, a line before it does not walk, the turn's ask cannot be
-/// rebuilt, or the logged head of the request after it is not the trunk
-/// and what rode.
+/// meditation, a line does not walk, the turn's ask cannot be rebuilt, a
+/// step that rode into a carried turn is still kept, a logged head is not
+/// the trunk and what rode, or the ride from a carried log is unchecked.
+#[allow(clippy::too_many_lines)]
 pub fn riding(
     lines: &[log::Line],
     recording: Option<&std::path::Path>,
     (seq, trunk): (u64, &[Message]),
-) -> Result<Option<Vec<Message>>, String> {
+) -> Result<Option<Ride>, String> {
     let Some(at) = lines.iter().position(|line| line.seq == seq) else {
         return Err(format!("the log has no line at seq {seq}"));
     };
@@ -713,21 +732,58 @@ pub fn riding(
     if turn == 0 || settled || !asked {
         return Ok(None);
     }
+    let carried = matches!(
+        lines.first().map(|line| &line.event),
+        Some(Line::SessionStart {
+            carried_from: Some(_),
+            ..
+        })
+    );
     let mut walk = walk_of(lines, (String::new(), None), recording)?;
     for line in &lines[1..=at] {
         walk.line(line)?;
     }
-    let asked = walk
-        .user_message(turn)
-        .map_err(|why| format!("turn {turn}'s ask: {why}"))?;
-    let notes = walk.notes.get(&turn).cloned().unwrap_or_default();
-    let mut rode = walk.with_notes(asked, notes);
-    for step in walk.steps.get(&turn).into_iter().flatten() {
-        if let Some(why) = &step.unrebuilt {
-            return Err(format!("turn {turn}'s step: {why}"));
-        }
-        rode.extend(step.messages());
+    // A step that rode into this turn from the log it was carried from, and
+    // that this refill kept: this log does not hold it.
+    if let Some(kept) = walk.ridden.get(&turn).filter(|kept| **kept > 0) {
+        return Err(format!(
+            "{kept} step(s) that rode into turn {turn} from the log it was carried from are \
+             kept after the refill at seq {seq}, and this log does not hold them"
+        ));
     }
+    // The ask and steps as sent; the walk's own trunk, which the kept one
+    // stands in for, and the tools, which this build sends anew, aside.
+    if let Err(why) = walk.user_message(turn) {
+        return Err(format!("turn {turn}'s ask: {why}"));
+    }
+    if let Some(why) = walk
+        .steps
+        .get(&turn)
+        .into_iter()
+        .flatten()
+        .find_map(|step| step.unrebuilt.clone())
+    {
+        return Err(format!("turn {turn}'s step: {why}"));
+    }
+    let (messages, _) = walk.request_messages(turn);
+    let at_trunk = walk.trunk.clone();
+    let rode = messages[at_trunk.len()..].to_vec();
+    let mut files = Vec::new();
+    for file in walk.ask_files.get(&turn).into_iter().flatten() {
+        let from = recording.map(|dir| dir.join(&file.path));
+        let bytes = from
+            .as_deref()
+            .map(std::fs::read)
+            .transpose()
+            .map_err(|why| format!("{}: {why}", file.path))?
+            .ok_or_else(|| format!("{}: no recording to read it back from", file.path))?;
+        files.push((file.clone(), bytes));
+    }
+    let sent_on = |carried: &[Message]| {
+        let mut messages = trunk.to_vec();
+        messages.extend(carried.iter().cloned());
+        messages
+    };
     // The request the recording sent after the refill: the turn's next on
     // the trunk, before the turn settled.
     let sent = lines[at + 1..]
@@ -743,18 +799,68 @@ pub fn riding(
             } => Some((line.seq, head.clone())),
             _ => None,
         });
-    if let (Some((request, logged)), Ok(_)) = (sent, &walk.tools) {
-        let mut messages = trunk.to_vec();
-        messages.extend(rode.iter().cloned());
-        if walk.rebuilt_head(&messages, &logged).is_none() {
+    let Some((request, logged)) = sent else {
+        if carried {
             return Err(format!(
-                "the head the log names for request {request}, the one sent after the refill \
-                 at seq {seq}, is not the kept trunk and the turn's ask and steps rebuilt from \
-                 the log: what rode is not known"
+                "nothing was sent after the refill at seq {seq} to check what rode against, \
+                 and this log was itself carried (`carried_from`): what rode is not known"
             ));
         }
+        return Ok(Some(Ride {
+            messages: rode,
+            files,
+        }));
+    };
+    if walk.tools.is_err() {
+        return Ok(Some(Ride {
+            messages: rode,
+            files,
+        }));
     }
-    Ok(Some(rode))
+    let contradicted = |request: u64| {
+        format!(
+            "the head the log names for request {request}, sent after the refill at seq {seq}, \
+             is not the kept trunk and the turn's ask and steps rebuilt from the log: what rode \
+             is not known"
+        )
+    };
+    if walk.rebuilt_head(&sent_on(&rode), &logged).is_none() {
+        return Err(contradicted(request));
+    }
+    // The ride's last message, which that head leaves out: the next trunk
+    // request's head covers it, when one was sent before another refill or
+    // tangent and still carries what rode as it rode.
+    let mut next = None;
+    for line in &lines[at + 1..] {
+        match &line.event {
+            Line::Meditation { .. } | Line::TangentOpen { .. } | Line::TangentClose { .. } => break,
+            Line::Request {
+                lane: Lane::Trunk,
+                head_sha256: Some(head),
+                turn: of_turn,
+                ..
+            } if line.seq > request => {
+                next = Some((line.seq, *of_turn, head.clone()));
+                break;
+            }
+            _ => {}
+        }
+        walk.line(line)?;
+    }
+    if let Some((request, of_turn, logged)) = next {
+        let (messages, unrebuilt) = walk.request_messages(of_turn);
+        if let Some(after) = messages
+            .strip_prefix(at_trunk.as_slice())
+            .filter(|after| unrebuilt.is_none() && after.starts_with(&rode))
+            && walk.rebuilt_head(&sent_on(after), &logged).is_none()
+        {
+            return Err(contradicted(request));
+        }
+    }
+    Ok(Some(Ride {
+        messages: rode,
+        files,
+    }))
 }
 
 /// The walk over a log's lines after its first.
@@ -826,6 +932,10 @@ struct Walk<'a> {
     /// Each turn's tool steps so far, in order: what the session sent after
     /// the ask, and what it put back on the trunk.
     steps: BTreeMap<u32, Vec<Step>>,
+    /// The steps that rode into a resumed turn from the log this one was
+    /// carried from (v50, #1151), by turn, as many as no refill has
+    /// compacted yet: this log holds none of them.
+    ridden: BTreeMap<u32, u64>,
     /// Each turn's steps a window meditation compacted out of its requests
     /// (#813, #884): the session's exchange keeps them, and they rejoin the
     /// trunk with the turn when it settles.
@@ -1103,6 +1213,7 @@ impl<'a> Walk<'a> {
             stepped,
             cancelled_text: BTreeMap::new(),
             steps: BTreeMap::new(),
+            ridden: BTreeMap::new(),
             compacted: BTreeMap::new(),
             trunk_unrebuilt: None,
             refilled: false,
@@ -1272,8 +1383,15 @@ impl<'a> Walk<'a> {
                 self.no_row(line);
             }
             Line::Ask {
-                turn, text, files, ..
+                turn,
+                text,
+                files,
+                resumed,
+                ..
             } => {
+                if let Some(resumed) = resumed {
+                    self.ridden.insert(*turn, resumed.turn_steps_kept);
+                }
                 self.asks.insert(*turn, text.clone());
                 self.ask(line.seq, *turn, files.as_ref());
             }
@@ -1698,7 +1816,18 @@ impl<'a> Walk<'a> {
         // compaction persists (#886); before it did, the session's exchange
         // still held the compacted steps, and they rejoined the trunk with
         // the turn when it settled.
-        if let Some(log::TurnSteps { compacted, .. }) = turn_steps
+        // The steps that rode into a resumed turn (#1151) are its first, so
+        // a compaction takes them first.
+        let compacted_steps = turn_steps.map(|steps| {
+            let ridden = self.ridden.entry(at_turn).or_default();
+            let from_ridden = (*ridden).min(steps.compacted);
+            *ridden -= from_ridden;
+            log::TurnSteps {
+                compacted: steps.compacted - from_ridden,
+                ..steps
+            }
+        });
+        if let Some(log::TurnSteps { compacted, .. }) = compacted_steps.as_ref()
             && let Some(steps) = self.steps.get_mut(&at_turn)
         {
             let compacted = usize::try_from(*compacted).unwrap_or(usize::MAX);
@@ -1940,7 +2069,10 @@ impl<'a> Walk<'a> {
     /// The trunk request at `seq`'s head, rebuilt from the log and checked
     /// against its logged digest, and the change row from the trunk's last
     /// request when the head moved.
-    fn head_change(&mut self, seq: u64, turn: u32, logged: &str) {
+    /// A trunk request of turn `turn`'s messages as the session sent them,
+    /// rebuilt from the log: the trunk, the turn's ask with its notes, then
+    /// its steps; and why they could not be rebuilt, when they could not.
+    fn request_messages(&self, turn: u32) -> (Vec<Message>, Option<String>) {
         let mut messages = self.trunk.clone();
         let asked = self.user_message(turn);
         let notes = self.notes.get(&turn).cloned().unwrap_or_default();
@@ -1962,6 +2094,11 @@ impl<'a> Walk<'a> {
         for step in self.steps.get(&turn).into_iter().flatten() {
             messages.extend(step.messages());
         }
+        (messages, unrebuilt)
+    }
+
+    fn head_change(&mut self, seq: u64, turn: u32, logged: &str) {
+        let (messages, unrebuilt) = self.request_messages(turn);
         let tools = self.tools.clone().unwrap_or_default();
         let head = |tools: Vec<ToolDefinition>| {
             Head::of(&RequestShape {
@@ -2792,6 +2929,7 @@ mod tests {
                 scoping: None,
                 files: None,
                 task: None,
+                resumed: None,
             },
             Line::Settlement {
                 from: State::Awaiting,
@@ -3171,6 +3309,7 @@ mod tests {
     }
 
     #[test]
+    #[allow(clippy::too_many_lines)]
     fn a_cancelled_a_failed_and_an_unanswered_call_are_named_not_dropped() {
         let mut events = vec![start()];
         for (turn, outcome) in [
@@ -3206,6 +3345,7 @@ mod tests {
                     scoping: None,
                     files: None,
                     task: None,
+                    resumed: None,
                 },
                 Line::Settlement {
                     from: State::Awaiting,

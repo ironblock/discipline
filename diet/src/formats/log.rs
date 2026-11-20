@@ -274,7 +274,11 @@
 //! Nth trunk call was made, or it refilled, since it started. The session
 //! ends after it. A log that declares 49 or less and carries it is refused.
 //! For a reader of earlier logs, the migration is nothing: no session was
-//! told to stop.
+//! told to stop. An `ask` that resumes a turn a carried refill cut names
+//! that meditation's `seq` in the carried log, `resumed_meditation_seq`, and
+//! how many of its steps rode after the refill, `resumed_turn_steps_kept`:
+//! both or neither, and its `text` and `files` are the ask that rode. A log
+//! that declares 49 or less and carries them is refused too.
 //!
 //! v49 (audit 9) logs what an operator's fork was sent: under a set whose
 //! operator forks carry the fields route's imperative (v6), a `fork`
@@ -1631,6 +1635,17 @@ pub struct RecordedFile {
     pub bytes: u64,
 }
 
+/// Where a resumed turn came from (v50, #1151): the meditation of the
+/// carried log that cut it, by its `seq`, and how many of its steps rode
+/// after that refill -- steps this log does not hold.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Resumed {
+    /// The `seq` of the meditation in the log the session was carried from.
+    pub meditation_seq: u64,
+    /// The steps that rode, each an assistant message and its results.
+    pub turn_steps_kept: u64,
+}
+
 /// What happened.
 // `SessionStart` is the large one, and a log holds one: the size each other
 // event carries for it is not worth a box per field (as session's `Event`).
@@ -1790,6 +1805,9 @@ pub enum Event {
         /// The task it asks, or answers the grade of (v18, #942), as the
         /// scenario's `grade` step names it.
         task: Option<String>,
+        /// The turn a carried refill cut, resumed (v50, #1151): this ask is
+        /// the one that rode after the kept trunk, its steps sent with it.
+        resumed: Option<Resumed>,
     },
     /// The state moved.
     Settlement {
@@ -5230,6 +5248,17 @@ fn from_object(object: &BTreeMap<String, Value>) -> Result<Line, String> {
             },
             files: fields.optional_files("files")?,
             task: fields.optional_string("task")?,
+            // Built only when its two keys are carried ([`all_or_none`]).
+            resumed: match (
+                fields.optional_count("resumed_meditation_seq")?,
+                fields.optional_count("resumed_turn_steps_kept")?,
+            ) {
+                (Some(meditation_seq), Some(turn_steps_kept)) => Some(Resumed {
+                    meditation_seq,
+                    turn_steps_kept,
+                }),
+                _ => None,
+            },
         },
         Kind::Settlement => Event::Settlement {
             from: fields.tag("from", State::from_tag)?,
@@ -7067,6 +7096,16 @@ const fn must_v48(key: &'static str, holds: Holds) -> Field {
 }
 
 /// A key that arrived in v46, optional wherever its object is written.
+/// A key that arrived in v50, optional on its kind.
+const fn may_v50(key: &'static str, holds: Holds) -> Field {
+    Field {
+        key,
+        holds,
+        required: false,
+        since: 50,
+    }
+}
+
 /// A key that arrived in v49, optional on its kind.
 const fn may_v49(key: &'static str, holds: Holds) -> Field {
     Field {
@@ -7850,6 +7889,8 @@ pub fn schema(kind: Kind) -> &'static [Field] {
                 may_v5("scoping", Holds::Flag),
                 may_v5("files", Holds::Files),
                 may_v18("task", Text),
+                may_v50("resumed_meditation_seq", Count),
+                may_v50("resumed_turn_steps_kept", Count),
             ];
             F
         }
@@ -8463,6 +8504,8 @@ pub fn all_or_none(kind: Kind) -> &'static [&'static str] {
         Kind::Fork => &["substrate", "model"],
         // The running turn a window meditation split (v8, #813).
         Kind::Meditation => &["turn_steps_kept", "turn_steps_compacted"],
+        // Where a resumed turn came from (v50, #1151).
+        Kind::Ask => &["resumed_meditation_seq", "resumed_turn_steps_kept"],
         // What a fork refused for the pool did not fit beside (v8, #782).
         Kind::ForkSettled => &["window", "trunk_tokens", "beside_tokens", "fork_tokens"],
         // The entry a note was merged into for its likeness, and their
@@ -9006,7 +9049,12 @@ fn to_value(line: &Line) -> Value {
             scoping,
             files,
             task,
+            resumed,
         } => {
+            if let Some(resumed) = resumed {
+                put("resumed_meditation_seq", count(resumed.meditation_seq));
+                put("resumed_turn_steps_kept", count(resumed.turn_steps_kept));
+            }
             put("turn", count(u64::from(*turn)));
             put("text", text(asked));
             if let Some(task) = task {
@@ -11629,6 +11677,7 @@ mod tests {
                 scoping: None,
                 files: None,
                 task: Some("t1".to_owned()),
+                resumed: None,
             },
             Event::Settlement {
                 from: State::Awaiting,
@@ -11676,6 +11725,7 @@ mod tests {
                 scoping: None,
                 files: None,
                 task: None,
+                resumed: None,
             },
             Event::Settlement {
                 from: State::Awaiting,
@@ -11721,6 +11771,7 @@ mod tests {
                 scoping: None,
                 files: None,
                 task: None,
+                resumed: None,
             },
             Event::Settlement {
                 from: State::Awaiting,
@@ -11786,6 +11837,7 @@ mod tests {
                 scoping: None,
                 files: None,
                 task: None,
+                resumed: None,
             },
             Event::Settlement {
                 from: State::Awaiting,
@@ -11872,6 +11924,7 @@ mod tests {
                     bytes: 48_213,
                 }]),
                 task: None,
+                resumed: None,
             },
             Event::Settlement {
                 from: State::Awaiting,

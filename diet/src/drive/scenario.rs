@@ -3375,6 +3375,13 @@ fn running(
                 .to_owned(),
         ));
     }
+    if options.carried_root.is_some() && !options.carried {
+        return Err(Failure(
+            "--carried-root reroots a carried session's text, and this run is not carried \
+             (--from-carry)"
+                .to_owned(),
+        ));
+    }
     // A run from a recorded refill (#948) takes up the script its log ran,
     // after that script's declared meditation.
     // A carried run at step 0 is one from a recorded refill (`--from-carry`):
@@ -3382,6 +3389,18 @@ fn running(
     // One carried at a seq (#1151) runs the script from its first step,
     // whatever log it came from: a live drive's names no script.
     let from_step = if recorded && options.carry_at.is_some() {
+        // A log that ran this script itself would replay it from its first
+        // step on the carried trunk (#1151's review).
+        if let Some(log) = &options.carry
+            && script_ran(log, &text)?
+        {
+            return Err(Failure(format!(
+                "{} ran this script itself: carried at a seq, it would replay its own script \
+                 from its first step on the carried trunk; --from-carry without --carry-at takes \
+                 it up after its declared meditation",
+                log.display()
+            )));
+        }
         0
     } else if recorded {
         let log = options
@@ -4189,6 +4208,20 @@ fn put_back(aside: Option<&std::path::Path>, out: &std::path::Path) -> Result<()
             .map_err(|why| failed(format!("{}: {why}", to.display())))?;
     }
     std::fs::remove_dir(aside).map_err(|why| failed(format!("{}: {why}", aside.display())))
+}
+
+/// Whether `log` names a run of the script `text` (#1151's review).
+fn script_ran(log: &std::path::Path, text: &str) -> Result<bool, Failure> {
+    use crate::formats::log::Event;
+    let written =
+        std::fs::read_to_string(log).map_err(|why| Failure(format!("{}: {why}", log.display())))?;
+    let lines = crate::formats::log::parse(&written)
+        .map_err(|why| Failure(format!("{}: {why}", log.display())))?;
+    Ok(matches!(
+        lines.first().map(|line| &line.event),
+        Some(Event::SessionStart { run: Some(run), .. })
+            if run.script_sha256 == crate::digest::sha256_hex(text.as_bytes())
+    ))
 }
 
 /// The script a recorded refill's log ran (#948): its `run`'s

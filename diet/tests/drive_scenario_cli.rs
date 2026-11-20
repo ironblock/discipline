@@ -3821,11 +3821,12 @@ fn a_run_from_a_chosen_refill_of_a_live_log_carries_that_refills_trunk_and_workt
         .output()
         .expect("diet-drive runs");
     assert_eq!(served.status.code(), Some(2), "a usage error");
-    assert!(
-        String::from_utf8_lossy(&served.stderr).contains("there is no --carry"),
-        "{}",
+    let said = format!(
+        "{}{}",
+        String::from_utf8_lossy(&served.stdout),
         String::from_utf8_lossy(&served.stderr)
     );
+    assert!(said.contains("there is no --carry"), "{said}");
     // Told to stop after one call: one, and the turn settles `stopped`.
     let out_stop = dir.join("out-stop");
     let (code, _, said) = drive(
