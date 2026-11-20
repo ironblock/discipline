@@ -2358,6 +2358,10 @@ fn serving_tools(
         .map_err(|why| (EXIT_INPUT, format!("{path}: {why}")))?;
     allowed.extend(stored);
     let home = std::env::var_os("HOME").map(std::path::PathBuf::from);
+    // #1149: off unless the regimen turns it on; counted at the first call.
+    let call_changes = declared
+        .call_changes
+        .then(|| std::sync::Mutex::new(diet::drive::call_changes::Tree::new(&worktree)));
     Ok(Some(Tools {
         confinement,
         // What the writable directories hold as the session opens (#830).
@@ -2386,6 +2390,7 @@ fn serving_tools(
         timeout_ms: declared.timeout_ms,
         // Set once the substrate is known to be canned (`--shown-root`).
         shown_roots: diet::drive::shown::ShownRoots::none(),
+        call_changes,
     }))
 }
 

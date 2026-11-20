@@ -22640,6 +22640,7 @@ pub(in crate::drive) mod tests {
             background: false,
             timeout_ms: None,
             shown_roots: crate::drive::shown::ShownRoots::none(),
+            call_changes: None,
         }
     }
 
@@ -24216,6 +24217,416 @@ pub(in crate::drive) mod tests {
             ]
         );
         every_head_rebuilds(&log);
+        tidy(&[&tree]);
+    }
+
+    // -----------------------------------------------------------------------
+    // what a call changed (#1149)
+    // -----------------------------------------------------------------------
+
+    /// A python replace inside `bash`: its argument names no file the edit
+    /// tool could see, and it finds `from` in `file` or nothing.
+    fn python_replace(file: &str, from: &str, to: &str) -> String {
+        format!(
+            "python3 -c \"import pathlib; p = pathlib.Path('{file}'); \
+             p.write_text(p.read_text().replace('{from}', '{to}'))\""
+        )
+    }
+
+    /// The loop over `tree` on `surface`, approvals off, the per-call changes
+    /// on when `on` (#1149): the request shape, and the tools.
+    fn counting(tree: &Path, surface: tool_loop::ToolSurface, on: bool) -> (RequestShape, Tools) {
+        let mut tools = tools(Confinement::Unconfined, tree, &[], None, Decider::Decline);
+        tools.approvals_off = true;
+        tools.surface = surface;
+        tools.read_tool = surface.read_tool();
+        tools.call_changes = on.then(|| Mutex::new(crate::drive::call_changes::Tree::new(tree)));
+        let mut shape = looping();
+        shape.tools = surface.tools();
+        (shape, tools)
+    }
+
+    /// `calls`, one a step, then an answer, as one turn under [`counting`]:
+    /// the session, and its log once the turn settled.
+    fn counted_turn(
+        tree: &Path,
+        (surface, on): (tool_loop::ToolSurface, bool),
+        calls: Vec<Step>,
+    ) -> (Session<Canned>, Vec<Logged>) {
+        let (session, log) = counted_turn_with(counting(tree, surface, on), calls);
+        assert_eq!(settled_as(&log), Some(SettleReason::Final));
+        (session, log)
+    }
+
+    /// What the model was sent as each call's result: the last request's
+    /// tool messages, in order.
+    fn results_sent(session: &Session<Canned>) -> Vec<String> {
+        let sent = session.shared.transport.sent();
+        sent.last()
+            .expect("a request")
+            .messages
+            .iter()
+            .filter(|message| message.role == Role::Tool)
+            .map(|message| message.content.clone())
+            .collect()
+    }
+
+    /// #1149: a python replace inside `bash` that changes a file is reported
+    /// with its line counts, counted from the worktree, and the file is
+    /// marked: no read of it is in the context. The block is what the model
+    /// was sent, and the projection rebuilds it from the logged result.
+    #[test]
+    fn a_python_replace_inside_bash_is_reported_with_its_line_counts() {
+        let tree = scratch("call-changes-replace");
+        std::fs::write(tree.join("app.py"), "a = 1\nb = 2\nc = 3\n").expect("written");
+        let replace = python_replace("app.py", "b = 2", "b = 20");
+        let (session, log) = counted_turn(
+            &tree,
+            (tool_loop::ToolSurface::Bash, true),
+            vec![bash("call-1", &replace)],
+        );
+        assert_eq!(
+            std::fs::read_to_string(tree.join("app.py")).expect("the file"),
+            "a = 1\nb = 20\nc = 3\n"
+        );
+        let block = "Files this call changed: app.py (+1 -1).\nNot shown in this context by \
+                     read, write or edit: app.py.\n";
+        assert_eq!(lines(&log)[0].shown.as_deref(), Some(block));
+        assert_eq!(results_sent(&session), [block]);
+        every_head_rebuilds(&log);
+        tidy(&[&tree]);
+    }
+
+    /// #1149: a replace that finds nothing exits 0 and changes nothing, and
+    /// says so.
+    #[test]
+    fn a_replace_that_finds_nothing_reports_no_change() {
+        let tree = scratch("call-changes-nothing");
+        std::fs::write(tree.join("app.py"), "a = 1\n").expect("written");
+        let replace = python_replace("app.py", "b = 2", "b = 20");
+        let (_, log) = counted_turn(
+            &tree,
+            (tool_loop::ToolSurface::Bash, true),
+            vec![bash("call-1", &replace)],
+        );
+        let line = &lines(&log)[0];
+        assert_eq!(line.exit, Some(0));
+        assert_eq!(
+            line.shown.as_deref(),
+            Some("Files this call changed: none.\n")
+        );
+        tidy(&[&tree]);
+    }
+
+    /// #1149: in a git repository a file its rules ignore is left out of the
+    /// count; the file beside it is not.
+    #[test]
+    fn an_ignored_file_is_left_out_of_the_count() {
+        let tree = scratch("call-changes-ignored");
+        let git = std::process::Command::new("git")
+            .args(["init", "-q"])
+            .current_dir(&tree)
+            .status()
+            .expect("git runs");
+        assert!(git.success());
+        std::fs::write(tree.join(".gitignore"), "*.log\n").expect("written");
+        std::fs::write(tree.join("app.py"), "a = 1\n").expect("written");
+        let (_, log) = counted_turn(
+            &tree,
+            (tool_loop::ToolSurface::Bash, true),
+            vec![bash(
+                "call-1",
+                "echo built > build.log && echo 'a = 2' > app.py && echo ok",
+            )],
+        );
+        assert!(tree.join("build.log").exists());
+        assert_eq!(
+            lines(&log)[0].shown.as_deref(),
+            Some(
+                "ok\n\nFiles this call changed: app.py (+1 -1).\nNot shown in this context by \
+                 read, write or edit: app.py.\n"
+            )
+        );
+        tidy(&[&tree]);
+    }
+
+    /// #1149: the count before a call is taken just before it runs, after
+    /// the user answered its prompt: a file written while the prompt waited
+    /// is not the call's.
+    #[test]
+    fn the_count_before_a_call_is_taken_after_its_prompt() {
+        let tree = scratch("call-changes-prompt");
+        std::fs::write(tree.join("app.py"), "a = 1\n").expect("written");
+        let (shape, mut tools) = counting(&tree, tool_loop::ToolSurface::Bash, true);
+        tools.approvals_off = false;
+        tools.decider = Decider::Operator;
+        let session = Session::open_looping(
+            Canned::new([
+                vec![bash("call-1", "echo 'a = 2' > app.py")],
+                deltas(&["done"]),
+            ]),
+            shape,
+            None,
+            tools,
+        );
+        session.ask("patch it", None).expect("accepted");
+        assert_eq!(waiting_on(&session).id, "call-1");
+        std::fs::write(tree.join("while-asked.txt"), "the user's\n").expect("written");
+        assert_eq!(session.approve("call-1", Decision::Once), Ok(()));
+        let log = wait_until(&session, "the turn to settle", settled);
+        assert_eq!(
+            lines(&log)[0].shown.as_deref(),
+            Some(
+                "Files this call changed: app.py (+1 -1).\nNot shown in this context by read, \
+                 write or edit: app.py.\n"
+            )
+        );
+        tidy(&[&tree]);
+    }
+
+    /// #1149: a call that returns while still running, in the background,
+    /// says its changes were not counted, never that it changed no file.
+    #[test]
+    fn a_call_still_running_says_so() {
+        let tree = scratch("call-changes-background");
+        let (mut shape, mut tools) = counting(&tree, tool_loop::ToolSurface::Bash, true);
+        tools.background = true;
+        shape.tools = tool_loop::ToolSurface::Bash.tools_with(true);
+        let start = Step::call(
+            0,
+            "call-1",
+            "bash",
+            &serde_json::json!({"command": "sleep 0.3; echo built > out.txt", "is_background": true})
+                .to_string(),
+        );
+        let (_, log) = counted_turn_with((shape, tools), vec![start]);
+        let shown = lines(&log)[0].shown.clone().expect("a result");
+        assert!(
+            shown.ends_with(
+                "\n\nFiles this call changed: not counted, the command is still running.\n"
+            ),
+            "{shown}"
+        );
+        tidy(&[&tree]);
+    }
+
+    /// [`counted_turn`] under a shape and tools of the test's own.
+    fn counted_turn_with(
+        (shape, tools): (RequestShape, Tools),
+        calls: Vec<Step>,
+    ) -> (Session<Canned>, Vec<Logged>) {
+        let mut acts: Vec<Vec<Step>> = calls.into_iter().map(|call| vec![call]).collect();
+        acts.push(deltas(&["done"]));
+        let session = Session::open_looping(Canned::new(acts), shape, None, tools);
+        session.ask("patch it", None).expect("accepted");
+        let log = wait_until(&session, "the turn to settle", settled);
+        reads_whole(&session);
+        (session, log)
+    }
+
+    /// The standard surface's calls one turn makes, for the switch's two
+    /// states: a write of a new file, a read of it, an edit of it, a `bash`
+    /// call that changes nothing, and an edit of a file never read that
+    /// fails.
+    fn the_standard_calls() -> Vec<Step> {
+        vec![
+            Step::call(
+                0,
+                "call-1",
+                "write",
+                r#"{"path":"notes.txt","content":"alpha\nbeta\n"}"#,
+            ),
+            Step::call(0, "call-2", "read", r#"{"path":"notes.txt"}"#),
+            Step::call(
+                0,
+                "call-3",
+                "edit",
+                r#"{"file_path":"notes.txt","old_string":"beta","new_string":"gamma"}"#,
+            ),
+            bash("call-4", "echo hi"),
+            Step::call(
+                0,
+                "call-5",
+                "edit",
+                r#"{"file_path":"other.txt","old_string":"absent","new_string":"x"}"#,
+            ),
+        ]
+    }
+
+    /// #1149: with the switch off, every tool result is byte for byte as the
+    /// build before it had them; on, `bash`, `write` and `edit` results end
+    /// with the block, `read` is as it was, and a file the call's own
+    /// `write` or `edit` showed is not marked, while a failed edit of a
+    /// file never read is.
+    #[test]
+    fn with_the_switch_off_every_tool_result_is_as_before() {
+        let shown = |on: bool| -> Vec<String> {
+            let tree = scratch(if on {
+                "call-changes-on"
+            } else {
+                "call-changes-off"
+            });
+            std::fs::write(tree.join("other.txt"), "present\n").expect("written");
+            let (session, log) = counted_turn(
+                &tree,
+                (tool_loop::ToolSurface::Standard, on),
+                the_standard_calls(),
+            );
+            let shown: Vec<String> = lines(&log)
+                .into_iter()
+                .map(|line| line.shown.expect("a result"))
+                .collect();
+            assert_eq!(
+                results_sent(&session),
+                shown,
+                "what was sent is what was logged"
+            );
+            every_head_rebuilds(&log);
+            tidy(&[&tree]);
+            shown
+        };
+        let off = shown(false);
+        let edited = "The file: notes.txt has been updated. Showing lines 1-3 of 3 from the \
+                      edited file:\n\n---\n\nalpha\ngamma\n";
+        let failed = "Failed to edit, 0 occurrences found for old_string in other.txt. No edits \
+                      made. The exact text in old_string was not found. Ensure you're not \
+                      escaping content incorrectly and check whitespace, indentation, and \
+                      context. Use read tool to verify.";
+        assert_eq!(
+            off,
+            [
+                "Successfully created and wrote to new file: notes.txt.",
+                "alpha\nbeta\n",
+                edited,
+                "hi\n",
+                failed,
+            ]
+        );
+        let on = shown(true);
+        assert_eq!(
+            on,
+            [
+                format!(
+                    "{}\n\nFiles this call changed: notes.txt (new, +2).\n",
+                    off[0]
+                ),
+                off[1].clone(),
+                format!("{}\nFiles this call changed: notes.txt (+1 -1).\n", off[2]),
+                format!("{}\nFiles this call changed: none.\n", off[3]),
+                format!(
+                    "{}\n\nFiles this call changed: none.\nNot shown in this context by read, \
+                     write or edit: other.txt.\n",
+                    off[4]
+                ),
+            ]
+        );
+    }
+
+    /// The standard surface over `tree`, the per-call changes on, meditating
+    /// after every turn with no tail under `outputs` and nothing in working
+    /// memory, playing `acts` (#1149).
+    fn counting_across_a_refill(
+        tree: &Path,
+        outputs: log::MeditationToolOutputs,
+        acts: Vec<Vec<Step>>,
+    ) -> Session<Canned> {
+        let (shape, tools) = counting(tree, tool_loop::ToolSurface::Standard, true);
+        Session::open_with(
+            Canned::new(acts),
+            shape,
+            None,
+            Some(tools),
+            None,
+            Some(Interview {
+                meditations: crate::meditation::policy::Served {
+                    every_turns: Some(1),
+                    tail_tokens: 0,
+                    outputs,
+                    refill_empty: true,
+                    ..crate::meditation::policy::Served::default()
+                },
+                ..interviewing(&[])
+            }),
+        )
+    }
+
+    /// Turn 1 reads `a.py` and `b.py`; the refill after it compacts the
+    /// turn away under `outputs`; turn 2 reads `b.py` again, then one `bash`
+    /// call patches both. The log, once turn 2 settled.
+    fn patched_after_a_refill(tree: &Path, outputs: log::MeditationToolOutputs) -> Vec<Logged> {
+        std::fs::write(tree.join("a.py"), "x = 1\n").expect("written");
+        std::fs::write(tree.join("b.py"), "y = 1\n").expect("written");
+        let read = |id: &str, file: &str| {
+            Step::call(
+                0,
+                id,
+                "read",
+                &serde_json::json!({"path": file}).to_string(),
+            )
+        };
+        let patch = "python3 -c \"import pathlib as P; [P.Path(f).write_text(P.Path(f).read_text()\
+                     .replace(a, b)) for f, a, b in [('a.py', 'x = 1', 'x = 2'), ('b.py', 'y = 1', \
+                     'y = 2')]]\"";
+        let session = counting_across_a_refill(
+            tree,
+            outputs,
+            vec![
+                vec![read("call-1", "a.py")],
+                vec![read("call-2", "b.py")],
+                deltas(&["read both"]),
+                vec![read("call-3", "b.py")],
+                vec![bash("call-4", patch)],
+                deltas(&["patched"]),
+            ],
+        );
+        session.ask("read them", None).expect("accepted");
+        wait_until(&session, "the refill after turn 1", |log| {
+            !meditations_in(log).is_empty()
+        });
+        session.ask("patch both", None).expect("accepted");
+        let log = wait_until(&session, "turn 2 to settle", |log| {
+            log.iter()
+                .filter(|logged| matches!(logged.event, Event::TurnSettled { .. }))
+                .count()
+                == 2
+        });
+        assert_eq!(
+            std::fs::read_to_string(tree.join("a.py")).expect("a.py"),
+            "x = 2\n"
+        );
+        reads_whole(&session);
+        every_head_rebuilds(&log);
+        log
+    }
+
+    /// #1149: a file whose read the refill compacted away is marked, and one
+    /// read again since is not: shown is counted from what the context
+    /// sends, never from what the session once read.
+    #[test]
+    fn a_file_not_shown_since_the_refill_is_marked_and_one_shown_is_not() {
+        let tree = scratch("call-changes-refill");
+        let log = patched_after_a_refill(&tree, log::MeditationToolOutputs::Evict);
+        assert_eq!(
+            lines(&log)[3].shown.as_deref(),
+            Some(
+                "Files this call changed: a.py (+1 -1), b.py (+1 -1).\nNot shown in this \
+                 context by read, write or edit: a.py.\n"
+            )
+        );
+        tidy(&[&tree]);
+    }
+
+    /// #1149, #1150: text a refill keeps still counts. Under `keep` the
+    /// refill carries turn 1's reads in its outputs section, so neither file
+    /// is marked.
+    #[test]
+    fn a_read_the_refill_keeps_still_counts_as_shown() {
+        let tree = scratch("call-changes-refill-keep");
+        let log = patched_after_a_refill(&tree, log::MeditationToolOutputs::Keep);
+        assert_eq!(
+            lines(&log)[3].shown.as_deref(),
+            Some("Files this call changed: a.py (+1 -1), b.py (+1 -1).\n")
+        );
         tidy(&[&tree]);
     }
 
