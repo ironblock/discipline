@@ -44,7 +44,6 @@
 use std::collections::{BTreeMap, BTreeSet};
 use std::fmt::Write as _;
 use std::fs::Metadata;
-use std::os::unix::fs::MetadataExt as _;
 use std::path::{Component, Path, PathBuf};
 use std::process::{Command, Stdio};
 use std::time::{Duration, SystemTime};
@@ -116,14 +115,44 @@ struct Stat {
 
 impl Stat {
     fn of(meta: &Metadata) -> Self {
+        let (mtime, ctime, ino, dev) = stamps(meta);
         Self {
             len: meta.len(),
-            mtime: (meta.mtime(), meta.mtime_nsec()),
-            ctime: (meta.ctime(), meta.ctime_nsec()),
-            ino: meta.ino(),
-            dev: meta.dev(),
+            mtime,
+            ctime,
+            ino,
+            dev,
         }
     }
+}
+
+/// A file's modification and inode-change times, as seconds and
+/// nanoseconds, its inode and its device.
+#[cfg(unix)]
+fn stamps(meta: &Metadata) -> ((i64, i64), (i64, i64), u64, u64) {
+    use std::os::unix::fs::MetadataExt as _;
+    (
+        (meta.mtime(), meta.mtime_nsec()),
+        (meta.ctime(), meta.ctime_nsec()),
+        meta.ino(),
+        meta.dev(),
+    )
+}
+
+/// [`stamps`] where there is no inode (the wasm build, which runs no
+/// call): the modification time stands for both times.
+#[cfg(not(unix))]
+fn stamps(meta: &Metadata) -> ((i64, i64), (i64, i64), u64, u64) {
+    let since = meta
+        .modified()
+        .ok()
+        .and_then(|at| at.duration_since(SystemTime::UNIX_EPOCH).ok())
+        .unwrap_or_default();
+    let at = (
+        i64::try_from(since.as_secs()).unwrap_or(i64::MAX),
+        i64::from(since.subsec_nanos()),
+    );
+    (at, at, 0, 0)
 }
 
 /// What a file is held by.
@@ -368,7 +397,7 @@ impl Tree {
     /// What `at` is held by: a symlink's target, never followed; a text
     /// file's lines while there is room; any other file's digest.
     fn held(&self, at: &Path, meta: &Metadata) -> Held {
-        let by_stat = Held::Stat(meta.len(), (meta.mtime(), meta.mtime_nsec()));
+        let by_stat = Held::Stat(meta.len(), stamps(meta).0);
         if meta.file_type().is_symlink() {
             return std::fs::read_link(at).map_or(by_stat, Held::Link);
         }
@@ -393,9 +422,10 @@ impl Tree {
 /// Whether `meta`'s inode last changed before `began`: a file that joined
 /// the listing untouched by the call.
 fn before(meta: &Metadata, began: SystemTime) -> bool {
+    let (seconds, nanoseconds) = stamps(meta).1;
     let ctime = Duration::new(
-        u64::try_from(meta.ctime()).unwrap_or(0),
-        u32::try_from(meta.ctime_nsec()).unwrap_or(0),
+        u64::try_from(seconds).unwrap_or(0),
+        u32::try_from(nanoseconds).unwrap_or(0),
     );
     began
         .duration_since(SystemTime::UNIX_EPOCH)
@@ -408,7 +438,11 @@ fn read_same(at: &Path, meta: &Metadata) -> Option<Vec<u8>> {
     use std::io::Read as _;
     let mut file = std::fs::File::open(at).ok()?;
     let opened = file.metadata().ok()?;
-    if opened.ino() != meta.ino() || opened.dev() != meta.dev() || !opened.is_file() {
+    let identity = |meta: &Metadata| {
+        let (_, _, ino, dev) = stamps(meta);
+        (ino, dev)
+    };
+    if !opened.is_file() || identity(&opened) != identity(meta) {
         return None;
     }
     let mut bytes = Vec::new();
