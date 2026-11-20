@@ -3834,6 +3834,9 @@ pub struct Carry {
     /// (#1151): the turn's ask, its notes, and the steps the split kept, as
     /// the session sent them after the refill. Empty when it cut none.
     pub riding: Vec<Message>,
+    /// The files the ask that rode had attached (#1151), each with its
+    /// bytes, read back from the first session's recording.
+    pub riding_files: Vec<(log::RecordedFile, Vec<u8>)>,
 }
 
 /// An interactive session on one trunk.
@@ -36291,6 +36294,7 @@ pub(in crate::drive) mod tests {
                 source: Some(vec!["src/scene-core.ts".to_owned()]),
                 phase: None,
                 riding: Vec::new(),
+                riding_files: Vec::new(),
             })
             .expect("it carries");
         let state = session.shared.lock();
@@ -36346,6 +36350,7 @@ pub(in crate::drive) mod tests {
                     source: None,
                     phase: None,
                     riding: Vec::new(),
+                    riding_files: Vec::new(),
                 })
                 .expect("it carries")
         };
@@ -37373,6 +37378,7 @@ pub(in crate::drive) mod tests {
             source: None,
             phase,
             riding: Vec::new(),
+            riding_files: Vec::new(),
         })
         .expect("it carries");
         assert_eq!(
@@ -37541,6 +37547,7 @@ pub(in crate::drive) mod tests {
             source: None,
             phase: Some("nowhere".to_owned()),
             riding: Vec::new(),
+            riding_files: Vec::new(),
         };
         let (interview, shape) = capturing_under(in_the_starter_library_at("orient"));
         let Err(refused) = Session::open_with(
@@ -37616,6 +37623,7 @@ pub(in crate::drive) mod tests {
             source: None,
             phase,
             riding: Vec::new(),
+            riding_files: Vec::new(),
         })
         .expect("it carries");
         assert_eq!(
@@ -37813,6 +37821,226 @@ pub(in crate::drive) mod tests {
             settles.len() == 1 && settles[0].contains(r#""reason":"stopped""#),
             "{settles:?}"
         );
+        reads_whole(&session);
+    }
+
+    /// A carry of `trunk`, from a meditation at seq 16, with `riding` after
+    /// it.
+    fn carrying(trunk: Vec<Message>, riding: Vec<Message>) -> Carry {
+        Carry {
+            trunk,
+            object: None,
+            from: carried_from(16),
+            source: None,
+            phase: None,
+            riding,
+            riding_files: Vec::new(),
+        }
+    }
+
+    /// A step that rode: the assistant's call `id`, then its result.
+    fn ridden_step(id: &str) -> [Message; 2] {
+        let mut said = Message::new(Role::Assistant, "Building.");
+        said.tool_calls = vec![ToolCall {
+            id: id.to_owned(),
+            name: "bash".to_owned(),
+            arguments: r#"{"command":"touch r0"}"#.to_owned(),
+        }];
+        [said, Message::tool_result(id.to_owned(), "ran".to_owned())]
+    }
+
+    /// #1151's review: a resumed turn's ridden steps count against its step
+    /// budget. One step rode and `max_steps` is 2, so the resumed request is
+    /// the turn's second step, its last: one request, then `max_steps`.
+    #[test]
+    fn a_resumed_turns_ridden_steps_count_against_its_step_budget() {
+        let tree = scratch("resume-steps");
+        let mut riding = vec![Message::new(Role::User, "loop")];
+        riding.extend(ridden_step("call-0"));
+        let session = Session::open_looping(
+            Canned::new(vec![
+                vec![bash("call-1", "touch r1")],
+                vec![bash("call-2", "touch r2")],
+            ]),
+            looping(),
+            None,
+            tools(
+                Confinement::Unconfined,
+                &tree,
+                &["touch"],
+                Some(2),
+                Decider::Decline,
+            ),
+        )
+        .with_carry(carrying(vec![Message::new(Role::System, HEAD)], riding))
+        .expect("it carries");
+        session.resume().expect("the cut turn resumes");
+        let log = wait_until(&session, "the resumed turn", settled);
+        assert_eq!(session.shared.transport.sent().len(), 1, "{log:#?}");
+        assert_eq!(settled_as(&log), Some(SettleReason::MaxSteps));
+        reads_whole(&session);
+    }
+
+    /// #1151's review: a resumed turn's `ask` line is the cut turn's ask as
+    /// it rode -- its words, its files kept in this session's recording, its
+    /// notes on `notice` lines -- marked resumed, naming the meditation it
+    /// resumed from and how many steps rode.
+    #[test]
+    fn a_resumed_turns_ask_line_names_its_files_its_notes_and_where_it_resumed_from() {
+        let dir = scratch("resume-ask");
+        let bytes = b"not really a png".to_vec();
+        let file = crate::drive::attach::referenced(&bytes, "image/png");
+        let mut ask = Message::new(Role::User, "build it");
+        ask.notes = vec!["a note that rode".to_owned()];
+        let mut riding = vec![ask];
+        riding.extend(ridden_step("call-0"));
+        let mut carry = carrying(vec![Message::new(Role::System, HEAD)], riding);
+        carry.riding_files = vec![(file.clone(), bytes)];
+        let session = Session::open_with(
+            Canned::new(vec![deltas(&["done"])]),
+            template(),
+            None,
+            None,
+            None,
+            None,
+        )
+        .with_carry(carry)
+        .expect("it carries");
+        session.keep_recording_in(dir.clone());
+        session.resume().expect("the cut turn resumes");
+        let log = wait_until(&session, "the resumed turn", settled);
+        let written: Vec<String> = log.iter().map(render).collect();
+        let asked = written
+            .iter()
+            .find(|line| line.contains(r#""kind":"ask""#))
+            .expect("its ask");
+        assert!(
+            asked.contains(r#""resumed_meditation_seq":16"#)
+                && asked.contains(r#""resumed_turn_steps_kept":1"#),
+            "{asked}"
+        );
+        assert!(asked.contains(&file.sha256), "its file: {asked}");
+        assert!(dir.join(&file.path).is_file(), "kept in this recording");
+        assert!(
+            written.iter().any(
+                |line| line.contains(r#""kind":"notice""#) && line.contains("a note that rode")
+            ),
+            "{written:#?}"
+        );
+        reads_whole(&session);
+    }
+
+    /// #1151's review: a carry from a carried log's own refill, under the
+    /// turn that log resumed, rebuilds what rode there. The walk counts the
+    /// steps that rode into the turn, which that log does not hold, so the
+    /// refill's compaction takes them first and the step it kept is the
+    /// log's own: the first request is the one the carried session sent
+    /// after its refill. Cut right after that refill, the ride has no
+    /// request to be checked against, and from a carried log it is refused.
+    #[test]
+    fn a_carry_from_a_carried_logs_refill_counts_the_steps_that_rode_into_its_turn() {
+        let (first, second) = (scratch("carry-chain-a"), scratch("carry-chain-b"));
+        let served = crate::meditation::policy::Served::default;
+        let without_tools = |mut shape: RequestShape| {
+            shape.tools.clear();
+            shape
+        };
+        let original = windowed(one_long_turn(24), 100_000, served());
+        original.keep_recording_in(first.clone());
+        original.ask("build it", None).expect("accepted");
+        let log = wait_until(&original, "the long turn", settled);
+        let seq = log[mid_turn_refills(&log)[0]].seq;
+        let text: String = log.iter().map(|logged| render(logged) + "\n").collect();
+        std::fs::write(first.join("session.log"), text).expect("the log");
+        let carry = crate::drive::carry::read_at(&first.join("session.log"), &[], Some(seq))
+            .expect("it carries");
+        let carried = windowed(one_long_turn(24), 100_000, served())
+            .with_carry(carry)
+            .expect("it carries");
+        carried.keep_recording_in(second.clone());
+        carried.resume().expect("the cut turn resumes");
+        let log = wait_until(&carried, "the resumed turn", settled);
+        let refills = mid_turn_refills(&log);
+        assert!(!refills.is_empty(), "a refill under the resumed turn");
+        let at = refills[0];
+        let again_at = log[at].seq;
+        let next = carried.shared.transport.sent()[sent_before(&log, at)].clone();
+        let text: String = log.iter().map(|logged| render(logged) + "\n").collect();
+        std::fs::write(second.join("session.log"), text).expect("the log");
+        let again = crate::drive::carry::read_at(&second.join("session.log"), &[], Some(again_at))
+            .expect("a carried log's refill carries");
+        let resumed = windowed(vec![deltas(&["The build is done."])], 100_000, served())
+            .with_carry(again)
+            .expect("it carries");
+        resumed.resume().expect("the cut turn resumes");
+        let _ = wait_until(&resumed, "the twice-resumed turn", settled);
+        assert_eq!(
+            without_tools(resumed.shared.transport.sent()[0].clone()),
+            without_tools(next),
+            "the request the carried session sent after its refill"
+        );
+        let cut: String = log[..=at]
+            .iter()
+            .map(|logged| render(logged) + "\n")
+            .collect();
+        std::fs::write(second.join("cut.log"), cut).expect("the log");
+        let refused = crate::drive::carry::read_at(&second.join("cut.log"), &[], Some(again_at))
+            .expect_err("an unchecked ride from a carried log");
+        assert!(refused.contains("carried"), "{refused}");
+        tidy(&[&first, &second]);
+    }
+
+    /// #1151's review: a carried trunk names the working directory its
+    /// refill was made in. Carried into a session whose commands run in
+    /// another, it is refused unless rerooted, so the model is never told
+    /// one checkout while its commands run in another: real paths, not a
+    /// scenario's placeholder.
+    #[test]
+    fn a_carry_naming_another_working_directory_is_refused_unless_rerooted() {
+        let (there, here) = (scratch("carry-cwd-there"), scratch("carry-cwd-here"));
+        let (there_shown, here_shown) = (there.display().to_string(), here.display().to_string());
+        let refill = Message::new(
+            Role::User,
+            format!(
+                "<summary>notes</summary>\n\n{}",
+                start_cwd_note(&there_shown)
+            ),
+        );
+        let carry = carrying(vec![Message::new(Role::System, HEAD), refill], Vec::new());
+        let open = || {
+            let mut running = tools(Confinement::Unconfined, &here, &[], None, Decider::Decline);
+            running.cwd.clone_from(&here_shown);
+            Session::open_looping(Canned::new(vec![]), looping(), None, running)
+        };
+        let Err(refused) = open().with_carry(carry.clone()) else {
+            panic!("a trunk naming another working directory is refused");
+        };
+        assert!(refused.contains(&there_shown), "{refused}");
+        let mut rerooted = carry;
+        crate::drive::carry::reroot(&mut rerooted, &[(there_shown, here_shown.clone())]);
+        assert!(open().with_carry(rerooted).is_ok(), "rerooted, it carries");
+        tidy(&[&there, &here]);
+    }
+
+    /// #1151's review: told to stop after one call, a session whose one call
+    /// answers ends when that turn settles: no next ask is taken and settled
+    /// `stopped` with no request.
+    #[test]
+    fn a_session_whose_last_allowed_call_answers_ends_with_its_turn() {
+        let session = Session::open(
+            Canned::new(vec![deltas(&["done"]), deltas(&["more"])]),
+            template(),
+        );
+        session.stop_after(1);
+        session.ask("go", None).expect("accepted");
+        let log = wait_until(&session, "the session's end", ended);
+        assert!(
+            !log.iter()
+                .map(render)
+                .any(|line| line.contains(r#""reason":"stopped""#)),
+            "{log:#?}"
+        );
+        assert!(session.ask("again", None).is_err(), "nothing after the end");
         reads_whole(&session);
     }
 

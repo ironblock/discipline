@@ -122,6 +122,7 @@ pub fn read_at(log: &Path, sealed: &[String], at: Option<u64>) -> Result<Carry, 
         source: (!source.is_empty()).then_some(source),
         phase: carried_phase(&lines, seq),
         riding,
+        riding_files: Vec::new(),
     })
 }
 
@@ -539,6 +540,7 @@ mod tests {
             source: None,
             phase: None,
             riding: Vec::new(),
+            riding_files: Vec::new(),
         };
         let roots = [
             (format!("/private{old}"), format!("/private{new}")),
@@ -684,6 +686,63 @@ mod tests {
             .expect_err("the logged head contradicts the ride");
         assert!(refused.contains("head"), "{refused}");
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// #1151's review: the head of the request sent after the refill leaves
+    /// out its last message, so a ride that is only the ask is not checked by
+    /// it. The next trunk request -- turn three's, no refill between -- covers
+    /// the ask, and is checked too: a log whose ask was rewritten after it
+    /// was sent is refused.
+    #[test]
+    fn the_rides_last_message_is_checked_against_the_next_request_that_covers_it() {
+        let trunk = vec![
+            Message::new(Role::System, "you are the trunk"),
+            Message::new(Role::User, "<state_snapshot>a tracker</state_snapshot>"),
+        ];
+        let mut next = crate::drive::session::tests::template();
+        next.messages = trunk.clone();
+        next.messages.extend([
+            Message::new(Role::User, "build it"),
+            Message::new(Role::Assistant, "started on the schema"),
+            Message::new(Role::User, "and then?"),
+        ]);
+        let next = crate::client::head::Head::of(&next).digest().to_owned();
+        let turn_three = [
+            r#"{"kind":"ask","seq":21,"t":95,"text":"and then?","turn":3}"#.to_owned(),
+            r#"{"from":"awaiting","kind":"settlement","seq":22,"t":96,"to":"turn"}"#.to_owned(),
+            format!(
+                r#"{{"head_sha256":"{next}","kind":"request","lane":"trunk","seq":23,"t":97,"turn":3}}"#
+            ),
+            r#"{"kind":"response","seq":24,"t":98,"text":"the next part","to_request":23}"#
+                .to_owned(),
+            r#"{"kind":"turn.settled","reason":"final","seq":25,"t":99,"turn":3}"#.to_owned(),
+            r#"{"from":"turn","kind":"settlement","seq":26,"t":100,"to":"awaiting"}"#.to_owned(),
+        ];
+        for (case, asked) in [("as-sent", "build it"), ("rewritten", "delete everything")] {
+            let dir = kept_at(&format!("next-{case}"), &trunk, &[], log::VERSION, None);
+            let path = dir.join("session.log");
+            let written = std::fs::read_to_string(&path).expect("the log");
+            let mut text = written.replace(
+                r#""text":"build it","turn":2"#,
+                &format!(r#""text":"{asked}","turn":2"#),
+            );
+            for line in &turn_three {
+                text.push_str(line);
+                text.push('\n');
+            }
+            std::fs::write(&path, text).expect("the log");
+            let read = read_at(&path, &[], Some(16));
+            if asked == "build it" {
+                assert_eq!(
+                    read.expect("checked and carried").riding,
+                    vec![Message::new(Role::User, "build it")]
+                );
+            } else {
+                let refused = read.expect_err("the ask was not the one sent");
+                assert!(refused.contains("request 23"), "{refused}");
+            }
+            let _ = std::fs::remove_dir_all(&dir);
+        }
     }
 
     /// #948: a kept trunk that is not the bytes its name says is refused,
