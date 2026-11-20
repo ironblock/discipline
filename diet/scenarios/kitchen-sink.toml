@@ -17,6 +17,10 @@ approval = "none"
 approval_policy = "approvals are off: every command runs without a gate decision or a prompt"
 tool_surface = "standard"
 mechanical_capture = "on"
+# Each `bash`, `edit` and `write` result ends with what the call changed
+# (#1149): the PNG's `bash` names `shot.png` new and not shown, the edit
+# `notes.md` by its lines, and the background build says it was not counted.
+call_changes = "on"
 
 # Four warrants fork on their own; `open` shadows, offered as a chip the operator accepts (#1031). It fired once as a
 # live warrant, so the example still shows every other one firing by itself (the app audit's page walk, F20).
