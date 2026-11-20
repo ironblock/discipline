@@ -330,6 +330,21 @@ Every run starts from the same refill: LOG's last meditation that kept a trunk, 
 - **A delivery variant (v27):** `--carry-trunk FILE` sends FILE's messages, in the recording's trunk format, in place of the kept trunk: the same notes delivered another way. The start line names its sha256 as `carried_from.variant_sha256`, beside the `trunk_sha256` it varies. A variant on a run that is not carried is refused, never dropped.
 - **The phase tool's description (v27):** `--phase-tool-description FILE` replaces the pinned description where the regimen declares phases, and the start line names its sha256 as `phase_tool_description_sha256`. Where no phase tool is declared it is refused.
 - **A first-move probe:** `--only-task TASK` runs only that task's ask, the first after the meditation that names it, and then ends: no grade, and nothing after it. It needs `--from-carry`. A regimen's `[limits] max_steps` caps the probe at K calls, and `lite/grader/first_move.py` measures it (`lite/README.md`).
+
+### From a chosen refill, of any drive (#1151)
+
+```
+diet-drive scenario FILE --out DIR --from-carry LOG --carry-at SEQ [--stop-after N] [--repeat N]
+diet-drive arms FILE --arms ARMS.toml --repeat N --out DIR --from-carry LOG --carry-at SEQ [--stop-after N]
+```
+
+- **The meditation at SEQ,** in place of LOG's last. LOG may be any log this build reads: a live drive's, which names no run, as well as a scenario's. No script is checked against it, and FILE runs from its first step: FILE is the seam's script, with the replies, approvals and expectations of the run from that seam.
+- **Its worktree** is that meditation's snapshot, restored by serve (`serve --carry LOG --carry-at SEQ`) into the run's fresh worktree, each file checked against its digest. Serve refuses a `--worktree` that is not empty. A log written before v26 still takes `--carry-worktree`.
+- **The turn the refill cut resumes.** A refill under a turn (a `window` one, or a model's move at the boundary) left the turn's ask and its last step riding after the refilled trunk, and they are not in the kept trunk. The carried session's first request is the kept trunk, then what rode. What rode is rebuilt from LOG as the projection rebuilds every head, the ask's files read back from LOG's recording. Where LOG names the head of the request it sent after that refill and its tools rebuild here, the rebuild must give that head, or the carry is refused. The resumed turn's `ask` line is the cut turn's ask. The run settles that turn before FILE's first step. A meditation made between turns resumes nothing.
+- **The start names the source:** `carried_from`'s `log_sha256` and `meditation_seq`, with the trunk, working memory and worktree by digest.
+- **The stop:** `--stop-after N` (serve's own flag) stops the session after its Nth trunk call, or at its next refill, whichever comes first. The next trunk request is never sent, the turn settles `stopped` (log v50), and the session ends. FILE's steps after that are not run.
+- **A carry trunk per arm:** an arm's `carry_trunk` sends its own trunk beside the baseline's kept one, named on its start as `variant_sha256`; the batch line's `against` names it as `carry_trunk`, each arm's trunk by digest or `kept`.
+- **A carried session sends this build's tools and wording,** not the recording's: the request after the refill is the one the recording sent except for its tool definitions, and every request after it is this build's. Its baseline is a carry with no lever moved, never the recorded continuation.
 - **A killed run's raw outputs:** while the assembler runs, a run's own `services/`, `grades/` and `next/` wait in `.<repeat>.parts` beside its directory (#960). A run killed then leaves them there; that is where to look.
 
 ## Repeating a scenario (#910)
@@ -401,8 +416,9 @@ This runs the scenario under each of a manifest's regimens, N times each. A pair
   ```
   - An arm's name is a directory its runs go in: 1 to 32 lowercase letters, digits, `-` and `_`, starting with a letter or digit.
   - `regimen` is relative to the manifest. `contrast` is optional, as `--contrast` is for a pair, and the baseline declares none.
+  - `carry_trunk` is optional, relative to the manifest: the trunk the arm's runs from a recorded refill send in the kept one's place, beating the batch's `--carry-trunk` (#1151; "A batch from a recorded refill").
   - Two or more arms, and no other key.
-- **Every other arm must differ from the baseline in exactly one lever, or in exactly its contrast,** checked as a pair's are. Otherwise the batch is refused before any run, naming the `arm`.
+- **Every other arm must differ from the baseline in exactly one lever, or in exactly its contrast,** checked as a pair's are. Otherwise the batch is refused before any run, naming the `arm`. An arm whose carry trunk is not the baseline's has that one difference, `carry_trunk`: its regimen then differs in nothing else, unless its `contrast` names `carry_trunk` and the rest.
 - **The order is a Williams design.** Block b runs the arms in row b of the design, cycling through its rows.
   - Over a whole cycle, every arm runs in every position equally often and follows every other arm once. So a linear drift on the box, and a carryover from the run before (the server's cache), balance across arms.
   - A cycle is k rows when k is even and 2k when it is odd. Two arms' rows are AB and BA, so a pair runs ABBA ABBA as before.

@@ -1,0 +1,109 @@
+{
+  "events": [
+    {
+      "compaction_persists": true,
+      "head": [
+        {
+          "content": "you are the trunk",
+          "role": "system"
+        }
+      ],
+      "kind": "session.start",
+      "model": "a-model",
+      "notes_in_the_ask": true,
+      "opened": 1790000000000,
+      "seq": 0,
+      "t": 0,
+      "version": 50
+    },
+    {
+      "kind": "ask",
+      "seq": 1,
+      "t": 5,
+      "text": "what is the answer?",
+      "turn": 1
+    },
+    {
+      "from": "awaiting",
+      "kind": "settlement",
+      "seq": 2,
+      "t": 10,
+      "to": "turn"
+    },
+    {
+      "head_sha256": "1bfd211e2e023cbe1c522fd4542444e82f4a70103069011c42f3aec4fc994806",
+      "kind": "request",
+      "lane": "trunk",
+      "max_tokens": 64,
+      "seq": 3,
+      "sized_tokens": 10,
+      "t": 15,
+      "turn": 1
+    },
+    {
+      "kind": "delta",
+      "request": 3,
+      "seq": 4,
+      "t": 20,
+      "text": "42"
+    },
+    {
+      "finish_reason": "stop",
+      "kind": "response",
+      "seq": 5,
+      "t": 25,
+      "text": "42",
+      "to_request": 3
+    },
+    {
+      "kind": "turn.settled",
+      "reason": "final",
+      "seq": 6,
+      "t": 30,
+      "turn": 1
+    },
+    {
+      "from": "turn",
+      "kind": "settlement",
+      "seq": 7,
+      "t": 35,
+      "to": "awaiting"
+    },
+    {
+      "kind": "ask",
+      "seq": 8,
+      "t": 40,
+      "text": "and the question?",
+      "turn": 2
+    },
+    {
+      "from": "awaiting",
+      "kind": "settlement",
+      "seq": 9,
+      "t": 45,
+      "to": "turn"
+    },
+    {
+      "kind": "turn.settled",
+      "reason": "stopped",
+      "seq": 10,
+      "t": 50,
+      "turn": 2
+    },
+    {
+      "from": "turn",
+      "kind": "settlement",
+      "seq": 11,
+      "t": 55,
+      "to": "awaiting"
+    },
+    {
+      "from": "awaiting",
+      "kind": "settlement",
+      "seq": 12,
+      "t": 60,
+      "to": "ended"
+    }
+  ],
+  "torn": 0
+}

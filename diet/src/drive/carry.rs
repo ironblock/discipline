@@ -35,29 +35,42 @@ pub fn read(log: &Path, sealed: &[String]) -> Result<Carry, String> {
 /// As [`read`]; and when the line at `at` is no meditation that kept its
 /// trunk.
 pub fn read_at(log: &Path, sealed: &[String], at: Option<u64>) -> Result<Carry, String> {
-    let _ = at;
     let bytes = std::fs::read(log).map_err(|why| format!("{}: {why}", log.display()))?;
     let text =
         String::from_utf8(bytes.clone()).map_err(|_| format!("{} is not UTF-8", log.display()))?;
     let lines = log::parse(&text).map_err(|why| format!("{}: {why}", log.display()))?;
-    let Some((seq, trunk_sha256, object_sha256, restored, worktree_sha256)) =
-        lines.iter().rev().find_map(|line| match &line.event {
-            Event::Meditation {
-                trunk_sha256: Some(trunk),
-                object_sha256,
-                restored_files,
-                worktree_sha256,
-                ..
-            } => Some((
-                line.seq,
-                trunk.clone(),
-                object_sha256.clone(),
-                restored_files.clone(),
-                worktree_sha256.clone(),
-            )),
-            _ => None,
-        })
-    else {
+    let kept_trunk = |line: &log::Line| match &line.event {
+        Event::Meditation {
+            trunk_sha256: Some(trunk),
+            object_sha256,
+            restored_files,
+            worktree_sha256,
+            ..
+        } => Some((
+            line.seq,
+            trunk.clone(),
+            object_sha256.clone(),
+            restored_files.clone(),
+            worktree_sha256.clone(),
+        )),
+        _ => None,
+    };
+    let chosen = match at {
+        None => lines.iter().rev().find_map(kept_trunk),
+        Some(at) => Some(
+            lines
+                .iter()
+                .find(|line| line.seq == at)
+                .and_then(kept_trunk)
+                .ok_or_else(|| {
+                    format!(
+                        "{}: the line at seq {at} is no meditation that kept its trunk (log v24)",
+                        log.display()
+                    )
+                })?,
+        ),
+    };
+    let Some((seq, trunk_sha256, object_sha256, restored, worktree_sha256)) = chosen else {
         return Err(format!(
             "{} holds no meditation that kept its trunk (log v24): nothing to carry",
             log.display()
@@ -86,6 +99,14 @@ pub fn read_at(log: &Path, sealed: &[String], at: Option<u64>) -> Result<Carry, 
             })
         })
         .collect();
+    // What rode after the refill (#1151), only for a meditation named by
+    // its seq: the default carry, the last refill's, is as it was.
+    let riding = match at {
+        Some(_) => crate::drive::projection::riding(&lines, Some(recording), (seq, &trunk))
+            .map_err(|why| format!("{}: {why}", log.display()))?
+            .unwrap_or_default(),
+        None => Vec::new(),
+    };
     Ok(Carry {
         trunk,
         object,
@@ -100,7 +121,7 @@ pub fn read_at(log: &Path, sealed: &[String], at: Option<u64>) -> Result<Carry, 
         },
         source: (!source.is_empty()).then_some(source),
         phase: carried_phase(&lines, seq),
-        riding: Vec::new(),
+        riding,
     })
 }
 
@@ -136,7 +157,8 @@ pub fn carried_phase(lines: &[log::Line], seq: u64) -> Option<String> {
 /// replaced with this session's, for each `(from, to)` of `roots` in turn (a
 /// worktree's resolved path and the path it was given, which a symlinked
 /// temporary directory makes two). The text is the trunk's -- each
-/// message's content, reasoning, notes and call arguments -- and the working
+/// message's content, reasoning, notes and call arguments, and so of what
+/// rode after it (#1151) -- and the working
 /// object's dump, so the native summary and the interview notes alike name
 /// the worktree the session runs in. No other byte changes. A root followed
 /// by a character a name goes on with (a letter, a digit, `_`, `-`) is another
@@ -160,7 +182,7 @@ pub fn reroot(carry: &mut Carry, roots: &[(String, String)]) -> u64 {
             }
         }
     };
-    for message in &mut carry.trunk {
+    for message in carry.trunk.iter_mut().chain(carry.riding.iter_mut()) {
         swap(&mut message.content);
         if message.reasoning_signature.is_none()
             && let Some(reasoning) = message.reasoning.as_mut()

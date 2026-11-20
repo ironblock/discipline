@@ -268,6 +268,14 @@
 //! log that declares 28 or less and carries it is refused. For a reader of
 //! earlier logs, the migration is nothing: no session declared one.
 //!
+//! v50 (#1151) stops a session where it was told to: a `turn.settled`
+//! whose `reason` is `stopped` is a turn whose next trunk request was never
+//! sent because the session's stop came first (`serve --stop-after N`): its
+//! Nth trunk call was made, or it refilled, since it started. The session
+//! ends after it. A log that declares 49 or less and carries it is refused.
+//! For a reader of earlier logs, the migration is nothing: no session was
+//! told to stop.
+//!
 //! v49 (audit 9) logs what an operator's fork was sent: under a set whose
 //! operator forks carry the fields route's imperative (v6), a `fork`
 //! line's `imperative` is the line sent before its `question`, which stays
@@ -541,12 +549,13 @@ use super::record::vocabulary;
 struct LogParser;
 
 /// The version this module writes, as `session.start` states it.
-pub const VERSION: i64 = 49;
+pub const VERSION: i64 = 50;
 
 /// Every version this module reads.
 pub const READS: &[i64] = &[
     0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25,
     26, 27, 28, 29, 30, 31, 32, 33, 34, 35, 36, 37, 38, 39, 40, 41, 42, 43, 44, 45, 46, 47, 48, 49,
+    50,
 ];
 
 /// How recent an input event must be, at the moment a turn settles, for the
@@ -1205,6 +1214,10 @@ vocabulary! {
         /// summary's request failed or its answer was empty (v16, #936):
         /// the render is never carried in its place.
         SummaryFailed => "summary_failed",
+        /// Its trunk's next request was never sent: the session's stop
+        /// (`serve --stop-after N`) came first, its Nth trunk call made or
+        /// a refill made since it started (v50, #1151). The session ends.
+        Stopped => "stopped",
     }
 }
 
@@ -2905,7 +2918,8 @@ pub struct CarriedFrom {
 /// session's worktree root replaced with the new session's.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Rerooted {
-    /// How many occurrences were replaced, the trunk's and the object's.
+    /// How many occurrences were replaced, the trunk's (and what rode after
+    /// it, #1151) and the object's.
     pub replaced: u64,
     /// The sha256 of the trunk as the session started from it.
     pub trunk_sha256: String,
@@ -7589,6 +7603,10 @@ pub fn tag_introduced(tags: Tags, tag: &str) -> i64 {
     {
         return 16;
     }
+    // A session's stop (#1151).
+    if tags == Tags::SettleReason && SettleReason::from_tag(tag) == Some(SettleReason::Stopped) {
+        return 50;
+    }
     if tags == Tags::Warrant && Warrant::from_tag(tag) == Some(Warrant::Refutation) {
         return 9;
     }
@@ -11513,17 +11531,17 @@ mod tests {
     /// #583, #878, #904, #555, #931, #936, #910, #942, #926, #932, #948, #971, #1016, #1021,
     /// #1022, #1031, #1030, #1037, #1038, #1050, #1094, the withdrawn chip,
     /// N3's asks, the queued fork (N4), the move at the boundary (N2), and
-    /// the queued fork's own line (audit 7), and the operator fork's
-    /// imperative (audit 9): this module writes v49.
+    /// the queued fork's own line (audit 7), the operator fork's imperative
+    /// (audit 9), and the session's stop (#1151): this module writes v50.
     #[test]
-    fn this_module_writes_v49_and_reads_every_version_before_it() {
-        assert_eq!(super::VERSION, 49);
+    fn this_module_writes_v50_and_reads_every_version_before_it() {
+        assert_eq!(super::VERSION, 50);
         assert_eq!(
             super::READS,
             &[
                 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22,
                 23, 24, 25, 26, 27, 28, 29, 30, 31, 32, 33, 34, 35, 36, 37, 38, 39, 40, 41, 42, 43,
-                44, 45, 46, 47, 48, 49
+                44, 45, 46, 47, 48, 49, 50
             ]
         );
     }
@@ -13853,7 +13871,7 @@ mod tests {
         );
         assert_eq!(
             tags(SettleReason::ALL.iter().map(|it| it.tag()).collect()),
-            "final cancelled max_steps timeout failed capped api_cap summary_failed"
+            "final cancelled max_steps timeout failed capped api_cap summary_failed stopped"
         );
         assert_eq!(
             tags(ToolOutcome::ALL.iter().map(|it| it.tag()).collect()),

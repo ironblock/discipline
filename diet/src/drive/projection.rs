@@ -563,18 +563,9 @@ pub fn project_in(
     let Some(log::Line {
         event:
             Line::SessionStart {
-                version,
-                model,
-                head,
-                tools,
-                phases,
-                template_kwargs,
                 fork_delivery,
                 tool_output,
                 levers,
-                bash_timeout_ms,
-                notes_in_the_ask,
-                compaction_persists,
                 phase_document,
                 run,
                 rehearsing_as,
@@ -591,31 +582,7 @@ pub fn project_in(
         .first()
         .map(|substrate| substrate.id.clone())
         .ok_or("the regime declares no substrate")?;
-    let mut walk = Walk::over(lines, substrate, engine);
-    walk.recording = recording.map(std::path::Path::to_path_buf);
-    // From v38 (#1050) the phase tool's `to` is an enum of the session's
-    // phases, and a refill's ground rules close with the phase's moves.
-    walk.version = *version;
-    let library = (*version >= 38).then(|| phases.clone().unwrap_or_default());
-    walk.tools = tools_of(
-        tools.as_deref().unwrap_or_default(),
-        *bash_timeout_ms,
-        capture_contract_of(levers.as_ref()),
-        library.as_deref(),
-    );
-    walk.template_kwargs = kwargs_of(template_kwargs.as_ref());
-    walk.model.clone_from(model);
-    // Where its notes ride (#609): in the ask's message, from this build on.
-    walk.notes_in_the_ask = notes_in_the_ask.unwrap_or(false);
-    walk.compaction_persists = compaction_persists.unwrap_or(false);
-    walk.head = head
-        .iter()
-        .map(|message| Message::new(role_of(message.role), message.content.clone()))
-        .collect();
-    walk.trunk.clone_from(&walk.head);
-    // The phase it opened in (#787), which the start row names.
-    walk.phase = phase_document.as_ref().map(phase_named);
-    walk.phase_named.clone_from(&walk.phase);
+    let mut walk = walk_of(lines, (substrate, engine), recording)?;
     for line in &lines[1..] {
         walk.line(line)?;
     }
@@ -651,6 +618,143 @@ pub fn project_in(
         unfilled: BTreeMap::new(),
         shadows: shadow_counts(lines),
     })
+}
+
+/// The walk over `lines`, set up from their `session.start`, before it has
+/// walked any line after it: the session's model, tools, template
+/// arguments and head, where its notes ride, and the phase it opened in.
+fn walk_of<'a>(
+    lines: &'a [log::Line],
+    (substrate, engine): (String, Option<Engine>),
+    recording: Option<&std::path::Path>,
+) -> Result<Walk<'a>, String> {
+    let Some(log::Line {
+        event:
+            Line::SessionStart {
+                version,
+                model,
+                head,
+                tools,
+                phases,
+                template_kwargs,
+                levers,
+                bash_timeout_ms,
+                notes_in_the_ask,
+                compaction_persists,
+                phase_document,
+                ..
+            },
+        ..
+    }) = lines.first()
+    else {
+        return Err("the log does not begin with its session".to_owned());
+    };
+    let mut walk = Walk::over(lines, substrate, engine);
+    walk.recording = recording.map(std::path::Path::to_path_buf);
+    // From v38 (#1050) the phase tool's `to` is an enum of the session's
+    // phases, and a refill's ground rules close with the phase's moves.
+    walk.version = *version;
+    let library = (*version >= 38).then(|| phases.clone().unwrap_or_default());
+    walk.tools = tools_of(
+        tools.as_deref().unwrap_or_default(),
+        *bash_timeout_ms,
+        capture_contract_of(levers.as_ref()),
+        library.as_deref(),
+    );
+    walk.template_kwargs = kwargs_of(template_kwargs.as_ref());
+    walk.model.clone_from(model);
+    // Where its notes ride (#609): in the ask's message, from this build on.
+    walk.notes_in_the_ask = notes_in_the_ask.unwrap_or(false);
+    walk.compaction_persists = compaction_persists.unwrap_or(false);
+    walk.head = head
+        .iter()
+        .map(|message| Message::new(role_of(message.role), message.content.clone()))
+        .collect();
+    walk.trunk.clone_from(&walk.head);
+    // The phase it opened in (#787), which the start row names.
+    walk.phase = phase_document.as_ref().map(phase_named);
+    walk.phase_named.clone_from(&walk.phase);
+    Ok(walk)
+}
+
+/// What rode after the trunk the meditation at `seq` refilled, when it cut
+/// a turn (#1151): the running turn's ask with its notes, then the steps the
+/// split kept, rebuilt from `lines` as every trunk head is, the ask's files
+/// read back from `recording`. Checked against the head the log names for
+/// the turn's next trunk request, sent on `trunk` -- the trunk the
+/// meditation kept -- when the log sent one and its tools rebuild here.
+/// `None` when the meditation cut no turn: it was made between turns, or
+/// before the first.
+///
+/// # Errors
+///
+/// When the log does not begin with its session, the line at `seq` is no
+/// meditation, a line before it does not walk, the turn's ask cannot be
+/// rebuilt, or the logged head of the request after it is not the trunk
+/// and what rode.
+pub fn riding(
+    lines: &[log::Line],
+    recording: Option<&std::path::Path>,
+    (seq, trunk): (u64, &[Message]),
+) -> Result<Option<Vec<Message>>, String> {
+    let Some(at) = lines.iter().position(|line| line.seq == seq) else {
+        return Err(format!("the log has no line at seq {seq}"));
+    };
+    let Line::Meditation { at_turn, .. } = &lines[at].event else {
+        return Err(format!("the line at seq {seq} is no meditation"));
+    };
+    let turn = *at_turn;
+    let settled = lines[..at].iter().any(
+        |line| matches!(&line.event, Line::TurnSettled { turn: settled, .. } if *settled == turn),
+    );
+    let asked = lines[..at]
+        .iter()
+        .any(|line| matches!(&line.event, Line::Ask { turn: asked, .. } if *asked == turn));
+    if turn == 0 || settled || !asked {
+        return Ok(None);
+    }
+    let mut walk = walk_of(lines, (String::new(), None), recording)?;
+    for line in &lines[1..=at] {
+        walk.line(line)?;
+    }
+    let asked = walk
+        .user_message(turn)
+        .map_err(|why| format!("turn {turn}'s ask: {why}"))?;
+    let notes = walk.notes.get(&turn).cloned().unwrap_or_default();
+    let mut rode = walk.with_notes(asked, notes);
+    for step in walk.steps.get(&turn).into_iter().flatten() {
+        if let Some(why) = &step.unrebuilt {
+            return Err(format!("turn {turn}'s step: {why}"));
+        }
+        rode.extend(step.messages());
+    }
+    // The request the recording sent after the refill: the turn's next on
+    // the trunk, before the turn settled.
+    let sent = lines[at + 1..]
+        .iter()
+        .take_while(
+            |line| !matches!(&line.event, Line::TurnSettled { turn: settled, .. } if *settled == turn),
+        )
+        .find_map(|line| match &line.event {
+            Line::Request {
+                lane: Lane::Trunk,
+                head_sha256: Some(head),
+                ..
+            } => Some((line.seq, head.clone())),
+            _ => None,
+        });
+    if let (Some((request, logged)), Ok(_)) = (sent, &walk.tools) {
+        let mut messages = trunk.to_vec();
+        messages.extend(rode.iter().cloned());
+        if walk.rebuilt_head(&messages, &logged).is_none() {
+            return Err(format!(
+                "the head the log names for request {request}, the one sent after the refill \
+                 at seq {seq}, is not the kept trunk and the turn's ask and steps rebuilt from \
+                 the log: what rode is not known"
+            ));
+        }
+    }
+    Ok(Some(rode))
 }
 
 /// The walk over a log's lines after its first.

@@ -260,6 +260,10 @@ vocabulary! {
         /// summary failed (#936): its request did not finish, or its answer
         /// was empty.
         SummaryFailed => "summary_failed",
+        /// The trunk's next request was never sent: the session's stop came
+        /// first (#1151), its Nth trunk call made or a refill made since it
+        /// started. The session ends.
+        Stopped => "stopped",
     }
 }
 
@@ -2858,6 +2862,12 @@ struct State {
     /// An `end` was admitted while a prompt waited: once the turn settles,
     /// the session ends.
     ending: bool,
+    /// The session's stop (#1151): after this many trunk calls, or at its
+    /// next refill, its next trunk request is never sent.
+    stop_after: Option<u64>,
+    /// What rode after a carried trunk (#1151), until the turn it cut is
+    /// resumed.
+    riding: Vec<Message>,
     /// The latest prompt the operator decided, by its request and call id:
     /// what `serve`'s `answered` event names.
     answered: Option<(u64, String)>,
@@ -3155,6 +3165,8 @@ impl State {
             },
             waiting: None,
             ending: false,
+            stop_after: None,
+            riding: Vec::new(),
             answered: None,
             interview,
             forking: None,
@@ -3563,6 +3575,28 @@ impl State {
             self.trunk.extend(ran);
             self.trunk_tokens = self.step_tokens.take();
         }
+    }
+
+    /// Whether the session's stop has come (#1151): told to stop after N
+    /// trunk calls, it has made N, or it has refilled since it started.
+    fn stop_due(&self) -> bool {
+        self.stop_after.is_some_and(|calls| {
+            self.refills > 0
+                || self
+                    .log
+                    .iter()
+                    .filter(|logged| {
+                        matches!(
+                            logged.event,
+                            Event::Requested {
+                                lane: Lane::Trunk,
+                                ..
+                            }
+                        )
+                    })
+                    .count() as u64
+                    >= calls
+        })
     }
 
     fn after_the_turn(&mut self) {
@@ -4083,6 +4117,8 @@ impl<S: Streaming + 'static> Session<S> {
                 .first()
                 .and_then(|first| crate::drive::regimen::nonce_in(&first.content));
             state.trunk = carry.trunk;
+            // What rode after it (#1151), for `resume` to send.
+            state.riding = carry.riding;
             // The phase the carried session was in (#1071), when the graph
             // has it: its rules ride in the carried refill, so no note is due
             // unless that refill has no system prompt to hold them. With none
@@ -4164,18 +4200,50 @@ impl<S: Streaming + 'static> Session<S> {
     }
 
     /// The turn the carried meditation cut (#1151), resumed: its ask and
-    /// the steps that rode after the refill sent on the carried trunk, the
-    /// request the recording sent next, and the turn going on from there.
-    /// `None` when the carry cut no turn, or the session is not awaiting.
+    /// the steps that rode after the refill sent on the carried trunk -- the
+    /// request the recording sent next -- and the turn going on from there.
+    /// Its `ask` line is the cut turn's ask, as it rode; nothing is added to
+    /// what rode, no note and no arrival fork. `None` when the carry cut no
+    /// turn, or the session is not awaiting.
+    #[must_use]
     pub fn resume(&self) -> Option<Admitted> {
-        None
+        let mut state = self.shared.lock();
+        if state.riding.is_empty() || state.settlement != Settlement::Awaiting {
+            return None;
+        }
+        let riding = std::mem::take(&mut state.riding);
+        state.turns += 1;
+        state.step_counters.covered.clear();
+        state.gap_firings.clear();
+        state.refute_due = None;
+        let turn = state.turns;
+        let seq = state.push(Event::Asked {
+            turn,
+            text: riding[0].content.clone(),
+            scoping: false,
+            files: Vec::new(),
+            task: None,
+        });
+        state.move_to(Settlement::Turn);
+        let mut shape = self.shared.template.clone();
+        shape.messages.clone_from(&state.trunk);
+        shape.messages.extend(riding.iter().cloned());
+        let deferred = carries_native(&state)
+            && window_split(&self.shared.template, &state, &shape, false).is_some();
+        let first = (!deferred)
+            .then(|| trunk_opening(&self.shared.template, &mut state, turn, &mut shape))
+            .flatten();
+        drop(state);
+        self.shared.changed.notify_all();
+        spawn_turn(&self.shared, (shape, riding, turn), (first, None, deferred));
+        Some(Admitted { seq, turn })
     }
 
     /// The session stops after its `calls`-th trunk call, or at its next
     /// refill, whichever comes first (#1151): the trunk request after it is
     /// never sent, the turn settles `stopped`, and the session ends.
     pub fn stop_after(&self, calls: u64) {
-        let _ = calls;
+        self.shared.lock().stop_after = Some(calls);
     }
 
     /// This session, its `session.start` naming the nonce its head's first
@@ -4476,54 +4544,15 @@ impl<S: Streaming + 'static> Session<S> {
             && carries_native(&state)
             && window_split(&self.shared.template, &state, &shape, false).is_some();
         let first = (arrival.is_none() && !deferred)
-            .then(|| trunk_opening(&self.shared.template, &mut state, turn, &mut shape));
+            .then(|| trunk_opening(&self.shared.template, &mut state, turn, &mut shape))
+            .flatten();
         drop(state);
         self.shared.changed.notify_all();
-
-        let shared = Arc::clone(&self.shared);
-        let spawned = std::thread::Builder::new()
-            .name("diet-turn".to_owned())
-            .spawn(move || {
-                // Caught rather than left to unwind: a panicking transport, or
-                // an overflowing deadline, must still settle the turn -- and
-                // say why -- or the session sits in `turn` for good, refusing
-                // every ask (#120's first review).
-                let outcome = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-                    let mut shape = shape;
-                    let first = first
-                        .or_else(|| {
-                            arrival.and_then(|forked| {
-                                on_arrival(&shared, &forked, turn, &opening, &mut shape)
-                            })
-                        })
-                        .or_else(|| {
-                            deferred
-                                .then(|| native_opening(&shared, turn, &mut shape))
-                                .flatten()
-                        });
-                    if let Some((request, cancel)) = first {
-                        call(&shared, &shape, &cancel, opening, turn, request);
-                    }
-                    // A fork the operator queued, the turn over first (N4).
-                    queued_at_the_gap(&shared);
-                    // A meditation the turn's end made due, queued for its audit
-                    // or pre-warm (#504).
-                    meditation_work(&shared);
-                    queued_at_the_gap(&shared);
-                }));
-                if let Err(payload) = outcome {
-                    crashed(&shared, panic_message(payload.as_ref()));
-                }
-            });
-        if let Err(why) = spawned {
-            // The same outcome by the other door: `std::thread::spawn` would
-            // have panicked on the caller with the session already in `turn`
-            // (#120's second review).
-            crashed(
-                &self.shared,
-                format!("the turn's thread could not start: {why}"),
-            );
-        }
+        spawn_turn(
+            &self.shared,
+            (shape, opening, turn),
+            (first, arrival, deferred),
+        );
         Ok(Admitted { seq, turn })
     }
 
@@ -7486,6 +7515,7 @@ fn settle_reason_in_the_log(reason: SettleReason) -> log::SettleReason {
         SettleReason::Failed => log::SettleReason::Failed,
         SettleReason::ApiCap => log::SettleReason::ApiCap,
         SettleReason::SummaryFailed => log::SettleReason::SummaryFailed,
+        SettleReason::Stopped => log::SettleReason::Stopped,
     }
 }
 
@@ -7813,6 +7843,14 @@ fn step<S: Streaming + 'static>(
                     // The same step sent again (#728): no step of its own.
                     return Some((next, false));
                 }
+                // The session's stop kept the retry from being sent (#1151).
+                if state.stop_due() {
+                    stop_turn(&shared.template, &mut state, turn);
+                    pool_after_the_turn(shared, &mut state);
+                    drop(state);
+                    shared.changed.notify_all();
+                    return None;
+                }
             }
             state.keep_ran_steps();
             state.push(Event::TurnSettled {
@@ -7853,6 +7891,14 @@ fn step<S: Streaming + 'static>(
                     shared.changed.notify_all();
                     // The same step sent again (#728): no step of its own.
                     return Some((next, false));
+                }
+                // The session's stop kept the retry from being sent (#1151).
+                if state.stop_due() {
+                    stop_turn(&shared.template, &mut state, turn);
+                    pool_after_the_turn(shared, &mut state);
+                    drop(state);
+                    shared.changed.notify_all();
+                    return None;
                 }
             }
             state.keep_ran_steps();
@@ -8085,6 +8131,15 @@ fn run_calls<S: Streaming + 'static>(
         shared.changed.notify_all();
         return None;
     }
+    // The session's stop (#1151): its Nth trunk call made, so the next is
+    // never sent, nor a refill made for it.
+    if state.stop_due() {
+        stop_turn(&shared.template, &mut state, turn);
+        pool_after_the_turn(shared, &mut state);
+        drop(state);
+        shared.changed.notify_all();
+        return None;
+    }
     // The operator's wraps (#1030), at this boundary: the request in flight
     // stood as sent; the next one carries them.
     apply_wraps(&mut state, shape, Some(exchange), turn);
@@ -8107,6 +8162,15 @@ fn run_calls<S: Streaming + 'static>(
     };
     if window_meditation(&shared.template, &mut state, shape, false, summary.as_ref()) {
         compacted_out(&mut state, shape, exchange);
+    }
+    // A refill made at this boundary is the stop's too (#1151): the request
+    // after it is never sent.
+    if state.stop_due() {
+        stop_turn(&shared.template, &mut state, turn);
+        pool_after_the_turn(shared, &mut state);
+        drop(state);
+        shared.changed.notify_all();
+        return None;
     }
     // Never more on the server than its pool holds: the forks in flight
     // leave it its cap, or it waits for them.
@@ -8979,12 +9043,22 @@ fn trunk_opening(
     state: &mut State,
     turn: u32,
     shape: &mut RequestShape,
-) -> (u64, Cancel) {
+) -> Option<(u64, Cancel)> {
+    // The session's stop (#1151), come before this turn's first request.
+    if state.stop_due() {
+        stop_turn(template, state, turn);
+        return None;
+    }
     // The operator's wraps waiting since the last trunk request (#1030).
     apply_wraps(state, shape, None, turn);
     // Under a native summary a due meditation was made on the turn's
     // thread before this (#936); here it refills with none.
     window_meditation(template, state, shape, false, None);
+    // A refill just made is the stop's too.
+    if state.stop_due() {
+        stop_turn(template, state, turn);
+        return None;
+    }
     let max_tokens = state.sized(shape, template.limits.max_output_tokens);
     let beside = state.trunk_beside();
     state.wrote_cache(shape);
@@ -9003,7 +9077,75 @@ fn trunk_opening(
         request,
         cancel: cancel.clone(),
     });
-    (request, cancel)
+    Some((request, cancel))
+}
+
+/// The turn `turn` settled `stopped` (#1151): the session's stop came before
+/// its next trunk request, which is never sent. The steps it ran stay on the
+/// trunk, as a request cap keeps them, and the session ends once the turn
+/// is over.
+fn stop_turn(template: &RequestShape, state: &mut State, turn: u32) {
+    state.flight = None;
+    state.keep_ran_steps();
+    state.push(Event::TurnSettled {
+        turn,
+        reason: SettleReason::Stopped,
+    });
+    state.ending = true;
+    turn_over(template, state);
+}
+
+/// The turn `turn`'s thread (#120): its first request -- opened under the
+/// lock that admitted it, or after the arrival fork or the native summary
+/// it waits for -- then its calls on `shape`, `opening` its exchange so
+/// far, then the gap's work.
+fn spawn_turn<S: Streaming + 'static>(
+    shared: &Arc<Shared<S>>,
+    (shape, opening, turn): (RequestShape, Vec<Message>, u32),
+    (first, arrival, deferred): (Option<(u64, Cancel)>, Option<Fired>, bool),
+) {
+    let thread = Arc::clone(shared);
+    let spawned = std::thread::Builder::new()
+        .name("diet-turn".to_owned())
+        .spawn(move || {
+            let shared = thread;
+            // Caught rather than left to unwind: a panicking transport, or
+            // an overflowing deadline, must still settle the turn -- and
+            // say why -- or the session sits in `turn` for good, refusing
+            // every ask (#120's first review).
+            let outcome = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                let mut shape = shape;
+                let first = first
+                    .or_else(|| {
+                        arrival.and_then(|forked| {
+                            on_arrival(&shared, &forked, turn, &opening, &mut shape)
+                        })
+                    })
+                    .or_else(|| {
+                        deferred
+                            .then(|| native_opening(&shared, turn, &mut shape))
+                            .flatten()
+                    });
+                if let Some((request, cancel)) = first {
+                    call(&shared, &shape, &cancel, opening, turn, request);
+                }
+                // A fork the operator queued, the turn over first (N4).
+                queued_at_the_gap(&shared);
+                // A meditation the turn's end made due, queued for its audit
+                // or pre-warm (#504).
+                meditation_work(&shared);
+                queued_at_the_gap(&shared);
+            }));
+            if let Err(payload) = outcome {
+                crashed(&shared, panic_message(payload.as_ref()));
+            }
+        });
+    if let Err(why) = spawned {
+        // The same outcome by the other door: `std::thread::spawn` would
+        // have panicked on the caller with the session already in `turn`
+        // (#120's second review).
+        crashed(shared, format!("the turn's thread could not start: {why}"));
+    }
 }
 
 /// The operator's arrival fork `forked` (#904), streamed and settled on the
@@ -9034,7 +9176,7 @@ fn on_arrival<S: Streaming>(
         state.move_to(Settlement::Awaiting);
         None
     } else {
-        Some(trunk_opening(&shared.template, &mut state, turn, shape))
+        trunk_opening(&shared.template, &mut state, turn, shape)
     };
     drop(state);
     shared.changed.notify_all();
@@ -11695,7 +11837,7 @@ fn native_opening<S: Streaming>(
     let (mut state, summary) = window_summary(shared, state, shape, false);
     let opened = if let Ok(summary) = summary {
         window_meditation(&shared.template, &mut state, shape, false, summary.as_ref());
-        Some(trunk_opening(&shared.template, &mut state, turn, shape))
+        trunk_opening(&shared.template, &mut state, turn, shape)
     } else {
         summary_failed(&mut state, turn);
         None
@@ -13054,8 +13196,12 @@ fn retried(
     (turn, cancel): (u32, &Cancel),
     summary: Option<&crate::meditation::native::Summary>,
 ) -> Option<u64> {
-    if state.overflow_retried == Some(turn)
+    // The session's stop (#1151) sends no retry, and makes no refill for one
+    // once its Nth call is made.
+    if state.stop_due()
+        || state.overflow_retried == Some(turn)
         || !window_meditation(template, state, shape, true, summary)
+        || state.stop_due()
     {
         return None;
     }
@@ -22192,7 +22338,7 @@ pub(in crate::drive) mod tests {
                     .map(|it| it.tag())
                     .collect::<Vec<_>>()
             ),
-            "final cancelled max_steps timeout failed api_cap summary_failed"
+            "final cancelled max_steps timeout failed api_cap summary_failed stopped"
         );
         assert_eq!(
             tags(&Lane::ALL.iter().map(|it| it.tag()).collect::<Vec<_>>()),
@@ -37549,6 +37695,27 @@ pub(in crate::drive) mod tests {
         let next = original.shared.transport.sent()[sent_before(&log, at)].clone();
         let text: String = log.iter().map(|logged| render(logged) + "\n").collect();
         std::fs::write(dir.join("session.log"), text).expect("the log");
+        // What rode is checked against the head the log names for the
+        // request after the refill: a log naming another is refused.
+        let after = log[at..]
+            .iter()
+            .find_map(|logged| match &logged.event {
+                Event::Requested {
+                    lane: Lane::Trunk,
+                    head_sha256,
+                    ..
+                } => Some(head_sha256.clone()),
+                _ => None,
+            })
+            .expect("the request after the refill");
+        let altered: String = log
+            .iter()
+            .map(|logged| render(logged).replace(&after, &"f".repeat(64)) + "\n")
+            .collect();
+        std::fs::write(dir.join("altered.log"), altered).expect("the log");
+        let refused = crate::drive::carry::read_at(&dir.join("altered.log"), &[], Some(seq))
+            .expect_err("a head that is not the trunk and what rode");
+        assert!(refused.contains("what rode is not known"), "{refused}");
 
         let carry = crate::drive::carry::read_at(&dir.join("session.log"), &[], Some(seq))
             .expect("it carries");
