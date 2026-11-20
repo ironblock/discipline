@@ -628,6 +628,19 @@ fn write(args: &Args, tools: &Tools, stop: &dyn Fn() -> bool) -> Done {
     }
 }
 
+/// The file a `read`, `write` or `edit` call names, as its arguments name it
+/// (#1149, #1150): what a successful one shows the model the text of. `None`
+/// for any other tool, or arguments that name no file.
+#[must_use]
+pub fn shown_file(name: &str, raw: &str) -> Option<String> {
+    let args = arguments(raw).ok()?;
+    match name {
+        READ | WRITE => required(&args, "path").ok().map(str::to_owned),
+        EDIT => edit_path(&args).ok().map(str::to_owned),
+        _ => None,
+    }
+}
+
 /// `edit`'s file (N8): its `file_path`, or `path`, the name `read` and
 /// `write` take it under; both, when they name the same file. Two different
 /// files are refused, and neither is refused as a missing `file_path`.

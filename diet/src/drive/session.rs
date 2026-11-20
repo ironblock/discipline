@@ -3054,6 +3054,12 @@ struct State {
     /// The worktree's files at the session's start (N5), by path to digest:
     /// what a refill's line of the files the model changed counts from.
     worktree_at_start: Option<BTreeMap<String, String>>,
+    /// The files the latest refill's outputs section shows the text of
+    /// (#1149, #1150): each `read`, `write` or `edit` result it carries
+    /// under `keep`, or quotes under `salient`, beside the refill message
+    /// that carries the section. Set at every refill, from what it sends,
+    /// and counted while that message is on the trunk ([`shown_files`]).
+    kept_shown: Option<(String, BTreeSet<std::path::PathBuf>)>,
     /// Who vouches for the note the latest self-capture call wrote, under a
     /// contract whose `update_record` takes no field kind (#1016): read by
     /// its result and its `patch` lines, and taken.
@@ -3237,6 +3243,7 @@ impl State {
             // to their placeholders (path-free scenario outputs).
             start_cwd: tools.map(|tools| start_cwd_note(&tools.shown_roots.text(&tools.cwd))),
             worktree_at_start: tools.and_then(|tools| super::carry::digests(&tools.worktree).ok()),
+            kept_shown: None,
             vouched: None,
             confirmed: None,
             jobs: BTreeMap::new(),
@@ -6421,7 +6428,7 @@ impl<S: Streaming + 'static> Session<S> {
         // the background commands still running, as the refill reads them:
         // the jobs are copied, so previewing marks none listed.
         let compacted = &turns[..turns.len() - kept.len()];
-        let outputs = refill_outputs(&state, interview.meditations.outputs, compacted);
+        let (outputs, _) = refill_outputs(&state, interview.meditations.outputs, compacted);
         let mut jobs: Vec<super::background::Job> = state.jobs.values().cloned().collect();
         let background = super::background::running_at_meditation(jobs.iter_mut())
             .map(|list| state.shown_roots.text(&list));
@@ -9040,7 +9047,8 @@ fn seen_by(log: &[Logged], turn: u32) -> crate::capture::tools::Seen {
     crate::capture::tools::Seen::from_parts(source, prefix, (observed, user_words))
 }
 
-fn standard_call(
+fn standard_call<S>(
+    shared: &Shared<S>,
     tools: &Tools,
     cancel: &Cancel,
     (turn, request): (u32, u64),
@@ -9052,6 +9060,27 @@ fn standard_call(
         line.reason = Some(log::ToolRefusal::MaxSteps);
         return (line, None);
     }
+    // #1149: an `edit` or `write` says what it changed, counted from just
+    // before it runs; the file it names is marked when no text of it is in
+    // the context.
+    let writes = [super::standard::EDIT, super::standard::WRITE].contains(&call.name.as_str());
+    let counted = writes.then(|| count_before(tools)).flatten();
+    let (line, shown) = standard_ran(tools, cancel, (turn, request), call);
+    let named = super::standard::shown_file(&call.name, &call.arguments)
+        .filter(|_| writes)
+        .map(|file| (file, line.outcome == log::ToolOutcome::Ran && !line.failed));
+    let shown = shown.map(|shown| count_after(shared, tools, (counted, request), named, shown));
+    (line, shown)
+}
+
+/// [`standard_call`]'s run: its line, and its result under the session's
+/// cap.
+fn standard_ran(
+    tools: &Tools,
+    cancel: &Cancel,
+    (turn, request): (u32, u64),
+    call: &Call,
+) -> (ToolLine, Option<String>) {
     match super::standard::run(&call.name, &call.arguments, tools, &|| cancel.is_asked()) {
         super::standard::Done::Shown(result) => {
             let mut line = ToolLine::of(request, turn, call, log::ToolOutcome::Ran);
@@ -9160,6 +9189,7 @@ fn prune_call<S>(
         saved: Some(saved.clone()),
         excerpts: Vec::new(),
         pruned: None,
+        failed: false,
     });
     state.push(Event::Pruned {
         turn,
@@ -9421,7 +9451,7 @@ fn one_call<S: Streaming>(
         && super::standard::is_standard(&call.name)
         && let Some(tools) = shared.tools.as_ref()
     {
-        return standard_call(tools, cancel, (turn, request), call, last);
+        return standard_call(shared, tools, cancel, (turn, request), call, last);
     }
     // `task_stop` (#614): no gate decides it; it stops a job the session
     // started.
@@ -9612,7 +9642,8 @@ fn one_call<S: Streaming>(
     line.approval = approval;
     let profiled = tools.confinement.isolation() != crate::isolation::Isolation::None;
     if background {
-        return background_call(shared, tools, line, (&run, &command));
+        let (line, shown) = background_call(shared, tools, line, (&run, &command));
+        return still_running(tools, line, shown);
     }
     // A running call the operator can move to the background (#614), when
     // background commands are on.
@@ -9632,6 +9663,9 @@ fn one_call<S: Streaming>(
             shared.changed.notify_all();
         }
     };
+    // #1149: the worktree counted just before the call runs, after any
+    // prompt to the user, so the call is charged with what it changes.
+    let counted = count_before(tools);
     // A stop reaches a running call: its whole process group is killed, and
     // the turn settles `cancelled` (#551). Its timeout ends it alone (#613).
     let finished = tools.confinement.run_promotable(
@@ -9663,12 +9697,13 @@ fn one_call<S: Streaming>(
         Ok(crate::isolation::Finished::Promoted(ran, child)) => {
             let job =
                 slot.and_then(|slot| slot.lock().unwrap_or_else(PoisonError::into_inner).take());
-            return promoted_call(shared, tools, line, (ran, child), (job, &command));
+            let (line, shown) = promoted_call(shared, tools, line, (ran, child), (job, &command));
+            return still_running(tools, line, shown);
         }
         Ok(crate::isolation::Finished::Ran(ran)) => Ok(ran),
         Err(not_run) => Err(not_run),
     };
-    match finished {
+    let (line, shown) = match finished {
         Ok(ran) if ran.timed_out && !ran.cancelled => {
             timed_out(tools, line, &ran, timeout.unwrap_or_default())
         }
@@ -9712,7 +9747,146 @@ fn one_call<S: Streaming>(
             (line, Some(shown))
         }
         Err(not_run) => never_ran(tools, line, &run, &not_run),
+    };
+    let shown = shown.map(|shown| count_after(shared, tools, (counted, request), None, shown));
+    (line, shown)
+}
+
+/// The worktree counted just before a `bash`, `edit` or `write` call runs
+/// (#1149): `None` with the lever off; otherwise whether it was listed.
+fn count_before(tools: &Tools) -> Option<bool> {
+    let tree = tools.call_changes.as_ref()?;
+    Some(
+        tree.lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .before()
+            .is_ok(),
+    )
+}
+
+/// `shown`, a call's result after the output cap, with the block of what it
+/// changed in the worktree since [`count_before`] (#1149): the files and
+/// their lines, or none. Then those of them, and the file an `edit` or
+/// `write` names (`named`, with whether it succeeded), whose text the
+/// context does not show ([`shown_files`]); the call's own successful
+/// `write` or `edit` shows its file. Unchanged with the lever off.
+fn count_after<S>(
+    shared: &Shared<S>,
+    tools: &Tools,
+    (counted, request): (Option<bool>, u64),
+    named: Option<(String, bool)>,
+    shown: String,
+) -> String {
+    use super::call_changes::{self as changes, Keys};
+    let (Some(counted), Some(tree)) = (counted, tools.call_changes.as_ref()) else {
+        return shown;
+    };
+    let entries = if counted {
+        tree.lock().unwrap_or_else(PoisonError::into_inner).after()
+    } else {
+        Err(String::new())
+    };
+    let Ok(entries) = entries else {
+        return changes::appended(&shown, changes::UNLISTED);
+    };
+    let keys = Keys::of(&tools.worktree);
+    let state = shared.lock();
+    let mut seen = shown_files(&state, &keys, request);
+    drop(state);
+    let mut marked: Vec<std::path::PathBuf> = entries
+        .iter()
+        .filter_map(changes::Entry::file)
+        .map(|file| keys.key(file))
+        .collect();
+    if let Some((file, wrote)) = named {
+        let key = keys.key(&file);
+        if wrote {
+            seen.insert(key.clone());
+        }
+        marked.push(key);
     }
+    let mut not_shown: Vec<String> = Vec::new();
+    for key in marked.iter().filter(|key| !seen.contains(*key)) {
+        let name = keys.named(key);
+        if !not_shown.contains(&name) {
+            not_shown.push(name);
+        }
+    }
+    changes::appended(&shown, &changes::block(&entries, &not_shown))
+}
+
+/// A call that returned while still running, in the background or moved
+/// there (#614): with the lever on, its result says its changes were not
+/// counted (#1149), never that it changed no file.
+fn still_running(
+    tools: &Tools,
+    line: ToolLine,
+    shown: Option<String>,
+) -> (ToolLine, Option<String>) {
+    let shown = match shown {
+        Some(shown) if tools.call_changes.is_some() && line.background.is_some() => Some(
+            super::call_changes::appended(&shown, super::call_changes::STILL_RUNNING),
+        ),
+        shown => shown,
+    };
+    (line, shown)
+}
+
+/// The files whose text the context the model is sent shows (#1149, #1150),
+/// by [`super::call_changes::Keys`]: Qwen Code's rule, as the maintainer
+/// ruled it on 2026-11-20. A `read` result of any range of a file, or the
+/// model's own successful `write` or `edit` of it, counts while that result
+/// is still in the context the next trunk request sends: on the trunk, in
+/// the running turn's steps, among step `request`'s results so far, or in
+/// the text a refill's outputs section carries of it ([`State::kept_shown`]).
+/// A refill, prune or wrap that takes a result off the trunk takes its file
+/// with it -- a wrap the user made, from when it is accepted, since the next
+/// request carries it -- and text a refill keeps (its tail, a riding step, a
+/// kept output) keeps it. `bash` output never counts, so no command is
+/// parsed. A carried trunk's results, which this session's log does not
+/// hold, do not count.
+fn shown_files(
+    state: &State,
+    keys: &super::call_changes::Keys,
+    request: u64,
+) -> BTreeSet<std::path::PathBuf> {
+    let sent: BTreeSet<(&str, &str)> = state
+        .trunk
+        .iter()
+        .chain(&state.ran)
+        .filter(|message| message.role == Role::Tool)
+        .filter_map(|message| Some((message.tool_call_id.as_deref()?, message.content.as_str())))
+        .filter(|sent| {
+            !state
+                .wraps
+                .values()
+                .any(|wrap| !wrap.applied && (wrap.id.as_str(), wrap.shown.as_str()) == *sent)
+        })
+        .collect();
+    let mut shown = match &state.kept_shown {
+        Some((refill, files)) if state.trunk.iter().any(|message| message.content == *refill) => {
+            files.clone()
+        }
+        _ => BTreeSet::new(),
+    };
+    for logged in &state.log {
+        let Event::ToolCalled(line) = &logged.event else {
+            continue;
+        };
+        if line.outcome != log::ToolOutcome::Ran || line.failed {
+            continue;
+        }
+        let (Some(file), Some(text)) = (
+            super::standard::shown_file(&line.name, &line.arguments),
+            line.shown.as_deref(),
+        ) else {
+            continue;
+        };
+        if line.request == request || sent.contains(&(line.id.as_str(), text)) {
+            shown.insert(keys.key(&file));
+        }
+    }
+    shown
 }
 
 /// Where the session's background jobs write (#614): the recording's
@@ -10216,7 +10390,7 @@ fn refilled(
     // working-memory entry no longer live, for a recall to find later.
     let earlier = meditations_at(&state.log, state.turns);
     let archived = archived_at_meditation(compacted, &interview.object, (state.turns, earlier));
-    let outputs = refill_outputs(state, tool_outputs, compacted);
+    let (outputs, kept_shown) = refill_outputs(state, tool_outputs, compacted);
     // Each background command still running (#614), after the summary in
     // the refill's message, as Qwen Code places its list: the refill
     // compacts away the call that started it.
@@ -10309,6 +10483,11 @@ fn refilled(
     // either way; under one, `refill_mid_turn` counts the request instead.
     let trunk_before = std::mem::take(&mut state.trunk);
     refill_counted(state, &trunk_before, &refilled);
+    // What its section shows, beside what its kept tail does (#1149), by
+    // the message that carries it.
+    state.kept_shown = refilled
+        .get(head.len())
+        .map(|message| (message.content.clone(), kept_shown));
     state.trunk = refilled;
     // What a session carried from this refill starts from (#948): the
     // trunk exactly as sent and the working object's dump, kept in the
@@ -10408,21 +10587,39 @@ fn refilled(
 /// the regimen's `tool_outputs`, its paths shown as the model is shown them,
 /// with how many outputs it names; `None` when there is none. Both the
 /// refill and its preview read it here, so the preview is what is sent.
+/// Beside it, the files whose text it shows (#1149): each successful
+/// `read`, `write` or `edit` whose result it carries or quotes.
 fn refill_outputs(
     state: &State,
     tool_outputs: log::MeditationToolOutputs,
     compacted: &[Message],
-) -> Option<(String, u64)> {
-    crate::meditation::outputs::section(
+) -> (Option<(String, u64)>, BTreeSet<std::path::PathBuf>) {
+    let gathered = compacted_outputs(
+        &state.log,
+        compacted,
         tool_outputs,
-        &compacted_outputs(
-            &state.log,
-            compacted,
-            tool_outputs,
-            (state.recording.as_deref(), &state.pruned),
-        ),
+        (state.recording.as_deref(), &state.pruned),
+    );
+    let shown = state
+        .worktree
+        .as_deref()
+        .map(|worktree| {
+            let keys = super::call_changes::Keys::of(worktree);
+            gathered
+                .iter()
+                .filter(|output| {
+                    !output.failed && crate::meditation::outputs::carries_text(tool_outputs, output)
+                })
+                .filter_map(|output| super::standard::shown_file(&output.name, &output.arguments))
+                .map(|file| keys.key(&file))
+                .collect()
+        })
+        .unwrap_or_default();
+    (
+        crate::meditation::outputs::section(tool_outputs, &gathered)
+            .map(|(text, n)| (state.shown_roots.text(&text), n)),
+        shown,
     )
-    .map(|(text, n)| (state.shown_roots.text(&text), n))
 }
 
 /// `render` as a refill sends it and its meditation line logs it, when the
@@ -13597,6 +13794,7 @@ fn compacted_outputs(
                 saved: None,
                 excerpts: Vec::new(),
                 pruned: Some(prune.text.clone()),
+                failed: false,
             });
             continue;
         }
@@ -13621,6 +13819,7 @@ fn compacted_outputs(
             saved: None,
             excerpts: Vec::new(),
             pruned: None,
+            failed: line.failed || line.outcome != log::ToolOutcome::Ran,
         });
     }
     if state == log::MeditationToolOutputs::Reference {
@@ -19350,9 +19549,9 @@ pub(in crate::drive) mod tests {
             name: "edit".to_owned(),
             arguments: format!(r#"{{"file_path":"a.py","old_string":"{old}","new_string":"y"}}"#),
         };
-        let (missing, _) = standard_call(&tools, &Cancel::new(), (1, 1), &edit("nowhere"), false);
+        let (missing, _) = standard_ran(&tools, &Cancel::new(), (1, 1), &edit("nowhere"));
         assert!(missing.failed, "{:?}", missing.shown);
-        let (made, shown) = standard_call(&tools, &Cancel::new(), (1, 1), &edit("x"), false);
+        let (made, shown) = standard_ran(&tools, &Cancel::new(), (1, 1), &edit("x"));
         assert!(!made.failed, "{shown:?}");
         assert!(shown.is_some_and(|shown| shown.contains("error")));
         tidy(&[&tree]);

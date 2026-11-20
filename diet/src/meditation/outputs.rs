@@ -36,6 +36,23 @@ pub struct Output {
     /// Its reference line, when the model pruned it (#612): carried in
     /// its place whatever the state.
     pub pruned: Option<String>,
+    /// Whether its call failed or never ran (#894): its result shows no
+    /// file's text, whatever the section carries of it (#1149).
+    pub failed: bool,
+}
+
+/// Whether the section `state` carries of `output` holds text of its
+/// result (#1149, #1150): its whole under `keep`, a quoted excerpt under
+/// `salient`; never a reference line, so never under `reference`, `evict`
+/// or a prune.
+#[must_use]
+pub fn carries_text(state: MeditationToolOutputs, output: &Output) -> bool {
+    output.pruned.is_none()
+        && match state {
+            MeditationToolOutputs::Keep => !output.shown.is_empty(),
+            MeditationToolOutputs::Salient => !output.excerpts.is_empty(),
+            MeditationToolOutputs::Evict | MeditationToolOutputs::Reference => false,
+        }
 }
 
 /// An output's whole, kept by digest.
@@ -224,6 +241,40 @@ mod tests {
             saved: None,
             excerpts: Vec::new(),
             pruned: None,
+            failed: false,
+        }
+    }
+
+    /// #1149: the outputs whose text a section carries are the ones it
+    /// prints a result or an excerpt of, under each state.
+    #[test]
+    fn the_section_carries_text_where_it_prints_a_result_or_an_excerpt() {
+        let quoted = Output {
+            excerpts: vec!["a".to_owned()],
+            ..output(1, "a\nb\n")
+        };
+        let pruned = Output {
+            pruned: Some("- turn 2: bash args={}: 1 bytes\n".to_owned()),
+            ..output(2, "c\n")
+        };
+        let outputs = [quoted, output(3, "d\n"), pruned];
+        for state in [
+            MeditationToolOutputs::Evict,
+            MeditationToolOutputs::Keep,
+            MeditationToolOutputs::Reference,
+            MeditationToolOutputs::Salient,
+        ] {
+            let text = section(state, &outputs)
+                .map(|(text, _)| text)
+                .unwrap_or_default();
+            for output in &outputs {
+                let printed = output.pruned.is_none()
+                    && (text.contains(&format!("[Tool result]: {}", output.shown))
+                        || output.excerpts.iter().any(|excerpt| {
+                            text.contains(&format!("[Tool result excerpt]: {excerpt}"))
+                        }));
+                assert_eq!(carries_text(state, output), printed, "{state:?} {output:?}");
+            }
         }
     }
 
