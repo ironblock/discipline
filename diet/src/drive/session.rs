@@ -3883,6 +3883,15 @@ pub struct Carry {
     /// The working directory the carried log's commands ran in, as its
     /// last `tool_call` before the refill names it (#1151's re-review).
     pub recorded_cwd: Option<String>,
+    /// The render the carried meditation's line logs, rerooted as the trunk
+    /// is (#1154): where a changed-files line is placed. `None` for a
+    /// native summary's refill, which carries Pi's `<modified-files>` list
+    /// in that line's place.
+    pub render: Option<String>,
+    /// The worktree snapshots the carried log's meditations kept, up to and
+    /// including the carried one, each by its meditation's seq (#1154): what
+    /// a changed-files line is counted between.
+    pub snapshots: Vec<(u64, String)>,
 }
 
 /// An interactive session on one trunk.
@@ -10440,14 +10449,36 @@ fn render_as_sent(state: &State, render: String, native: bool) -> String {
         .and_then(|(worktree, before)| {
             let after = super::carry::digests(worktree).ok()?;
             crate::meditation::changed::line(before, &after)
-        });
+        })
+        .map(|line| state.shown_roots.text(&line));
+    laid_out(render, changed.as_deref(), state.start_cwd.as_deref())
+}
+
+/// `render`, then the changed-files line, then the working directory, each
+/// a paragraph of its own when there is one: how a refill's render is sent
+/// ([`render_as_sent`]), and so where a carry adds the line to a recorded
+/// one ([`with_changed_line`]).
+fn laid_out(render: String, changed: Option<&str>, cwd: Option<&str>) -> String {
     let render = match changed {
-        Some(line) => format!("{render}\n\n{}", state.shown_roots.text(&line)),
+        Some(line) => format!("{render}\n\n{line}"),
         None => render,
     };
-    match state.start_cwd.as_deref() {
+    match cwd {
         Some(cwd) => format!("{render}\n\n{cwd}"),
         None => render,
+    }
+}
+
+/// A recorded refill's `render` with the changed-files line `line` (N5)
+/// where [`render_as_sent`] puts it (#1154): after the render, and before
+/// the working directory said again when the render ends with it (#1112).
+#[must_use]
+pub fn with_changed_line(render: &str, line: &str) -> String {
+    match render.rsplit_once("\n\n") {
+        Some((rendered, last)) if names_a_cwd(last) => {
+            laid_out(rendered.to_owned(), Some(line), Some(last))
+        }
+        _ => laid_out(render.to_owned(), Some(line), None),
     }
 }
 
@@ -14208,23 +14239,25 @@ fn named_cwd(trunk: &[Message]) -> Option<String> {
 /// their notes -- that names a working directory as [`start_cwd_note`]
 /// words it.
 fn cwd_lines(trunk: &[Message]) -> impl Iterator<Item = String> + '_ {
-    let marked = start_cwd_note("\u{1}");
-    let (before, after) = marked
-        .split_once('\u{1}')
-        .map(|(before, after)| (before.to_owned(), after.to_owned()))
-        .unwrap_or_default();
     trunk
         .iter()
         .filter(|message| matches!(message.role, Role::User | Role::System))
         .flat_map(|message| std::iter::once(&message.content).chain(&message.notes))
         .flat_map(|text| text.lines())
-        .filter(move |line| {
-            !before.is_empty()
-                && line.len() > before.len() + after.len()
-                && line.starts_with(&before)
-                && line.ends_with(&after)
-        })
+        .filter(|line| names_a_cwd(line))
         .map(str::to_owned)
+}
+
+/// Whether `line` is one line naming a working directory as
+/// [`start_cwd_note`] words it.
+fn names_a_cwd(line: &str) -> bool {
+    let marked = start_cwd_note("\u{1}");
+    let (before, after) = marked.split_once('\u{1}').unwrap_or_default();
+    !before.is_empty()
+        && !line.contains('\n')
+        && line.len() > before.len() + after.len()
+        && line.starts_with(before)
+        && line.ends_with(after)
 }
 
 /// The note on the next ask that tells the model the operator declined its
@@ -36514,6 +36547,7 @@ pub(in crate::drive) mod tests {
             worktree: None,
             variant_sha256: None,
             rerooted: None,
+            changed: None,
         };
         let session = Session::open_with(Canned::new(vec![]), template(), None, None, None, None)
             .with_carry(Carry {
@@ -36527,6 +36561,8 @@ pub(in crate::drive) mod tests {
                 riding_prompt: None,
                 riding_steps: 0,
                 recorded_cwd: None,
+                render: None,
+                snapshots: Vec::new(),
             })
             .expect("it carries");
         let state = session.shared.lock();
@@ -36568,6 +36604,7 @@ pub(in crate::drive) mod tests {
             worktree: None,
             variant_sha256: None,
             rerooted: None,
+            changed: None,
         };
         let carried = |system: &str| {
             Session::open_with(Canned::new(vec![]), template(), None, None, None, None)
@@ -36586,6 +36623,8 @@ pub(in crate::drive) mod tests {
                     riding_prompt: None,
                     riding_steps: 0,
                     recorded_cwd: None,
+                    render: None,
+                    snapshots: Vec::new(),
                 })
                 .expect("it carries")
         };
@@ -37487,6 +37526,7 @@ pub(in crate::drive) mod tests {
             worktree: None,
             variant_sha256: None,
             rerooted: None,
+            changed: None,
         }
     }
 
@@ -37617,6 +37657,8 @@ pub(in crate::drive) mod tests {
             riding_prompt: None,
             riding_steps: 0,
             recorded_cwd: None,
+            render: None,
+            snapshots: Vec::new(),
         })
         .expect("it carries");
         assert_eq!(
@@ -37789,6 +37831,8 @@ pub(in crate::drive) mod tests {
             riding_prompt: None,
             riding_steps: 0,
             recorded_cwd: None,
+            render: None,
+            snapshots: Vec::new(),
         };
         let (interview, shape) = capturing_under(in_the_starter_library_at("orient"));
         let Err(refused) = Session::open_with(
@@ -37868,6 +37912,8 @@ pub(in crate::drive) mod tests {
             riding_prompt: None,
             riding_steps: 0,
             recorded_cwd: None,
+            render: None,
+            snapshots: Vec::new(),
         })
         .expect("it carries");
         assert_eq!(
@@ -38082,6 +38128,8 @@ pub(in crate::drive) mod tests {
             riding_prompt: None,
             riding_steps: 0,
             recorded_cwd: None,
+            render: None,
+            snapshots: Vec::new(),
         }
     }
 

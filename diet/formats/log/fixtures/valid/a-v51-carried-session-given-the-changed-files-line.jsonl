@@ -1,0 +1,7 @@
+{"carried_from":{"changed_since_seq":9,"changed_trunk_sha256":"4444444444444444444444444444444444444444444444444444444444444444","log_sha256":"cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc","meditation_seq":16,"trunk_sha256":"dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd","worktree_from":"meditation","worktree_sha256":"3333333333333333333333333333333333333333333333333333333333333333"},"compaction_persists":true,"head":[{"content":"you are the trunk","role":"system"}],"kind":"session.start","model":"a-model","notes_in_the_ask":true,"opened":1790000000000,"seq":0,"t":0,"version":51}
+{"kind":"ask","seq":1,"t":5,"text":"read the notes","turn":1}
+{"from":"awaiting","kind":"settlement","seq":2,"t":10,"to":"turn"}
+{"head_sha256":"5555555555555555555555555555555555555555555555555555555555555555","kind":"request","lane":"trunk","seq":3,"t":15,"turn":1}
+{"finish_reason":"stop","kind":"response","seq":4,"t":20,"text":"the notes say two","to_request":3}
+{"kind":"turn.settled","reason":"final","seq":5,"t":25,"turn":1}
+{"from":"turn","kind":"settlement","seq":6,"t":30,"to":"awaiting"}

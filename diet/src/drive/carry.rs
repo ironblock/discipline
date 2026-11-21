@@ -11,6 +11,7 @@
 
 use std::path::Path;
 
+use crate::client::shape::Role;
 use crate::formats::log::{self, CarriedFrom, Event};
 
 use super::session::Carry;
@@ -121,6 +122,31 @@ pub fn read_at(log: &Path, sealed: &[String], at: Option<u64>) -> Result<Carry, 
             _ => None,
         })
         .last();
+    // Where a changed-files line is placed and what it is counted between
+    // (#1154): the refill's render as its line logs it, and every snapshot
+    // a meditation kept up to it.
+    let render = lines
+        .iter()
+        .find(|line| line.seq == seq)
+        .and_then(|line| match &line.event {
+            Event::Meditation { render, carry, .. }
+                if *carry != Some(log::MeditationCarry::NativeSummary) =>
+            {
+                Some(render.clone())
+            }
+            _ => None,
+        });
+    let snapshots = lines
+        .iter()
+        .take_while(|line| line.seq <= seq)
+        .filter_map(|line| match &line.event {
+            Event::Meditation {
+                worktree_sha256: Some(sha256),
+                ..
+            } => Some((line.seq, sha256.clone())),
+            _ => None,
+        })
+        .collect();
     Ok(Carry {
         trunk,
         object,
@@ -132,6 +158,7 @@ pub fn read_at(log: &Path, sealed: &[String], at: Option<u64>) -> Result<Carry, 
             worktree: worktree_sha256.map(|sha256| (sha256, log::WorktreeFrom::Meditation)),
             variant_sha256: None,
             rerooted: None,
+            changed: None,
         },
         source: (!source.is_empty()).then_some(source),
         phase: carried_phase(&lines, seq),
@@ -140,7 +167,175 @@ pub fn read_at(log: &Path, sealed: &[String], at: Option<u64>) -> Result<Carry, 
         riding_prompt,
         riding_steps,
         recorded_cwd,
+        render,
+        snapshots,
     })
+}
+
+/// The worktree snapshot a carry's changed-files line is counted from
+/// (#1154).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ChangedSince {
+    /// The log's earliest: a log does not record the worktree as the
+    /// session opened, so its first snapshot stands for it.
+    Earliest,
+    /// The one the meditation at this seq kept.
+    Seq(u64),
+}
+
+/// `carry` with the line a refill carries today naming the files the model
+/// changed (N5, #1154): what `meditation::changed::line` writes for the
+/// worktree snapshot `since` names and the carried refill's own, each read
+/// back from `recording`, the carried log's, and checked against its
+/// digest; shown as this session shows a path ([`ShownRoots`]); and placed
+/// in the refill's render where a refill's render puts it today
+/// (`session::with_changed_line`). Nothing is added when nothing changed.
+/// `carried_from` names the base's seq and the trunk's digest as the
+/// session starts from it. Call it after any reroot, so the render it
+/// finds is the trunk's.
+///
+/// [`ShownRoots`]: super::shown::ShownRoots
+///
+/// # Errors
+///
+/// When the carried refill is a native summary's, which carries Pi's
+/// `<modified-files>` list in the line's place; its render already carries
+/// the line; it kept no snapshot; `since` names no earlier meditation that
+/// kept one; a snapshot does not read; or no message of the carried trunk
+/// opens with the render. Refused, `carry` is as it was.
+pub fn add_changed_line(
+    carry: &mut Carry,
+    recording: &Path,
+    since: ChangedSince,
+    shown: &super::shown::ShownRoots,
+) -> Result<(), String> {
+    use crate::meditation::changed;
+    let seam = carry.from.meditation_seq;
+    let Some(render) = carry.render.as_deref() else {
+        return Err(format!(
+            "the refill at seq {seam} carried a native summary, whose `<modified-files>` list \
+             stands in the changed-files line's place"
+        ));
+    };
+    if render
+        .lines()
+        .any(|line| line.starts_with(changed::SENTENCE))
+    {
+        return Err(format!(
+            "the refill at seq {seam} already carries the line naming the files the model \
+             changed: it is not given a second"
+        ));
+    }
+    let kept_at = |at: u64| {
+        carry
+            .snapshots
+            .iter()
+            .find(|(seq, _)| *seq == at)
+            .map(|(_, sha256)| sha256.as_str())
+    };
+    let after = kept_at(seam)
+        .ok_or_else(|| format!("the refill at seq {seam} kept no worktree snapshot (log v26)"))?;
+    let (since_seq, before) = match since {
+        ChangedSince::Earliest => carry
+            .snapshots
+            .first()
+            .filter(|(seq, _)| *seq < seam)
+            .map(|(seq, sha256)| (*seq, sha256.as_str()))
+            .ok_or_else(|| {
+                format!("the log keeps no worktree snapshot before the refill's at seq {seam}")
+            })?,
+        ChangedSince::Seq(at) => kept_at(at)
+            .filter(|_| at < seam)
+            .map(|sha256| (at, sha256))
+            .ok_or_else(|| {
+                format!(
+                    "the line at seq {at} is no meditation before the refill's at seq {seam} \
+                     that kept a worktree snapshot"
+                )
+            })?,
+    };
+    let line = changed::line(
+        &snapshot_files(before, recording)?,
+        &snapshot_files(after, recording)?,
+    );
+    let mut trunk = carry.trunk.clone();
+    if let Some(line) = line {
+        // The refill's message, as `refill_message` opens it on the render.
+        let marked = crate::meditation::render::refill_message("\u{1}").content;
+        let opening = marked
+            .split_once('\u{1}')
+            .map_or("", |(opening, _)| opening);
+        let opens = format!("{opening}{render}");
+        let message = trunk
+            .iter_mut()
+            .find(|message| message.role == Role::User && message.content.starts_with(&opens))
+            .ok_or_else(|| {
+                format!(
+                    "no message of the carried trunk opens with the render the refill at seq \
+                     {seam} logs"
+                )
+            })?;
+        let rest = &message.content[opens.len()..];
+        message.content = format!(
+            "{opening}{}{rest}",
+            super::session::with_changed_line(render, &shown.text(&line))
+        );
+    }
+    let sent = crate::client::shape::messages_json(&trunk);
+    carry.trunk = trunk;
+    carry.from.changed = Some(Box::new(log::ChangedFiles {
+        since_seq,
+        trunk_sha256: crate::digest::sha256_hex(sent.as_bytes()),
+    }));
+    Ok(())
+}
+
+/// The files the worktree snapshot `manifest_sha256` names (#1154), each by
+/// its path to what stands for its bytes, as [`digests`] reads a worktree:
+/// a `.git` directory left out, a regular file by its sha256, a symlink
+/// and a file over [`SNAPSHOT_MAX_BYTES`] by what the manifest says of
+/// them. A snapshot keeps neither a symlink's target nor a large file's
+/// modification time, so one retargeted, or rewritten at its size, is not
+/// seen to change.
+fn snapshot_files(
+    manifest_sha256: &str,
+    recording: &Path,
+) -> Result<std::collections::BTreeMap<String, String>, String> {
+    let manifest: serde_json::Value =
+        serde_json::from_slice(&kept_file(recording, manifest_sha256)?)
+            .map_err(|why| format!("the worktree manifest: {why}"))?;
+    let named = |key: &str| manifest[key].as_array().cloned().unwrap_or_default();
+    let mut files = std::collections::BTreeMap::new();
+    for (entry, skipped) in named("files")
+        .into_iter()
+        .map(|entry| (entry, false))
+        .chain(named("skipped").into_iter().map(|entry| (entry, true)))
+    {
+        let Some(path) = entry["path"].as_str() else {
+            return Err(format!("a manifest entry without its path: {entry}"));
+        };
+        if path.split('/').rev().skip(1).any(|part| part == ".git") {
+            continue;
+        }
+        let stands = match (skipped, entry["sha256"].as_str(), entry["why"].as_str()) {
+            (false, Some(sha256), _) => sha256.to_owned(),
+            (true, _, Some("size")) => format!("bytes:{}", entry["bytes"]),
+            (true, _, Some(why)) => why.to_owned(),
+            _ => return Err(format!("a manifest entry naming nothing it kept: {entry}")),
+        };
+        files.insert(path.to_owned(), stands);
+    }
+    Ok(files)
+}
+
+/// The file `recording` keeps by `sha256`, checked against it.
+fn kept_file(recording: &Path, sha256: &str) -> Result<Vec<u8>, String> {
+    let path = recording.join("files").join(sha256);
+    let bytes = std::fs::read(&path).map_err(|why| format!("{}: {why}", path.display()))?;
+    if crate::digest::sha256_hex(&bytes) != sha256 {
+        return Err(format!("{} is not the bytes its name says", path.display()));
+    }
+    Ok(bytes)
 }
 
 /// The lines of `text` a carry from the meditation at `at` -- the last
@@ -292,10 +487,12 @@ pub fn reroot(carry: &mut Carry, roots: &[(String, String)]) -> u64 {
     if let Some(object) = carry.object.as_mut() {
         swap(object);
     }
-    // Not text the model is sent: rerooted alike, counted apart.
-    if let Some(cwd) = carry.recorded_cwd.as_mut() {
+    // Not text the model is sent: rerooted alike, counted apart. The
+    // render (#1154) is found in the trunk by its text, so it is rerooted
+    // as the trunk is.
+    for text in carry.recorded_cwd.iter_mut().chain(carry.render.iter_mut()) {
         for (from, to) in &roots {
-            *cwd = rooted_at(cwd, from, to).0;
+            *text = rooted_at(text, from, to).0;
         }
     }
     if !roots.is_empty() {
@@ -462,14 +659,7 @@ pub fn digests(worktree: &Path) -> Result<std::collections::BTreeMap<String, Str
 /// A manifest or file that is missing, is not the bytes its name says, or
 /// names a path outside `into`.
 pub fn restore(manifest_sha256: &str, recording: &Path, into: &Path) -> Result<usize, String> {
-    let kept = |sha256: &str| -> Result<Vec<u8>, String> {
-        let path = recording.join("files").join(sha256);
-        let bytes = std::fs::read(&path).map_err(|why| format!("{}: {why}", path.display()))?;
-        if crate::digest::sha256_hex(&bytes) != sha256 {
-            return Err(format!("{} is not the bytes its name says", path.display()));
-        }
-        Ok(bytes)
-    };
+    let kept = |sha256: &str| kept_file(recording, sha256);
     let manifest: serde_json::Value = serde_json::from_slice(&kept(manifest_sha256)?)
         .map_err(|why| format!("the worktree manifest: {why}"))?;
     let files = manifest["files"]
@@ -634,6 +824,7 @@ mod tests {
                 worktree: None,
                 variant_sha256: None,
                 rerooted: None,
+                changed: None,
             },
             source: None,
             phase: None,
@@ -642,6 +833,8 @@ mod tests {
             riding_prompt: None,
             riding_steps: 0,
             recorded_cwd: None,
+            render: None,
+            snapshots: Vec::new(),
         };
         let roots = [
             (format!("/private{old}"), format!("/private{new}")),
@@ -888,6 +1081,224 @@ mod tests {
         .expect("the log");
         let refused = read(&path, &[]).expect_err("the last meditation may be the torn line");
         assert!(refused.contains("torn"), "{refused}");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// Each tree of `trees`, a list of files by path with their text,
+    /// written under `dir` and snapshotted into `recording` as a meditation
+    /// keeps one: the snapshot's manifest digest, with the tree's path.
+    fn snapshotted(
+        dir: &Path,
+        recording: &Path,
+        trees: &[&[(&str, &str)]],
+    ) -> Vec<(String, std::path::PathBuf)> {
+        trees
+            .iter()
+            .enumerate()
+            .map(|(at, files)| {
+                let tree = dir.join(format!("tree-{at}"));
+                for (path, text) in *files {
+                    let to = tree.join(path);
+                    std::fs::create_dir_all(to.parent().expect("a parent")).expect("a directory");
+                    std::fs::write(&to, text).expect("a file");
+                }
+                (snapshot(&tree, recording).expect("a snapshot"), tree)
+            })
+            .collect()
+    }
+
+    /// A carry from the meditation at seq 16 whose refill rendered `render`,
+    /// its tool outputs after it, the meditations at 5, 9 and 16 having kept
+    /// `snapshots` in that order.
+    fn refilled(render: Option<&str>, snapshots: &[String]) -> Carry {
+        let outputs = "\n# tool outputs\n- turn 1: bash: 5 bytes, saved at /w/files/x\n";
+        let refill = crate::meditation::render::refill_message(&format!(
+            "{}{outputs}",
+            render.unwrap_or("<state_snapshot>a tracker</state_snapshot>")
+        ));
+        Carry {
+            trunk: vec![Message::new(Role::System, "the head"), refill],
+            object: None,
+            from: log::CarriedFrom {
+                log_sha256: "a".repeat(64),
+                meditation_seq: 16,
+                trunk_sha256: "b".repeat(64),
+                object_sha256: None,
+                worktree: None,
+                variant_sha256: None,
+                rerooted: None,
+                changed: None,
+            },
+            source: None,
+            phase: None,
+            riding: Vec::new(),
+            riding_files: Vec::new(),
+            riding_prompt: None,
+            riding_steps: 0,
+            recorded_cwd: None,
+            render: render.map(str::to_owned),
+            snapshots: [5, 9, 16]
+                .into_iter()
+                .zip(snapshots.iter().cloned())
+                .collect(),
+        }
+    }
+
+    /// #1154: given the changed-files line, a carry's refill gains exactly
+    /// the line N5's own code writes for the snapshot it counts from and the
+    /// carried refill's -- the line a session that opened on the first and
+    /// refilled on the second would carry, a `.git` directory left out --
+    /// placed where a refill's render puts it today: after the render,
+    /// before the working directory said again, and before what follows the
+    /// render. The base is the log's earliest snapshot by default, or the
+    /// one a seq names, and the start names it and the trunk as sent.
+    #[test]
+    fn a_carry_given_the_changed_files_line_adds_n5s_line_where_the_render_puts_it() {
+        let dir = std::env::temp_dir().join(format!("diet-carry-changed-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        let recording = dir.join("recording");
+        let trees = snapshotted(
+            &dir,
+            &recording,
+            &[
+                &[("a.rs", "1"), ("src/b.rs", "2"), ("gone.txt", "x")],
+                &[("a.rs", "1"), ("src/b.rs", "3")],
+                &[
+                    ("a.rs", "9"),
+                    ("src/b.rs", "3"),
+                    ("src/c.rs", "4"),
+                    (".git/HEAD", "ref: refs/heads/main"),
+                    ("node_modules/p/index.js", "5"),
+                ],
+            ],
+        );
+        let snapshots: Vec<String> = trees.iter().map(|(sha256, _)| sha256.clone()).collect();
+        let n5 = |from: usize| {
+            crate::meditation::changed::line(
+                &digests(&trees[from].1).expect("the base"),
+                &digests(&trees[2].1).expect("the seam"),
+            )
+            .expect("files changed")
+        };
+        let rendered = "<state_snapshot>a tracker</state_snapshot>";
+        let outputs = "\n# tool outputs\n- turn 1: bash: 5 bytes, saved at /w/files/x\n";
+        for (since, from, base_seq) in
+            [(ChangedSince::Earliest, 0, 5), (ChangedSince::Seq(9), 1, 9)]
+        {
+            let line = n5(from);
+            assert!(!line.contains(".git"), "{line}");
+            for (render, laid_out) in [
+                (rendered.to_owned(), format!("{rendered}\n\n{line}")),
+                (
+                    format!("{rendered}\n\nYou are in /w."),
+                    format!("{rendered}\n\n{line}\n\nYou are in /w."),
+                ),
+            ] {
+                let mut carry = refilled(Some(&render), &snapshots);
+                add_changed_line(
+                    &mut carry,
+                    &recording,
+                    since,
+                    &crate::drive::shown::ShownRoots::none(),
+                )
+                .expect("it adds the line");
+                assert_eq!(carry.trunk[0], Message::new(Role::System, "the head"));
+                assert_eq!(
+                    carry.trunk[1].content,
+                    crate::meditation::render::refill_message(&format!("{laid_out}{outputs}"))
+                        .content,
+                    "{since:?}"
+                );
+                assert_eq!(
+                    carry.from.changed,
+                    Some(Box::new(log::ChangedFiles {
+                        since_seq: base_seq,
+                        trunk_sha256: crate::digest::sha256_hex(
+                            crate::client::shape::messages_json(&carry.trunk).as_bytes()
+                        ),
+                    }))
+                );
+            }
+        }
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// #1154: a refill whose render already carries the changed-files line
+    /// is refused, never given a second; so is a native summary's, which
+    /// carries Pi's list in its place, a base that is no earlier snapshot,
+    /// and a log with none before the carried refill's. Refused, the carry
+    /// is as it was.
+    #[test]
+    fn a_refill_that_already_carries_the_line_is_refused_not_given_a_second() {
+        let dir =
+            std::env::temp_dir().join(format!("diet-carry-changed-refused-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        let recording = dir.join("recording");
+        let trees = snapshotted(
+            &dir,
+            &recording,
+            &[&[("a.rs", "1")], &[("a.rs", "2")], &[("a.rs", "3")]],
+        );
+        let snapshots: Vec<String> = trees.iter().map(|(sha256, _)| sha256.clone()).collect();
+        let shown = crate::drive::shown::ShownRoots::none();
+        let carried = format!(
+            "<state_snapshot>a tracker</state_snapshot>\n\n{} a.rs.\n\nYou are in /w.",
+            crate::meditation::changed::SENTENCE
+        );
+        // After an empty working set the line opens on a third line break.
+        let after_empty = format!(
+            "# working set\n\n\n{} a.rs.",
+            crate::meditation::changed::SENTENCE
+        );
+        let refusals = [
+            (
+                Some(carried.as_str()),
+                snapshots.clone(),
+                ChangedSince::Earliest,
+                "already carries",
+            ),
+            (
+                Some(after_empty.as_str()),
+                snapshots.clone(),
+                ChangedSince::Earliest,
+                "already carries",
+            ),
+            (
+                None,
+                snapshots.clone(),
+                ChangedSince::Earliest,
+                "native summary",
+            ),
+            (
+                Some("a render"),
+                snapshots.clone(),
+                ChangedSince::Seq(16),
+                "seq 16 is no",
+            ),
+            (
+                Some("a render"),
+                snapshots.clone(),
+                ChangedSince::Seq(7),
+                "seq 7 is no",
+            ),
+            (
+                Some("a render"),
+                snapshots[2..].to_vec(),
+                ChangedSince::Earliest,
+                "no worktree snapshot before",
+            ),
+        ];
+        for (render, kept, since, why) in refusals {
+            let mut carry = refilled(render, &kept);
+            if kept.len() == 1 {
+                carry.snapshots = vec![(16, kept[0].clone())];
+            }
+            let before = carry.clone();
+            let refused =
+                add_changed_line(&mut carry, &recording, since, &shown).expect_err("refused");
+            assert!(refused.contains(why), "{why}: {refused}");
+            assert_eq!(carry, before, "refused, the carry is as it was");
+        }
         let _ = std::fs::remove_dir_all(&dir);
     }
 

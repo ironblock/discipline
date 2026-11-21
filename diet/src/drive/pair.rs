@@ -7,6 +7,7 @@
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::Path;
 
+use crate::drive::carry::ChangedSince;
 use crate::drive::scenario::{Repeats, RunOptions, Runs, Slot, script_digest, slot};
 use crate::formats::log::Run;
 use crate::formats::regimen::{self, Regimen, Value};
@@ -323,22 +324,34 @@ pub struct Arm {
     /// The trunk a run of it from a recorded refill sends in the kept one's
     /// place (#1151): its own `--carry-trunk`, beating the batch's.
     pub carry_trunk: Option<std::path::PathBuf>,
+    /// The changed-files line a run of it from a recorded refill adds
+    /// (#1154), and the snapshot it counts from: its own
+    /// `--carry-changed-files`, beside the batch's.
+    pub carry_changed_files: Option<ChangedSince>,
 }
 
-/// The name a contrast gives an arm's own carry trunk (#1151): the one
-/// difference besides its regimen's that an arm may have.
+/// The name a contrast gives an arm's own carry trunk (#1151): a difference
+/// besides its regimen's that an arm may have.
 pub const CARRY_TRUNK: &str = "carry_trunk";
+
+/// The name a contrast and a manifest give an arm's changed-files line
+/// (#1154), a difference besides its regimen's as its carry trunk is.
+pub const CARRY_CHANGED_FILES: &str = "carry_changed_files";
 
 /// A batch's arms, in name order, and its baseline, from an arms manifest
 /// (#932): `baseline = "NAME"`, then one `[arm.NAME]` table each, holding
-/// `regimen` (relative to the manifest) and, optionally, `contrast` and
-/// `carry_trunk` (relative to the manifest, #1151).
+/// `regimen` (relative to the manifest) and, optionally, `contrast`,
+/// `carry_trunk` (relative to the manifest, #1151) and
+/// `carry_changed_files`: `true`, the changed-files line counted from the
+/// log's earliest worktree snapshot, or the seq of the meditation whose
+/// snapshot it counts from (#1154).
 ///
 /// # Errors
 ///
 /// When it does not read, names an arm badly, names a baseline that is no
 /// arm, gives the baseline a contrast, holds fewer than two arms, or holds
 /// a key it does not take.
+#[allow(clippy::too_many_lines)]
 pub fn manifest(path: &Path) -> Result<(Vec<Arm>, String, Option<String>), String> {
     let text = std::fs::read_to_string(path)
         .map_err(|why| format!("{} cannot be read: {why}", path.display()))?;
@@ -369,14 +382,29 @@ pub fn manifest(path: &Path) -> Result<(Vec<Arm>, String, Option<String>), Strin
         let Value::Table(table) = table else {
             return Err(wrong(format!("`arm.{name}` is not a table")));
         };
-        if let Some(key) = table
-            .keys()
-            .find(|key| *key != "regimen" && *key != "contrast" && *key != CARRY_TRUNK)
-        {
+        if let Some(key) = table.keys().find(|key| {
+            *key != "regimen"
+                && *key != "contrast"
+                && *key != CARRY_TRUNK
+                && *key != CARRY_CHANGED_FILES
+        }) {
             return Err(wrong(format!(
-                "`[arm.{name}]` takes `regimen`, `contrast` and `{CARRY_TRUNK}`, not `{key}`"
+                "`[arm.{name}]` takes `regimen`, `contrast`, `{CARRY_TRUNK}` and \
+                 `{CARRY_CHANGED_FILES}`, not `{key}`"
             )));
         }
+        let carry_changed_files = match table.get(CARRY_CHANGED_FILES) {
+            None => None,
+            Some(Value::Boolean(true)) => Some(ChangedSince::Earliest),
+            Some(Value::Integer(seq)) if *seq >= 0 => Some(ChangedSince::Seq(seq.unsigned_abs())),
+            Some(_) => {
+                return Err(wrong(format!(
+                    "`[arm.{name}]`'s `{CARRY_CHANGED_FILES}` is `true`, for the log's earliest \
+                     worktree snapshot, or the seq of the meditation whose snapshot it counts \
+                     from"
+                )));
+            }
+        };
         let carry_trunk = match table.get(CARRY_TRUNK) {
             None => None,
             Some(Value::String(trunk)) if !trunk.is_empty() => Some(dir.join(trunk)),
@@ -418,6 +446,7 @@ pub fn manifest(path: &Path) -> Result<(Vec<Arm>, String, Option<String>), Strin
             regimen: dir.join(regimen),
             contrast,
             carry_trunk,
+            carry_changed_files,
         });
     }
     if arms.len() < 2 {
@@ -481,63 +510,121 @@ fn checked(
     })
 }
 
-/// What the batch's line names of an arm whose carry trunk is not the
-/// baseline's (#1151): the trunk is one difference, `carry_trunk`, with each
-/// arm's trunk by digest (`kept` for the trunk the meditation kept). Beside
-/// it the regimens differ in nothing, or in exactly the rest of a declared
-/// contrast that names `carry_trunk`; or, refused, the refusal's keys.
-fn trunk_checked(
+/// One way an arm's carry differs from the baseline's (#1151, #1154): its
+/// name, as a contrast names it, with its state under each.
+type CarryDifference = (&'static str, serde_json::Value);
+
+/// What an arm's carry differs from the baseline's in, each named with its
+/// state under each: its trunk (#1151), by digest, `kept` for the trunk the
+/// meditation kept; and its changed-files line (#1154), `false` for none,
+/// `true` for one counted from the log's earliest snapshot, else the seq
+/// of the meditation whose snapshot it counts from, as a manifest says it.
+fn carry_differences(
+    (base_trunk, base_changed): (Option<&str>, Option<ChangedSince>),
+    (arm_trunk, arm_changed): (Option<&str>, Option<ChangedSince>),
+) -> Vec<CarryDifference> {
+    let changed = |since: Option<ChangedSince>| match since {
+        None => serde_json::json!(false),
+        Some(ChangedSince::Earliest) => serde_json::json!(true),
+        Some(ChangedSince::Seq(seq)) => serde_json::json!(seq),
+    };
+    let mut differences = Vec::new();
+    if base_trunk != arm_trunk {
+        differences.push((
+            CARRY_TRUNK,
+            serde_json::json!({"a": base_trunk.unwrap_or("kept"), "b": arm_trunk.unwrap_or("kept")}),
+        ));
+    }
+    if base_changed != arm_changed {
+        differences.push((
+            CARRY_CHANGED_FILES,
+            serde_json::json!({"a": changed(base_changed), "b": changed(arm_changed)}),
+        ));
+    }
+    differences
+}
+
+/// What the batch's line names of an arm whose carry is not the baseline's
+/// (#1151, #1154): each of `differences` by its name, with its state under
+/// each. One is the arm's one difference, unless a declared contrast names
+/// it; more than one, a contrast names each. Beside them the regimens
+/// differ in nothing, or in exactly the rest of the declared contrast; or,
+/// refused, the refusal's keys.
+fn carry_checked(
     a: &Regimen,
     b: &Regimen,
     contrast: Option<&[String]>,
-    (base, arm): (Option<&str>, Option<&str>),
+    differences: &[CarryDifference],
 ) -> Result<serde_json::Value, serde_json::Value> {
-    let trunk = serde_json::json!({
-        "a": base.unwrap_or("kept"),
-        "b": arm.unwrap_or("kept"),
-    });
+    let kinds: Vec<&str> = differences.iter().map(|(name, _)| *name).collect();
+    let listed = kinds
+        .iter()
+        .map(|name| format!("`{name}`"))
+        .collect::<Vec<_>>()
+        .join(" and ");
+    let named = |mut value: serde_json::Value| {
+        for (name, state) in differences {
+            value[*name] = state.clone();
+        }
+        value
+    };
     let rest: Vec<String> = match contrast {
-        None => Vec::new(),
-        Some(declared) if declared.iter().any(|member| member == CARRY_TRUNK) => declared
-            .iter()
-            .filter(|member| *member != CARRY_TRUNK)
-            .cloned()
-            .collect(),
-        Some(_) => {
-            return Err(serde_json::json!({
+        None if kinds.len() > 1 => {
+            return Err(named(serde_json::json!({
                 "refused": format!(
-                    "its carry trunk differs from the baseline's, and its contrast does not name \
-                     `{CARRY_TRUNK}`"
+                    "its carry differs from the baseline's in {listed}: more than one \
+                     difference, unless its contrast names each"
                 ),
-                "missing": [CARRY_TRUNK],
-                CARRY_TRUNK: trunk,
-            }));
+            })));
+        }
+        None => Vec::new(),
+        Some(declared) => {
+            let missing: Vec<&str> = kinds
+                .iter()
+                .filter(|name| !declared.iter().any(|member| member == *name))
+                .copied()
+                .collect();
+            if !missing.is_empty() {
+                return Err(named(serde_json::json!({
+                    "refused": format!(
+                        "its carry differs from the baseline's in {listed}, and its contrast does \
+                         not name {}",
+                        missing
+                            .iter()
+                            .map(|name| format!("`{name}`"))
+                            .collect::<Vec<_>>()
+                            .join(" and ")
+                    ),
+                    "missing": missing,
+                })));
+            }
+            declared
+                .iter()
+                .filter(|member| !kinds.contains(&member.as_str()))
+                .cloned()
+                .collect()
         }
     };
     if !rest.is_empty() {
-        return checked(a, b, Some(&rest)).map(|mut named| {
-            named[CARRY_TRUNK] = trunk;
-            named
-        });
+        return checked(a, b, Some(&rest)).map(named);
     }
     let found = Differences::of(a, b);
     if found.levers.is_empty() && found.keys.is_empty() {
-        let mut named = serde_json::json!({ CARRY_TRUNK: trunk });
+        let mut value = named(serde_json::json!({}));
         if let Some(declared) = contrast {
-            named["contrast"] = serde_json::json!({"declared": declared, "levers": {}});
+            value["contrast"] = serde_json::json!({"declared": declared, "levers": {}});
         }
-        return Ok(named);
+        return Ok(value);
     }
-    Err(serde_json::json!({
+    Err(named(serde_json::json!({
         "refused": format!(
-            "its carry trunk differs from the baseline's, so its regimen differs in nothing else, \
-             unless its contrast names the rest beside `{CARRY_TRUNK}`"
+            "its carry differs from the baseline's in {listed}, so its regimen differs in nothing \
+             else, unless its contrast names the rest beside them"
         ),
         "levers": states(&found.levers),
         "keys": found.keys,
         "keys_naming_no_lever": found.naming_no_lever,
-        CARRY_TRUNK: trunk,
-    }))
+    })))
 }
 
 /// An arm's carry trunk by its file's digest (#1151), when it has one.
@@ -607,7 +694,8 @@ pub fn arms(
         return (said, false);
     };
     // Each arm's carry trunk (#1151): its own, else the batch's, by digest;
-    // one in a batch that is not carried is refused, never dropped.
+    // one in a batch that is not carried is refused, never dropped. So is
+    // its changed-files line (#1154).
     if !options.carried && arms.iter().any(|arm| arm.carry_trunk.is_some()) {
         said["failure"] = serde_json::Value::String(format!(
             "an arm's `{CARRY_TRUNK}` varies a carried session's trunk, and this batch is not \
@@ -615,6 +703,17 @@ pub fn arms(
         ));
         return (said, false);
     }
+    if !options.carried && arms.iter().any(|arm| arm.carry_changed_files.is_some()) {
+        said["failure"] = serde_json::Value::String(format!(
+            "an arm's `{CARRY_CHANGED_FILES}` adds a line to a carried session's refill, and \
+             this batch is not carried (--from-carry)"
+        ));
+        return (said, false);
+    }
+    let changed: Vec<Option<ChangedSince>> = arms
+        .iter()
+        .map(|arm| arm.carry_changed_files.or(options.carry_changed_files))
+        .collect();
     let trunks = match arms
         .iter()
         .map(|arm| trunk_digest(arm.carry_trunk.as_ref().or(options.carry_trunk.as_ref())))
@@ -628,14 +727,18 @@ pub fn arms(
     };
     let mut against = serde_json::Map::new();
     for (at, arm) in arms.iter().enumerate().filter(|(at, _)| *at != base) {
-        let named = if trunks[at] == trunks[base] {
+        let differences = carry_differences(
+            (trunks[base].as_deref(), changed[base]),
+            (trunks[at].as_deref(), changed[at]),
+        );
+        let named = if differences.is_empty() {
             checked(&reads[base].0, &reads[at].0, arm.contrast.as_deref())
         } else {
-            trunk_checked(
+            carry_checked(
                 &reads[base].0,
                 &reads[at].0,
                 arm.contrast.as_deref(),
-                (trunks[base].as_deref(), trunks[at].as_deref()),
+                &differences,
             )
         };
         match named {
@@ -733,6 +836,7 @@ pub fn arms(
                     .carry_trunk
                     .clone()
                     .or_else(|| options.carry_trunk.clone()),
+                carry_changed_files: changed[at],
                 ..options.clone()
             };
             match slot(
@@ -796,12 +900,14 @@ pub fn pair(
             regimen: a.to_path_buf(),
             contrast: None,
             carry_trunk: None,
+            carry_changed_files: None,
         },
         Arm {
             name: "b".to_owned(),
             regimen: b.to_path_buf(),
             contrast: contrast.map(<[String]>::to_vec),
             carry_trunk: None,
+            carry_changed_files: None,
         },
     ];
     let (mut said, ok) = arms(drive, options, (&two, "a", None), repeats, emit);
@@ -950,13 +1056,13 @@ mod tests {
         assert_eq!(arms[0].carry_trunk, None);
         let base = regimen(&format!("{BASE}refutation_interview = \"off\"\n"));
         let moved = regimen(&format!("{BASE}refutation_interview = \"on\"\n"));
-        let trunks = (None, Some("v"));
-        let named = trunk_checked(&base, &base, None, trunks).expect("the trunk alone");
+        let trunks = carry_differences((None, None), (Some("v"), None));
+        let named = carry_checked(&base, &base, None, &trunks).expect("the trunk alone");
         assert_eq!(
             named[CARRY_TRUNK],
             serde_json::json!({"a": "kept", "b": "v"})
         );
-        let refused = trunk_checked(&base, &moved, None, trunks).expect_err("two differences");
+        let refused = carry_checked(&base, &moved, None, &trunks).expect_err("two differences");
         assert!(
             refused["refused"]
                 .as_str()
@@ -965,12 +1071,115 @@ mod tests {
             "{refused}"
         );
         let declared = [CARRY_TRUNK.to_owned(), "refutation_interview".to_owned()];
-        let named = trunk_checked(&base, &moved, Some(&declared), trunks).expect("both declared");
+        let named = carry_checked(&base, &moved, Some(&declared), &trunks).expect("both declared");
         assert!(named.get("contrast").is_some() && named.get(CARRY_TRUNK).is_some());
         let left_out = ["refutation_interview".to_owned()];
         let refused =
-            trunk_checked(&base, &moved, Some(&left_out), trunks).expect_err("the trunk left out");
+            carry_checked(&base, &moved, Some(&left_out), &trunks).expect_err("the trunk left out");
         assert_eq!(refused["missing"], serde_json::json!([CARRY_TRUNK]));
+    }
+
+    /// #1154: an arm's changed-files line is read from its manifest, `true`
+    /// for the log's earliest snapshot or a meditation's seq, and anything
+    /// else is refused. An arm whose line is not the baseline's has that
+    /// one difference, named with each arm's state: its regimen differs in
+    /// nothing else unless its contrast names `carry_changed_files` and the
+    /// rest, a contrast that leaves it out is refused, and beside a trunk
+    /// of its own it is a second difference, which a contrast names too.
+    #[test]
+    fn an_arm_adding_the_changed_files_line_differs_from_the_baseline_in_that_alone() {
+        let (arms, _, _) = manifest_of(
+            "changed",
+            "baseline = \"kept\"\n[arm.kept]\nregimen = \"r.toml\"\n\
+             [arm.changed]\nregimen = \"r.toml\"\ncarry_changed_files = true\n\
+             [arm.since]\nregimen = \"r.toml\"\ncarry_changed_files = 42\n",
+        )
+        .expect("it reads");
+        let read: Vec<(&str, Option<ChangedSince>)> = arms
+            .iter()
+            .map(|arm| (arm.name.as_str(), arm.carry_changed_files))
+            .collect();
+        assert_eq!(
+            read,
+            [
+                ("changed", Some(ChangedSince::Earliest)),
+                ("kept", None),
+                ("since", Some(ChangedSince::Seq(42))),
+            ]
+        );
+        for value in ["false", "\"yes\"", "-1"] {
+            let refused = manifest_of(
+                "changed-bad",
+                &format!(
+                    "baseline = \"kept\"\n[arm.kept]\nregimen = \"r.toml\"\n\
+                     [arm.changed]\nregimen = \"r.toml\"\ncarry_changed_files = {value}\n"
+                ),
+            )
+            .expect_err(value);
+            assert!(refused.contains(CARRY_CHANGED_FILES), "{value}: {refused}");
+        }
+        assert_eq!(
+            carry_differences((None, None), (None, None)),
+            Vec::<CarryDifference>::new()
+        );
+        let changed = carry_differences((None, None), (None, Some(ChangedSince::Earliest)));
+        assert_eq!(
+            changed,
+            [(
+                CARRY_CHANGED_FILES,
+                serde_json::json!({"a": false, "b": true})
+            )]
+        );
+        assert_eq!(
+            carry_differences(
+                (None, Some(ChangedSince::Earliest)),
+                (None, Some(ChangedSince::Seq(42)))
+            ),
+            [(CARRY_CHANGED_FILES, serde_json::json!({"a": true, "b": 42}))]
+        );
+        let base = regimen(&format!("{BASE}refutation_interview = \"off\"\n"));
+        let moved = regimen(&format!("{BASE}refutation_interview = \"on\"\n"));
+        let named = carry_checked(&base, &base, None, &changed).expect("the line alone");
+        assert_eq!(
+            named[CARRY_CHANGED_FILES],
+            serde_json::json!({"a": false, "b": true})
+        );
+        let refused = carry_checked(&base, &moved, None, &changed).expect_err("two differences");
+        assert!(
+            refused["refused"]
+                .as_str()
+                .unwrap_or("")
+                .contains(CARRY_CHANGED_FILES),
+            "{refused}"
+        );
+        let declared = [
+            CARRY_CHANGED_FILES.to_owned(),
+            "refutation_interview".to_owned(),
+        ];
+        let named = carry_checked(&base, &moved, Some(&declared), &changed).expect("both declared");
+        assert!(named.get("contrast").is_some() && named.get(CARRY_CHANGED_FILES).is_some());
+        let left_out = ["refutation_interview".to_owned()];
+        let refused =
+            carry_checked(&base, &moved, Some(&left_out), &changed).expect_err("the line left out");
+        assert_eq!(refused["missing"], serde_json::json!([CARRY_CHANGED_FILES]));
+        // Beside a trunk of its own, two differences: one alone is refused,
+        // and a contrast naming both runs.
+        let both = carry_differences((None, None), (Some("v"), Some(ChangedSince::Earliest)));
+        assert_eq!(
+            both.iter().map(|(name, _)| *name).collect::<Vec<_>>(),
+            [CARRY_TRUNK, CARRY_CHANGED_FILES]
+        );
+        let refused = carry_checked(&base, &base, None, &both).expect_err("two carry differences");
+        assert!(
+            refused["refused"]
+                .as_str()
+                .unwrap_or("")
+                .contains(CARRY_TRUNK),
+            "{refused}"
+        );
+        let declared = [CARRY_TRUNK.to_owned(), CARRY_CHANGED_FILES.to_owned()];
+        let named = carry_checked(&base, &base, Some(&declared), &both).expect("both declared");
+        assert!(named.get(CARRY_TRUNK).is_some() && named.get(CARRY_CHANGED_FILES).is_some());
     }
 
     /// #912: two levers apart is refused, naming both levers and both keys;
