@@ -51,10 +51,11 @@ impl Entry {
     }
 }
 
-/// Every directory holding a file of `files`, at any depth.
-fn dirs(files: &BTreeMap<String, String>) -> BTreeSet<&str> {
+/// Every directory holding a file of `files`, at any depth: also how a
+/// call's changes are grouped (#1149).
+pub(crate) fn dirs<'a>(files: impl IntoIterator<Item = &'a String>) -> BTreeSet<&'a str> {
     let mut out = BTreeSet::new();
-    for path in files.keys() {
+    for path in files {
         let mut at = path.as_str();
         while let Some(cut) = at.rfind('/') {
             at = &at[..cut];
@@ -65,7 +66,7 @@ fn dirs(files: &BTreeMap<String, String>) -> BTreeSet<&str> {
 }
 
 /// The shallowest directory above `path` that `known` does not hold, if any.
-fn new_dir<'a>(path: &'a str, known: &BTreeSet<&str>) -> Option<&'a str> {
+pub(crate) fn new_dir<'a>(path: &'a str, known: &BTreeSet<&str>) -> Option<&'a str> {
     path.match_indices('/')
         .map(|(cut, _)| &path[..cut])
         .find(|dir| !known.contains(dir))
@@ -77,7 +78,7 @@ fn new_dir<'a>(path: &'a str, known: &BTreeSet<&str>) -> Option<&'a str> {
 /// entry with its count, so a dependency install is not a thousand names.
 #[must_use]
 pub fn line(before: &BTreeMap<String, String>, after: &BTreeMap<String, String>) -> Option<String> {
-    let (known_before, known_after) = (dirs(before), dirs(after));
+    let (known_before, known_after) = (dirs(before.keys()), dirs(after.keys()));
     let mut entries = BTreeSet::new();
     let mut created_dirs: BTreeMap<&str, usize> = BTreeMap::new();
     let mut deleted_dirs: BTreeMap<&str, usize> = BTreeMap::new();

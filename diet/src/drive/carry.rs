@@ -14,6 +14,7 @@ use std::path::Path;
 use crate::formats::log::{self, CarriedFrom, Event};
 
 use super::session::Carry;
+use super::shown_files::Showing;
 
 /// The carry `log`'s last meditation kept, with the files it embedded that
 /// lie under one of `sealed` named relative to it.
@@ -121,6 +122,7 @@ pub fn read_at(log: &Path, sealed: &[String], at: Option<u64>) -> Result<Carry, 
             _ => None,
         })
         .last();
+    let calls = carried_calls(&lines, seq, (&trunk, &riding));
     Ok(Carry {
         trunk,
         object,
@@ -140,7 +142,61 @@ pub fn read_at(log: &Path, sealed: &[String], at: Option<u64>) -> Result<Carry, 
         riding_prompt,
         riding_steps,
         recorded_cwd,
+        calls,
     })
+}
+
+/// The first session's calls whose results the carry sends and that show a
+/// file (#1149, #1150): each `read`, `write` or `edit` its log holds before
+/// the meditation at `seq` that ran and shows one, by the standard surface's
+/// reading of its result ([`Showing::of`]), with the user's wrap of it, kept
+/// when a message of `sent` -- the trunk, and what rides after it -- shows
+/// it. What the carried session's shown rule pairs those messages with.
+fn carried_calls(
+    lines: &[log::Line],
+    seq: u64,
+    (trunk, riding): (
+        &[crate::client::shape::Message],
+        &[crate::client::shape::Message],
+    ),
+) -> Vec<Showing> {
+    let before = || lines.iter().filter(|line| line.seq < seq);
+    let wraps: std::collections::BTreeMap<u64, (bool, String)> = before()
+        .filter_map(|line| match &line.event {
+            Event::Wrapped {
+                call, entry, text, ..
+            } => Some((*call, (entry.is_some(), text.clone()))),
+            _ => None,
+        })
+        .collect();
+    let same = |text: &str| text.to_owned();
+    before()
+        .filter_map(|line| {
+            let Event::ToolCall {
+                turn,
+                id,
+                name,
+                arguments,
+                outcome: log::ToolOutcome::Ran,
+                shown: Some(shown),
+                ..
+            } = &line.event
+            else {
+                return None;
+            };
+            let mut showing = Showing::of(id, *turn, (name, arguments), shown, &same)?;
+            match wraps.get(&line.seq) {
+                Some((true, span)) => showing.span = Some(span.clone()),
+                Some((false, _)) => showing.cleared = true,
+                None => {}
+            }
+            trunk
+                .iter()
+                .chain(riding)
+                .any(|message| showing.shown_in(message, &same))
+                .then_some(showing)
+        })
+        .collect()
 }
 
 /// The lines of `text` a carry from the meditation at `at` -- the last
@@ -296,6 +352,18 @@ pub fn reroot(carry: &mut Carry, roots: &[(String, String)]) -> u64 {
     if let Some(cwd) = carry.recorded_cwd.as_mut() {
         for (from, to) in &roots {
             *cwd = rooted_at(cwd, from, to).0;
+        }
+    }
+    // The carried calls' texts as the messages they pair with now read
+    // (#1149), not counted: no message carries them.
+    for call in &mut carry.calls {
+        for text in [&mut call.shown, &mut call.arguments, &mut call.file]
+            .into_iter()
+            .chain(call.span.as_mut())
+        {
+            for (from, to) in &roots {
+                *text = rooted_at(text, from, to).0;
+            }
         }
     }
     if !roots.is_empty() {
@@ -590,6 +658,54 @@ mod tests {
         let _ = std::fs::remove_dir_all(&dir);
     }
 
+    /// #1149: a rerooted carry's calls read as the messages they pair with
+    /// now read, and no replacement is counted for them, since no message
+    /// carries them.
+    #[test]
+    fn a_rerooted_carry_rewrites_the_calls_it_carried() {
+        let old = "/tmp/diet-scenario-worktree-1";
+        let new = "/tmp/diet-scenario-worktree-2";
+        let mut carry = Carry {
+            trunk: vec![Message::new(Role::System, "the head")],
+            object: None,
+            from: log::CarriedFrom {
+                log_sha256: "a".repeat(64),
+                meditation_seq: 1,
+                trunk_sha256: "b".repeat(64),
+                object_sha256: None,
+                worktree: None,
+                variant_sha256: None,
+                rerooted: None,
+            },
+            source: None,
+            phase: None,
+            riding: Vec::new(),
+            riding_files: Vec::new(),
+            riding_prompt: None,
+            riding_steps: 0,
+            recorded_cwd: None,
+            calls: vec![
+                Showing::of(
+                    "c2",
+                    1,
+                    ("read", &format!("{{\"path\":\"{old}/h1/main.ts\"}}")),
+                    &format!("// {old}/h1/main.ts\n"),
+                    &str::to_owned,
+                )
+                .expect("a read"),
+            ],
+        };
+        let replaced = reroot(&mut carry, &[(old.to_owned(), new.to_owned())]);
+        assert_eq!(replaced, 0, "no message carries a call");
+        let call = &carry.calls[0];
+        assert!(
+            [&call.file, &call.arguments, &call.shown]
+                .iter()
+                .all(|text| text.contains(new) && !text.contains(old)),
+            "{call:?}"
+        );
+    }
+
     /// #948 (smoke 2): the carried text names the first session's worktree;
     /// rerooted, every occurrence names the new one instead, in the trunk's
     /// content, reasoning, notes and call arguments and in the object's dump,
@@ -642,6 +758,7 @@ mod tests {
             riding_prompt: None,
             riding_steps: 0,
             recorded_cwd: None,
+            calls: Vec::new(),
         };
         let roots = [
             (format!("/private{old}"), format!("/private{new}")),

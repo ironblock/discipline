@@ -911,6 +911,8 @@ pub fn serve_levers(regimen: &Regimen, output_cap: (u32, &str)) -> BTreeMap<Stri
         ("substrate_rung".to_owned(), word("substrate")),
         ("tool_surface".to_owned(), surface),
         ("background_commands".to_owned(), background_lever(regimen)),
+        // #1149: each `bash`, `edit` and `write` result says what it changed.
+        ("call_changes".to_owned(), call_changes_lever(regimen)),
         ("bash_timeout".to_owned(), timeout_lever(regimen)),
         ("stream_deadline".to_owned(), stream_deadline_lever(regimen)),
         ("tool_call_text_fallback".to_owned(), text_fallback),
@@ -1161,6 +1163,15 @@ fn background_lever(regimen: &Regimen) -> String {
             || UNDECLARED.to_owned(),
             |declared| if declared.background { "on" } else { "off" }.to_owned(),
         )
+}
+
+/// The per-call changes lever's word (#1149): `on` or `off`; undeclared
+/// where the regimen runs no commands, or for a value serve refuses.
+fn call_changes_lever(regimen: &Regimen) -> String {
+    match crate::drive::tool_loop::declared(regimen) {
+        Ok(Some(declared)) => if declared.call_changes { "on" } else { "off" }.to_owned(),
+        _ => UNDECLARED.to_owned(),
+    }
 }
 
 /// The interview role lever's word (#599): the role the regimen asks in.
@@ -1472,6 +1483,30 @@ mod tests {
                 && refused.contains(&crate::dogma::VERSION.to_string()),
             "{refused}"
         );
+    }
+
+    /// #1149: the start row names the per-call changes: `off` by default,
+    /// `on` when the regimen says so; undeclared where it runs no commands,
+    /// or for any other word, which serve refuses at start.
+    #[test]
+    fn the_start_row_names_the_per_call_changes() {
+        use crate::formats::regimen;
+        let lever = |text: &str| {
+            serve_levers(&regimen::parse(text).expect("a regimen"), (8192, "default"))
+                ["call_changes"]
+                .clone()
+        };
+        assert_eq!(lever("approval = \"none\"\n"), "off");
+        assert_eq!(
+            lever("approval = \"none\"\ncall_changes = \"off\"\n"),
+            "off"
+        );
+        assert_eq!(lever("approval = \"none\"\ncall_changes = \"on\"\n"), "on");
+        assert_eq!(
+            lever("approval = \"none\"\ncall_changes = \"yes\"\n"),
+            UNDECLARED
+        );
+        assert_eq!(lever("call_changes = \"on\"\n"), UNDECLARED);
     }
 
     /// #150's gate on the start row: `carry`, `refuse`, or undeclared for

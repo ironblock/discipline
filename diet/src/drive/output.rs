@@ -67,6 +67,24 @@ pub enum Kept<'a> {
 }
 
 /// The notice that goes before a capped output.
+/// How the cap's notice opens.
+const NOTICE_OPENS: &str = "Tool output was too large and has been truncated.\n";
+
+/// How the cap's notice ends: the head follows it.
+const NOTICE_ENDS: &str = "Truncated part of the output:\n";
+
+/// `shown` from the head of the output [`capped`] cut on (#1149): the
+/// notice taken off a capped output, any other as it is.
+#[must_use]
+pub fn from_the_head(shown: &str) -> &str {
+    if !shown.starts_with(NOTICE_OPENS) {
+        return shown;
+    }
+    shown
+        .find(NOTICE_ENDS)
+        .map_or(shown, |at| &shown[at + NOTICE_ENDS.len()..])
+}
+
 fn notice(kept: Kept<'_>) -> String {
     let (saved, reading) = match kept {
         Kept::At {
@@ -95,10 +113,10 @@ fn notice(kept: Kept<'_>) -> String {
         ),
     };
     format!(
-        "Tool output was too large and has been truncated.\n{saved}\n{reading}\n\
+        "{NOTICE_OPENS}{saved}\n{reading}\n\
          The truncated output below shows the beginning and end of the content. The marker \
          '... [CONTENT TRUNCATED] ...' indicates where content was removed.\n\n\
-         Truncated part of the output:\n"
+         {NOTICE_ENDS}"
     )
 }
 

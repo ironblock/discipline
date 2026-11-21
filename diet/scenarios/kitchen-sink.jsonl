@@ -203,6 +203,9 @@
 {"expect":"notice","where":{"text~":"task-notification"}}
 {"expect":"timeout.near","where":{"call":"call-b7","timeout_ms":"16000"}}
 {"expect":"tool_call","where":{"name":"bash","shown~":"Tool output was too large"}}
+{"expect":"tool_call","where":{"name":"bash","shown~":"Files this call changed: shot.png (new, +3).\nNot shown in this context by read, write or edit: shot.png."}}
+{"expect":"tool_call","where":{"name":"edit","shown~":"Files this call changed: notes.md (+1 -1).\n"}}
+{"expect":"tool_call","where":{"name":"bash","background~":"bg_","shown~":"Files this call changed: not counted, the command is still running."}}
 {"expect":"tool_call","where":{"outcome":"refused","reason":"max_steps"}}
 {"expect":"turn.settled","where":{"reason":"max_steps"}}
 {"expect":"tool_call","where":{"name":"tidy_everything","outcome":"refused","reason":"unknown_tool"}}
