@@ -567,28 +567,22 @@ fn read(args: &Args, tools: &Tools, stop: &dyn Fn() -> bool) -> Done {
     }
     let bytes = match read_bytes(tools, &located(tools, path), stop) {
         Ok(bytes) => bytes,
-        Err(why) => return failed(why, |why| format!("Error reading file {path}: {why}")),
+        Err(why) => return failed(why, |why| read_error(path, &why)),
     };
     if let Some(media_type) = image_type(&bytes) {
         if u64::try_from(bytes.len()).unwrap_or(u64::MAX) > super::attach::MAX_BYTES {
-            return Done::Failed(format!(
-                "Cannot read image file {path}: it is larger than {} bytes",
-                super::attach::MAX_BYTES
-            ));
+            return Done::Failed(image_too_large(path));
         }
         return Done::Image { media_type, bytes };
     }
     let Ok(content) = String::from_utf8(bytes) else {
-        return Done::Failed(format!("Cannot read binary file: {path}"));
+        return Done::Failed(binary_file(path));
     };
     let lines: Vec<&str> = content.split_inclusive('\n').collect();
     let total = lines.len();
     let start = offset.unwrap_or(1) - 1;
     if start >= total && total > 0 {
-        return Done::Failed(format!(
-            "Offset {} is beyond end of file ({total} lines total)",
-            start + 1
-        ));
+        return Done::Failed(format!("{}{total} lines total)", beyond_end(start + 1)));
     }
     let wanted = limit.unwrap_or(READ_MAX_LINES).min(READ_MAX_LINES);
     let mut shown = String::new();
@@ -620,12 +614,85 @@ fn write(args: &Args, tools: &Tools, stop: &dyn Fn() -> bool) -> Done {
         None => located(tools, path),
     };
     match write_text(tools, &at, content.as_bytes(), stop) {
-        Ok(true) => Done::Shown(format!("Successfully overwrote file: {path}.")),
-        Ok(false) => Done::Shown(format!(
-            "Successfully created and wrote to new file: {path}."
-        )),
+        Ok(existed) => Done::Shown(wrote(path, existed)),
         Err(why) => failed(why, |why| format!("Error writing to file: {why}")),
     }
+}
+
+/// A read's failure to read `path`, for `why` (Qwen Code's words).
+fn read_error(path: &str, why: &str) -> String {
+    format!("Error reading file {path}: {why}")
+}
+
+/// A read's refusal of an image past the attachment bound.
+fn image_too_large(path: &str) -> String {
+    format!(
+        "Cannot read image file {path}: it is larger than {} bytes",
+        super::attach::MAX_BYTES
+    )
+}
+
+/// A read's refusal of a file that is not text.
+fn binary_file(path: &str) -> String {
+    format!("Cannot read binary file: {path}")
+}
+
+/// How a read's refusal of an `offset` past the file's end begins; the
+/// file's line count and `)` follow.
+fn beyond_end(offset: usize) -> String {
+    format!("Offset {offset} is beyond end of file (")
+}
+
+/// A write's success: over a file that `existed`, or a new one.
+fn wrote(path: &str, existed: bool) -> String {
+    if existed {
+        format!("Successfully overwrote file: {path}.")
+    } else {
+        format!("Successfully created and wrote to new file: {path}.")
+    }
+}
+
+/// How an edit's success begins; its snippet may follow.
+fn edited(path: &str) -> String {
+    format!("The file: {path} has been updated.")
+}
+
+/// The file a `read`, `write` or `edit` result `shown` shows the model the
+/// text of (#1149, #1150), by this surface's own reading of what it wrote:
+/// a read that is not one of its own failures, a write's or an edit's
+/// success. A failure that its arguments make (a missing path, an offset of
+/// 0, a `~`) is read off the arguments; one met at run time, off the words
+/// above, each naming the call's own path. `None` for any other tool or
+/// result, and arguments that name no file.
+#[must_use]
+pub fn shows_file(name: &str, raw: &str, shown: &str) -> Option<String> {
+    let args = arguments(raw).ok()?;
+    let (path, succeeded) = match name {
+        READ => {
+            let path = required(&args, "path").ok()?;
+            let offset = optional_count(&args, "offset").ok()?;
+            optional_count(&args, "limit").ok()?;
+            let failed = shown.starts_with(&read_error(path, ""))
+                || shown == image_too_large(path)
+                || shown == binary_file(path)
+                || offset.is_some_and(|offset| shown.starts_with(&beyond_end(offset)));
+            (path, !failed)
+        }
+        WRITE => {
+            let path = required(&args, "path").ok()?;
+            required(&args, "content").ok()?;
+            (
+                path,
+                shown == wrote(path, true) || shown == wrote(path, false),
+            )
+        }
+        EDIT => {
+            let path = edit_path(&args).ok()?;
+            (path, shown.starts_with(&edited(path)))
+        }
+        _ => return None,
+    };
+    (succeeded && refused_tilde(path).is_none()).then(|| path.to_owned())
 }
 
 /// The file a `read`, `write` or `edit` call names, as its arguments name it
@@ -719,7 +786,7 @@ fn edit(args: &Args, tools: &Tools, stop: &dyn Fn() -> bool) -> Done {
     if let Err(why) = write_text(tools, &at, &updated, stop) {
         return failed(why, |why| format!("Error executing edit: {why}"));
     }
-    let mut message = format!("The file: {path} has been updated.");
+    let mut message = edited(path);
     if let Some(snippet) = snippet(
         &String::from_utf8_lossy(&current),
         &String::from_utf8_lossy(&updated),
@@ -1149,6 +1216,103 @@ mod tests {
 
     fn call(name: &str, args: &serde_json::Value, tools: &Tools) -> String {
         shown(run(name, &args.to_string(), tools, &|| false))
+    }
+
+    /// #1149, #1150: the surface reads its own results as it wrote them: a
+    /// `read`, `write` or `edit` result shows its file exactly when the call
+    /// succeeded, every failure path tried, error-shaped content and a
+    /// result quoting a failure's words included.
+    #[test]
+    fn a_result_shows_its_file_exactly_when_its_call_succeeded() {
+        let tree = scratch("std-shows");
+        let tools = unconfined(&tree);
+        std::fs::write(tree.join("a.txt"), "one\ntwo\nthree\n").expect("written");
+        std::fs::write(tree.join("quote.txt"), "Cannot read binary file: a.txt\n")
+            .expect("written");
+        std::fs::write(tree.join("bin"), [0xff_u8, 0xfe, 0x00]).expect("written");
+        std::fs::write(tree.join("shot.png"), b"\x89PNG\r\n\x1a\n0000").expect("written");
+        let cases = [
+            (READ, serde_json::json!({"path": "a.txt"})),
+            (
+                READ,
+                serde_json::json!({"path": "a.txt", "offset": 2, "limit": 1}),
+            ),
+            (READ, serde_json::json!({"path": "a.txt", "offset": 9})),
+            (READ, serde_json::json!({"path": "a.txt", "offset": 0})),
+            (READ, serde_json::json!({"path": "quote.txt"})),
+            (READ, serde_json::json!({"path": "gone.txt"})),
+            (READ, serde_json::json!({"path": "bin"})),
+            (READ, serde_json::json!({"path": "shot.png"})),
+            (READ, serde_json::json!({"path": "~/a.txt"})),
+            (READ, serde_json::json!({})),
+            (
+                WRITE,
+                serde_json::json!({"path": "new.txt", "content": "x\n"}),
+            ),
+            (
+                WRITE,
+                serde_json::json!({"path": "new.txt", "content": "y\n"}),
+            ),
+            (
+                WRITE,
+                serde_json::json!({"path": "deep/er/n.txt", "content": "x\n"}),
+            ),
+            (WRITE, serde_json::json!({"path": "a.txt"})),
+            (
+                WRITE,
+                serde_json::json!({"path": "~/w.txt", "content": "x"}),
+            ),
+            (
+                EDIT,
+                serde_json::json!({"file_path": "a.txt", "old_string": "two", "new_string": "2"}),
+            ),
+            (
+                EDIT,
+                serde_json::json!({"file_path": "a.txt", "old_string": "absent", "new_string": "x"}),
+            ),
+            (
+                EDIT,
+                serde_json::json!({"file_path": "a.txt", "old_string": "e", "new_string": "E"}),
+            ),
+            (
+                EDIT,
+                serde_json::json!({"file_path": "a.txt", "old_string": "one", "new_string": "one"}),
+            ),
+            (
+                EDIT,
+                serde_json::json!({"file_path": "a.txt", "old_string": "", "new_string": "x"}),
+            ),
+            (
+                EDIT,
+                serde_json::json!({"file_path": "gone.txt", "old_string": "a", "new_string": "b"}),
+            ),
+            (
+                EDIT,
+                serde_json::json!({"file_path": "~/a.txt", "old_string": "a", "new_string": "b"}),
+            ),
+        ];
+        let mut both = (0, 0);
+        for (name, args) in cases {
+            let raw = args.to_string();
+            let (succeeded, text) = match run(name, &raw, &tools, &|| false) {
+                Done::Shown(text) => (true, text),
+                Done::Image { .. } => (true, String::new()),
+                Done::Failed(text) => (false, text),
+                Done::Cancelled(_) => panic!("cancelled"),
+            };
+            if succeeded {
+                both.0 += 1;
+            } else {
+                both.1 += 1;
+            }
+            assert_eq!(
+                shows_file(name, &raw, &text).is_some(),
+                succeeded,
+                "{name} {raw}: {text:?}"
+            );
+        }
+        assert_eq!(both, (8, 14), "successes and failures both tried");
+        let _ = std::fs::remove_dir_all(&tree);
     }
 
     /// #894: a tool's own failure is `Failed`; what it returns on success

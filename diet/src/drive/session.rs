@@ -9887,8 +9887,9 @@ fn shown_files(
 }
 
 /// This session's calls whose results may show a file (#1149, #1150): each
-/// successful `read`, `write` or `edit` its log holds, with the user's wrap
-/// of its result, when there is one.
+/// successful `read`, `write` or `edit` its log holds, by the standard
+/// surface's reading of its result, with the user's wrap of it, when there
+/// is one.
 fn showing_calls(state: &State) -> Vec<super::shown_files::Showing> {
     state
         .log
@@ -9897,23 +9898,22 @@ fn showing_calls(state: &State) -> Vec<super::shown_files::Showing> {
             let Event::ToolCalled(line) = &logged.event else {
                 return None;
             };
-            if line.outcome != log::ToolOutcome::Ran
-                || line.failed
-                || super::standard::shown_file(&line.name, &line.arguments).is_none()
-            {
+            if line.outcome != log::ToolOutcome::Ran {
                 return None;
             }
+            let showing = super::shown_files::Showing::of(
+                &line.id,
+                line.turn,
+                (&line.name, &line.arguments),
+                line.shown.as_deref()?,
+            )?;
             let wrap = state.wraps.get(&logged.seq);
             Some(super::shown_files::Showing {
-                id: line.id.clone(),
-                turn: line.turn,
-                name: line.name.clone(),
-                arguments: line.arguments.clone(),
-                shown: line.shown.clone()?,
                 span: wrap
                     .filter(|wrap| wrap.entry.is_some())
                     .map(|wrap| wrap.text.clone()),
                 cleared: wrap.is_some_and(|wrap| wrap.entry.is_none()),
+                ..showing
             })
         })
         .collect()

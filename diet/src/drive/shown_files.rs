@@ -5,9 +5,11 @@
 //!
 //! A file is shown while the messages sent hold a result that shows its text:
 //! a `read` result of any range of it, or the model's own successful `write`
-//! or `edit` of it. Each result is paired with its call, and the call's
-//! outcome is the one its log recorded -- this session's, or, for a carried
-//! call, the first session's -- since a failed call shows no file. A result
+//! or `edit` of it. Each result is paired with its call, as the log that
+//! recorded the call has it -- this session's, or, for a carried call, the
+//! first session's -- and a failed call shows no file, by the standard
+//! surface's own reading of its result ([`super::standard::shows_file`]),
+//! one rule for both, since the log records no failure of its own. A result
 //! counts where it sits on its own, where the user's wrap left a kept span of
 //! it (a partial read, as the ruling has it), and where a refill's outputs
 //! section prints it or an excerpt of it. A wrap with no span clears it from
@@ -25,6 +27,8 @@ use crate::meditation::outputs;
 /// `edit`, as the log that recorded it has it.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Showing {
+    /// The file it shows, as its arguments name it.
+    pub file: String,
     /// Its id, which its result's message names.
     pub id: String,
     /// The turn it was made in, as its log counts turns.
@@ -55,6 +59,48 @@ pub struct Shown {
     pub place: usize,
 }
 
+impl Showing {
+    /// The call `id` made in `turn` with `name` and `arguments`, as its result
+    /// `shown` was first carried, when that result shows a file
+    /// ([`super::standard::shows_file`]); `None` otherwise.
+    #[must_use]
+    pub fn of(id: &str, turn: u32, (name, arguments): (&str, &str), shown: &str) -> Option<Self> {
+        Some(Self {
+            file: super::standard::shows_file(name, arguments, shown)?,
+            id: id.to_owned(),
+            turn,
+            name: name.to_owned(),
+            arguments: arguments.to_owned(),
+            shown: shown.to_owned(),
+            span: None,
+            cleared: false,
+        })
+    }
+
+    /// Whether `message`, one the context sends, shows this call's file:
+    /// its result where it sits, or its kept span; or, in a refill's outputs
+    /// section, its result or an excerpt of it. `rewrite` is what the
+    /// section's paths went through.
+    #[must_use]
+    pub fn shown_in(&self, message: &Message, rewrite: &dyn Fn(&str) -> String) -> bool {
+        match (message.role, message.tool_call_id.as_deref()) {
+            (Role::Tool, Some(id)) => {
+                id == self.id
+                    && ((!self.cleared && message.content == self.shown)
+                        || self.span.as_deref() == Some(message.content.as_str()))
+            }
+            _ => {
+                !self.shown.is_empty()
+                    && outputs::carries_text_of(
+                        &message.content,
+                        (self.turn, &self.name, &self.arguments),
+                        rewrite,
+                    )
+            }
+        }
+    }
+}
+
 /// The files `calls` show in `sent`, the messages the context sends in
 /// order, each by `key` of the file its call names, at its latest showing.
 /// `rewrite` is what a refill's section went through
@@ -71,40 +117,22 @@ pub fn shown<'a>(
     }
     let mut out = BTreeMap::new();
     for (place, message) in sent.into_iter().enumerate() {
-        let showing: Vec<&Showing> = match (message.role, message.tool_call_id.as_deref()) {
-            (Role::Tool, Some(id)) => by_id
-                .get(id)
-                .into_iter()
-                .flatten()
-                .copied()
-                .filter(|call| {
-                    (!call.cleared && message.content == call.shown)
-                        || call.span.as_deref() == Some(message.content.as_str())
-                })
-                .collect(),
-            _ if message.content.contains(outputs::HEADER) => calls
-                .iter()
-                .filter(|call| {
-                    !call.shown.is_empty()
-                        && outputs::carries_text_of(
-                            &message.content,
-                            (call.turn, &call.name, &call.arguments),
-                            rewrite,
-                        )
-                })
-                .collect(),
+        let candidates: Vec<&Showing> = match (message.role, message.tool_call_id.as_deref()) {
+            (Role::Tool, Some(id)) => by_id.get(id).into_iter().flatten().copied().collect(),
+            _ if message.content.contains(outputs::HEADER) => calls.iter().collect(),
             _ => Vec::new(),
         };
-        for call in showing {
-            if let Some(file) = super::standard::shown_file(&call.name, &call.arguments) {
-                out.insert(
-                    key(&file),
-                    Shown {
-                        call: call.id.clone(),
-                        place,
-                    },
-                );
-            }
+        for call in candidates
+            .into_iter()
+            .filter(|call| call.shown_in(message, rewrite))
+        {
+            out.insert(
+                key(&call.file),
+                Shown {
+                    call: call.id.clone(),
+                    place,
+                },
+            );
         }
     }
     out
@@ -115,15 +143,8 @@ mod tests {
     use super::*;
 
     fn read(id: &str, file: &str, shown: &str) -> Showing {
-        Showing {
-            id: id.to_owned(),
-            turn: 1,
-            name: super::super::standard::READ.to_owned(),
-            arguments: serde_json::json!({"path": file}).to_string(),
-            shown: shown.to_owned(),
-            span: None,
-            cleared: false,
-        }
+        let arguments = serde_json::json!({"path": file}).to_string();
+        Showing::of(id, 1, (super::super::standard::READ, &arguments), shown).expect("a read")
     }
 
     fn result(id: &str, content: &str) -> Message {
