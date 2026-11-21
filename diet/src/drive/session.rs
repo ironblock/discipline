@@ -3853,6 +3853,15 @@ pub struct Carry {
     /// The files the ask that rode had attached (#1151), each with its
     /// bytes, read back from the first session's recording.
     pub riding_files: Vec<(log::RecordedFile, Vec<u8>)>,
+    /// The measured prompt of the request the recording sent after the
+    /// refill (#1151's re-review), when it measured one.
+    pub riding_prompt: Option<u64>,
+    /// The steps the recorded turn had taken at the refill, compacted and
+    /// kept alike (#1151's re-review): what a resumed turn's budget counts.
+    pub riding_steps: u64,
+    /// The working directory the carried log's commands ran in, as its
+    /// last `tool_call` before the refill names it (#1151's re-review).
+    pub recorded_cwd: Option<String>,
 }
 
 /// An interactive session on one trunk.
@@ -36400,6 +36409,9 @@ pub(in crate::drive) mod tests {
                 phase: None,
                 riding: Vec::new(),
                 riding_files: Vec::new(),
+                riding_prompt: None,
+                riding_steps: 0,
+                recorded_cwd: None,
             })
             .expect("it carries");
         let state = session.shared.lock();
@@ -36456,6 +36468,9 @@ pub(in crate::drive) mod tests {
                     phase: None,
                     riding: Vec::new(),
                     riding_files: Vec::new(),
+                    riding_prompt: None,
+                    riding_steps: 0,
+                    recorded_cwd: None,
                 })
                 .expect("it carries")
         };
@@ -37484,6 +37499,9 @@ pub(in crate::drive) mod tests {
             phase,
             riding: Vec::new(),
             riding_files: Vec::new(),
+            riding_prompt: None,
+            riding_steps: 0,
+            recorded_cwd: None,
         })
         .expect("it carries");
         assert_eq!(
@@ -37653,6 +37671,9 @@ pub(in crate::drive) mod tests {
             phase: Some("nowhere".to_owned()),
             riding: Vec::new(),
             riding_files: Vec::new(),
+            riding_prompt: None,
+            riding_steps: 0,
+            recorded_cwd: None,
         };
         let (interview, shape) = capturing_under(in_the_starter_library_at("orient"));
         let Err(refused) = Session::open_with(
@@ -37729,6 +37750,9 @@ pub(in crate::drive) mod tests {
             phase,
             riding: Vec::new(),
             riding_files: Vec::new(),
+            riding_prompt: None,
+            riding_steps: 0,
+            recorded_cwd: None,
         })
         .expect("it carries");
         assert_eq!(
@@ -37940,6 +37964,9 @@ pub(in crate::drive) mod tests {
             phase: None,
             riding,
             riding_files: Vec::new(),
+            riding_prompt: None,
+            riding_steps: 0,
+            recorded_cwd: None,
         }
     }
 
@@ -38072,6 +38099,11 @@ pub(in crate::drive) mod tests {
         let next = carried.shared.transport.sent()[sent_before(&log, at)].clone();
         let text: String = log.iter().map(|logged| render(logged) + "\n").collect();
         std::fs::write(second.join("session.log"), text).expect("the log");
+        assert_eq!(
+            unrebuilt_heads(&log, &second),
+            Vec::<u64>::new(),
+            "the resumed log's heads rebuild, its ridden steps kept"
+        );
         let again = crate::drive::carry::read_at(&second.join("session.log"), &[], Some(again_at))
             .expect("a carried log's refill carries");
         let resumed = windowed(vec![deltas(&["The build is done."])], 100_000, served())
@@ -38147,6 +38179,240 @@ pub(in crate::drive) mod tests {
         );
         assert!(session.ask("again", None).is_err(), "nothing after the end");
         reads_whole(&session);
+    }
+
+    /// The trunk requests `log` names that it says could not be rebuilt
+    /// from it, by seq, projected with `recording` beside it.
+    fn unrebuilt_heads(log: &[Logged], recording: &Path) -> Vec<u64> {
+        let lines: Vec<log::Line> = log.iter().map(line_of).collect();
+        let projected = super::super::projection::project_in(
+            &lines,
+            &regime(),
+            Some(super::super::projection::Engine::Commit("e7051ef")),
+            Some(recording),
+        )
+        .expect("the log projects");
+        projected
+            .unspellable
+            .iter()
+            .filter(|named| named.kind == "request" && named.why.contains("could not be rebuilt"))
+            .map(|named| named.seq)
+            .collect()
+    }
+
+    /// #1151's re-review: a refill names its working directory as the
+    /// session shows it, `~/...` under the home directory (`cwd_label`). A
+    /// reroot from the absolute root replaces that spelling too, and the
+    /// carry is then taken by a session running in the new root.
+    #[test]
+    fn a_reroot_from_an_absolute_root_replaces_its_home_relative_spelling_too() {
+        let Some(home) = std::env::var_os("HOME").map(std::path::PathBuf::from) else {
+            return;
+        };
+        let there = home
+            .join("git")
+            .join("experiments")
+            .join("a-recorded-drive");
+        let there_shown = crate::drive::tool_loop::cwd_label(&there, Some(&home));
+        assert!(there_shown.starts_with("~/"), "{there_shown}");
+        let here = scratch("carry-tilde-here");
+        let here_shown = here.display().to_string();
+        let refill = Message::new(
+            Role::User,
+            format!(
+                "<summary>see {}/src/main.ts</summary>\n\n{}",
+                there.display(),
+                start_cwd_note(&there_shown)
+            ),
+        );
+        let mut carry = carrying(vec![Message::new(Role::System, HEAD), refill], Vec::new());
+        let replaced = crate::drive::carry::reroot(
+            &mut carry,
+            &[(there.display().to_string(), here_shown.clone())],
+        );
+        assert_eq!(replaced, 2, "the absolute path and the `~` one: {carry:?}");
+        let mut running = tools(Confinement::Unconfined, &here, &[], None, Decider::Decline);
+        running.cwd.clone_from(&here_shown);
+        assert!(
+            Session::open_looping(Canned::new(vec![]), looping(), None, running)
+                .with_carry(carry)
+                .is_ok(),
+            "rerooted from the absolute root, it carries"
+        );
+        tidy(&[&here]);
+    }
+
+    /// #1151's re-review: a refill made while the session awaits is the
+    /// stop's too, and the session ends with it: the next ask is refused,
+    /// never settled `stopped` with no request.
+    #[test]
+    fn a_refill_made_while_awaiting_ends_a_session_told_to_stop() {
+        let (interview, shape) = capturing_under(interviewing(&[]));
+        let session = Session::open_with(
+            Canned::new(noting_turn()),
+            shape,
+            None,
+            None,
+            None,
+            Some(interview),
+        );
+        session.stop_after(100);
+        session.ask("look around", None).expect("accepted");
+        let _ = wait_until(&session, "turn one", settled);
+        session.declare_meditation(None).expect("a meditation");
+        let log = wait_until(&session, "the end at the refill", ended);
+        assert!(
+            !log.iter()
+                .map(render)
+                .any(|line| line.contains(r#""reason":"stopped""#)),
+            "{log:#?}"
+        );
+        assert!(session.ask("again", None).is_err(), "nothing after the end");
+        reads_whole(&session);
+    }
+
+    /// #1151's re-review: a turn that settles while a fork cut during it is
+    /// still in flight moves to `awaiting` once the fork settles; with the
+    /// stop come by then, the session ends there instead.
+    #[test]
+    fn a_turn_settled_beside_a_fork_in_flight_ends_a_stopped_session_when_the_fork_settles() {
+        let tree = scratch("stop-beside-a-fork");
+        let gate = Gate::new();
+        let session = during_turn(
+            &tree,
+            vec![vec![bash("call-1", "cat notes.md")]],
+            vec![vec![
+                Step::Hold(gate.clone()),
+                Step::Delta("LEARNED: notes.md holds a note\n".to_owned()),
+            ]],
+            1,
+        );
+        session.stop_after(2);
+        session.ask("look around", None).expect("accepted");
+        let _ = wait_until(&session, "the turn's failed second call", |log| {
+            log.iter()
+                .any(|logged| matches!(logged.event, Event::TurnSettled { .. }))
+        });
+        gate.open();
+        let _ = wait_until(&session, "the end once the fork settles", ended);
+        tidy(&[&tree]);
+    }
+
+    /// #1151's re-review: a resumed turn's budget counts every step the
+    /// recorded turn took -- those its refills compacted as well as those
+    /// that rode -- read from the meditation lines up to the seam; and the
+    /// resumed request is the step after them.
+    #[test]
+    fn a_carry_counts_every_step_the_recorded_turn_took() {
+        let dir = scratch("carry-steps");
+        let original = windowed(
+            one_long_turn(24),
+            100_000,
+            crate::meditation::policy::Served::default(),
+        );
+        original.keep_recording_in(dir.clone());
+        original.ask("build it", None).expect("accepted");
+        let log = wait_until(&original, "the long turn", settled);
+        let text: String = log.iter().map(|logged| render(logged) + "\n").collect();
+        std::fs::write(dir.join("session.log"), text).expect("the log");
+        let refills = mid_turn_refills(&log);
+        assert!(refills.len() >= 2, "{:?}", turn_steps(&log));
+        for &at in &refills[..2] {
+            let taken = log[..at]
+                .iter()
+                .filter(|logged| matches!(logged.event, Event::Called { .. }))
+                .count() as u64;
+            let carry =
+                crate::drive::carry::read_at(&dir.join("session.log"), &[], Some(log[at].seq))
+                    .expect("it carries");
+            assert_eq!(carry.riding_steps, taken, "at seq {}", log[at].seq);
+        }
+        let tree = scratch("carry-steps-tree");
+        let mut riding = vec![Message::new(Role::User, "loop")];
+        riding.extend(ridden_step("call-0"));
+        let mut carry = carrying(vec![Message::new(Role::System, HEAD)], riding);
+        carry.riding_steps = 3;
+        let session = Session::open_looping(
+            Canned::new(vec![
+                vec![bash("call-1", "touch r1")],
+                vec![bash("call-2", "touch r2")],
+            ]),
+            looping(),
+            None,
+            tools(
+                Confinement::Unconfined,
+                &tree,
+                &["touch"],
+                Some(4),
+                Decider::Decline,
+            ),
+        )
+        .with_carry(carry)
+        .expect("it carries");
+        session.resume().expect("the cut turn resumes");
+        let _ = wait_until(&session, "the resumed turn", settled);
+        assert_eq!(session.shared.transport.sent().len(), 1, "step 4 of 4");
+        tidy(&[&dir, &tree]);
+    }
+
+    /// #1151's re-review: a carried log projects as any other. A carry
+    /// from a refill made between turns keeps the trunk it was started from
+    /// in its recording, so its first request's head rebuilds; and a
+    /// resumed turn's ridden steps are kept too, so every head of it does.
+    #[test]
+    fn a_carried_logs_heads_rebuild_with_or_without_a_ride() {
+        let (first, second) = (scratch("carry-heads-a"), scratch("carry-heads-b"));
+        let (interview, shape) = capturing_under(interviewing(&[]));
+        let original = Session::open_with(
+            Canned::new(noting_turn()),
+            shape.clone(),
+            None,
+            None,
+            None,
+            Some(interview.clone()),
+        );
+        original.keep_recording_in(first.clone());
+        original.ask("look around", None).expect("accepted");
+        let _ = wait_until(&original, "turn one", settled);
+        original.declare_meditation(None).expect("a meditation");
+        let log = wait_until(&original, "the refill", |log| {
+            log.iter()
+                .any(|l| matches!(l.event, Event::Meditated { .. }))
+        });
+        let text: String = log.iter().map(|logged| render(logged) + "\n").collect();
+        std::fs::write(first.join("session.log"), text).expect("the log");
+        let carry = crate::drive::carry::read_at(
+            &first.join("session.log"),
+            &[],
+            Some(last_meditation(
+                &log.iter().map(line_of).collect::<Vec<_>>(),
+            )),
+        )
+        .expect("it carries");
+        let carried = Session::open_with(
+            Canned::new(vec![deltas(&["planned"]), deltas(&["more"])]),
+            shape,
+            None,
+            None,
+            None,
+            Some(interview),
+        )
+        .with_carry(carry)
+        .expect("it carries");
+        carried.keep_recording_in(second.clone());
+        carried.ask("make the plan", None).expect("accepted");
+        let _ = wait_until(&carried, "the carried turn", settled);
+        carried.ask("and then", None).expect("accepted");
+        let log = wait_until(&carried, "the second turn", |log| {
+            settled(log)
+                && log
+                    .iter()
+                    .filter(|l| matches!(l.event, Event::TurnSettled { .. }))
+                    .count()
+                    == 2
+        });
+        assert_eq!(unrebuilt_heads(&log, &second), Vec::<u64>::new());
+        tidy(&[&first, &second]);
     }
 
     /// An interview under the starter phase library (#787), opening in `plan`.

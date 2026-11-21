@@ -3762,28 +3762,70 @@ fn a_run_from_a_chosen_refill_of_a_live_log_carries_that_refills_trunk_and_workt
             .contains("its own script"),
         "{said}"
     );
-    // A carry at a seq takes the recorded drive's worktree root to reroot
-    // from, as a fresh session's does (#948): the start names it.
-    let (code, _, said) = drive(
-        "scenario",
-        &seam,
-        &[
-            "--out".as_ref(),
-            dir.join("out-rooted").as_os_str(),
-            "--from-carry".as_ref(),
-            recorded.as_os_str(),
-            "--carry-at".as_ref(),
-            at.as_ref(),
-            "--carried-root".as_ref(),
-            dir.join("the-recorded-checkout").as_os_str(),
-        ],
-    );
+    // A recorded drive whose paths are real: the first refill's kept trunk
+    // rewritten from the scenario's placeholder to an absolute checkout.
+    // Carried with no reroot, it is refused; rerooted from that checkout,
+    // its paths are replaced and it carries; rerooted from a root it never
+    // names, nothing is replaced, and it is refused.
+    let real = dir.join("real");
+    std::fs::create_dir_all(real.join("files")).expect("a recording");
+    for entry in std::fs::read_dir(out.join("files")).expect("the recording") {
+        let entry = entry.expect("an entry");
+        std::fs::copy(entry.path(), real.join("files").join(entry.file_name())).expect("a copy");
+    }
+    let kept_sha = one["trunk_sha256"]
+        .as_str()
+        .expect("a kept trunk")
+        .to_owned();
+    let kept = std::fs::read_to_string(out.join("files").join(&kept_sha)).expect("the kept trunk");
+    let rest = kept
+        .split("You are in ")
+        .nth(1)
+        .expect("the refill names its working directory");
+    let end = [rest.find(".\""), rest.find(".\\n")]
+        .into_iter()
+        .flatten()
+        .min()
+        .expect("the line's end");
+    let shown = rest[..end].to_owned();
+    let checkout = "/srv/a-recorded-checkout";
+    let rewritten = kept.replace(&shown, checkout);
+    let rewritten_sha = diet::digest::sha256_hex(rewritten.as_bytes());
+    std::fs::write(real.join("files").join(&rewritten_sha), &rewritten).expect("the trunk");
+    let log_text = std::fs::read_to_string(&recorded).expect("the log");
+    std::fs::write(
+        real.join("session.log"),
+        log_text.replace(&kept_sha, &rewritten_sha),
+    )
+    .expect("the log");
+    let from_real = |out: &str, root: Option<&str>| {
+        let mut args: Vec<std::ffi::OsString> = vec![
+            "--out".into(),
+            dir.join(out).into(),
+            "--from-carry".into(),
+            real.join("session.log").into(),
+            "--carry-at".into(),
+            at.clone().into(),
+        ];
+        if let Some(root) = root {
+            args.extend(["--carried-root".into(), root.into()]);
+        }
+        let args: Vec<&std::ffi::OsStr> = args.iter().map(std::ffi::OsString::as_os_str).collect();
+        drive("scenario", &seam, &args)
+    };
+    let (code, _, said) = from_real("out-unrooted", None);
+    assert_ne!(code, Some(0), "{said}");
+    assert!(said.contains(checkout), "{said}");
+    let (code, _, said) = from_real("out-rooted", Some(checkout));
     assert_eq!(code, Some(0), "{said}");
     let start = first_line(&dir.join("out-rooted").join("session.log"));
     assert!(
-        start["carried_from"]["rerooted"].is_number(),
-        "rerooted from the given root: {start}"
+        start["carried_from"]["rerooted"].as_u64() > Some(0),
+        "the checkout's paths replaced: {start}"
     );
+    let (code, _, said) = from_real("out-misrooted", Some("/srv/another-checkout"));
+    assert_ne!(code, Some(0), "{said}");
+    assert!(said.contains("replaced nothing"), "{said}");
     // Into a worktree that holds files, serve restores nothing: refused.
     let full = dir.join("full");
     std::fs::create_dir_all(&full).expect("a directory");
@@ -3990,6 +4032,40 @@ fn a_run_from_a_mid_turn_refill_resumes_the_cut_turn_through_serve() {
         first["head_sha256"], sent_after,
         "the request the recording sent"
     );
+    assert!(
+        logged(&log, "meditation")
+            .iter()
+            .all(|meditation| meditation["seq"].as_u64() > first["seq"].as_u64()),
+        "no refill before the resumed request"
+    );
+    // Told to stop after three calls, it sends its first: the resumed
+    // request is never taken for the next refill.
+    let stop_out = dir.join("out-stop");
+    let ran = Command::new(DRIVE)
+        .current_dir(root())
+        .arg("scenario")
+        .arg(&seam)
+        .arg("--out")
+        .arg(&stop_out)
+        .arg("--no-assemble")
+        .arg("--from-carry")
+        .arg(&recorded)
+        .arg("--carry-at")
+        .arg(refill["seq"].to_string())
+        .args(["--stop-after", "3"])
+        .output()
+        .expect("diet-drive runs");
+    assert_eq!(
+        ran.status.code(),
+        Some(0),
+        "{}",
+        String::from_utf8_lossy(&ran.stdout)
+    );
+    let sent = logged(&stop_out.join("session.log"), "request")
+        .into_iter()
+        .filter(|request| request["lane"] == "trunk")
+        .count();
+    assert!(sent >= 1, "the resumed request was sent");
     let asks = logged(&log, "ask");
     assert_eq!(asks.len(), 1, "{asks:?}");
     assert_eq!(asks[0]["resumed_meditation_seq"], refill["seq"], "{asks:?}");

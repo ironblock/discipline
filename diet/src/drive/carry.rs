@@ -124,6 +124,9 @@ pub fn read_at(log: &Path, sealed: &[String], at: Option<u64>) -> Result<Carry, 
         phase: carried_phase(&lines, seq),
         riding,
         riding_files,
+        riding_prompt: None,
+        riding_steps: 0,
+        recorded_cwd: None,
     })
 }
 
@@ -542,6 +545,9 @@ mod tests {
             phase: None,
             riding: Vec::new(),
             riding_files: Vec::new(),
+            riding_prompt: None,
+            riding_steps: 0,
+            recorded_cwd: None,
         };
         let roots = [
             (format!("/private{old}"), format!("/private{new}")),
@@ -744,6 +750,33 @@ mod tests {
             }
             let _ = std::fs::remove_dir_all(&dir);
         }
+    }
+
+    /// #1151's re-review: a carry reads its log through what it uses -- the
+    /// meditation, then the requests its ride is checked against -- so a
+    /// line after them that this build's checks refuse leaves the carry
+    /// alone, and one before them refuses it.
+    #[test]
+    fn a_line_after_what_the_carry_uses_that_does_not_read_leaves_it_alone() {
+        let trunk = vec![
+            Message::new(Role::System, "you are the trunk"),
+            Message::new(Role::User, "<state_snapshot>a tracker</state_snapshot>"),
+        ];
+        let dir = kept_at("unread-after", &trunk, &[], log::VERSION, None);
+        let path = dir.join("session.log");
+        let written = std::fs::read_to_string(&path).expect("the log");
+        let never_asked = r#"{"kind":"turn.settled","reason":"final","seq":21,"t":101,"turn":9}"#;
+        std::fs::write(&path, format!("{written}{never_asked}\n")).expect("the log");
+        assert!(log::parse(&std::fs::read_to_string(&path).expect("the log")).is_err());
+        read_at(&path, &[], Some(16)).expect("the line after is not read");
+        let before = written.replace(
+            r#""reason":"final","seq":5,"t":25,"turn":1"#,
+            r#""reason":"final","seq":5,"t":25,"turn":9"#,
+        );
+        assert_ne!(before, written, "the fixture's turn one settles at seq 5");
+        std::fs::write(&path, before).expect("the log");
+        assert!(read_at(&path, &[], Some(16)).is_err(), "a line before is");
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     /// #948: a kept trunk that is not the bytes its name says is refused,
