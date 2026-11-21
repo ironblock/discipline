@@ -2,7 +2,9 @@
 //! block's words live, apart from how the changes are counted ([`super`]),
 //! so a different form (a diff, say) changes this file alone.
 //!
-//! The wording is the maintainer's to approve: data, not an instruction.
+//! The wording is the maintainer's, approved on 2026-11-21: data, not an
+//! instruction. The lever counts the worktree only, so a `bash` call that
+//! writes only outside it says it changed none.
 
 use std::fmt::Write as _;
 
