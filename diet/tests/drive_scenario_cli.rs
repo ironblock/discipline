@@ -3549,6 +3549,571 @@ fn a_carried_session_restores_the_worktree_its_refill_left() {
     let _ = std::fs::remove_dir_all(&dir);
 }
 
+/// #1151: a run from a chosen refill of a log that names no run -- what a
+/// live drive writes, which `--from-carry` alone refuses -- carried at its
+/// first meditation's seq, not its last: the start names the log's digest
+/// and that seq, the trunk and worktree that meditation kept by their
+/// digests, its first request sends that trunk (the head the recording
+/// sent after that refill, not after the last), and its command reads that
+/// worktree's file. The seam's script runs from its first step. Told to
+/// stop after one call, it sends one and its turn settles `stopped`. An arm
+/// of a batch can carry its own trunk beside the baseline's kept one, the
+/// trunk its one difference, named on its start.
+#[test]
+#[allow(clippy::too_many_lines)]
+fn a_run_from_a_chosen_refill_of_a_live_log_carries_that_refills_trunk_and_worktree() {
+    let dir = scratch("carry-at");
+    let path = commanding(&dir, "same.toml", 4);
+    let regimen = std::fs::read_to_string(&path).expect("the regimen");
+    std::fs::write(
+        &path,
+        regimen.replace(
+            "[limits]",
+            "interview_warrant = [\"read\"]\nmeditation_empty = \"refill\"\n[limits]",
+        ),
+    )
+    .expect("the regimen");
+    let call = |id: &str, command: &str| serde_json::json!([{"id": id, "name": "bash", "arguments": serde_json::json!({"command": command}).to_string()}]);
+    let head = serde_json::json!({"scenario": "carry-at", "regimen": "same.toml", "head": root().join("diet/drive/heads/floor.md")});
+    let script = |lines: &[serde_json::Value]| {
+        let mut text: String = std::iter::once(&head)
+            .chain(lines)
+            .map(|line| line.to_string() + "\n")
+            .collect();
+        for _ in 0..16 {
+            text.push_str(&serde_json::json!({"reply": {"text": "Done."}}).to_string());
+            text.push('\n');
+        }
+        text
+    };
+    let first = dir.join("first.jsonl");
+    std::fs::write(
+        &first,
+        script(&[
+            serde_json::json!({"reply": {"when": "Write one", "text": "Writing.", "calls": call("c1", "echo one > notes.txt")}}),
+            serde_json::json!({"reply": {"when": "Write two", "text": "Writing.", "calls": call("c2", "echo two > notes.txt")}}),
+            serde_json::json!({"step": "ask", "text": "Write one."}),
+            serde_json::json!({"step": "declare-meditation"}),
+            serde_json::json!({"step": "ask", "text": "Write two."}),
+            serde_json::json!({"step": "declare-meditation"}),
+            serde_json::json!({"step": "ask", "text": "Is it written?"}),
+            serde_json::json!({"step": "end"}),
+        ]),
+    )
+    .expect("the scenario");
+    let seam = dir.join("seam.jsonl");
+    std::fs::write(
+        &seam,
+        script(&[
+            serde_json::json!({"reply": {"when": "Read the note", "text": "Reading.", "calls": call("c3", "cat notes.txt")}}),
+            serde_json::json!({"step": "ask", "text": "Read the note."}),
+            serde_json::json!({"step": "end"}),
+        ]),
+    )
+    .expect("the scenario");
+    let drive = |verb: &str, file: &Path, args: &[&std::ffi::OsStr]| {
+        let ran = Command::new(DRIVE)
+            .current_dir(root())
+            .arg(verb)
+            .arg(file)
+            .args(args)
+            .arg("--no-assemble")
+            .output()
+            .expect("diet-drive runs");
+        let stdout = String::from_utf8_lossy(&ran.stdout).into_owned();
+        let said: serde_json::Value =
+            serde_json::from_str(stdout.lines().last().unwrap_or("")).unwrap_or_default();
+        (
+            ran.status.code(),
+            said,
+            format!("{stdout}{}", String::from_utf8_lossy(&ran.stderr)),
+        )
+    };
+    // The recorded drive: a single run, so its log names no run.
+    let out = dir.join("out-first");
+    let (code, _, said) = drive("scenario", &first, &["--out".as_ref(), out.as_os_str()]);
+    assert_eq!(code, Some(0), "{said}");
+    let recorded = out.join("session.log");
+    assert!(
+        first_line(&recorded).get("run").is_none(),
+        "a live log's shape"
+    );
+    let meditations = logged(&recorded, "meditation");
+    assert_eq!(meditations.len(), 2, "{meditations:?}");
+    let (one, two) = (&meditations[0], &meditations[1]);
+    let head_after = |meditation: &serde_json::Value| {
+        logged(&recorded, "request")
+            .into_iter()
+            .find(|request| {
+                request["lane"] == "trunk" && request["seq"].as_u64() > meditation["seq"].as_u64()
+            })
+            .map(|request| request["head_sha256"].clone())
+            .expect("a trunk request after the refill")
+    };
+    assert_ne!(head_after(one), head_after(two), "two trunks");
+    // `--from-carry` alone takes the last meditation and the script after
+    // it, and a log that names no run is refused.
+    let (code, said, _) = drive(
+        "scenario",
+        &seam,
+        &[
+            "--out".as_ref(),
+            dir.join("out-refused").as_os_str(),
+            "--from-carry".as_ref(),
+            recorded.as_os_str(),
+        ],
+    );
+    assert_eq!(code, Some(1), "{said}");
+    assert!(
+        said["failure"]
+            .as_str()
+            .unwrap_or("")
+            .contains("names no run"),
+        "{said}"
+    );
+    // At the first meditation's seq: accepted, and carried from it.
+    let at = one["seq"].to_string();
+    let out_at = dir.join("out-at");
+    let (code, _, said) = drive(
+        "scenario",
+        &seam,
+        &[
+            "--out".as_ref(),
+            out_at.as_os_str(),
+            "--from-carry".as_ref(),
+            recorded.as_os_str(),
+            "--carry-at".as_ref(),
+            at.as_ref(),
+        ],
+    );
+    assert_eq!(code, Some(0), "{said}");
+    let log = out_at.join("session.log");
+    let start = first_line(&log);
+    let from = &start["carried_from"];
+    assert_eq!(
+        from["log_sha256"],
+        diet::digest::sha256_hex(&std::fs::read(&recorded).expect("the log")).as_str(),
+        "{start}"
+    );
+    assert_eq!(from["meditation_seq"], one["seq"], "{start}");
+    assert_eq!(from["trunk_sha256"], one["trunk_sha256"], "{start}");
+    assert_eq!(from["worktree_sha256"], one["worktree_sha256"], "{start}");
+    assert_eq!(from["worktree_from"], "meditation", "{start}");
+    let carried_head = logged(&log, "request")
+        .into_iter()
+        .find(|request| request["lane"] == "trunk")
+        .map(|request| request["head_sha256"].clone())
+        .expect("a trunk request");
+    assert_eq!(
+        carried_head,
+        head_after(one),
+        "the first refill's trunk, sent"
+    );
+    let read = logged(&log, "tool_call")
+        .into_iter()
+        .find(|call| call["id"] == "c3")
+        .expect("the read");
+    let shown = read["shown"].as_str().unwrap_or("");
+    assert!(
+        shown.contains("one") && !shown.contains("two"),
+        "the first refill's worktree: {read}"
+    );
+    let asks: Vec<String> = logged(&log, "ask")
+        .iter()
+        .map(|ask| ask["text"].as_str().unwrap_or("").to_owned())
+        .collect();
+    assert_eq!(
+        asks,
+        ["Read the note."],
+        "the seam's script, from its first step"
+    );
+    // A seq of a log that ran FILE itself would replay its own script from
+    // its first step on the carried trunk: refused.
+    let (code, _, said) = drive(
+        "scenario",
+        &first,
+        &[
+            "--out".as_ref(),
+            dir.join("out-repeat").as_os_str(),
+            "--repeat".as_ref(),
+            "1".as_ref(),
+        ],
+    );
+    assert_eq!(code, Some(0), "{said}");
+    let repeated = dir.join("out-repeat").join("repeat-01").join("session.log");
+    let repeated_at = logged(&repeated, "meditation")[0]["seq"].to_string();
+    let (code, said, _) = drive(
+        "scenario",
+        &first,
+        &[
+            "--out".as_ref(),
+            dir.join("out-replay").as_os_str(),
+            "--from-carry".as_ref(),
+            repeated.as_os_str(),
+            "--carry-at".as_ref(),
+            repeated_at.as_ref(),
+        ],
+    );
+    assert_eq!(code, Some(1), "{said}");
+    assert!(
+        said["failure"]
+            .as_str()
+            .unwrap_or("")
+            .contains("its own script"),
+        "{said}"
+    );
+    // A recorded drive whose paths are real: the first refill's kept trunk
+    // rewritten from the scenario's placeholder to an absolute checkout.
+    // Carried with no reroot, it is refused; rerooted from that checkout,
+    // its paths are replaced and it carries; rerooted from a root it never
+    // names, nothing is replaced, and it is refused.
+    let realpaths = dir.join("real");
+    std::fs::create_dir_all(realpaths.join("files")).expect("a recording");
+    for entry in std::fs::read_dir(out.join("files")).expect("the recording") {
+        let entry = entry.expect("an entry");
+        std::fs::copy(
+            entry.path(),
+            realpaths.join("files").join(entry.file_name()),
+        )
+        .expect("a copy");
+    }
+    let kept_sha = one["trunk_sha256"]
+        .as_str()
+        .expect("a kept trunk")
+        .to_owned();
+    let kept = std::fs::read_to_string(out.join("files").join(&kept_sha)).expect("the kept trunk");
+    let rest = kept
+        .split("You are in ")
+        .nth(1)
+        .expect("the refill names its working directory");
+    let end = [rest.find(".\""), rest.find(".\\n")]
+        .into_iter()
+        .flatten()
+        .min()
+        .expect("the line's end");
+    let shown = rest[..end].to_owned();
+    let checkout = "/srv/a-recorded-checkout";
+    let rewritten = kept.replace(&shown, checkout);
+    let rewritten_sha = diet::digest::sha256_hex(rewritten.as_bytes());
+    std::fs::write(realpaths.join("files").join(&rewritten_sha), &rewritten).expect("the trunk");
+    let log_text = std::fs::read_to_string(&recorded).expect("the log");
+    std::fs::write(
+        realpaths.join("session.log"),
+        log_text.replace(&kept_sha, &rewritten_sha),
+    )
+    .expect("the log");
+    let from_real = |out: &str, root: Option<&str>| {
+        let mut args: Vec<std::ffi::OsString> = vec![
+            "--out".into(),
+            dir.join(out).into(),
+            "--from-carry".into(),
+            realpaths.join("session.log").into(),
+            "--carry-at".into(),
+            at.clone().into(),
+        ];
+        if let Some(root) = root {
+            args.extend(["--carried-root".into(), root.into()]);
+        }
+        let args: Vec<&std::ffi::OsStr> = args.iter().map(std::ffi::OsString::as_os_str).collect();
+        drive("scenario", &seam, &args)
+    };
+    let (code, _, said) = from_real("out-unrooted", None);
+    assert_ne!(code, Some(0), "{said}");
+    assert!(said.contains(checkout), "{said}");
+    let (code, _, said) = from_real("out-rooted", Some(checkout));
+    assert_eq!(code, Some(0), "{said}");
+    let start = first_line(&dir.join("out-rooted").join("session.log"));
+    assert!(
+        start["carried_from"]["rerooted"].as_u64() > Some(0),
+        "the checkout's paths replaced: {start}"
+    );
+    let (code, _, said) = from_real("out-misrooted", Some("/srv/another-checkout"));
+    assert_ne!(code, Some(0), "{said}");
+    assert!(said.contains("replaced nothing"), "{said}");
+    // Into a worktree that holds files, serve restores nothing: refused.
+    let full = dir.join("full");
+    std::fs::create_dir_all(&full).expect("a directory");
+    std::fs::write(full.join("stray.txt"), "stray").expect("a file");
+    let (code, _, said) = drive(
+        "scenario",
+        &seam,
+        &[
+            "--out".as_ref(),
+            dir.join("out-full").as_os_str(),
+            "--from-carry".as_ref(),
+            recorded.as_os_str(),
+            "--carry-at".as_ref(),
+            at.as_ref(),
+            "--worktree".as_ref(),
+            full.as_os_str(),
+        ],
+    );
+    assert_ne!(code, Some(0), "{said}");
+    assert!(said.contains("holds files"), "{said}");
+    // Without a seq, a carry reads its log only through what it uses too: a
+    // line after the meditation that does not read leaves it alone.
+    let copy = dir.join("out-repeat-copy");
+    std::fs::create_dir_all(copy.join("files")).expect("a recording");
+    for entry in std::fs::read_dir(repeated.with_file_name("files")).expect("the recording") {
+        let entry = entry.expect("an entry");
+        std::fs::copy(entry.path(), copy.join("files").join(entry.file_name())).expect("a copy");
+    }
+    let text = std::fs::read_to_string(&repeated).expect("the log");
+    let next_seq = text.lines().count();
+    std::fs::write(
+        copy.join("session.log"),
+        format!(
+            "{text}{}\n",
+            serde_json::json!({"kind": "turn.settled", "reason": "final", "seq": next_seq, "t": 1, "turn": 99})
+        ),
+    )
+    .expect("the log");
+    let (code, said, _) = drive(
+        "scenario",
+        &first,
+        &[
+            "--out".as_ref(),
+            dir.join("out-unread-after").as_os_str(),
+            "--from-carry".as_ref(),
+            copy.join("session.log").as_os_str(),
+        ],
+    );
+    assert_eq!(code, Some(0), "{said}");
+    // `--carry-at` names a carry's meditation: with no `--carry`, refused.
+    let head = dir.join("head.md");
+    std::fs::write(&head, "you are the trunk\n").expect("a head");
+    let served = Command::new(DRIVE)
+        .args([
+            "serve",
+            "--endpoint",
+            "http://127.0.0.1:9",
+            "--model",
+            "m",
+            "--head",
+        ])
+        .arg(&head)
+        .args(["--carry-at", "3"])
+        .output()
+        .expect("diet-drive runs");
+    assert_eq!(served.status.code(), Some(2), "a usage error");
+    let said = format!(
+        "{}{}",
+        String::from_utf8_lossy(&served.stdout),
+        String::from_utf8_lossy(&served.stderr)
+    );
+    assert!(said.contains("there is no --carry"), "{said}");
+    // Told to stop after one call: one, and the turn settles `stopped`.
+    let out_stop = dir.join("out-stop");
+    let (code, _, said) = drive(
+        "scenario",
+        &seam,
+        &[
+            "--out".as_ref(),
+            out_stop.as_os_str(),
+            "--from-carry".as_ref(),
+            recorded.as_os_str(),
+            "--carry-at".as_ref(),
+            at.as_ref(),
+            "--stop-after".as_ref(),
+            "1".as_ref(),
+        ],
+    );
+    assert_eq!(code, Some(0), "{said}");
+    let log = out_stop.join("session.log");
+    let trunk_calls = logged(&log, "request")
+        .into_iter()
+        .filter(|request| request["lane"] == "trunk")
+        .count();
+    assert_eq!(trunk_calls, 1, "one call");
+    let settled: Vec<serde_json::Value> = logged(&log, "turn.settled");
+    assert_eq!(settled.len(), 1, "{settled:?}");
+    assert_eq!(settled[0]["reason"], "stopped", "{settled:?}");
+    // A batch whose arm carries its own trunk beside the baseline's kept one.
+    let kept = std::fs::read_to_string(
+        out.join("files")
+            .join(one["trunk_sha256"].as_str().expect("a kept trunk")),
+    )
+    .expect("the kept trunk");
+    let mut variant: serde_json::Value = serde_json::from_str(&kept).expect("messages");
+    let system = variant[0]["content"]
+        .as_str()
+        .expect("a system message")
+        .to_owned();
+    variant[0]["content"] = serde_json::Value::String(format!("{system}\n\nA variant."));
+    let variant_text = variant.to_string();
+    std::fs::write(dir.join("variant.json"), &variant_text).expect("the variant");
+    let manifest = dir.join("ARMS.toml");
+    std::fs::write(
+        &manifest,
+        "baseline = \"kept\"\npurpose = \"smoke\"\n[arm.kept]\nregimen = \"same.toml\"\n\
+         [arm.variant]\nregimen = \"same.toml\"\ncarry_trunk = \"variant.json\"\n",
+    )
+    .expect("the manifest");
+    let arms_out = dir.join("out-arms");
+    let (code, said, all) = drive(
+        "arms",
+        &seam,
+        &[
+            "--arms".as_ref(),
+            manifest.as_os_str(),
+            "--repeat".as_ref(),
+            "1".as_ref(),
+            "--out".as_ref(),
+            arms_out.as_os_str(),
+            "--from-carry".as_ref(),
+            recorded.as_os_str(),
+            "--carry-at".as_ref(),
+            at.as_ref(),
+        ],
+    );
+    assert_eq!(code, Some(0), "{all}");
+    assert!(
+        said["against"]["variant"].get("carry_trunk").is_some(),
+        "the batch names the arm's difference: {said}"
+    );
+    let start = |arm: &str| first_line(&arms_out.join(arm).join("repeat-01").join("session.log"));
+    assert_eq!(
+        start("variant")["carried_from"]["variant_sha256"],
+        diet::digest::sha256_hex(variant_text.as_bytes()).as_str()
+    );
+    assert!(
+        start("kept")["carried_from"]
+            .get("variant_sha256")
+            .is_none(),
+        "the baseline carries the kept trunk"
+    );
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// #1151's review: a run from a mid-turn refill of a log that names no run
+/// -- `split-turn`'s, run once -- resumes the turn the refill cut through
+/// serve: the runner settles it before the seam's script, its first trunk
+/// request has the head the recording sent after that refill, its `ask` is
+/// marked resumed from that refill with the one step that rode, and the
+/// turn goes on and settles.
+#[test]
+#[allow(clippy::too_many_lines)]
+fn a_run_from_a_mid_turn_refill_resumes_the_cut_turn_through_serve() {
+    let dir = scratch("carry-at-split");
+    let out = dir.join("out-first");
+    let ran = Command::new(DRIVE)
+        .current_dir(root())
+        .arg("scenario")
+        .arg(root().join("diet/scenarios/split-turn.jsonl"))
+        .arg("--out")
+        .arg(&out)
+        .arg("--no-assemble")
+        .output()
+        .expect("diet-drive runs");
+    assert_eq!(
+        ran.status.code(),
+        Some(0),
+        "{}",
+        String::from_utf8_lossy(&ran.stdout)
+    );
+    let recorded = out.join("session.log");
+    let refill = logged(&recorded, "meditation")
+        .into_iter()
+        .find(|meditation| meditation.get("turn_steps_kept").is_some())
+        .expect("a refill under the turn");
+    let sent_after = logged(&recorded, "request")
+        .into_iter()
+        .find(|request| {
+            request["lane"] == "trunk" && request["seq"].as_u64() > refill["seq"].as_u64()
+        })
+        .map(|request| request["head_sha256"].clone())
+        .expect("the request after the refill");
+    let seam = dir.join("seam.jsonl");
+    let mut text = [
+        serde_json::json!({"scenario": "carry-at-split", "regimen": root().join("diet/scenarios/split-turn.toml"), "head": root().join("diet/drive/heads/floor.md")}),
+        serde_json::json!({"step": "end"}),
+    ]
+    .iter()
+    .map(|line| line.to_string() + "\n")
+    .collect::<String>();
+    for _ in 0..4 {
+        text.push_str(&serde_json::json!({"reply": {"text": "The parser is built."}}).to_string());
+        text.push('\n');
+    }
+    std::fs::write(&seam, text).expect("the seam");
+    let at_out = dir.join("out-at");
+    let ran = Command::new(DRIVE)
+        .current_dir(root())
+        .arg("scenario")
+        .arg(&seam)
+        .arg("--out")
+        .arg(&at_out)
+        .arg("--no-assemble")
+        .arg("--from-carry")
+        .arg(&recorded)
+        .arg("--carry-at")
+        .arg(refill["seq"].to_string())
+        .output()
+        .expect("diet-drive runs");
+    assert_eq!(
+        ran.status.code(),
+        Some(0),
+        "{}{}",
+        String::from_utf8_lossy(&ran.stdout),
+        String::from_utf8_lossy(&ran.stderr)
+    );
+    let log = at_out.join("session.log");
+    let first = logged(&log, "request")
+        .into_iter()
+        .find(|request| request["lane"] == "trunk")
+        .expect("a trunk request");
+    assert_eq!(
+        first["head_sha256"], sent_after,
+        "the request the recording sent"
+    );
+    assert!(
+        logged(&log, "meditation")
+            .iter()
+            .all(|meditation| meditation["seq"].as_u64() > first["seq"].as_u64()),
+        "no refill before the resumed request"
+    );
+    // Told to stop after three calls, it sends its first: the resumed
+    // request is never taken for the next refill.
+    let stop_out = dir.join("out-stop");
+    let ran = Command::new(DRIVE)
+        .current_dir(root())
+        .arg("scenario")
+        .arg(&seam)
+        .arg("--out")
+        .arg(&stop_out)
+        .arg("--no-assemble")
+        .arg("--from-carry")
+        .arg(&recorded)
+        .arg("--carry-at")
+        .arg(refill["seq"].to_string())
+        .args(["--stop-after", "3"])
+        .output()
+        .expect("diet-drive runs");
+    assert_eq!(
+        ran.status.code(),
+        Some(0),
+        "{}",
+        String::from_utf8_lossy(&ran.stdout)
+    );
+    let sent = logged(&stop_out.join("session.log"), "request")
+        .into_iter()
+        .filter(|request| request["lane"] == "trunk")
+        .count();
+    assert!(sent >= 1, "the resumed request was sent");
+    let asks = logged(&log, "ask");
+    assert_eq!(asks.len(), 1, "{asks:?}");
+    assert_eq!(asks[0]["resumed_meditation_seq"], refill["seq"], "{asks:?}");
+    assert_eq!(asks[0]["resumed_turn_steps_kept"], 1, "{asks:?}");
+    let settled = logged(&log, "turn.settled");
+    assert!(
+        settled
+            .iter()
+            .any(|line| line["turn"] == 1 && line["reason"] == "final"),
+        "{settled:?}"
+    );
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
 /// #948 (v27): a run from a recorded refill can send a delivery variant of
 /// its trunk in the kept one's place (`--carry-trunk`), named on its start
 /// line beside the trunk it varies; a variant byte-identical to the kept

@@ -2062,6 +2062,14 @@ impl Driver {
         Ok((status, body.to_owned()))
     }
 
+    /// Whether the session has ended (#1151): its stop, or an `end`. A
+    /// serve that no longer answers has ended its session and is exiting;
+    /// whether it exited cleanly is the run's to judge.
+    fn ended(&self) -> bool {
+        self.get("/state")
+            .map_or(true, |state| state["settlement"] == "ended")
+    }
+
     fn get(&self, path: &str) -> Result<serde_json::Value, Failure> {
         match self.request("GET", path, None)? {
             (200, body) => {
@@ -2364,12 +2372,14 @@ impl Driver {
 /// refused, a pick that names no live entry, a prompt with no approvals to
 /// answer it, a wait that timed out, or a session that never settled.
 pub fn drive(scenario: &Scenario, driver: &Driver) -> Result<Bindings, Failure> {
-    drive_from(scenario, driver, (0, false)).map(|(bound, _)| bound)
+    drive_from(scenario, driver, (0, false, false)).map(|(bound, _)| bound)
 }
 
 /// [`drive`], from the step at `from`; with `reseat`, stopping after the
 /// first declared meditation it settles (#948), and naming the step after
-/// it, where the next session takes up the script.
+/// it, where the next session takes up the script. A `seam` -- a session
+/// carried at a seq (#1151) -- first settles the turn its refill cut, which
+/// serve resumed, and stops driving once the session's stop has ended it.
 ///
 /// # Errors
 ///
@@ -2378,15 +2388,23 @@ pub fn drive(scenario: &Scenario, driver: &Driver) -> Result<Bindings, Failure> 
 pub fn drive_from(
     scenario: &Scenario,
     driver: &Driver,
-    (from, reseat): (usize, bool),
+    (from, reseat, seam): (usize, bool, bool),
 ) -> Result<(Bindings, Option<usize>), Failure> {
     let approvals = scenario.approvals.as_deref();
     let mut bound = Bindings::new();
+    if seam {
+        driver
+            .settle(approvals, STEP_PATIENCE)
+            .map_err(|why| Failure(format!("the resumed turn: {why}")))?;
+    }
     let mut mark = driver.last_seq()?;
     let mut tangent: Option<&str> = None;
     let mut before: Option<String> = None;
     for (at, step) in scenario.steps.iter().enumerate().skip(from) {
         let failed = |why: Failure| Failure(format!("step {}: {why}", at + 1));
+        if seam && driver.ended() {
+            break;
+        }
         match step {
             Step::Ask {
                 text,
@@ -2732,11 +2750,20 @@ pub struct RunOptions {
     /// A delivery variant of the carried trunk (`--carry-trunk FILE`, v27):
     /// passed to serve, which sends it in the kept trunk's place.
     pub carry_trunk: Option<std::path::PathBuf>,
+    /// The meditation a run from a recorded refill is carried from, by its
+    /// seq (`--carry-at SEQ`, #1151), in place of the log's last: serve's
+    /// `--carry-at`. Any log is taken, a live drive's as well as a
+    /// scenario's, and the script runs from its first step.
+    pub carry_at: Option<u64>,
+    /// The carried session's stop (`--stop-after N`, #1151): serve's
+    /// `--stop-after`.
+    pub stop_after: Option<u64>,
     /// The worktree the carried session's first session ran in (#948, log
     /// v28), as given and as resolved: serve reroots the carried text from
     /// each into this session's own worktree's same form. The runner sets it
     /// for the next session of a run; a carry taken from another run's log
-    /// (`--from-carry`) names none, and its text is carried as kept.
+    /// (`--from-carry`) names one when `--carried-root DIR` gives it (#1151's
+    /// re-review), and else none, its text carried as kept.
     pub carried_root: Option<(std::path::PathBuf, std::path::PathBuf)>,
     /// The phase tool's description in place of the pinned template
     /// (`--phase-tool-description FILE`, v27): passed to serve.
@@ -3340,11 +3367,43 @@ fn running(
                 .to_owned(),
         ));
     }
+    // A seq and a stop name a run from a recorded refill (#1151): never
+    // silently dropped.
+    let recorded = options.carried && options.from_step == 0;
+    if (options.carry_at.is_some() || options.stop_after.is_some()) && !recorded {
+        return Err(Failure(
+            "--carry-at and --stop-after are a run's from a recorded refill (--from-carry)"
+                .to_owned(),
+        ));
+    }
+    if options.carried_root.is_some() && !options.carried {
+        return Err(Failure(
+            "--carried-root reroots a carried session's text, and this run is not carried \
+             (--from-carry)"
+                .to_owned(),
+        ));
+    }
     // A run from a recorded refill (#948) takes up the script its log ran,
     // after that script's declared meditation.
     // A carried run at step 0 is one from a recorded refill (`--from-carry`):
     // a session carried within its run always starts past a meditation.
-    let from_step = if options.carried && options.from_step == 0 {
+    // One carried at a seq (#1151) runs the script from its first step,
+    // whatever log it came from: a live drive's names no script.
+    let from_step = if recorded && options.carry_at.is_some() {
+        // A log that ran this script itself would replay it from its first
+        // step on the carried trunk (#1151's review).
+        if let Some(log) = &options.carry
+            && script_ran(log, &text)?
+        {
+            return Err(Failure(format!(
+                "{} ran this script itself: carried at a seq, it would replay its own script \
+                 from its first step on the carried trunk; --from-carry without --carry-at takes \
+                 it up after its declared meditation",
+                log.display()
+            )));
+        }
+        0
+    } else if recorded {
         let log = options
             .carry
             .as_ref()
@@ -3645,6 +3704,14 @@ fn running(
     // A carried session (#948) starts from the first one's kept carry.
     if let Some(carry) = &options.carry {
         serve.arg("--carry").arg(carry);
+        // At a seq (#1151), serve restores the worktree and resumes the
+        // turn its refill cut; and the session stops where it is told.
+        if let Some(seq) = options.carry_at.filter(|_| options.carried) {
+            serve.arg("--carry-at").arg(seq.to_string());
+        }
+        if let Some(calls) = options.stop_after.filter(|_| options.carried) {
+            serve.arg("--stop-after").arg(calls.to_string());
+        }
         // A delivery variant applies to the carried session alone (#948).
         if let Some(trunk) = options.carry_trunk.as_ref().filter(|_| options.carried) {
             serve.arg("--carry-trunk").arg(trunk);
@@ -3683,6 +3750,7 @@ fn running(
         match carried_worktree(options, &work, &dir)
             .map_err(|failure| voided(said, "worktree", failure))?
         {
+            // Restored by serve when `files` is none (#1151).
             Some((sha256, from, files)) => {
                 said["carried_worktree"] =
                     serde_json::json!({"sha256": sha256, "from": from.tag(), "files": files});
@@ -3888,13 +3956,15 @@ fn running(
         (Some(_), Some((_, notice))) => with_notice(scenario, from_step, notice)?,
         _ => scenario,
     };
-    let outcome = self::drive_from(&scenario, &driver, (from_step, reseat));
+    // A run carried at a seq (#1151): its resumed turn, then its script.
+    let seam = options.carried && options.carry_at.is_some();
+    let outcome = self::drive_from(&scenario, &driver, (from_step, reseat, seam));
     let next = outcome.as_ref().ok().and_then(|(_, next)| *next);
     // A check that crashed (#942): void, whatever else the run says.
     if let Some(cause) = driver.voided() {
         said["void"] = serde_json::Value::String(cause.to_owned());
     }
-    if outcome.is_err() || next.is_some() {
+    if outcome.is_err() || next.is_some() || seam {
         let _ = driver.command(&serde_json::json!({"kind": "end"}));
     }
     // Serve exits once the session ends and its record is written.
@@ -4000,6 +4070,8 @@ fn running(
                 from_step,
                 carried: true,
                 sealed,
+                carry_at: None,
+                stop_after: None,
                 ..options.clone()
             };
             let mut next_said = serde_json::json!({"ok": false});
@@ -4139,6 +4211,21 @@ fn put_back(aside: Option<&std::path::Path>, out: &std::path::Path) -> Result<()
     std::fs::remove_dir(aside).map_err(|why| failed(format!("{}: {why}", aside.display())))
 }
 
+/// Whether `log` names a run of the script `text` (#1151's review).
+fn script_ran(log: &std::path::Path, text: &str) -> Result<bool, Failure> {
+    use crate::formats::log::Event;
+    let written =
+        std::fs::read_to_string(log).map_err(|why| Failure(format!("{}: {why}", log.display())))?;
+    let first = written.split_inclusive('\n').next().unwrap_or_default();
+    let lines = crate::formats::log::parse(first)
+        .map_err(|why| Failure(format!("{}: {why}", log.display())))?;
+    Ok(matches!(
+        lines.first().map(|line| &line.event),
+        Some(Event::SessionStart { run: Some(run), .. })
+            if run.script_sha256 == crate::digest::sha256_hex(text.as_bytes())
+    ))
+}
+
 /// The script a recorded refill's log ran (#948): its `run`'s
 /// `script_sha256` must be `text`'s, or a batch from it would take up a
 /// script it never ran.
@@ -4146,7 +4233,10 @@ fn carried_script(log: &std::path::Path, text: &str) -> Result<(), Failure> {
     use crate::formats::log::Event;
     let written =
         std::fs::read_to_string(log).map_err(|why| Failure(format!("{}: {why}", log.display())))?;
-    let lines = crate::formats::log::parse(&written)
+    // Its start alone (#1151's third review): a line after what the carry
+    // uses is not read.
+    let first = written.split_inclusive('\n').next().unwrap_or_default();
+    let lines = crate::formats::log::parse(first)
         .map_err(|why| Failure(format!("{}: {why}", log.display())))?;
     let Some(Event::SessionStart { run: Some(run), .. }) = lines.first().map(|line| &line.event)
     else {
@@ -4167,45 +4257,57 @@ fn carried_script(log: &std::path::Path, text: &str) -> Result<(), Failure> {
 }
 
 /// A carried session's worktree (#948), restored into `into`: the snapshot
-/// its carried log's last meditation kept (v26), or, for a log written
-/// before v26, `--carry-worktree`'s directory snapshotted into this
-/// session's recording `work` and restored from there. `None` when the
-/// session is not carried, is blank, or crosses no worktree.
+/// its carried log's last meditation kept (v26) -- or the one at
+/// `--carry-at`'s seq (#1151), which serve restores itself, so its count is
+/// `None` -- or, for a log written before v26, `--carry-worktree`'s
+/// directory snapshotted into this session's recording `work` and restored
+/// from there. `None` when the session is not carried, is blank, or
+/// crosses no worktree.
 fn carried_worktree(
     options: &RunOptions,
     work: &std::path::Path,
     into: &std::path::Path,
-) -> Result<Option<(String, crate::formats::log::WorktreeFrom, usize)>, Failure> {
+) -> Result<Option<(String, crate::formats::log::WorktreeFrom, Option<usize>)>, Failure> {
     use crate::formats::log::{Event, WorktreeFrom};
     let Some(log) = options.carry.as_ref().filter(|_| options.carried) else {
         return Ok(None);
     };
     let written =
         std::fs::read_to_string(log).map_err(|why| Failure(format!("{}: {why}", log.display())))?;
-    let lines = crate::formats::log::parse(&written)
+    let lines = crate::drive::carry::lines_for(&written, options.carry_at)
         .map_err(|why| Failure(format!("{}: {why}", log.display())))?;
-    let kept = lines.iter().rev().find_map(|line| match &line.event {
+    let worktree_of = |line: &crate::formats::log::Line| match &line.event {
         Event::Meditation {
             trunk_sha256: Some(_),
             worktree_sha256,
             ..
         } => Some(worktree_sha256.clone()),
         _ => None,
-    });
+    };
+    let kept = match options.carry_at {
+        Some(at) => lines
+            .iter()
+            .find(|line| line.seq == at)
+            .and_then(worktree_of),
+        None => lines.iter().rev().find_map(worktree_of),
+    };
     let recording = log.parent().unwrap_or_else(|| std::path::Path::new("."));
     match (kept.flatten(), &options.carry_worktree) {
         (Some(_), Some(_)) => Err(Failure(format!(
             "{} keeps its own worktree: --carry-worktree would replace it",
             log.display()
         ))),
+        (Some(sha256), None) if options.carry_at.is_some() => {
+            Ok(Some((sha256, WorktreeFrom::Meditation, None)))
+        }
         (Some(sha256), None) => {
             let files = crate::drive::carry::restore(&sha256, recording, into).map_err(Failure)?;
-            Ok(Some((sha256, WorktreeFrom::Meditation, files)))
+            Ok(Some((sha256, WorktreeFrom::Meditation, Some(files))))
         }
         (None, Some(given)) => {
             let sha256 = crate::drive::carry::snapshot(given, work).map_err(Failure)?;
             let files = crate::drive::carry::restore(&sha256, work, into).map_err(Failure)?;
-            Ok(Some((sha256, WorktreeFrom::Given, files)))
+            Ok(Some((sha256, WorktreeFrom::Given, Some(files))))
         }
         (None, None) => Ok(None),
     }
