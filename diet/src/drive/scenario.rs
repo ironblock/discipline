@@ -2750,6 +2750,10 @@ pub struct RunOptions {
     /// A delivery variant of the carried trunk (`--carry-trunk FILE`, v27):
     /// passed to serve, which sends it in the kept trunk's place.
     pub carry_trunk: Option<std::path::PathBuf>,
+    /// The carried refill given the changed-files line, and the snapshot it
+    /// counts from (`--carry-changed-files [--carry-changed-since SEQ]`,
+    /// v51, #1154): passed to serve, for a run from a recorded refill.
+    pub carry_changed_files: Option<crate::drive::carry::ChangedSince>,
     /// The meditation a run from a recorded refill is carried from, by its
     /// seq (`--carry-at SEQ`, #1151), in place of the log's last: serve's
     /// `--carry-at`. Any log is taken, a live drive's as well as a
@@ -3376,6 +3380,11 @@ fn running(
                 .to_owned(),
         ));
     }
+    if options.carry_changed_files.is_some() && !recorded {
+        return Err(Failure(
+            "--carry-changed-files is a run's from a recorded refill (--from-carry)".to_owned(),
+        ));
+    }
     if options.carried_root.is_some() && !options.carried {
         return Err(Failure(
             "--carried-root reroots a carried session's text, and this run is not carried \
@@ -3715,6 +3724,13 @@ fn running(
         // A delivery variant applies to the carried session alone (#948).
         if let Some(trunk) = options.carry_trunk.as_ref().filter(|_| options.carried) {
             serve.arg("--carry-trunk").arg(trunk);
+        }
+        // The changed-files line (#1154), added after serve's reroot.
+        if let Some(since) = options.carry_changed_files.filter(|_| options.carried) {
+            serve.arg("--carry-changed-files");
+            if let crate::drive::carry::ChangedSince::Seq(seq) = since {
+                serve.arg("--carry-changed-since").arg(seq.to_string());
+            }
         }
     }
     if let Some(description) = &options.phase_tool_description {
@@ -4072,6 +4088,7 @@ fn running(
                 sealed,
                 carry_at: None,
                 stop_after: None,
+                carry_changed_files: None,
                 ..options.clone()
             };
             let mut next_said = serde_json::json!({"ok": false});

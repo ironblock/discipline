@@ -268,6 +268,16 @@
 //! log that declares 28 or less and carries it is refused. For a reader of
 //! earlier logs, the migration is nothing: no session declared one.
 //!
+//! v51 (#1154) names a carried refill given the changed-files line: a
+//! carried session whose refill was given the line a refill carries today
+//! naming the files the model changed (N5) names, on its `carried_from`,
+//! the `seq` of the meditation whose worktree snapshot the line is counted
+//! from, `changed_since_seq`, and the sha256 of the trunk as the session
+//! started from it, the line added, `changed_trunk_sha256`: both or
+//! neither. The line itself is in that trunk. A log that declares 50 or
+//! less and carries them is refused. For a reader of earlier logs, the
+//! migration is nothing: no carry was given the line.
+//!
 //! v50 (#1151) stops a session where it was told to: a `turn.settled`
 //! whose `reason` is `stopped` is a turn whose next trunk request was never
 //! sent because the session's stop came first (`serve --stop-after N`): its
@@ -555,13 +565,13 @@ use super::record::vocabulary;
 struct LogParser;
 
 /// The version this module writes, as `session.start` states it.
-pub const VERSION: i64 = 50;
+pub const VERSION: i64 = 51;
 
 /// Every version this module reads.
 pub const READS: &[i64] = &[
     0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25,
     26, 27, 28, 29, 30, 31, 32, 33, 34, 35, 36, 37, 38, 39, 40, 41, 42, 43, 44, 45, 46, 47, 48, 49,
-    50,
+    50, 51,
 ];
 
 /// How recent an input event must be, at the moment a turn settles, for the
@@ -2939,7 +2949,7 @@ pub struct CarriedFrom {
     pub rerooted: Option<Box<Rerooted>>,
     /// The line naming the files the model changed, added to the carried
     /// refill (v51, #1154).
-    pub changed: Option<ChangedFiles>,
+    pub changed: Option<Box<ChangedFiles>>,
 }
 
 /// A carried refill given the line a refill carries today naming the files
@@ -3216,6 +3226,16 @@ fn carried_from_value(carried: &CarriedFrom) -> Value {
                 Value::String(object.clone()),
             );
         }
+    }
+    if let Some(changed) = &carried.changed {
+        members.insert(
+            "changed_since_seq".to_owned(),
+            Value::Integer(i64::try_from(changed.since_seq).unwrap_or(i64::MAX)),
+        );
+        members.insert(
+            "changed_trunk_sha256".to_owned(),
+            Value::String(changed.trunk_sha256.clone()),
+        );
     }
     if let Some((sha256, from)) = &carried.worktree {
         members.insert("worktree_sha256".to_owned(), Value::String(sha256.clone()));
@@ -7120,6 +7140,16 @@ const fn must_v48(key: &'static str, holds: Holds) -> Field {
 }
 
 /// A key that arrived in v46, optional wherever its object is written.
+/// A key that arrived in v51, optional wherever its object is written.
+const fn may_v51(key: &'static str, holds: Holds) -> Field {
+    Field {
+        key,
+        holds,
+        required: false,
+        since: 51,
+    }
+}
+
 /// A key that arrived in v50, optional on its kind.
 const fn may_v50(key: &'static str, holds: Holds) -> Field {
     Field {
@@ -7505,6 +7535,8 @@ pub const CARRIED_FROM: &[Field] = &[
     may_v28("rerooted", Holds::Count),
     may_v28("rerooted_trunk_sha256", Holds::Digest),
     may_v28("rerooted_object_sha256", Holds::Digest),
+    may_v51("changed_since_seq", Holds::Count),
+    may_v51("changed_trunk_sha256", Holds::Digest),
 ];
 
 pub const RUN: &[Field] = &[
@@ -11171,7 +11203,23 @@ impl Fields<'_> {
         Ok(CarriedFrom {
             log_sha256: inner.digest("log_sha256").map_err(within)?,
             meditation_seq: inner.count("meditation_seq").map_err(within)?,
-            changed: None,
+            changed: match (
+                inner.0.contains_key("changed_since_seq"),
+                inner.0.contains_key("changed_trunk_sha256"),
+            ) {
+                (false, false) => None,
+                (true, true) => Some(Box::new(ChangedFiles {
+                    since_seq: inner.count("changed_since_seq").map_err(within)?,
+                    trunk_sha256: inner.digest("changed_trunk_sha256").map_err(within)?,
+                })),
+                _ => {
+                    return Err(within(
+                        "`changed_since_seq` and `changed_trunk_sha256` name one changed-files \
+                         line: both or neither"
+                            .to_owned(),
+                    ));
+                }
+            },
             trunk_sha256: inner.digest("trunk_sha256").map_err(within)?,
             object_sha256: match inner.0.get("object_sha256") {
                 None => None,
@@ -11611,16 +11659,17 @@ mod tests {
     /// #1022, #1031, #1030, #1037, #1038, #1050, #1094, the withdrawn chip,
     /// N3's asks, the queued fork (N4), the move at the boundary (N2), and
     /// the queued fork's own line (audit 7), the operator fork's imperative
-    /// (audit 9), and the session's stop (#1151): this module writes v50.
+    /// (audit 9), the session's stop (#1151), and the carried refill's
+    /// changed-files line (#1154): this module writes v51.
     #[test]
-    fn this_module_writes_v50_and_reads_every_version_before_it() {
-        assert_eq!(super::VERSION, 50);
+    fn this_module_writes_v51_and_reads_every_version_before_it() {
+        assert_eq!(super::VERSION, 51);
         assert_eq!(
             super::READS,
             &[
                 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22,
                 23, 24, 25, 26, 27, 28, 29, 30, 31, 32, 33, 34, 35, 36, 37, 38, 39, 40, 41, 42, 43,
-                44, 45, 46, 47, 48, 49, 50
+                44, 45, 46, 47, 48, 49, 50, 51
             ]
         );
     }

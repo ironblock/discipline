@@ -146,6 +146,16 @@ fn carry_usage(out: &mut String) {
     out.push_str("settles `stopped` (log v50), and the session ends; a turn that settles, a\n");
     out.push_str("refill made while awaiting, or a fork that settles with the stop come ends\n");
     out.push_str("it too (#1151).\n");
+    out.push_str("--carry-changed-files: with --carry, the carried refill given the line a\n");
+    out.push_str("refill carries today naming the files the model changed (N5, #1154), in\n");
+    out.push_str("its place in the render, after any --carried-root: counted from LOG's\n");
+    out.push_str("earliest worktree snapshot, since a log does not record the worktree as\n");
+    out.push_str("the session opened, to the refill's own. A refill that carries the line\n");
+    out.push_str("already, or a native summary's, is refused. The start line names the base's\n");
+    out.push_str("seq and the trunk as sent (`changed_since_seq`, `changed_trunk_sha256`,\n");
+    out.push_str("log v51) beside the refill's seq.\n");
+    out.push_str("--carry-changed-since SEQ: with --carry-changed-files, the snapshot the\n");
+    out.push_str("meditation at SEQ kept, an earlier one than the refill's, as the base.\n");
     out.push_str("--carried-root FROM=TO: with --carry, the carried text's worktree root\n");
     out.push_str("FROM, and its `~` spelling under this machine's home, replaced with TO as\n");
     out.push_str("this session shows it (a scenario's placeholder). A drive recorded under\n");
@@ -172,8 +182,8 @@ fn serve_usage() -> String {
          \x20                       [--allow-origin URL]... [--max-output-tokens N]\n\
          \x20                       [--worktree DIR] [--sandbox-unix-socket PATH]...\n\
          \x20                       [--sandbox-secret PATH]... [--carry LOG [--carry-at SEQ] [--carried-worktree SHA256]\n\
-         \x20                       [--carry-trunk FILE] [--carried-root FROM=TO]...] [--stop-after N] [--phase-tool-description FILE]\n\
-         \x20                       [--answer-tool FILE]...\n\
+         \x20                       [--carry-trunk FILE] [--carried-root FROM=TO]... [--carry-changed-files [--carry-changed-since SEQ]]]\n\
+         \x20                       [--stop-after N] [--phase-tool-description FILE] [--answer-tool FILE]...\n\
          \x20                       [--run JSON] [--rehearse-as RUNG]\n\
          \x20                       [--seat-endpoint URL --seat-model NAME [--seat-key-file FILE]]\n\
          \x20      diet-drive serve --profile NAME [--config FILE] [any flag above]\n\n",
@@ -315,6 +325,12 @@ struct ServeArgs {
     /// `--carry-trunk FILE`: a delivery variant of the carried trunk, sent in
     /// its place and named by its sha256 (v27, #948).
     carry_trunk: Option<String>,
+    /// `--carry-changed-files`: the carried refill given the changed-files
+    /// line (v51, #1154).
+    carry_changed_files: bool,
+    /// `--carry-changed-since SEQ`: the snapshot that line counts from, in
+    /// place of the log's earliest (#1154).
+    carry_changed_since: Option<u64>,
     /// `--phase-tool-description FILE`: the phase tool's description in place
     /// of the pinned template, named by its sha256 (v27, #948).
     phase_tool_description: Option<String>,
@@ -464,15 +480,21 @@ fn serve_args(args: &[String]) -> Option<ServeArgs> {
     let mut stop_after = None;
     let mut carried_worktree = None;
     let mut carry_trunk = None;
+    let mut carry_changed_files = false;
+    let mut carry_changed_since = None;
     let mut phase_tool_description = None;
     let mut answer_tools = Vec::new();
     let mut carried_roots = Vec::new();
     let mut auth_stdin = false;
     let mut given = args.iter();
     while let Some(flag) = given.next() {
-        // The one flag with no value (#1047).
+        // The flags with no value (#1047, #1154).
         if flag == "--auth-stdin" {
             auth_stdin = true;
+            continue;
+        }
+        if flag == "--carry-changed-files" {
+            carry_changed_files = true;
             continue;
         }
         let value = given.next()?;
@@ -547,6 +569,11 @@ fn serve_args(args: &[String]) -> Option<ServeArgs> {
         } else if flag == "--carry-trunk" {
             carry_trunk = Some(value.clone());
             true
+        } else if flag == "--carry-changed-since" {
+            value
+                .parse()
+                .map(|seq| carry_changed_since = Some(seq))
+                .is_ok()
         } else if flag == "--carried-root" {
             match value.split_once('=') {
                 // FROM may be a `~/...` spelling, as a drive recorded under
@@ -625,6 +652,8 @@ fn serve_args(args: &[String]) -> Option<ServeArgs> {
         stop_after,
         carried_worktree,
         carry_trunk,
+        carry_changed_files,
+        carry_changed_since,
         phase_tool_description,
         answer_tools,
         carried_roots,
@@ -706,6 +735,8 @@ fn serve(args: &[String]) -> ExitCode {
         stop_after,
         carried_worktree,
         carry_trunk,
+        carry_changed_files,
+        carry_changed_since,
         phase_tool_description,
         answer_tools,
         carried_roots,
@@ -802,6 +833,12 @@ fn serve(args: &[String]) -> ExitCode {
             Some(carry)
         }
     };
+    // The worktree as this session shows it (#1151's re-review): a
+    // scenario's placeholder, else its path.
+    let mut shown = diet::drive::shown::ShownRoots::none();
+    for root in &shown_roots {
+        let _ = shown.add(root);
+    }
     // The carried text rerooted into this session's worktree (v28, #948):
     // the native summary and the working memory name the worktree it runs in.
     let carry = match (carry, carried_roots.is_empty()) {
@@ -813,17 +850,47 @@ fn serve(args: &[String]) -> ExitCode {
             );
         }
         (Some(mut carry), false) => {
-            // Into the worktree as this session shows it (#1151's re-review):
-            // a scenario's placeholder, else its path.
-            let mut shown = diet::drive::shown::ShownRoots::none();
-            for root in &shown_roots {
-                let _ = shown.add(root);
-            }
             let roots: Vec<(String, String)> = carried_roots
                 .iter()
                 .map(|(from, to)| (from.clone(), shown.text(to)))
                 .collect();
             diet::drive::carry::reroot(&mut carry, &roots);
+            Some(carry)
+        }
+    };
+    // The changed-files line (v51, #1154), counted between two of LOG's
+    // worktree snapshots and placed after any reroot, so its paths and the
+    // render it follows are this session's.
+    let carry = match (carry, carry_changed_files, carry_changed_since) {
+        (carry, false, None) => carry,
+        (_, false, Some(_)) => {
+            return fail(
+                EXIT_USAGE,
+                "--carry-changed-since names the changed-files line's base, and there is no \
+                 --carry-changed-files",
+            );
+        }
+        (None, true, _) => {
+            return fail(
+                EXIT_USAGE,
+                "--carry-changed-files adds a line to a carry's refill, and there is no --carry",
+            );
+        }
+        (Some(mut carry), true, since) => {
+            let since = since.map_or(
+                diet::drive::carry::ChangedSince::Earliest,
+                diet::drive::carry::ChangedSince::Seq,
+            );
+            let recording = carry_log
+                .as_deref()
+                .map(std::path::Path::new)
+                .and_then(std::path::Path::parent)
+                .unwrap_or_else(|| std::path::Path::new("."));
+            if let Err(why) =
+                diet::drive::carry::add_changed_line(&mut carry, recording, since, &shown)
+            {
+                return fail(EXIT_INPUT, &format!("--carry-changed-files: {why}"));
+            }
             Some(carry)
         }
     };
@@ -3286,7 +3353,9 @@ fn usage() -> String {
     out.push_str(
         "           [--void-cap K] [--dry-run] [--from-carry LOG [--carry-at SEQ] [--stop-after N]\n",
     );
-    out.push_str("           [--carry-worktree DIR]\n");
+    out.push_str(
+        "           [--carry-worktree DIR] [--carry-changed-files [--carry-changed-since SEQ]]\n",
+    );
     out.push_str(
         "           [--carry-trunk FILE] [--only-task TASK]] [--phase-tool-description FILE]\n",
     );
@@ -3338,7 +3407,8 @@ fn scenario(args: &[String]) -> ExitCode {
              [--key-file FILE]] [--regimen FILE] [--worktree DIR] [--no-assemble] [--dry-run] \
              [--repeat N [--stop-file PATH] [--void-cap K]] [--from-carry LOG [--carry-at SEQ] \
              [--stop-after N] [--carried-root DIR] [--carry-worktree DIR] \
-             [--carry-trunk FILE] [--only-task TASK]] [--phase-tool-description FILE]",
+             [--carry-trunk FILE] [--carry-changed-files [--carry-changed-since SEQ]] \
+             [--only-task TASK]] [--phase-tool-description FILE]",
         )
     };
     let Some((file, rest)) = args.split_first() else {
@@ -3351,6 +3421,7 @@ fn scenario(args: &[String]) -> ExitCode {
     };
     let mut out = None;
     let (mut count, mut stop_file, mut void_cap) = (None, None, None);
+    let mut changed_files = false;
     let mut flags = rest.iter();
     while let Some(flag) = flags.next() {
         if flag == "--no-assemble" {
@@ -3359,6 +3430,10 @@ fn scenario(args: &[String]) -> ExitCode {
         }
         if flag == "--dry-run" {
             options.dry_run = true;
+            continue;
+        }
+        if flag == CARRY_CHANGED_FILES {
+            changed_files = true;
             continue;
         }
         let Some(value) = flags.next() else {
@@ -3391,6 +3466,13 @@ fn scenario(args: &[String]) -> ExitCode {
     let Some(out) = out else {
         return usage();
     };
+    if !changed_files_read(&mut options, changed_files) {
+        return fail(
+            EXIT_USAGE,
+            "--carry-changed-since names the changed-files line's base, and there is no \
+             --carry-changed-files",
+        );
+    }
     options.out = out;
     if count.is_none() && (stop_file.is_some() || void_cap.is_some()) {
         return fail(EXIT_USAGE, "--stop-file and --void-cap are --repeat's");
@@ -3445,17 +3527,37 @@ type BatchFlags = (
     BTreeMap<String, String>,
 );
 
-/// The carry's flags `scenario` and `arms` take (#948, #1151).
-const CARRY_FLAGS: [&str; 8] = [
+/// The carry's flags `scenario` and `arms` take (#948, #1151, #1154).
+const CARRY_FLAGS: [&str; 9] = [
     "--from-carry",
     "--carry-at",
     "--stop-after",
     "--carried-root",
     "--carry-worktree",
     "--carry-trunk",
+    "--carry-changed-since",
     "--phase-tool-description",
     "--only-task",
 ];
+
+/// The carry's flag with no value `scenario` and `arms` take (#1154): the
+/// carried refill given the changed-files line.
+const CARRY_CHANGED_FILES: &str = "--carry-changed-files";
+
+/// `options` told `--carry-changed-files` when `given`, counted from
+/// `--carry-changed-since`'s seq when it was given, else from the log's
+/// earliest snapshot (#1154). False when a seq was given without it.
+fn changed_files_read(options: &mut diet::drive::scenario::RunOptions, given: bool) -> bool {
+    use diet::drive::carry::ChangedSince;
+    match (given, options.carry_changed_files) {
+        (false, Some(_)) => false,
+        (true, None) => {
+            options.carry_changed_files = Some(ChangedSince::Earliest);
+            true
+        }
+        _ => true,
+    }
+}
 
 /// One of [`CARRY_FLAGS`] on `options`: `--from-carry LOG`, a run from a
 /// recorded refill, carried from that log's last meditation and taking up
@@ -3465,9 +3567,10 @@ const CARRY_FLAGS: [&str; 8] = [
 /// recorded drive's worktree root, rerooted into the run's own as a fresh
 /// session's is (#948, #1151's review); `--carry-worktree DIR`, its
 /// worktree for a log written before v26; `--carry-trunk FILE`, a delivery
-/// variant of its trunk; `--phase-tool-description FILE`, the phase tool's
-/// description; `--only-task TASK`, a first-move probe of one task from the
-/// refill. Whether the value reads.
+/// variant of its trunk; `--carry-changed-since SEQ`, the snapshot its
+/// changed-files line counts from (#1154); `--phase-tool-description
+/// FILE`, the phase tool's description; `--only-task TASK`, a first-move
+/// probe of one task from the refill. Whether the value reads.
 fn carry_flag(options: &mut diet::drive::scenario::RunOptions, flag: &str, value: &str) -> bool {
     match flag {
         "--from-carry" => {
@@ -3492,6 +3595,12 @@ fn carry_flag(options: &mut diet::drive::scenario::RunOptions, flag: &str, value
         }
         "--carry-worktree" => options.carry_worktree = Some(value.into()),
         "--carry-trunk" => options.carry_trunk = Some(value.into()),
+        "--carry-changed-since" => match value.parse() {
+            Ok(seq) => {
+                options.carry_changed_files = Some(diet::drive::carry::ChangedSince::Seq(seq));
+            }
+            Err(_) => return false,
+        },
         "--only-task" => options.only_task = Some(value.to_owned()),
         _ => options.phase_tool_description = Some(value.into()),
     }
@@ -3511,10 +3620,15 @@ fn batch_flags(args: &[String], own: &[&str]) -> Option<BatchFlags> {
     };
     let (mut out, mut count, mut stop_file, mut void_cap) = (None, None, None, VOID_CAP);
     let mut kept = BTreeMap::new();
+    let mut changed_files = false;
     let mut flags = rest.iter();
     while let Some(flag) = flags.next() {
         if flag == "--no-assemble" {
             options.assemble = false;
+            continue;
+        }
+        if flag == CARRY_CHANGED_FILES {
+            changed_files = true;
             continue;
         }
         // Each run rehearsed on the canned substrate its rung speaks (#942).
@@ -3541,6 +3655,9 @@ fn batch_flags(args: &[String], own: &[&str]) -> Option<BatchFlags> {
             }
             _ => return None,
         }
+    }
+    if !changed_files_read(&mut options, changed_files) {
+        return None;
     }
     options.out = out?;
     let repeats = Repeats {

@@ -673,14 +673,20 @@ fn walk_of<'a>(
         .collect();
     walk.trunk.clone_from(&walk.head);
     // A carried session's trunk (#1151's re-review), as it was started from
-    // it: kept beside the log by the digest its start names -- the rerooted
-    // text's, else the variant's, else the kept trunk's.
+    // it: kept beside the log by the digest its start names -- the one given
+    // the changed-files line's (#1154), else the rerooted text's, else the
+    // variant's, else the kept trunk's.
     if let (Some(from), Some(dir)) = (carried_from, recording) {
         let digests = from
-            .rerooted
+            .changed
             .as_ref()
-            .map(|rerooted| rerooted.trunk_sha256.clone())
+            .map(|changed| changed.trunk_sha256.clone())
             .into_iter()
+            .chain(
+                from.rerooted
+                    .as_ref()
+                    .map(|rerooted| rerooted.trunk_sha256.clone()),
+            )
             .chain(from.variant_sha256.clone())
             .chain(std::iter::once(from.trunk_sha256.clone()));
         if let Some(trunk) = digests
