@@ -532,7 +532,7 @@ export type AskLine = {
   scoping?: boolean;
   files?: RecordedFile[];
   task?: string;
-} & ({ resumed_meditation_seq: number; resumed_turn_steps_kept: number } | { resumed_meditation_seq?: never; resumed_turn_steps_kept?: never });
+} & ({ resumed_meditation_seq: number; resumed_turn_steps_kept: number; resumed_steps_sha256: string } | { resumed_meditation_seq?: never; resumed_turn_steps_kept?: never; resumed_steps_sha256?: never });
 
 export type SettlementLine = {
   seq: number;

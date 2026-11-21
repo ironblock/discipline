@@ -34,11 +34,12 @@ pub fn read(log: &Path, sealed: &[String]) -> Result<Carry, String> {
 ///
 /// As [`read`]; and when the line at `at` is no meditation that kept its
 /// trunk.
+#[allow(clippy::too_many_lines)]
 pub fn read_at(log: &Path, sealed: &[String], at: Option<u64>) -> Result<Carry, String> {
     let bytes = std::fs::read(log).map_err(|why| format!("{}: {why}", log.display()))?;
     let text =
         String::from_utf8(bytes.clone()).map_err(|_| format!("{} is not UTF-8", log.display()))?;
-    let lines = log::parse(&text).map_err(|why| format!("{}: {why}", log.display()))?;
+    let lines = lines_for(&text, at).map_err(|why| format!("{}: {why}", log.display()))?;
     let kept_trunk = |line: &log::Line| match &line.event {
         Event::Meditation {
             trunk_sha256: Some(trunk),
@@ -106,8 +107,20 @@ pub fn read_at(log: &Path, sealed: &[String], at: Option<u64>) -> Result<Carry, 
             .map_err(|why| format!("{}: {why}", log.display()))?,
         None => None,
     };
-    let (riding, riding_files) =
-        ride.map_or_else(Default::default, |ride| (ride.messages, ride.files));
+    let (riding, riding_files, riding_prompt, riding_steps) = ride.map_or_else(
+        || (Vec::new(), Vec::new(), None, 0),
+        |ride| (ride.messages, ride.files, ride.prompt, ride.steps),
+    );
+    // Where the carried log's commands ran (#1151's re-review): its last
+    // `tool_call` up to the meditation, as that line names it.
+    let recorded_cwd = lines
+        .iter()
+        .take_while(|line| line.seq <= seq)
+        .filter_map(|line| match &line.event {
+            Event::ToolCall { cwd: Some(cwd), .. } => Some(cwd.clone()),
+            _ => None,
+        })
+        .last();
     Ok(Carry {
         trunk,
         object,
@@ -124,10 +137,64 @@ pub fn read_at(log: &Path, sealed: &[String], at: Option<u64>) -> Result<Carry, 
         phase: carried_phase(&lines, seq),
         riding,
         riding_files,
-        riding_prompt: None,
-        riding_steps: 0,
-        recorded_cwd: None,
+        riding_prompt,
+        riding_steps,
+        recorded_cwd,
     })
+}
+
+/// The lines of `text` a carry from the meditation at `at` -- the last
+/// that kept a trunk when `at` is `None` -- reads (#1151's re-review):
+/// through that meditation, then through the requests its ride is checked
+/// against (the turn's next trunk request and its outcome, and the next
+/// trunk request after it before another refill or tangent), parsed and
+/// checked as a log. A line after them is not read, so one this build's
+/// checks refuse leaves the carry alone.
+///
+/// # Errors
+///
+/// When the lines it reads are not a log; a log in which it finds no such
+/// meditation is read whole, and refused as the whole is.
+pub fn lines_for(text: &str, at: Option<u64>) -> Result<Vec<log::Line>, String> {
+    let raw: Vec<&str> = text.split_inclusive('\n').collect();
+    let peek: Vec<serde_json::Value> = raw
+        .iter()
+        .map(|line| serde_json::from_str(line).unwrap_or_default())
+        .collect();
+    let kind = |i: usize| peek[i]["kind"].as_str().unwrap_or_default();
+    let seam = match at {
+        Some(at) => (0..raw.len()).find(|&i| peek[i]["seq"].as_u64() == Some(at)),
+        None => (0..raw.len())
+            .rev()
+            .find(|&i| kind(i) == "meditation" && peek[i].get("trunk_sha256").is_some()),
+    };
+    let Some(seam) = seam else {
+        return log::parse(text).map_err(|why| why.to_string());
+    };
+    let turn = peek[seam]["at_turn"].as_u64();
+    let trunk_request = |i: usize| kind(i) == "request" && peek[i]["lane"] == "trunk";
+    let mut end = seam;
+    let first = (seam + 1..raw.len())
+        .take_while(|&i| !(kind(i) == "turn.settled" && peek[i]["turn"].as_u64() == turn))
+        .find(|&i| trunk_request(i));
+    if let Some(first) = first {
+        end = first;
+        let request = peek[first]["seq"].as_u64();
+        if let Some(outcome) = (first + 1..raw.len()).find(|&i| {
+            peek[i]["to_request"].as_u64() == request
+                || (matches!(kind(i), "cancelled" | "request.failed")
+                    && peek[i]["request"].as_u64() == request)
+        }) {
+            end = end.max(outcome);
+        }
+        if let Some(next) = (first + 1..raw.len())
+            .take_while(|&i| !matches!(kind(i), "meditation" | "tangent.open" | "tangent.close"))
+            .find(|&i| trunk_request(i))
+        {
+            end = end.max(next);
+        }
+    }
+    log::parse(&raw[..=end].concat()).map_err(|why| why.to_string())
 }
 
 /// The phase a carried session is in after the meditation at `seq` (#1071):
@@ -172,7 +239,19 @@ pub fn carried_phase(lines: &[log::Line], seq: u64) -> Option<String> {
 /// were replaced, 0 among them (the carry was rerooted and nothing named the
 /// old root), and the text's digests as sent. Returns how many.
 pub fn reroot(carry: &mut Carry, roots: &[(String, String)]) -> u64 {
-    let roots: Vec<(&str, &str)> = roots
+    // Each root's `~` spelling too (#1151's re-review): a working directory
+    // under the home directory is written `~/...` (`tool_loop::cwd_label`),
+    // and so rerooted to the new root's own spelling.
+    let home = std::env::var_os("HOME").map(std::path::PathBuf::from);
+    let label = |path: &str| super::tool_loop::cwd_label(Path::new(path), home.as_deref());
+    let spelled: Vec<(String, String)> = roots
+        .iter()
+        .flat_map(|(from, to)| {
+            let tilde = (label(from) != *from).then(|| (label(from), label(to)));
+            std::iter::once((from.clone(), to.clone())).chain(tilde)
+        })
+        .collect();
+    let roots: Vec<(&str, &str)> = spelled
         .iter()
         .map(|(from, to)| (from.trim_end_matches('/'), to.trim_end_matches('/')))
         .filter(|(from, to)| !from.is_empty() && from != to)
@@ -203,6 +282,12 @@ pub fn reroot(carry: &mut Carry, roots: &[(String, String)]) -> u64 {
     }
     if let Some(object) = carry.object.as_mut() {
         swap(object);
+    }
+    // Not text the model is sent: rerooted alike, counted apart.
+    if let Some(cwd) = carry.recorded_cwd.as_mut() {
+        for (from, to) in &roots {
+            *cwd = rooted_at(cwd, from, to).0;
+        }
     }
     if !roots.is_empty() {
         let sent = crate::client::shape::messages_json(&carry.trunk);

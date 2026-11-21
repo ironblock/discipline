@@ -2873,6 +2873,21 @@ struct State {
     riding: Vec<Message>,
     /// The files the ask that rode had attached (#1151), until it is resumed.
     riding_files: Vec<(log::RecordedFile, Vec<u8>)>,
+    /// The measured prompt of the request the recording sent after the
+    /// carried refill, and the steps its turn had taken (#1151's re-review),
+    /// until the turn is resumed.
+    riding_prompt: Option<u64>,
+    riding_steps: u64,
+    /// The carried trunk as this session was started from it (#1151's
+    /// re-review), until a recording keeps it: what a reader of this log
+    /// rebuilds its heads from.
+    carried_json: Option<String>,
+    /// The refills that replaced the trunk (#1151's re-review): what the
+    /// stop counts, where a refill that changed nothing is none.
+    changed_refills: u64,
+    /// The resumed turn whose first request is being opened (#1151's
+    /// re-review): no refill is made before it.
+    resuming: Option<u32>,
     /// The latest prompt the operator decided, by its request and call id:
     /// what `serve`'s `answered` event names.
     answered: Option<(u64, String)>,
@@ -3173,6 +3188,11 @@ impl State {
             stop_after: None,
             riding: Vec::new(),
             riding_files: Vec::new(),
+            riding_prompt: None,
+            riding_steps: 0,
+            carried_json: None,
+            changed_refills: 0,
+            resuming: None,
             answered: None,
             interview,
             forking: None,
@@ -3587,7 +3607,7 @@ impl State {
     /// trunk calls, it has made N, or it has refilled since it started.
     fn stop_due(&self) -> bool {
         self.stop_after.is_some_and(|calls| {
-            self.refills > 0
+            self.changed_refills > 0
                 || self
                     .log
                     .iter()
@@ -4123,6 +4143,11 @@ impl<S: Streaming + 'static> Session<S> {
         if state.recording.is_none() {
             state.recording = Some(dir);
         }
+        // The trunk a carried session started from (#1151's re-review), by
+        // its digest beside the log, as the first session kept it.
+        if let (Some(json), Some(dir)) = (state.carried_json.take(), state.recording.clone()) {
+            let _ = super::attach::kept_whole(&dir, json.as_bytes(), "application/json");
+        }
     }
 
     /// This session, started from another's meditation (#948): its trunk the
@@ -4135,6 +4160,7 @@ impl<S: Streaming + 'static> Session<S> {
     ///
     /// When the object's dump does not read, or a dump is carried into a
     /// session that keeps no working memory.
+    #[allow(clippy::too_many_lines)]
     pub fn with_carry(self, carry: Carry) -> Result<Self, String> {
         {
             let mut state = self.shared.lock();
@@ -4142,13 +4168,33 @@ impl<S: Streaming + 'static> Session<S> {
             // its refill said where its commands ran, and this session's run
             // where its first ask will say. Another is refused, never sent,
             // unless the carry was rerooted into this one.
-            if let Some(here) = state.start_cwd.as_deref()
-                && let Some(there) = other_cwd(&carry.trunk, here)
-            {
-                return Err(format!(
-                    "the carried trunk says `{there}`, and this session's commands run where it \
-                     says `{here}`: --carried-root FROM=TO reroots the carry into this worktree"
-                ));
+            // A log whose refills name no directory (before #1112) names
+            // where its commands ran on its `tool_call` lines.
+            let reroot = "reroot it into this worktree (`serve --carried-root FROM=TO`, \
+                          `scenario` and `arms` `--carried-root DIR`)";
+            if let Some(here) = state.start_cwd.as_deref() {
+                let named = named_cwd(&carry.trunk)
+                    .or_else(|| carry.recorded_cwd.as_deref().map(start_cwd_note));
+                // A root that replaced nothing named no directory the carry
+                // ran in, unless it already ran here.
+                if carry
+                    .from
+                    .rerooted
+                    .as_ref()
+                    .is_some_and(|rerooted| rerooted.replaced == 0)
+                    && named.as_deref() != Some(here)
+                {
+                    return Err(format!(
+                        "the carried root replaced nothing: the carry names no path under it, \
+                         and no directory this session runs in; {reroot} from the root it ran in"
+                    ));
+                }
+                if let Some(there) = named.as_ref().filter(|there| *there != here) {
+                    return Err(format!(
+                        "the carried trunk says `{there}`, and this session's commands run \
+                         where it says `{here}`: {reroot}"
+                    ));
+                }
             }
             // The head sent is the carried trunk's, so the start names the
             // nonce it carries, not the one this session drew (#969).
@@ -4160,6 +4206,9 @@ impl<S: Streaming + 'static> Session<S> {
             // What rode after it (#1151), for `resume` to send.
             state.riding = carry.riding;
             state.riding_files = carry.riding_files;
+            state.riding_prompt = carry.riding_prompt;
+            state.riding_steps = carry.riding_steps;
+            state.carried_json = Some(crate::client::shape::messages_json(&state.trunk));
             // The phase the carried session was in (#1071), when the graph
             // has it: its rules ride in the carried refill, so no note is due
             // unless that refill has no system prompt to hold them. With none
@@ -4278,6 +4327,26 @@ impl<S: Streaming + 'static> Session<S> {
             .iter()
             .filter(|message| message.role == Role::Assistant)
             .count() as u64;
+        // Every step the recorded turn took counts (#1151's re-review): those
+        // its refills compacted as well as those that rode.
+        let taken = state.riding_steps.max(ridden);
+        // The ridden steps, kept beside the log by digest as a trunk is, so a
+        // reader of this log rebuilds the turn's heads from them.
+        let from_steps = riding
+            .iter()
+            .position(|message| message.role == Role::Assistant)
+            .unwrap_or(riding.len());
+        let steps_json = crate::client::shape::messages_json(&riding[from_steps..]);
+        let steps_sha256 = state
+            .recording
+            .as_deref()
+            .and_then(|dir| {
+                super::attach::kept_whole(dir, steps_json.as_bytes(), "application/json").ok()
+            })
+            .map_or_else(
+                || crate::digest::sha256_hex(steps_json.as_bytes()),
+                |kept| kept.sha256,
+            );
         state.turns += 1;
         state.step_counters.covered.clear();
         state.gap_firings.clear();
@@ -4292,6 +4361,7 @@ impl<S: Streaming + 'static> Session<S> {
             resumed: Some(log::Resumed {
                 meditation_seq,
                 turn_steps_kept: ridden,
+                steps_sha256,
             }),
         });
         // Its notes, each on a line of its own as the walk rebuilds an
@@ -4306,14 +4376,19 @@ impl<S: Streaming + 'static> Session<S> {
         let mut shape = self.shared.template.clone();
         shape.messages.clone_from(&state.trunk);
         shape.messages.extend(riding.iter().cloned());
-        let deferred = carries_native(&state)
-            && window_split(&self.shared.template, &state, &shape, false).is_some();
-        let first = (!deferred)
-            .then(|| trunk_opening(&self.shared.template, &mut state, turn, &mut shape))
-            .flatten();
+        // The request the recording sent after the refill, sent as it was:
+        // sized from what the recording measured of it, and with no second
+        // refill before it (#1151's re-review).
+        if let Some(measured) = state.riding_prompt.take() {
+            state.measured_prompt = Some((measured, estimate_of(&shape)));
+        }
+        state.resuming = Some(turn);
+        let first = trunk_opening(&self.shared.template, &mut state, turn, &mut shape);
+        state.resuming = None;
         drop(state);
         self.shared.changed.notify_all();
-        let steps = u32::try_from(ridden).unwrap_or(u32::MAX).saturating_add(1);
+        let deferred = false;
+        let steps = u32::try_from(taken).unwrap_or(u32::MAX).saturating_add(1);
         spawn_turn(
             &self.shared,
             (shape, riding, (turn, steps)),
@@ -4792,6 +4867,9 @@ impl<S: Streaming + 'static> Session<S> {
             crate::meditation::Reason::Operator,
             to.map(str::to_owned),
         );
+        // A refill made now, while awaiting, is the stop's too (#1151's
+        // re-review); one queued for its audit or warm, when it is made.
+        state.ended_if_stopped();
         drop(state);
         self.shared.changed.notify_all();
         if queued {
@@ -6587,7 +6665,7 @@ pub fn line_of(logged: &Logged) -> log::Line {
             task,
             resumed,
         } => log::Event::Ask {
-            resumed: *resumed,
+            resumed: resumed.clone(),
             task: task.clone(),
             turn: *turn,
             text: text.clone(),
@@ -9143,8 +9221,11 @@ fn trunk_opening(
     // The operator's wraps waiting since the last trunk request (#1030).
     apply_wraps(state, shape, None, turn);
     // Under a native summary a due meditation was made on the turn's
-    // thread before this (#936); here it refills with none.
-    window_meditation(template, state, shape, false, None);
+    // thread before this (#936); here it refills with none. A resumed
+    // turn's first request was sent after a refill, never before one.
+    if state.resuming != Some(turn) {
+        window_meditation(template, state, shape, false, None);
+    }
     // A refill just made is the stop's too.
     if state.stop_due() {
         stop_turn(template, state, turn);
@@ -10213,6 +10294,9 @@ fn refilled(
     state.refills += 1;
     refilled.extend(kept);
     let prefix_hash_after = digest(&refilled);
+    if refilled != state.trunk {
+        state.changed_refills += 1;
+    }
     state.trunk = refilled;
     // What a session carried from this refill starts from (#948): the
     // trunk exactly as sent and the working object's dump, kept in the
@@ -11907,7 +11991,8 @@ fn meditation_work<S: Streaming>(shared: &Shared<S>) {
     state.move_to(Settlement::Awaiting);
     state.push(meditated);
     state.withdraw_off_the_trunk();
-    if state.ending {
+    // A refill while awaiting is the stop's too (#1151's re-review).
+    if state.ending || state.stop_due() {
         state.ending = false;
         state.move_to(Settlement::Ended);
     }
@@ -14092,23 +14177,34 @@ pub fn start_cwd_note(cwd: &str) -> String {
         .expect("START_CWD's one hole is `cwd`")
 }
 
-/// The first line of `trunk`'s user and system messages -- their content
-/// and their notes -- that names a working directory as [`start_cwd_note`]
-/// words it, when it is not `here` (#1151's review): what a carried refill
-/// says of where its commands ran.
-fn other_cwd(trunk: &[Message], here: &str) -> Option<String> {
+/// The line that names a working directory in `trunk`'s user and system
+/// messages, the last it holds (#1151's re-review): another, when they name
+/// two, before the one they agree on.
+fn named_cwd(trunk: &[Message]) -> Option<String> {
+    let lines: Vec<String> = cwd_lines(trunk).collect();
+    let last = lines.last()?.clone();
+    Some(lines.into_iter().find(|line| *line != last).unwrap_or(last))
+}
+
+/// Each line of `trunk`'s user and system messages -- their content and
+/// their notes -- that names a working directory as [`start_cwd_note`]
+/// words it.
+fn cwd_lines(trunk: &[Message]) -> impl Iterator<Item = String> + '_ {
     let marked = start_cwd_note("\u{1}");
-    let (before, after) = marked.split_once('\u{1}')?;
+    let (before, after) = marked
+        .split_once('\u{1}')
+        .map(|(before, after)| (before.to_owned(), after.to_owned()))
+        .unwrap_or_default();
     trunk
         .iter()
         .filter(|message| matches!(message.role, Role::User | Role::System))
         .flat_map(|message| std::iter::once(&message.content).chain(&message.notes))
         .flat_map(|text| text.lines())
-        .find(|line| {
-            line.len() > before.len() + after.len()
-                && line.starts_with(before)
-                && line.ends_with(after)
-                && *line != here
+        .filter(move |line| {
+            !before.is_empty()
+                && line.len() > before.len() + after.len()
+                && line.starts_with(&before)
+                && line.ends_with(&after)
         })
         .map(str::to_owned)
 }
@@ -16311,7 +16407,8 @@ fn pool_settled(template: &RequestShape, state: &mut State) -> bool {
         Some(Deferred::TurnOver) => turn_over(template, state),
         Some(Deferred::Move) => {
             state.move_to(Settlement::Awaiting);
-            if state.ending {
+            // The session's stop, come by now (#1151's re-review).
+            if state.ending || state.stop_due() {
                 state.ending = false;
                 state.move_to(Settlement::Ended);
             }

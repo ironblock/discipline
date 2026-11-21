@@ -3767,11 +3767,15 @@ fn a_run_from_a_chosen_refill_of_a_live_log_carries_that_refills_trunk_and_workt
     // Carried with no reroot, it is refused; rerooted from that checkout,
     // its paths are replaced and it carries; rerooted from a root it never
     // names, nothing is replaced, and it is refused.
-    let real = dir.join("real");
-    std::fs::create_dir_all(real.join("files")).expect("a recording");
+    let realpaths = dir.join("real");
+    std::fs::create_dir_all(realpaths.join("files")).expect("a recording");
     for entry in std::fs::read_dir(out.join("files")).expect("the recording") {
         let entry = entry.expect("an entry");
-        std::fs::copy(entry.path(), real.join("files").join(entry.file_name())).expect("a copy");
+        std::fs::copy(
+            entry.path(),
+            realpaths.join("files").join(entry.file_name()),
+        )
+        .expect("a copy");
     }
     let kept_sha = one["trunk_sha256"]
         .as_str()
@@ -3791,10 +3795,10 @@ fn a_run_from_a_chosen_refill_of_a_live_log_carries_that_refills_trunk_and_workt
     let checkout = "/srv/a-recorded-checkout";
     let rewritten = kept.replace(&shown, checkout);
     let rewritten_sha = diet::digest::sha256_hex(rewritten.as_bytes());
-    std::fs::write(real.join("files").join(&rewritten_sha), &rewritten).expect("the trunk");
+    std::fs::write(realpaths.join("files").join(&rewritten_sha), &rewritten).expect("the trunk");
     let log_text = std::fs::read_to_string(&recorded).expect("the log");
     std::fs::write(
-        real.join("session.log"),
+        realpaths.join("session.log"),
         log_text.replace(&kept_sha, &rewritten_sha),
     )
     .expect("the log");
@@ -3803,7 +3807,7 @@ fn a_run_from_a_chosen_refill_of_a_live_log_carries_that_refills_trunk_and_workt
             "--out".into(),
             dir.join(out).into(),
             "--from-carry".into(),
-            real.join("session.log").into(),
+            realpaths.join("session.log").into(),
             "--carry-at".into(),
             at.clone().into(),
         ];
@@ -3959,6 +3963,7 @@ fn a_run_from_a_chosen_refill_of_a_live_log_carries_that_refills_trunk_and_workt
 /// marked resumed from that refill with the one step that rode, and the
 /// turn goes on and settles.
 #[test]
+#[allow(clippy::too_many_lines)]
 fn a_run_from_a_mid_turn_refill_resumes_the_cut_turn_through_serve() {
     let dir = scratch("carry-at-split");
     let out = dir.join("out-first");

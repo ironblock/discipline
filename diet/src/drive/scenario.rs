@@ -2762,7 +2762,8 @@ pub struct RunOptions {
     /// v28), as given and as resolved: serve reroots the carried text from
     /// each into this session's own worktree's same form. The runner sets it
     /// for the next session of a run; a carry taken from another run's log
-    /// (`--from-carry`) names none, and its text is carried as kept.
+    /// (`--from-carry`) names one when `--carried-root DIR` gives it (#1151's
+    /// re-review), and else none, its text carried as kept.
     pub carried_root: Option<(std::path::PathBuf, std::path::PathBuf)>,
     /// The phase tool's description in place of the pinned template
     /// (`--phase-tool-description FILE`, v27): passed to serve.
@@ -4215,7 +4216,8 @@ fn script_ran(log: &std::path::Path, text: &str) -> Result<bool, Failure> {
     use crate::formats::log::Event;
     let written =
         std::fs::read_to_string(log).map_err(|why| Failure(format!("{}: {why}", log.display())))?;
-    let lines = crate::formats::log::parse(&written)
+    let first = written.split_inclusive('\n').next().unwrap_or_default();
+    let lines = crate::formats::log::parse(first)
         .map_err(|why| Failure(format!("{}: {why}", log.display())))?;
     Ok(matches!(
         lines.first().map(|line| &line.event),
@@ -4269,7 +4271,7 @@ fn carried_worktree(
     };
     let written =
         std::fs::read_to_string(log).map_err(|why| Failure(format!("{}: {why}", log.display())))?;
-    let lines = crate::formats::log::parse(&written)
+    let lines = crate::drive::carry::lines_for(&written, options.carry_at)
         .map_err(|why| Failure(format!("{}: {why}", log.display())))?;
     let worktree_of = |line: &crate::formats::log::Line| match &line.event {
         Event::Meditation {

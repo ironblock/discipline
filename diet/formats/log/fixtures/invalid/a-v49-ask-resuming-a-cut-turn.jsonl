@@ -1,5 +1,5 @@
 {"compaction_persists":true,"head":[{"content":"you are the trunk","role":"system"}],"kind":"session.start","model":"a-model","notes_in_the_ask":true,"opened":1790000000000,"seq":0,"t":0,"version":49}
-{"kind":"ask","resumed_meditation_seq":16,"resumed_turn_steps_kept":1,"seq":1,"t":5,"text":"build it","turn":1}
+{"kind":"ask","resumed_meditation_seq":16,"resumed_steps_sha256":"fcf7713f8ad23e932a32313169307296e46c28b39eef076b93d5656f2f1e4f94","resumed_turn_steps_kept":1,"seq":1,"t":5,"text":"build it","turn":1}
 {"kind":"notice","seq":2,"t":5,"text":"a note that rode","turn":1}
 {"from":"awaiting","kind":"settlement","seq":3,"t":10,"to":"turn"}
 {"head_sha256":"1bfd211e2e023cbe1c522fd4542444e82f4a70103069011c42f3aec4fc994806","kind":"request","lane":"trunk","max_tokens":64,"seq":4,"sized_tokens":10,"t":15,"turn":1}

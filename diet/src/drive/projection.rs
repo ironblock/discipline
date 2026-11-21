@@ -642,6 +642,7 @@ fn walk_of<'a>(
                 notes_in_the_ask,
                 compaction_persists,
                 phase_document,
+                carried_from,
                 ..
             },
         ..
@@ -671,6 +672,24 @@ fn walk_of<'a>(
         .map(|message| Message::new(role_of(message.role), message.content.clone()))
         .collect();
     walk.trunk.clone_from(&walk.head);
+    // A carried session's trunk (#1151's re-review), as it was started from
+    // it: kept beside the log by the digest its start names -- the rerooted
+    // text's, else the variant's, else the kept trunk's.
+    if let (Some(from), Some(dir)) = (carried_from, recording) {
+        let digests = from
+            .rerooted
+            .as_ref()
+            .map(|rerooted| rerooted.trunk_sha256.clone())
+            .into_iter()
+            .chain(from.variant_sha256.clone())
+            .chain(std::iter::once(from.trunk_sha256.clone()));
+        if let Some(trunk) = digests
+            .into_iter()
+            .find_map(|sha256| kept_messages(dir, &sha256))
+        {
+            walk.trunk = trunk;
+        }
+    }
     // The phase it opened in (#787), which the start row names.
     walk.phase = phase_document.as_ref().map(phase_named);
     walk.phase_named.clone_from(&walk.phase);
@@ -686,6 +705,14 @@ pub struct Ride {
     pub messages: Vec<Message>,
     /// The ask's attached files, each with its bytes.
     pub files: Vec<(log::RecordedFile, Vec<u8>)>,
+    /// The measured prompt of the request sent after the refill, when the
+    /// log names one: its timings, or a hosted API's usage.
+    pub prompt: Option<u64>,
+    /// The steps the turn had taken at the refill (#1151's re-review): each
+    /// earlier refill's compacted ones in the turn, then this refill's
+    /// compacted and kept ones; for a log whose compactions did not persist,
+    /// this refill's alone, which counted the whole turn.
+    pub steps: u64,
 }
 
 /// What rode after the trunk the meditation at `seq` refilled, when it cut
@@ -779,6 +806,26 @@ pub fn riding(
             .ok_or_else(|| format!("{}: no recording to read it back from", file.path))?;
         files.push((file.clone(), bytes));
     }
+    let persists = matches!(
+        lines.first().map(|line| &line.event),
+        Some(Line::SessionStart {
+            compaction_persists: Some(true),
+            ..
+        })
+    );
+    let steps = lines[..=at]
+        .iter()
+        .filter_map(|line| match &line.event {
+            Line::Meditation {
+                at_turn,
+                turn_steps: Some(steps),
+                ..
+            } if *at_turn == turn => Some((line.seq, *steps)),
+            _ => None,
+        })
+        .filter(|(at_seq, _)| persists || *at_seq == seq)
+        .map(|(at_seq, steps)| steps.compacted + if at_seq == seq { steps.kept } else { 0 })
+        .sum::<u64>();
     let sent_on = |carried: &[Message]| {
         let mut messages = trunk.to_vec();
         messages.extend(carried.iter().cloned());
@@ -809,12 +856,27 @@ pub fn riding(
         return Ok(Some(Ride {
             messages: rode,
             files,
+            prompt: None,
+            steps,
         }));
     };
+    let prompt = walk
+        .outcome
+        .get(&request)
+        .and_then(|outcome| match outcome {
+            Line::Response { timings, usage, .. } => timings
+                .as_ref()
+                .filter(|timings| timings.prompt_n.is_some() || timings.cache_n.is_some())
+                .map(|timings| timings.prompt_n.unwrap_or(0) + timings.cache_n.unwrap_or(0))
+                .or_else(|| usage.as_ref().map(|usage| usage.prompt_tokens)),
+            _ => None,
+        });
     if walk.tools.is_err() {
         return Ok(Some(Ride {
             messages: rode,
             files,
+            prompt,
+            steps,
         }));
     }
     let contradicted = |request: u64| {
@@ -860,7 +922,46 @@ pub fn riding(
     Ok(Some(Ride {
         messages: rode,
         files,
+        prompt,
+        steps,
     }))
+}
+
+/// The messages kept as `sha256` in `dir`'s recording, when they are there,
+/// are those bytes and read as messages.
+fn kept_messages(dir: &std::path::Path, sha256: &str) -> Option<Vec<Message>> {
+    let bytes = std::fs::read(dir.join("files").join(sha256)).ok()?;
+    if crate::digest::sha256_hex(&bytes) != sha256 {
+        return None;
+    }
+    crate::client::shape::messages_of_json(std::str::from_utf8(&bytes).ok()?).ok()
+}
+
+/// Steps that rode into a resumed turn (#1151's re-review), from their
+/// messages: each assistant message, its calls, and the result shown each.
+fn ridden_steps(messages: &[Message]) -> Vec<Step> {
+    messages
+        .iter()
+        .enumerate()
+        .filter(|(_, message)| message.role == Role::Assistant)
+        .map(|(at, said)| Step {
+            request: 0,
+            said: said.clone(),
+            calls: said
+                .tool_calls
+                .iter()
+                .map(|call| {
+                    let shown = messages[at + 1..]
+                        .iter()
+                        .take_while(|message| message.role == Role::Tool)
+                        .find(|message| message.tool_call_id.as_deref() == Some(call.id.as_str()))
+                        .cloned();
+                    (call.clone(), shown)
+                })
+                .collect(),
+            unrebuilt: None,
+        })
+        .collect()
 }
 
 /// The walk over a log's lines after its first.
@@ -1389,8 +1490,22 @@ impl<'a> Walk<'a> {
                 resumed,
                 ..
             } => {
+                // The steps that rode into a resumed turn (#1151's
+                // re-review): kept beside the log, its first steps; else
+                // only counted, as this log does not hold them.
                 if let Some(resumed) = resumed {
-                    self.ridden.insert(*turn, resumed.turn_steps_kept);
+                    match self
+                        .recording
+                        .as_deref()
+                        .and_then(|dir| kept_messages(dir, &resumed.steps_sha256))
+                    {
+                        Some(messages) => {
+                            self.steps.insert(*turn, ridden_steps(&messages));
+                        }
+                        None => {
+                            self.ridden.insert(*turn, resumed.turn_steps_kept);
+                        }
+                    }
                 }
                 self.asks.insert(*turn, text.clone());
                 self.ask(line.seq, *turn, files.as_ref());

@@ -135,8 +135,9 @@ fn carry_usage(out: &mut String) {
     out.push_str("head of the request LOG sent after the refill checks all of it but its last\n");
     out.push_str("message; LOG's next trunk request before another refill checks that one.\n");
     out.push_str("The ask names where it resumed from (`resumed_meditation_seq`,\n");
-    out.push_str("`resumed_turn_steps_kept`, log v50). A carried trunk naming another working\n");
-    out.push_str("directory than this session's is refused unless --carried-root reroots it. A\n");
+    out.push_str("`resumed_turn_steps_kept`, `resumed_steps_sha256`, log v50). A carry naming\n");
+    out.push_str("another working directory than this session's is refused unless\n");
+    out.push_str("--carried-root reroots it, its `~` spelling too; one replacing nothing is. A\n");
     out.push_str("carried session sends this build's tools and wording, so its baseline is\n");
     out.push_str("a carry with no lever moved, never the recorded continuation.\n");
     out.push_str("--stop-after N: the session stops after its Nth trunk call, or at its\n");
@@ -762,6 +763,9 @@ fn serve(args: &[String]) -> ExitCode {
         }
         (carry, _, _) => carry,
     };
+    // The variant's bytes, kept beside this session's log once it opens
+    // (#1151's re-review): what a reader of the log rebuilds its trunk from.
+    let mut variant_bytes = None;
     // A delivery variant (v27, #948): the carried notes sent another way, a
     // trunk in place of the kept one, named beside the trunk it varies.
     let carry = match (carry, carry_trunk.as_deref()) {
@@ -786,6 +790,7 @@ fn serve(args: &[String]) -> ExitCode {
             };
             carry.trunk = trunk;
             carry.from.variant_sha256 = Some(diet::digest::sha256_hex(&bytes));
+            variant_bytes = Some(bytes);
             Some(carry)
         }
     };
@@ -800,7 +805,17 @@ fn serve(args: &[String]) -> ExitCode {
             );
         }
         (Some(mut carry), false) => {
-            diet::drive::carry::reroot(&mut carry, &carried_roots);
+            // Into the worktree as this session shows it (#1151's re-review):
+            // a scenario's placeholder, else its path.
+            let mut shown = diet::drive::shown::ShownRoots::none();
+            for root in &shown_roots {
+                let _ = shown.add(root);
+            }
+            let roots: Vec<(String, String)> = carried_roots
+                .iter()
+                .map(|(from, to)| (from.clone(), shown.text(to)))
+                .collect();
+            diet::drive::carry::reroot(&mut carry, &roots);
             Some(carry)
         }
     };
@@ -1425,6 +1440,9 @@ fn serve(args: &[String]) -> ExitCode {
     // Every session keeps its refills' carries beside its log (#948).
     if let Some(dir) = &attaching.recording {
         session.keep_recording_in(dir.clone());
+        if let Some(bytes) = &variant_bytes {
+            let _ = diet::drive::attach::kept_whole(dir, bytes, "application/json");
+        }
     }
     let opened = session.opened();
     let watching = std::sync::Arc::clone(&session);

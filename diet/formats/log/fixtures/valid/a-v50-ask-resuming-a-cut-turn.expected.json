@@ -19,6 +19,7 @@
     {
       "kind": "ask",
       "resumed_meditation_seq": 16,
+      "resumed_steps_sha256": "fcf7713f8ad23e932a32313169307296e46c28b39eef076b93d5656f2f1e4f94",
       "resumed_turn_steps_kept": 1,
       "seq": 1,
       "t": 5,

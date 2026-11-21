@@ -276,8 +276,10 @@
 //! For a reader of earlier logs, the migration is nothing: no session was
 //! told to stop. An `ask` that resumes a turn a carried refill cut names
 //! that meditation's `seq` in the carried log, `resumed_meditation_seq`, and
-//! how many of its steps rode after the refill, `resumed_turn_steps_kept`:
-//! both or neither, and its `text` and `files` are the ask that rode. A log
+//! how many of its steps rode after the refill, `resumed_turn_steps_kept`,
+//! and the sha256 of those steps' messages kept in the recording,
+//! `resumed_steps_sha256`: all three or none, and its `text` and `files`
+//! are the ask that rode. A log
 //! that declares 49 or less and carries them is refused too.
 //!
 //! v49 (audit 9) logs what an operator's fork was sent: under a set whose
@@ -1638,12 +1640,16 @@ pub struct RecordedFile {
 /// Where a resumed turn came from (v50, #1151): the meditation of the
 /// carried log that cut it, by its `seq`, and how many of its steps rode
 /// after that refill -- steps this log does not hold.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Resumed {
     /// The `seq` of the meditation in the log the session was carried from.
     pub meditation_seq: u64,
     /// The steps that rode, each an assistant message and its results.
     pub turn_steps_kept: u64,
+    /// The sha256 of those steps' messages, kept in the recording as a
+    /// trunk is (#1151's re-review): what a reader rebuilds the turn's heads
+    /// from.
+    pub steps_sha256: String,
 }
 
 /// What happened.
@@ -5252,10 +5258,12 @@ fn from_object(object: &BTreeMap<String, Value>) -> Result<Line, String> {
             resumed: match (
                 fields.optional_count("resumed_meditation_seq")?,
                 fields.optional_count("resumed_turn_steps_kept")?,
+                object.contains_key("resumed_steps_sha256"),
             ) {
-                (Some(meditation_seq), Some(turn_steps_kept)) => Some(Resumed {
+                (Some(meditation_seq), Some(turn_steps_kept), true) => Some(Resumed {
                     meditation_seq,
                     turn_steps_kept,
+                    steps_sha256: fields.digest("resumed_steps_sha256")?,
                 }),
                 _ => None,
             },
@@ -7891,6 +7899,7 @@ pub fn schema(kind: Kind) -> &'static [Field] {
                 may_v18("task", Text),
                 may_v50("resumed_meditation_seq", Count),
                 may_v50("resumed_turn_steps_kept", Count),
+                may_v50("resumed_steps_sha256", Holds::Digest),
             ];
             F
         }
@@ -8505,7 +8514,11 @@ pub fn all_or_none(kind: Kind) -> &'static [&'static str] {
         // The running turn a window meditation split (v8, #813).
         Kind::Meditation => &["turn_steps_kept", "turn_steps_compacted"],
         // Where a resumed turn came from (v50, #1151).
-        Kind::Ask => &["resumed_meditation_seq", "resumed_turn_steps_kept"],
+        Kind::Ask => &[
+            "resumed_meditation_seq",
+            "resumed_turn_steps_kept",
+            "resumed_steps_sha256",
+        ],
         // What a fork refused for the pool did not fit beside (v8, #782).
         Kind::ForkSettled => &["window", "trunk_tokens", "beside_tokens", "fork_tokens"],
         // The entry a note was merged into for its likeness, and their
@@ -9054,6 +9067,7 @@ fn to_value(line: &Line) -> Value {
             if let Some(resumed) = resumed {
                 put("resumed_meditation_seq", count(resumed.meditation_seq));
                 put("resumed_turn_steps_kept", count(resumed.turn_steps_kept));
+                put("resumed_steps_sha256", text(&resumed.steps_sha256));
             }
             put("turn", count(u64::from(*turn)));
             put("text", text(asked));
