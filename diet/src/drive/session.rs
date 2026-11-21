@@ -9797,7 +9797,7 @@ impl<'a> Sent<'a> {
 
 /// `shown`, a call's result after the output cap, with the block of what it
 /// changed in the worktree since [`count_before`] (#1149): the files and
-/// their lines, or none; a file an `edit` or `write` names outside the
+/// their lines, or none; a file an `edit` or `write` wrote outside the
 /// working directory, as not counted. Then those of them, and the file an
 /// `edit` or `write` names (`named`, with whether it succeeded), whose text
 /// the context `sent` does not show ([`shown_files`]); the call's own
@@ -9835,11 +9835,13 @@ fn count_after<S>(
     let mut outside = Vec::new();
     if let Some((file, wrote)) = named {
         let key = keys.key(&file);
+        // Outside the working directory, named as not counted when it was
+        // written; a failed one changed nothing.
         if wrote {
             seen.insert(key.clone());
-        }
-        if !keys.inside(&key) {
-            outside.push(keys.named(&key));
+            if !keys.inside(&key) {
+                outside.push(keys.named(&key));
+            }
         }
         marked.push(key);
     }
@@ -9915,6 +9917,7 @@ fn showing_calls(state: &State) -> Vec<super::shown_files::Showing> {
                 line.turn,
                 (&line.name, &line.arguments),
                 line.shown.as_deref()?,
+                &|text| state.shown_roots.text(text),
             )?;
             let wrap = state.wraps.get(&logged.seq);
             Some(super::shown_files::Showing {
@@ -25366,7 +25369,12 @@ pub(in crate::drive) mod tests {
             0,
         );
         std::fs::write(tree.join("huge.png"), huge).expect("written");
-        let big: String = (0..40).map(|n| format!("row {n}\n")).collect();
+        let big: String = (0..40).fold(String::new(), |mut big, n| {
+            use std::fmt::Write as _;
+            // Long enough that the cap's notice makes it shorter.
+            let _ = writeln!(big, "row {n}: {}", "x".repeat(60));
+            big
+        });
         std::fs::write(tree.join("big.txt"), big).expect("written");
         std::fs::write(tree.join("locked.txt"), "lock\n").expect("written");
         std::fs::set_permissions(
@@ -25396,8 +25404,7 @@ pub(in crate::drive) mod tests {
                 other => panic!("{name} {raw}: {other:?}"),
             }
         }
-        let (mut shape, mut tools) = counting(&tree, tool_loop::ToolSurface::Standard, true);
-        shape.tools = tool_loop::ToolSurface::Standard.tools();
+        let (shape, mut tools) = counting(&tree, tool_loop::ToolSurface::Standard, true);
         tools.output_cap = crate::drive::output::OutputCap::Capped {
             max_lines: 20,
             max_bytes: 51_200,

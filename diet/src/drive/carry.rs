@@ -184,7 +184,7 @@ fn carried_calls(
             else {
                 return None;
             };
-            let mut showing = Showing::of(id, *turn, (name, arguments), shown)?;
+            let mut showing = Showing::of(id, *turn, (name, arguments), shown, &same)?;
             match wraps.get(&line.seq) {
                 Some((true, span)) => showing.span = Some(span.clone()),
                 Some((false, _)) => showing.cleared = true,
@@ -658,11 +658,6 @@ mod tests {
         let _ = std::fs::remove_dir_all(&dir);
     }
 
-    /// #948 (smoke 2): the carried text names the first session's worktree;
-    /// rerooted, every occurrence names the new one instead, in the trunk's
-    /// content, reasoning, notes and call arguments and in the object's dump,
-    /// a longer path that only starts with the root is left, and the start
-    /// names how many were replaced and the digests of what was sent.
     /// #1149: a rerooted carry's calls read as the messages they pair with
     /// now read, and no replacement is counted for them, since no message
     /// carries them.
@@ -695,6 +690,7 @@ mod tests {
                     1,
                     ("read", &format!("{{\"path\":\"{old}/h1/main.ts\"}}")),
                     &format!("// {old}/h1/main.ts\n"),
+                    &str::to_owned,
                 )
                 .expect("a read"),
             ],
@@ -710,6 +706,11 @@ mod tests {
         );
     }
 
+    /// #948 (smoke 2): the carried text names the first session's worktree;
+    /// rerooted, every occurrence names the new one instead, in the trunk's
+    /// content, reasoning, notes and call arguments and in the object's dump,
+    /// a longer path that only starts with the root is left, and the start
+    /// names how many were replaced and the digests of what was sent.
     #[test]
     fn a_rerooted_carry_names_the_new_worktree_and_never_the_old() {
         let old = "/tmp/diet-scenario-worktree-1";

@@ -104,6 +104,20 @@ fn text(entry: &Entry) -> String {
     }
 }
 
+/// `shown`, a call's result as logged, without the block [`appended`] put
+/// after it: the result the tool wrote, under the cap (#1149). The blank
+/// line between goes with the block, and with it a newline the result ended
+/// with, since [`appended`] leaves no trace of which it was.
+#[must_use]
+pub fn stripped(shown: &str) -> &str {
+    if shown.starts_with(CHANGED) {
+        return "";
+    }
+    shown
+        .rfind(&format!("\n\n{CHANGED}"))
+        .map_or(shown, |at| &shown[..at])
+}
+
 /// `shown`, a call's result after the output cap, with `block` after it, a
 /// blank line between.
 #[must_use]
@@ -170,6 +184,28 @@ mod tests {
         assert_eq!(
             render(&Block::Unlisted),
             "Files this call changed: not counted, the working directory could not be listed.\n"
+        );
+    }
+
+    /// What [`appended`] puts after a result, [`stripped`] takes off.
+    #[test]
+    fn a_result_with_its_block_stripped_is_the_result() {
+        let none = Block::Counted {
+            entries: &[],
+            outside: &[],
+            not_shown: &["a.py".to_owned()],
+        };
+        for result in ["", "Updated.", "two\nlines", "x = 1\n"] {
+            assert_eq!(
+                stripped(&appended(result, &none)),
+                result.strip_suffix('\n').unwrap_or(result)
+            );
+        }
+        assert_eq!(stripped("no block here"), "no block here");
+        assert_eq!(
+            stripped(&appended("", &Block::StillRunning)),
+            "",
+            "a block alone"
         );
     }
 

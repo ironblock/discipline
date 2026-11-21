@@ -61,12 +61,21 @@ pub struct Shown {
 
 impl Showing {
     /// The call `id` made in `turn` with `name` and `arguments`, as its result
-    /// `shown` was first carried, when that result shows a file
-    /// ([`super::standard::shows_file`]); `None` otherwise.
+    /// `shown` was first carried, when that result shows a file. The tool
+    /// reads its own result ([`super::standard::shows_file`]): the result as
+    /// carried, its block taken off ([`super::call_changes::block::stripped`])
+    /// and its paths read under `rewrite`. `None` otherwise.
     #[must_use]
-    pub fn of(id: &str, turn: u32, (name, arguments): (&str, &str), shown: &str) -> Option<Self> {
+    pub fn of(
+        id: &str,
+        turn: u32,
+        (name, arguments): (&str, &str),
+        shown: &str,
+        rewrite: &dyn Fn(&str) -> String,
+    ) -> Option<Self> {
+        let written = super::call_changes::block::stripped(shown);
         Some(Self {
-            file: super::standard::shows_file(name, arguments, shown)?,
+            file: super::standard::shows_file(name, arguments, written, rewrite)?,
             id: id.to_owned(),
             turn,
             name: name.to_owned(),
@@ -144,7 +153,14 @@ mod tests {
 
     fn read(id: &str, file: &str, shown: &str) -> Showing {
         let arguments = serde_json::json!({"path": file}).to_string();
-        Showing::of(id, 1, (super::super::standard::READ, &arguments), shown).expect("a read")
+        Showing::of(
+            id,
+            1,
+            (super::super::standard::READ, &arguments),
+            shown,
+            &str::to_owned,
+        )
+        .expect("a read")
     }
 
     fn result(id: &str, content: &str) -> Message {
