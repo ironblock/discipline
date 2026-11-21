@@ -271,6 +271,8 @@ pub struct Tree {
     began: Option<SystemTime>,
     /// Whether the first count has run.
     counted: bool,
+    /// How many files the counts have read.
+    reads: u64,
 }
 
 impl Tree {
@@ -283,6 +285,7 @@ impl Tree {
             kept: 0,
             began: None,
             counted: false,
+            reads: 0,
         }
     }
 
@@ -396,7 +399,7 @@ impl Tree {
 
     /// What `at` is held by: a symlink's target, never followed; a text
     /// file's lines while there is room; any other file's digest.
-    fn held(&self, at: &Path, meta: &Metadata) -> Held {
+    fn held(&mut self, at: &Path, meta: &Metadata) -> Held {
         let by_stat = Held::Stat(meta.len(), stamps(meta).0);
         if meta.file_type().is_symlink() {
             return std::fs::read_link(at).map_or(by_stat, Held::Link);
@@ -404,6 +407,7 @@ impl Tree {
         if meta.len() > super::carry::SNAPSHOT_MAX_BYTES {
             return by_stat;
         }
+        self.reads += 1;
         let Some(bytes) = read_same(at, meta) else {
             return by_stat;
         };
@@ -900,20 +904,6 @@ mod tests {
     }
 
     #[test]
-    fn past_the_edit_bound_the_whole_middle_is_counted() {
-        let (mut old, mut new) = (String::new(), String::new());
-        for n in 0..3000 {
-            let _ = writeln!(old, "old {n}");
-            let _ = writeln!(new, "new {n}");
-        }
-        assert_eq!(
-            counts(old.as_bytes(), new.as_bytes()),
-            (3000, 3000),
-            "6000 edits, past the bound"
-        );
-    }
-
-    #[test]
     fn a_change_in_place_a_new_file_and_a_deletion_are_counted_in_lines() {
         let dir = scratch("in-place");
         std::fs::write(dir.join("app.py"), "a = 1\nb = 2\n").expect("written");
@@ -1128,6 +1118,101 @@ mod tests {
             keys.key("src/app.py")
         );
         assert_eq!(keys.named(&keys.key("src/app.py")), "src/app.py");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// Past the edit bound a change is named with its lines not counted,
+    /// never with a count that is wrong.
+    #[test]
+    fn past_the_edit_bound_a_change_is_not_counted_in_lines() {
+        let dir = scratch("past-the-bound");
+        let lines = |word: &str| -> String {
+            let mut text = String::new();
+            for n in 0..3000 {
+                let _ = writeln!(text, "{word} {n}");
+            }
+            text
+        };
+        std::fs::write(dir.join("big.txt"), lines("old")).expect("written");
+        let mut tree = Tree::new(&dir);
+        let entries = counted(&mut tree, || {
+            std::fs::write(dir.join("big.txt"), lines("new")).expect("written");
+        });
+        assert_eq!(entries, [Entry::Modified("big.txt".to_owned(), None)]);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// A worktree its own repository ignores (a scratch directory under a
+    /// checkout, say): git lists nothing there, so it is walked.
+    #[test]
+    fn a_worktree_its_repository_ignores_is_walked() {
+        let dir = scratch("ignored-worktree");
+        git(&dir, &["init", "-q"]);
+        std::fs::write(dir.join(".gitignore"), "work/\n").expect("written");
+        let work = dir.join("work");
+        std::fs::create_dir_all(&work).expect("made");
+        std::fs::write(work.join("app.py"), "a = 1\n").expect("written");
+        let mut tree = Tree::new(&work);
+        let entries = counted(&mut tree, || {
+            std::fs::write(work.join("app.py"), "a = 2\n").expect("written");
+            std::fs::write(work.join("new.py"), "b = 1\n").expect("written");
+        });
+        assert_eq!(
+            entries,
+            [
+                Entry::Modified("app.py".to_owned(), Some((1, 1))),
+                Entry::Created("new.py".to_owned(), Some(1)),
+            ]
+        );
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// On a coarse clock a file the call made can carry an inode-change time
+    /// just before the count began: within [`RACY`] of it, it is still new.
+    #[test]
+    fn a_file_made_within_the_clocks_grain_of_the_count_is_new() {
+        let dir = scratch("coarse-clock");
+        let mut tree = Tree::new(&dir);
+        tree.before().expect("listed");
+        // As a one-second clock would have it: the count began later than
+        // the file's ctime says it was made.
+        tree.began = tree.began.map(|began| began + Duration::from_millis(1500));
+        std::fs::write(dir.join("new.py"), "b = 1\n").expect("written");
+        assert_eq!(
+            tree.after().expect("listed"),
+            [Entry::Created("new.py".to_owned(), Some(1))]
+        );
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// Stat first: a call that changes one file of many reads that file
+    /// alone, never the whole tree again.
+    #[test]
+    fn a_call_reads_only_the_files_whose_stat_changed() {
+        let dir = scratch("stat-first");
+        let an_hour_ago = SystemTime::now() - Duration::from_secs(3600);
+        for n in 0..50 {
+            let at = dir.join(format!("f{n:02}.txt"));
+            std::fs::write(&at, format!("line {n}\n")).expect("written");
+            std::fs::File::options()
+                .write(true)
+                .open(&at)
+                .and_then(|file| file.set_modified(an_hour_ago))
+                .expect("dated");
+        }
+        let mut tree = Tree::new(&dir);
+        tree.before().expect("listed");
+        assert_eq!(tree.reads, 50, "the first count reads every file");
+        tree.after().expect("listed");
+        let reads = tree.reads;
+        let entries = counted(&mut tree, || {
+            std::fs::write(dir.join("f07.txt"), "line 7, changed\n").expect("written");
+        });
+        assert_eq!(
+            entries,
+            [Entry::Modified("f07.txt".to_owned(), Some((1, 1)))]
+        );
+        assert_eq!(tree.reads - reads, 1, "one file read for the call");
         let _ = std::fs::remove_dir_all(&dir);
     }
 
