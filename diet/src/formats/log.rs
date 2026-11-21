@@ -2937,6 +2937,21 @@ pub struct CarriedFrom {
     pub variant_sha256: Option<String>,
     /// The carried text rerooted into this session's worktree (v28).
     pub rerooted: Option<Box<Rerooted>>,
+    /// The line naming the files the model changed, added to the carried
+    /// refill (v51, #1154).
+    pub changed: Option<ChangedFiles>,
+}
+
+/// A carried refill given the line a refill carries today naming the files
+/// the model changed (v51, #1154, N5), counted from the worktree snapshot an
+/// earlier meditation of the same log kept to the carried refill's own.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ChangedFiles {
+    /// The `seq` of the meditation whose snapshot the line counts from.
+    pub since_seq: u64,
+    /// The sha256 of the trunk as the session started from it, the line
+    /// added after any rerooting.
+    pub trunk_sha256: String,
 }
 
 /// A carry's text rerooted (v28, #948): every occurrence of the first
@@ -11156,6 +11171,7 @@ impl Fields<'_> {
         Ok(CarriedFrom {
             log_sha256: inner.digest("log_sha256").map_err(within)?,
             meditation_seq: inner.count("meditation_seq").map_err(within)?,
+            changed: None,
             trunk_sha256: inner.digest("trunk_sha256").map_err(within)?,
             object_sha256: match inner.0.get("object_sha256") {
                 None => None,

@@ -3883,6 +3883,15 @@ pub struct Carry {
     /// The working directory the carried log's commands ran in, as its
     /// last `tool_call` before the refill names it (#1151's re-review).
     pub recorded_cwd: Option<String>,
+    /// The render the carried meditation's line logs, rerooted as the trunk
+    /// is (#1154): where a changed-files line is placed. `None` for a
+    /// native summary's refill, which carries Pi's `<modified-files>` list
+    /// in that line's place.
+    pub render: Option<String>,
+    /// The worktree snapshots the carried log's meditations kept, up to and
+    /// including the carried one, each by its meditation's seq (#1154): what
+    /// a changed-files line is counted between.
+    pub snapshots: Vec<(u64, String)>,
 }
 
 /// An interactive session on one trunk.
@@ -36514,6 +36523,7 @@ pub(in crate::drive) mod tests {
             worktree: None,
             variant_sha256: None,
             rerooted: None,
+            changed: None,
         };
         let session = Session::open_with(Canned::new(vec![]), template(), None, None, None, None)
             .with_carry(Carry {
@@ -36527,6 +36537,8 @@ pub(in crate::drive) mod tests {
                 riding_prompt: None,
                 riding_steps: 0,
                 recorded_cwd: None,
+                render: None,
+                snapshots: Vec::new(),
             })
             .expect("it carries");
         let state = session.shared.lock();
@@ -36568,6 +36580,7 @@ pub(in crate::drive) mod tests {
             worktree: None,
             variant_sha256: None,
             rerooted: None,
+            changed: None,
         };
         let carried = |system: &str| {
             Session::open_with(Canned::new(vec![]), template(), None, None, None, None)
@@ -36586,6 +36599,8 @@ pub(in crate::drive) mod tests {
                     riding_prompt: None,
                     riding_steps: 0,
                     recorded_cwd: None,
+                    render: None,
+                    snapshots: Vec::new(),
                 })
                 .expect("it carries")
         };
@@ -37487,6 +37502,7 @@ pub(in crate::drive) mod tests {
             worktree: None,
             variant_sha256: None,
             rerooted: None,
+            changed: None,
         }
     }
 
@@ -37617,6 +37633,8 @@ pub(in crate::drive) mod tests {
             riding_prompt: None,
             riding_steps: 0,
             recorded_cwd: None,
+            render: None,
+            snapshots: Vec::new(),
         })
         .expect("it carries");
         assert_eq!(
@@ -37789,6 +37807,8 @@ pub(in crate::drive) mod tests {
             riding_prompt: None,
             riding_steps: 0,
             recorded_cwd: None,
+            render: None,
+            snapshots: Vec::new(),
         };
         let (interview, shape) = capturing_under(in_the_starter_library_at("orient"));
         let Err(refused) = Session::open_with(
@@ -37868,6 +37888,8 @@ pub(in crate::drive) mod tests {
             riding_prompt: None,
             riding_steps: 0,
             recorded_cwd: None,
+            render: None,
+            snapshots: Vec::new(),
         })
         .expect("it carries");
         assert_eq!(
@@ -38082,6 +38104,8 @@ pub(in crate::drive) mod tests {
             riding_prompt: None,
             riding_steps: 0,
             recorded_cwd: None,
+            render: None,
+            snapshots: Vec::new(),
         }
     }
 

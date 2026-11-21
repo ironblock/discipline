@@ -3549,6 +3549,297 @@ fn a_carried_session_restores_the_worktree_its_refill_left() {
     let _ = std::fs::remove_dir_all(&dir);
 }
 
+/// A commanding regimen named `name` in `dir` whose reads fire an interview
+/// and whose refill of an empty working memory is made: what a drive that
+/// refills between its turns runs under.
+fn refilling(dir: &Path, name: &str) -> PathBuf {
+    let path = commanding(dir, name, 4);
+    let regimen = std::fs::read_to_string(&path).expect("the regimen");
+    std::fs::write(
+        &path,
+        regimen.replace(
+            "[limits]",
+            "interview_warrant = [\"read\"]\nmeditation_empty = \"refill\"\n[limits]",
+        ),
+    )
+    .expect("the regimen");
+    path
+}
+
+/// `diet-drive VERB FILE ARGS --no-assemble`, from the repository's root:
+/// its exit, its last line on stdout as JSON, and everything it printed.
+fn drive_verb(
+    verb: &str,
+    file: &Path,
+    args: &[&std::ffi::OsStr],
+) -> (Option<i32>, serde_json::Value, String) {
+    let ran = Command::new(DRIVE)
+        .current_dir(root())
+        .arg(verb)
+        .arg(file)
+        .args(args)
+        .arg("--no-assemble")
+        .output()
+        .expect("diet-drive runs");
+    let stdout = String::from_utf8_lossy(&ran.stdout).into_owned();
+    let said: serde_json::Value =
+        serde_json::from_str(stdout.lines().last().unwrap_or("")).unwrap_or_default();
+    (
+        ran.status.code(),
+        said,
+        format!("{stdout}{}", String::from_utf8_lossy(&ran.stderr)),
+    )
+}
+
+/// #1154: a run from a chosen refill can add the line a refill carries
+/// today naming the files the model changed (N5), counted from the log's
+/// earliest worktree snapshot, or the one a seq names, to the refill's own.
+/// A refill recorded before N5 is stood in for by one of this build's with
+/// the line taken out of its render and its kept trunk. Given the line
+/// back, from the earlier refill's snapshot, the carried trunk is the one
+/// this build kept, byte for byte, and its first request has the head the
+/// recording sent after it; the start names the base's seq beside the
+/// seam's. Without the option the trunk is sent as it was kept. A refill
+/// that carries the line already is refused, and so is a base that is no
+/// earlier snapshot. An arm of a batch can add the line as its one
+/// difference from the baseline, which the batch's line names.
+#[test]
+#[allow(clippy::too_many_lines)]
+fn a_run_from_a_chosen_refill_can_add_the_changed_files_line_from_an_earlier_snapshot() {
+    use diet::meditation::changed::SENTENCE;
+    let dir = scratch("carry-changed");
+    refilling(&dir, "same.toml");
+    std::fs::write(dir.join("notes.seed"), "zero\n").expect("the seed");
+    let call = |id: &str, command: &str| serde_json::json!([{"id": id, "name": "bash", "arguments": serde_json::json!({"command": command}).to_string()}]);
+    let head = serde_json::json!({"scenario": "carry-changed", "regimen": "same.toml", "head": root().join("diet/drive/heads/floor.md"), "seed": {"notes.txt": "notes.seed"}});
+    let script = |name: &str, lines: &[serde_json::Value]| {
+        let mut text: String = std::iter::once(&head)
+            .chain(lines)
+            .map(|line| line.to_string() + "\n")
+            .collect();
+        for _ in 0..8 {
+            text.push_str(&serde_json::json!({"reply": {"text": "Noted."}}).to_string());
+            text.push('\n');
+        }
+        let path = dir.join(name);
+        std::fs::write(&path, text).expect("the scenario");
+        path
+    };
+    let first = script(
+        "first.jsonl",
+        &[
+            serde_json::json!({"reply": {"when": "Note one", "text": "Noting.", "calls": call("c1", "echo one > notes.txt")}}),
+            serde_json::json!({"reply": {"when": "Note two", "text": "Noting.", "calls": call("c2", "echo two > notes.txt")}}),
+            serde_json::json!({"step": "ask", "text": "Note one."}),
+            serde_json::json!({"step": "declare-meditation"}),
+            serde_json::json!({"step": "ask", "text": "Note two."}),
+            serde_json::json!({"step": "declare-meditation"}),
+            serde_json::json!({"step": "ask", "text": "Is it noted?"}),
+            serde_json::json!({"step": "end"}),
+        ],
+    );
+    let seam = script(
+        "seam.jsonl",
+        &[
+            serde_json::json!({"reply": {"when": "Read the notes", "text": "Reading.", "calls": call("c3", "cat notes.txt")}}),
+            serde_json::json!({"step": "ask", "text": "Read the notes."}),
+            serde_json::json!({"step": "end"}),
+        ],
+    );
+    // The recorded drive, by this build: each refill names the note it
+    // changed since the session opened on the seed.
+    let out = dir.join("out-first");
+    let (code, _, said) = drive_verb("scenario", &first, &["--out".as_ref(), out.as_os_str()]);
+    assert_eq!(code, Some(0), "{said}");
+    let recorded = out.join("session.log");
+    let meditations = logged(&recorded, "meditation");
+    assert_eq!(meditations.len(), 2, "{meditations:?}");
+    let (one, two) = (&meditations[0], &meditations[1]);
+    let line = format!("{SENTENCE} notes.txt.");
+    for meditation in [one, two] {
+        assert!(
+            meditation["render"]
+                .as_str()
+                .unwrap_or("")
+                .contains(&format!("\n\n{line}")),
+            "this build's refill names the note: {meditation}"
+        );
+    }
+    let head_after = |meditation: &serde_json::Value| {
+        logged(&recorded, "request")
+            .into_iter()
+            .find(|request| {
+                request["lane"] == "trunk" && request["seq"].as_u64() > meditation["seq"].as_u64()
+            })
+            .map(|request| request["head_sha256"].clone())
+            .expect("a trunk request after the refill")
+    };
+    let carried = |log: &Path, out: &str, extra: &[&str]| {
+        let out = dir.join(out);
+        let mut args: Vec<std::ffi::OsString> = vec![
+            "--out".into(),
+            out.clone().into(),
+            "--from-carry".into(),
+            log.into(),
+            "--carry-at".into(),
+            two["seq"].to_string().into(),
+        ];
+        args.extend(extra.iter().map(std::ffi::OsString::from));
+        let args: Vec<&std::ffi::OsStr> = args.iter().map(std::ffi::OsString::as_os_str).collect();
+        let (code, said, all) = drive_verb("scenario", &seam, &args);
+        (code, said, all, out.join("session.log"))
+    };
+    let first_head = |log: &Path| {
+        logged(log, "request")
+            .into_iter()
+            .find(|request| request["lane"] == "trunk")
+            .map(|request| request["head_sha256"].clone())
+            .expect("a trunk request")
+    };
+    // A refill that carries the line already: refused, never given two.
+    let (code, _, all, _) = carried(&recorded, "out-already", &["--carry-changed-files"]);
+    assert_ne!(code, Some(0), "{all}");
+    assert!(all.contains("already carries"), "{all}");
+    // Without the option, the kept trunk is sent as it was kept.
+    let (code, _, all, log) = carried(&recorded, "out-as-kept", &[]);
+    assert_eq!(code, Some(0), "{all}");
+    assert_eq!(first_head(&log), head_after(two), "the kept trunk, sent");
+    assert!(
+        first_line(&log)["carried_from"]
+            .get("changed_since_seq")
+            .is_none(),
+        "{all}"
+    );
+    // A refill from before N5, stood in for: the second refill's line taken
+    // out of its render and its kept trunk, the trunk kept by its own digest.
+    let pre = dir.join("pre-n5");
+    std::fs::create_dir_all(pre.join("files")).expect("a recording");
+    for entry in std::fs::read_dir(out.join("files")).expect("the recording") {
+        let entry = entry.expect("an entry");
+        std::fs::copy(entry.path(), pre.join("files").join(entry.file_name())).expect("a copy");
+    }
+    let escaped = serde_json::to_string(&format!("\n\n{line}")).expect("JSON");
+    let escaped = &escaped[1..escaped.len() - 1];
+    let kept_sha = two["trunk_sha256"]
+        .as_str()
+        .expect("a kept trunk")
+        .to_owned();
+    let kept = std::fs::read_to_string(out.join("files").join(&kept_sha)).expect("the kept trunk");
+    assert_eq!(kept.matches(escaped).count(), 1, "{kept}");
+    let stripped = kept.replace(escaped, "");
+    let stripped_sha = diet::digest::sha256_hex(stripped.as_bytes());
+    std::fs::write(pre.join("files").join(&stripped_sha), &stripped).expect("the trunk");
+    let seq_key = format!("\"seq\":{},", two["seq"]);
+    let text: String = std::fs::read_to_string(&recorded)
+        .expect("the log")
+        .split_inclusive('\n')
+        .map(|logged| {
+            if logged.contains("\"kind\":\"meditation\"") && logged.contains(&seq_key) {
+                assert_eq!(logged.matches(escaped).count(), 1, "{logged}");
+                logged
+                    .replace(escaped, "")
+                    .replace(&kept_sha, &stripped_sha)
+            } else {
+                logged.to_owned()
+            }
+        })
+        .collect();
+    let pre_log = pre.join("session.log");
+    std::fs::write(&pre_log, text).expect("the log");
+    // Given the line back, from the log's earliest snapshot: the trunk this
+    // build kept, byte for byte, sent; the start names both seqs.
+    let one_seq = one["seq"].to_string();
+    for (out, extra) in [
+        ("out-changed", vec!["--carry-changed-files"]),
+        (
+            "out-changed-since",
+            vec!["--carry-changed-files", "--carry-changed-since", &one_seq],
+        ),
+    ] {
+        let (code, _, all, log) = carried(&pre_log, out, &extra);
+        assert_eq!(code, Some(0), "{out}: {all}");
+        let from = &first_line(&log)["carried_from"];
+        assert_eq!(from["meditation_seq"], two["seq"], "{out}: {from}");
+        assert_eq!(from["changed_since_seq"], one["seq"], "{out}: {from}");
+        assert_eq!(from["trunk_sha256"], stripped_sha.as_str(), "{out}: {from}");
+        assert_eq!(
+            from["changed_trunk_sha256"],
+            kept_sha.as_str(),
+            "{out}: {from}"
+        );
+        assert_eq!(first_head(&log), head_after(two), "{out}: the line, back");
+    }
+    // Without it, the stripped trunk is sent as kept.
+    let (code, _, all, log) = carried(&pre_log, "out-pre-as-kept", &[]);
+    assert_eq!(code, Some(0), "{all}");
+    assert_ne!(first_head(&log), head_after(two), "no line added");
+    assert!(
+        first_line(&log)["carried_from"]
+            .get("changed_trunk_sha256")
+            .is_none(),
+        "{all}"
+    );
+    // A base that is no earlier snapshot: the seam's own.
+    let seam_seq = two["seq"].to_string();
+    let (code, _, all, _) = carried(
+        &pre_log,
+        "out-since-seam",
+        &["--carry-changed-files", "--carry-changed-since", &seam_seq],
+    );
+    assert_ne!(code, Some(0), "{all}");
+    assert!(all.contains("is no meditation before"), "{all}");
+    // The base names the option's snapshot: without the option, refused.
+    let (code, _, all, _) = carried(
+        &pre_log,
+        "out-since-alone",
+        &["--carry-changed-since", &seam_seq],
+    );
+    assert_eq!(code, Some(2), "a usage error: {all}");
+    // An arm adding the line beside the baseline's kept trunk.
+    let manifest = dir.join("ARMS.toml");
+    std::fs::write(
+        &manifest,
+        "baseline = \"kept\"\npurpose = \"smoke\"\n[arm.kept]\nregimen = \"same.toml\"\n\
+         [arm.changed]\nregimen = \"same.toml\"\ncarry_changed_files = true\n",
+    )
+    .expect("the manifest");
+    let arms_out = dir.join("out-arms");
+    let (code, said, all) = drive_verb(
+        "arms",
+        &seam,
+        &[
+            "--arms".as_ref(),
+            manifest.as_os_str(),
+            "--repeat".as_ref(),
+            "1".as_ref(),
+            "--out".as_ref(),
+            arms_out.as_os_str(),
+            "--from-carry".as_ref(),
+            pre_log.as_os_str(),
+            "--carry-at".as_ref(),
+            seam_seq.as_ref(),
+        ],
+    );
+    assert_eq!(code, Some(0), "{all}");
+    assert_eq!(
+        said["against"]["changed"]["carry_changed_files"],
+        serde_json::json!({"a": false, "b": true}),
+        "the batch names the arm's difference: {said}"
+    );
+    let start = |arm: &str| first_line(&arms_out.join(arm).join("repeat-01").join("session.log"));
+    assert_eq!(
+        start("changed")["carried_from"]["changed_since_seq"],
+        one["seq"]
+    );
+    assert!(
+        start("kept")["carried_from"]
+            .get("changed_since_seq")
+            .is_none(),
+        "the baseline carries the kept trunk"
+    );
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
 /// #1151: a run from a chosen refill of a log that names no run -- what a
 /// live drive writes, which `--from-carry` alone refuses -- carried at its
 /// first meditation's seq, not its last: the start names the log's digest
@@ -3563,16 +3854,7 @@ fn a_carried_session_restores_the_worktree_its_refill_left() {
 #[allow(clippy::too_many_lines)]
 fn a_run_from_a_chosen_refill_of_a_live_log_carries_that_refills_trunk_and_worktree() {
     let dir = scratch("carry-at");
-    let path = commanding(&dir, "same.toml", 4);
-    let regimen = std::fs::read_to_string(&path).expect("the regimen");
-    std::fs::write(
-        &path,
-        regimen.replace(
-            "[limits]",
-            "interview_warrant = [\"read\"]\nmeditation_empty = \"refill\"\n[limits]",
-        ),
-    )
-    .expect("the regimen");
+    refilling(&dir, "same.toml");
     let call = |id: &str, command: &str| serde_json::json!([{"id": id, "name": "bash", "arguments": serde_json::json!({"command": command}).to_string()}]);
     let head = serde_json::json!({"scenario": "carry-at", "regimen": "same.toml", "head": root().join("diet/drive/heads/floor.md")});
     let script = |lines: &[serde_json::Value]| {
@@ -3611,24 +3893,7 @@ fn a_run_from_a_chosen_refill_of_a_live_log_carries_that_refills_trunk_and_workt
         ]),
     )
     .expect("the scenario");
-    let drive = |verb: &str, file: &Path, args: &[&std::ffi::OsStr]| {
-        let ran = Command::new(DRIVE)
-            .current_dir(root())
-            .arg(verb)
-            .arg(file)
-            .args(args)
-            .arg("--no-assemble")
-            .output()
-            .expect("diet-drive runs");
-        let stdout = String::from_utf8_lossy(&ran.stdout).into_owned();
-        let said: serde_json::Value =
-            serde_json::from_str(stdout.lines().last().unwrap_or("")).unwrap_or_default();
-        (
-            ran.status.code(),
-            said,
-            format!("{stdout}{}", String::from_utf8_lossy(&ran.stderr)),
-        )
-    };
+    let drive = drive_verb;
     // The recorded drive: a single run, so its log names no run.
     let out = dir.join("out-first");
     let (code, _, said) = drive("scenario", &first, &["--out".as_ref(), out.as_os_str()]);

@@ -7,6 +7,7 @@
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::Path;
 
+use crate::drive::carry::ChangedSince;
 use crate::drive::scenario::{Repeats, RunOptions, Runs, Slot, script_digest, slot};
 use crate::formats::log::Run;
 use crate::formats::regimen::{self, Regimen, Value};
@@ -323,11 +324,45 @@ pub struct Arm {
     /// The trunk a run of it from a recorded refill sends in the kept one's
     /// place (#1151): its own `--carry-trunk`, beating the batch's.
     pub carry_trunk: Option<std::path::PathBuf>,
+    /// The changed-files line a run of it from a recorded refill adds
+    /// (#1154), and the snapshot it counts from: its own
+    /// `--carry-changed-files`, beside the batch's.
+    pub carry_changed_files: Option<ChangedSince>,
 }
 
 /// The name a contrast gives an arm's own carry trunk (#1151): the one
 /// difference besides its regimen's that an arm may have.
 pub const CARRY_TRUNK: &str = "carry_trunk";
+
+/// The name a contrast and a manifest give an arm's changed-files line
+/// (#1154), a difference besides its regimen's as its carry trunk is.
+pub const CARRY_CHANGED_FILES: &str = "carry_changed_files";
+
+/// One way an arm's carry differs from the baseline's (#1151, #1154): its
+/// name, as a contrast names it, with its state under each.
+type CarryDifference = (&'static str, serde_json::Value);
+
+/// What an arm's carry -- its trunk by digest, its changed-files line by
+/// its base -- differs from the baseline's in. A stub: nothing yet.
+fn carry_differences(
+    base: (Option<&str>, Option<ChangedSince>),
+    arm: (Option<&str>, Option<ChangedSince>),
+) -> Vec<CarryDifference> {
+    let _ = (base, arm);
+    Vec::new()
+}
+
+/// What the batch's line names of an arm whose carry differs from the
+/// baseline's. A stub: it refuses everything.
+fn carry_checked(
+    a: &Regimen,
+    b: &Regimen,
+    contrast: Option<&[String]>,
+    differences: &[CarryDifference],
+) -> Result<serde_json::Value, serde_json::Value> {
+    let _ = (a, b, contrast, differences);
+    Err(serde_json::json!({}))
+}
 
 /// A batch's arms, in name order, and its baseline, from an arms manifest
 /// (#932): `baseline = "NAME"`, then one `[arm.NAME]` table each, holding
@@ -369,10 +404,12 @@ pub fn manifest(path: &Path) -> Result<(Vec<Arm>, String, Option<String>), Strin
         let Value::Table(table) = table else {
             return Err(wrong(format!("`arm.{name}` is not a table")));
         };
-        if let Some(key) = table
-            .keys()
-            .find(|key| *key != "regimen" && *key != "contrast" && *key != CARRY_TRUNK)
-        {
+        if let Some(key) = table.keys().find(|key| {
+            *key != "regimen"
+                && *key != "contrast"
+                && *key != CARRY_TRUNK
+                && *key != CARRY_CHANGED_FILES
+        }) {
             return Err(wrong(format!(
                 "`[arm.{name}]` takes `regimen`, `contrast` and `{CARRY_TRUNK}`, not `{key}`"
             )));
@@ -418,6 +455,7 @@ pub fn manifest(path: &Path) -> Result<(Vec<Arm>, String, Option<String>), Strin
             regimen: dir.join(regimen),
             contrast,
             carry_trunk,
+            carry_changed_files: None,
         });
     }
     if arms.len() < 2 {
@@ -796,12 +834,14 @@ pub fn pair(
             regimen: a.to_path_buf(),
             contrast: None,
             carry_trunk: None,
+            carry_changed_files: None,
         },
         Arm {
             name: "b".to_owned(),
             regimen: b.to_path_buf(),
             contrast: contrast.map(<[String]>::to_vec),
             carry_trunk: None,
+            carry_changed_files: None,
         },
     ];
     let (mut said, ok) = arms(drive, options, (&two, "a", None), repeats, emit);
@@ -971,6 +1011,109 @@ mod tests {
         let refused =
             trunk_checked(&base, &moved, Some(&left_out), trunks).expect_err("the trunk left out");
         assert_eq!(refused["missing"], serde_json::json!([CARRY_TRUNK]));
+    }
+
+    /// #1154: an arm's changed-files line is read from its manifest, `true`
+    /// for the log's earliest snapshot or a meditation's seq, and anything
+    /// else is refused. An arm whose line is not the baseline's has that
+    /// one difference, named with each arm's state: its regimen differs in
+    /// nothing else unless its contrast names `carry_changed_files` and the
+    /// rest, a contrast that leaves it out is refused, and beside a trunk
+    /// of its own it is a second difference, which a contrast names too.
+    #[test]
+    fn an_arm_adding_the_changed_files_line_differs_from_the_baseline_in_that_alone() {
+        let (arms, _, _) = manifest_of(
+            "changed",
+            "baseline = \"kept\"\n[arm.kept]\nregimen = \"r.toml\"\n\
+             [arm.changed]\nregimen = \"r.toml\"\ncarry_changed_files = true\n\
+             [arm.since]\nregimen = \"r.toml\"\ncarry_changed_files = 42\n",
+        )
+        .expect("it reads");
+        let read: Vec<(&str, Option<ChangedSince>)> = arms
+            .iter()
+            .map(|arm| (arm.name.as_str(), arm.carry_changed_files))
+            .collect();
+        assert_eq!(
+            read,
+            [
+                ("changed", Some(ChangedSince::Earliest)),
+                ("kept", None),
+                ("since", Some(ChangedSince::Seq(42))),
+            ]
+        );
+        for value in ["false", "\"yes\"", "-1"] {
+            let refused = manifest_of(
+                "changed-bad",
+                &format!(
+                    "baseline = \"kept\"\n[arm.kept]\nregimen = \"r.toml\"\n\
+                     [arm.changed]\nregimen = \"r.toml\"\ncarry_changed_files = {value}\n"
+                ),
+            )
+            .expect_err(value);
+            assert!(refused.contains(CARRY_CHANGED_FILES), "{value}: {refused}");
+        }
+        assert_eq!(
+            carry_differences((None, None), (None, None)),
+            Vec::<CarryDifference>::new()
+        );
+        let changed = carry_differences((None, None), (None, Some(ChangedSince::Earliest)));
+        assert_eq!(
+            changed,
+            [(
+                CARRY_CHANGED_FILES,
+                serde_json::json!({"a": false, "b": true})
+            )]
+        );
+        assert_eq!(
+            carry_differences(
+                (None, Some(ChangedSince::Earliest)),
+                (None, Some(ChangedSince::Seq(42)))
+            ),
+            [(CARRY_CHANGED_FILES, serde_json::json!({"a": true, "b": 42}))]
+        );
+        let base = regimen(&format!("{BASE}refutation_interview = \"off\"\n"));
+        let moved = regimen(&format!("{BASE}refutation_interview = \"on\"\n"));
+        let named = carry_checked(&base, &base, None, &changed).expect("the line alone");
+        assert_eq!(
+            named[CARRY_CHANGED_FILES],
+            serde_json::json!({"a": false, "b": true})
+        );
+        let refused = carry_checked(&base, &moved, None, &changed).expect_err("two differences");
+        assert!(
+            refused["refused"]
+                .as_str()
+                .unwrap_or("")
+                .contains(CARRY_CHANGED_FILES),
+            "{refused}"
+        );
+        let declared = [
+            CARRY_CHANGED_FILES.to_owned(),
+            "refutation_interview".to_owned(),
+        ];
+        let named = carry_checked(&base, &moved, Some(&declared), &changed).expect("both declared");
+        assert!(named.get("contrast").is_some() && named.get(CARRY_CHANGED_FILES).is_some());
+        let left_out = ["refutation_interview".to_owned()];
+        let refused =
+            carry_checked(&base, &moved, Some(&left_out), &changed).expect_err("the line left out");
+        assert_eq!(refused["missing"], serde_json::json!([CARRY_CHANGED_FILES]));
+        // Beside a trunk of its own, two differences: one alone is refused,
+        // and a contrast naming both runs.
+        let both = carry_differences((None, None), (Some("v"), Some(ChangedSince::Earliest)));
+        assert_eq!(
+            both.iter().map(|(name, _)| *name).collect::<Vec<_>>(),
+            [CARRY_TRUNK, CARRY_CHANGED_FILES]
+        );
+        let refused = carry_checked(&base, &base, None, &both).expect_err("two carry differences");
+        assert!(
+            refused["refused"]
+                .as_str()
+                .unwrap_or("")
+                .contains(CARRY_TRUNK),
+            "{refused}"
+        );
+        let declared = [CARRY_TRUNK.to_owned(), CARRY_CHANGED_FILES.to_owned()];
+        let named = carry_checked(&base, &base, Some(&declared), &both).expect("both declared");
+        assert!(named.get(CARRY_TRUNK).is_some() && named.get(CARRY_CHANGED_FILES).is_some());
     }
 
     /// #912: two levers apart is refused, naming both levers and both keys;

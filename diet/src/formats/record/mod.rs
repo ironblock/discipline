@@ -4347,6 +4347,7 @@ fn take_carried_from(
         worktree: None,
         variant_sha256: None,
         rerooted: None,
+        changed: None,
     }))
 }
 
