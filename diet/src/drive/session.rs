@@ -25134,6 +25134,319 @@ pub(in crate::drive) mod tests {
         tidy(&[&tree]);
     }
 
+    /// #1149, the re-review's probe: a `write` shows its file, though its
+    /// result as logged ends with the block. A file written, one overwritten,
+    /// then a `bash` that changes both: neither is marked.
+    #[test]
+    fn a_file_the_model_wrote_stays_shown_when_bash_changes_it() {
+        let tree = scratch("call-changes-written");
+        std::fs::write(tree.join("old.py"), "x = 0\n").expect("written");
+        let write = |id: &str, file: &str, content: &str| {
+            Step::call(
+                0,
+                id,
+                "write",
+                &serde_json::json!({"path": file, "content": content}).to_string(),
+            )
+        };
+        let (_, log) = counted_turn(
+            &tree,
+            (tool_loop::ToolSurface::Standard, true),
+            vec![
+                write("call-1", "new.py", "y = 1\n"),
+                write("call-2", "old.py", "x = 1\n"),
+                bash(
+                    "call-3",
+                    "python3 -c \"import pathlib as P; [P.Path(f).write_text(P.Path(f).\
+                     read_text().replace(a, b)) for f, a, b in [('new.py', 'y = 1', 'y = 2'), \
+                     ('old.py', 'x = 1', 'x = 2')]]\"",
+                ),
+            ],
+        );
+        assert_eq!(
+            lines(&log)[2].shown.as_deref(),
+            Some("Files this call changed: new.py (+1 -1), old.py (+1 -1).\n")
+        );
+        tidy(&[&tree]);
+    }
+
+    /// #1149, the re-review's ruling: a `write` or `edit` outside the working
+    /// directory that failed changed nothing, so it is not listed as changed;
+    /// its file is still named as one the context does not show.
+    #[test]
+    fn a_failed_write_or_edit_outside_the_working_directory_is_not_listed() {
+        let tree = scratch("call-changes-outside-failed");
+        let outside = scratch("call-changes-outside-failed-there");
+        std::fs::write(outside.join("other.txt"), "present\n").expect("written");
+        std::fs::write(outside.join("file.txt"), "a file\n").expect("written");
+        let other = outside.join("other.txt").to_string_lossy().into_owned();
+        let under = outside
+            .join("file.txt/under.txt")
+            .to_string_lossy()
+            .into_owned();
+        let (_, log) = counted_turn(
+            &tree,
+            (tool_loop::ToolSurface::Standard, true),
+            vec![
+                Step::call(
+                    0,
+                    "call-1",
+                    "edit",
+                    &serde_json::json!({"file_path": other, "old_string": "absent", "new_string": "x"})
+                        .to_string(),
+                ),
+                Step::call(
+                    0,
+                    "call-2",
+                    "write",
+                    &serde_json::json!({"path": under, "content": "x\n"}).to_string(),
+                ),
+            ],
+        );
+        let shown: Vec<String> = lines(&log)
+            .into_iter()
+            .map(|line| line.shown.expect("a result"))
+            .collect();
+        for (shown, path) in shown.iter().zip([&other, &under]) {
+            assert!(
+                shown.ends_with(&format!(
+                    "\n\nFiles this call changed: none.\nNot shown in this context by read, \
+                     write or edit: {path}.\n"
+                )),
+                "{shown}"
+            );
+        }
+        tidy(&[&tree, &outside]);
+    }
+
+    /// The calls a standard tool fails on with `kind` (#1149), on the tree
+    /// [`the_standard_results_as_logged`] makes: one or more for each kind a
+    /// `read`, `write` or `edit` reports, none for the kinds they never do.
+    /// The match is exhaustive, so a new kind without its calls does not
+    /// build.
+    fn failing(kind: crate::drive::standard::Failure) -> Vec<(&'static str, String)> {
+        use crate::drive::standard::{EDIT, Failure, READ, WRITE};
+        let call = |name: &'static str, args: serde_json::Value| (name, args.to_string());
+        let edit = |path: &str, old: &str, new: &str| {
+            call(
+                EDIT,
+                serde_json::json!({"file_path": path, "old_string": old, "new_string": new}),
+            )
+        };
+        match kind {
+            Failure::NotAnObject => vec![(READ, "[\"a.txt\"]".to_owned())],
+            Failure::Missing => vec![
+                call(READ, serde_json::json!({})),
+                call(WRITE, serde_json::json!({"content": "x\n"})),
+                call(WRITE, serde_json::json!({"path": "w.txt"})),
+                call(
+                    EDIT,
+                    serde_json::json!({"old_string": "one", "new_string": "1"}),
+                ),
+                call(
+                    EDIT,
+                    serde_json::json!({"file_path": "a.txt", "new_string": "1"}),
+                ),
+                call(
+                    EDIT,
+                    serde_json::json!({"file_path": "a.txt", "old_string": "one"}),
+                ),
+            ],
+            Failure::NotText => vec![
+                call(READ, serde_json::json!({"path": 7})),
+                call(WRITE, serde_json::json!({"path": "w.txt", "content": 7})),
+                call(
+                    EDIT,
+                    serde_json::json!({"file_path": 7, "old_string": "one", "new_string": "1"}),
+                ),
+            ],
+            Failure::NotACount => vec![
+                call(READ, serde_json::json!({"path": "a.txt", "offset": 0})),
+                call(READ, serde_json::json!({"path": "a.txt", "limit": "all"})),
+            ],
+            Failure::NotABoolean => vec![call(
+                EDIT,
+                serde_json::json!({"file_path": "a.txt", "old_string": "one", "new_string": "1", "replace_all": "yes"}),
+            )],
+            Failure::TwoFiles => vec![call(
+                EDIT,
+                serde_json::json!({"file_path": "a.txt", "path": "b.txt", "old_string": "one", "new_string": "1"}),
+            )],
+            Failure::Tilde => vec![
+                call(READ, serde_json::json!({"path": "~/a.txt"})),
+                call(
+                    WRITE,
+                    serde_json::json!({"path": "~/w.txt", "content": "x"}),
+                ),
+                edit("~/a.txt", "one", "1"),
+            ],
+            Failure::Unreadable => vec![
+                call(READ, serde_json::json!({"path": "gone.txt"})),
+                call(READ, serde_json::json!({"path": "@TREE@/gone.txt"})),
+            ],
+            Failure::ImageTooLarge => vec![call(READ, serde_json::json!({"path": "huge.png"}))],
+            Failure::Binary => vec![call(READ, serde_json::json!({"path": "bin"}))],
+            Failure::BeyondEnd => {
+                vec![call(
+                    READ,
+                    serde_json::json!({"path": "a.txt", "offset": 99}),
+                )]
+            }
+            Failure::Unwritable => vec![call(
+                WRITE,
+                serde_json::json!({"path": "a.txt/under.txt", "content": "x\n"}),
+            )],
+            Failure::EmptyOldString => vec![edit("a.txt", "", "x")],
+            Failure::NotFound => vec![edit("a.txt", "absent", "x"), edit("quote.txt", "zzz", "y")],
+            Failure::Ambiguous => vec![edit("a.txt", "e", "E")],
+            Failure::Unchanged => vec![edit("a.txt", "one", "one")],
+            Failure::EditUnreadable => vec![edit("gone.txt", "a", "b")],
+            Failure::EditUnwritable => vec![edit("locked.txt", "lock", "x")],
+            // No `read`, `write` or `edit` reports these.
+            Failure::Unknown | Failure::Search => Vec::new(),
+        }
+    }
+
+    /// The calls a standard tool succeeds on, one for each way it does: a
+    /// whole read and a partial one, an image, a file quoting a failure's
+    /// words, a new file and an overwritten one, by a relative and an absolute
+    /// path, an edit and an edit whose result the cap cuts.
+    fn succeeding() -> Vec<(&'static str, String)> {
+        use crate::drive::standard::{EDIT, READ, WRITE};
+        let call = |name: &'static str, args: serde_json::Value| (name, args.to_string());
+        vec![
+            call(READ, serde_json::json!({"path": "a.txt"})),
+            call(
+                READ,
+                serde_json::json!({"path": "a.txt", "offset": 2, "limit": 1}),
+            ),
+            call(READ, serde_json::json!({"path": "shot.png"})),
+            call(READ, serde_json::json!({"path": "quote.txt"})),
+            call(
+                WRITE,
+                serde_json::json!({"path": "new.txt", "content": "x\n"}),
+            ),
+            call(
+                WRITE,
+                serde_json::json!({"path": "new.txt", "content": "y\n"}),
+            ),
+            call(
+                WRITE,
+                serde_json::json!({"path": "@TREE@/abs.txt", "content": "x\n"}),
+            ),
+            call(
+                EDIT,
+                serde_json::json!({"file_path": "a.txt", "old_string": "two", "new_string": "2"}),
+            ),
+            call(
+                EDIT,
+                serde_json::json!({"file_path": "big.txt", "old_string": "row", "new_string": "ROW", "replace_all": true}),
+            ),
+        ]
+    }
+
+    /// #1149, the re-review: the session reads each `read`, `write` and
+    /// `edit` result as logged -- under the output cap, with the block after
+    /// it, its roots rewritten -- as showing its file exactly when the call
+    /// succeeded. Each failure is checked to be the kind its case names, and
+    /// every kind those tools report has its case.
+    #[test]
+    fn the_standard_results_as_logged_show_their_files_exactly_when_their_calls_succeeded() {
+        use crate::drive::standard::{Done, Failure};
+        let tree = scratch("call-changes-as-logged");
+        let tree = std::fs::canonicalize(&tree).expect("canonical");
+        std::fs::write(tree.join("a.txt"), "one\ntwo\nthree\n").expect("written");
+        std::fs::write(tree.join("quote.txt"), "Cannot read binary file: a.txt\n")
+            .expect("written");
+        std::fs::write(tree.join("bin"), [0xff_u8, 0xfe, 0x00]).expect("written");
+        std::fs::write(tree.join("shot.png"), b"\x89PNG\r\n\x1a\n0000").expect("written");
+        let mut huge = b"\x89PNG\r\n\x1a\n".to_vec();
+        huge.resize(
+            usize::try_from(crate::drive::attach::MAX_BYTES).expect("a size") + 1,
+            0,
+        );
+        std::fs::write(tree.join("huge.png"), huge).expect("written");
+        let big: String = (0..40).map(|n| format!("row {n}\n")).collect();
+        std::fs::write(tree.join("big.txt"), big).expect("written");
+        std::fs::write(tree.join("locked.txt"), "lock\n").expect("written");
+        std::fs::set_permissions(
+            tree.join("locked.txt"),
+            std::os::unix::fs::PermissionsExt::from_mode(0o444),
+        )
+        .expect("read-only");
+        let rooted = |raw: &str| raw.replace("@TREE@", &tree.to_string_lossy());
+        let mut failures: Vec<(Failure, &'static str, String)> = Vec::new();
+        for kind in Failure::ALL {
+            let cases = failing(*kind);
+            assert!(
+                cases.is_empty() == matches!(kind, Failure::Unknown | Failure::Search),
+                "{kind:?} has its case"
+            );
+            failures.extend(
+                cases
+                    .into_iter()
+                    .map(|(name, raw)| (*kind, name, rooted(&raw))),
+            );
+        }
+        // Each failing case fails as its kind, before the session runs it.
+        let direct = tools(Confinement::Unconfined, &tree, &[], None, Decider::Decline);
+        for (kind, name, raw) in &failures {
+            match crate::drive::standard::run(name, raw, &direct, &|| false) {
+                Done::Failed(failed) => assert_eq!(failed.kind, *kind, "{name} {raw}"),
+                other => panic!("{name} {raw}: {other:?}"),
+            }
+        }
+        let (mut shape, mut tools) = counting(&tree, tool_loop::ToolSurface::Standard, true);
+        shape.tools = tool_loop::ToolSurface::Standard.tools();
+        tools.output_cap = crate::drive::output::OutputCap::Capped {
+            max_lines: 20,
+            max_bytes: 51_200,
+        };
+        tools
+            .shown_roots
+            .add(&format!("{}=/scenario/worktree", tree.display()))
+            .expect("a root");
+        let calls: Vec<(&'static str, String, bool)> = failures
+            .iter()
+            .map(|(_, name, raw)| (*name, raw.clone(), false))
+            .chain(
+                succeeding()
+                    .into_iter()
+                    .map(|(name, raw)| (name, rooted(&raw), true)),
+            )
+            .collect();
+        let steps: Vec<Step> = calls
+            .iter()
+            .enumerate()
+            .map(|(n, (name, raw, _))| Step::call(0, &format!("call-{n}"), name, raw))
+            .collect();
+        let (session, log) = counted_turn_with((shape, tools), steps);
+        let showing: Vec<String> = showing_calls(&session.shared.lock())
+            .into_iter()
+            .map(|call| call.id)
+            .collect();
+        let logged = lines(&log);
+        assert_eq!(logged.len(), calls.len());
+        let mut capped = 0;
+        for (line, (name, raw, succeeded)) in logged.iter().zip(&calls) {
+            let shown = line.shown.as_deref().unwrap_or_default();
+            assert_eq!(!line.failed, *succeeded, "{name} {raw}: {shown}");
+            capped += usize::from(shown.starts_with("Tool output was too large"));
+            assert_eq!(
+                showing.contains(&line.id),
+                *succeeded,
+                "{name} {raw}, as logged: {shown}"
+            );
+        }
+        assert!(capped > 0, "an edit's result was capped");
+        std::fs::set_permissions(
+            tree.join("locked.txt"),
+            std::os::unix::fs::PermissionsExt::from_mode(0o644),
+        )
+        .expect("writable again");
+        tidy(&[&tree]);
+    }
+
     /// A PNG of `width` by `height` pixels, `bytes` long: its signature, its
     /// header chunk, then filler -- what a screenshot's encoding weighs,
     /// generated at run time.
