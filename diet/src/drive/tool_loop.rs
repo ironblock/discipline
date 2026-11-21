@@ -1172,7 +1172,7 @@ pub type RepositoryReader = fn(&Path) -> Option<Repository>;
 
 /// git, read-only, in `worktree` with nothing but `PATH` and `HOME` and
 /// the free read's own overrides.
-fn git_reading(worktree: &Path, args: &[&str]) -> Option<std::process::Output> {
+pub(crate) fn git_reading(worktree: &Path, args: &[&str]) -> Option<std::process::Output> {
     let mut command = Command::new("git");
     command.env_clear();
     for key in ["PATH", "HOME"] {

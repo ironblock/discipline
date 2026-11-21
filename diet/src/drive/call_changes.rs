@@ -16,15 +16,17 @@
 //! rules. A submodule's files are not listed. A file in no repository counts
 //! (none is ignored), except under a `.git` directory, as the refill's
 //! changed-files line counts it; so does every file of a worktree when git
-//! cannot run. A path that leaves the listing while it is still on disk
-//! became ignored, and a path that joins it whose inode last changed before
-//! the call began (its ctime) was already there: neither is a change.
+//! cannot run, or lists none (a worktree its own repository ignores). A path
+//! that leaves the listing while it is still on disk became ignored, and a
+//! path that joins it whose inode last changed before the call began (its
+//! ctime), by more than a coarse clock's grain ([`RACY`]), was already
+//! there: neither is a change.
 //!
 //! **What is held.** The first count reads every listed file once. A text
 //! file up to [`TEXT_MAX_BYTES`] is held by its sha256 and a hash of each
 //! line, within [`KEPT_MAX_BYTES`] of line hashes in all, so its change is
-//! counted in lines: the shortest edit script's, on whole lines (Myers).
-//! Any other regular file is held by its sha256, or by its size and
+//! counted in lines: the shortest edit script's, on whole lines (Myers), up
+//! to [`MAX_EDITS`]. Any other regular file is held by its sha256, or by its size and
 //! modification time past [`super::carry::SNAPSHOT_MAX_BYTES`], and a symlink
 //! by its target, never followed: such a change is named with its lines not
 //! counted.
@@ -39,17 +41,17 @@
 //! (a background job, the user) is counted as the call's. A change made
 //! between calls is not: the count just before the call takes it in.
 //!
-//! The wording is the maintainer's to approve: data, not an instruction.
+//! What the block says is [`block`]'s alone: this module counts.
 
 use std::collections::{BTreeMap, BTreeSet};
-use std::fmt::Write as _;
 use std::fs::Metadata;
 use std::path::{Component, Path, PathBuf};
-use std::process::{Command, Stdio};
 use std::time::{Duration, SystemTime};
 
 use crate::formats::regimen::{self, Regimen};
 use crate::meditation::changed;
+
+pub mod block;
 
 /// The regimen key of the per-call changes lever (#1149).
 pub const CALL_CHANGES: &str = "call_changes";
@@ -84,24 +86,8 @@ pub const KEPT_MAX_BYTES: u64 = 64 * 1024 * 1024;
 pub const RACY: Duration = Duration::from_secs(2);
 
 /// The most edits the line count searches for in a file's changed middle;
-/// past them, every line of the middle is counted removed and added.
+/// past them, the change is named with its lines not counted.
 pub const MAX_EDITS: usize = 2000;
-
-/// What the block says first.
-pub const CHANGED: &str = "Files this call changed:";
-
-/// What the block says of the files it names whose text the context does
-/// not show (#1149, the shown rule of 2026-11-20).
-pub const NOT_SHOWN: &str = "Not shown in this context by read, write or edit:";
-
-/// The block of a call that returned while still running (#1149): in the
-/// background, or moved there.
-pub const STILL_RUNNING: &str =
-    "Files this call changed: not counted, the command is still running.\n";
-
-/// The block of a call whose worktree could not be listed.
-pub const UNLISTED: &str =
-    "Files this call changed: not counted, the working directory could not be listed.\n";
 
 /// The parts of a file's stat that change when it is written.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -200,7 +186,7 @@ impl Held {
 struct File {
     stat: Stat,
     held: Held,
-    /// Modified within [`RACY`] of the count that read it.
+    /// Modified within the clock's grain of the count that read it.
     racy: bool,
 }
 
@@ -241,22 +227,6 @@ impl Entry {
             _ => None,
         }
     }
-
-    fn text(&self) -> String {
-        let not_counted = "lines not counted";
-        match self {
-            Self::Modified(path, Some((added, removed))) => format!("{path} (+{added} -{removed})"),
-            Self::Modified(path, None) => format!("{path} ({not_counted})"),
-            Self::Created(path, Some(lines)) => format!("{path} (new, +{lines})"),
-            Self::Created(path, None) => format!("{path} (new, {not_counted})"),
-            Self::Deleted(path, Some(lines)) => format!("{path} (deleted, -{lines})"),
-            Self::Deleted(path, None) => format!("{path} (deleted)"),
-            Self::CreatedDir(path, 1) => format!("{path}/ (1 new file)"),
-            Self::CreatedDir(path, n) => format!("{path}/ ({n} new files)"),
-            Self::DeletedDir(path, 1) => format!("{path}/ (1 file deleted)"),
-            Self::DeletedDir(path, n) => format!("{path}/ ({n} files deleted)"),
-        }
-    }
 }
 
 /// The worktree as the session last counted it (#1149): held across its
@@ -271,6 +241,8 @@ pub struct Tree {
     began: Option<SystemTime>,
     /// Whether the first count has run.
     counted: bool,
+    /// The clock grain the count allows for: [`RACY`].
+    grain: Duration,
     /// How many files the counts have read.
     reads: u64,
 }
@@ -286,6 +258,7 @@ impl Tree {
             began: None,
             counted: false,
             reads: 0,
+            grain: RACY,
         }
     }
 
@@ -356,7 +329,7 @@ impl Tree {
             };
             let stat = Stat::of(&meta);
             let racy = meta.modified().map_or(true, |at| {
-                now.duration_since(at).map_or(true, |ago| ago < RACY)
+                now.duration_since(at).map_or(true, |ago| ago < self.grain)
             });
             if let Some(file) = self.files.get(&path)
                 && file.stat == stat
@@ -370,13 +343,13 @@ impl Tree {
                 (Some(old), Some(_)) if !old.held.same(&held) => Some(Entry::Modified(
                     path.clone(),
                     match (&old.held, &held) {
-                        (Held::Text(_, was), Held::Text(_, is)) => Some(line_counts(was, is)),
+                        (Held::Text(_, was), Held::Text(_, is)) => line_counts(was, is),
                         _ => None,
                     },
                 )),
                 // Joined the listing: created by the call, or there before
                 // and listed now (an ignore rule changed), which is no change.
-                (None, Some((began, _))) if !first && !before(&meta, *began) => {
+                (None, Some((began, _))) if !first && !before(&meta, *began, self.grain) => {
                     Some(Entry::Created(path.clone(), held.lines()))
                 }
                 _ => None,
@@ -423,9 +396,11 @@ impl Tree {
     }
 }
 
-/// Whether `meta`'s inode last changed before `began`: a file that joined
-/// the listing untouched by the call.
-fn before(meta: &Metadata, began: SystemTime) -> bool {
+/// Whether `meta`'s inode last changed before `began`, by more than `grain`:
+/// a file that joined the listing untouched by the call. Within it, a
+/// coarse clock could have stamped a file the call made, so it is the
+/// call's.
+fn before(meta: &Metadata, began: SystemTime, grain: Duration) -> bool {
     let (seconds, nanoseconds) = stamps(meta).1;
     let ctime = Duration::new(
         u64::try_from(seconds).unwrap_or(0),
@@ -433,7 +408,7 @@ fn before(meta: &Metadata, began: SystemTime) -> bool {
     );
     began
         .duration_since(SystemTime::UNIX_EPOCH)
-        .is_ok_and(|began| ctime < began)
+        .is_ok_and(|began| ctime + grain < began)
 }
 
 /// `at`'s bytes, when the file opened is the one `meta` stat'ed: a symlink
@@ -465,7 +440,8 @@ fn listed(root: &Path) -> Result<BTreeSet<String>, String> {
 
 /// The files git lists under `root`, tracked and untracked, its ignore
 /// rules applied, as a free git read, and those of each repository nested
-/// in it untracked, by their own; `None` when git cannot list them.
+/// in it untracked, by their own; `None` when git cannot list them, or lists
+/// none -- a worktree its own repository ignores, which is walked instead.
 fn git_listed(root: &Path) -> Option<BTreeSet<String>> {
     let mut out = BTreeSet::new();
     for path in git_files(root)? {
@@ -483,32 +459,21 @@ fn git_listed(root: &Path) -> Option<BTreeSet<String>> {
             }
         }
     }
-    Some(out)
+    (!out.is_empty()).then_some(out)
 }
 
 /// What `git ls-files` lists under `root`, as it lists it.
 fn git_files(root: &Path) -> Option<Vec<String>> {
-    let mut command = Command::new("git");
-    command.env_clear();
-    for key in ["PATH", "HOME"] {
-        if let Some(value) = std::env::var_os(key) {
-            command.env(key, value);
-        }
-    }
-    let output = command
-        .args(super::tool_loop::GIT_FREE_CONFIG)
-        .args([
+    let output = super::tool_loop::git_reading(
+        root,
+        &[
             "ls-files",
             "-z",
             "--cached",
             "--others",
             "--exclude-standard",
-        ])
-        .current_dir(root)
-        .stdin(Stdio::null())
-        .stderr(Stdio::null())
-        .output()
-        .ok()?;
+        ],
+    )?;
     if !output.status.success() {
         return None;
     }
@@ -646,9 +611,8 @@ fn line_hashes(bytes: &[u8]) -> Vec<u64> {
 
 /// Lines added and removed from `old` to `new`, each a file's line hashes
 /// ([`line_hashes`]): the shortest edit script's, on whole lines (Myers),
-/// after their common head and tail. Past [`MAX_EDITS`], every line of the
-/// changed middle is counted.
-fn line_counts(old: &[u64], new: &[u64]) -> (u64, u64) {
+/// after their common head and tail; `None` past [`MAX_EDITS`], not counted.
+fn line_counts(old: &[u64], new: &[u64]) -> Option<(u64, u64)> {
     let head = old.iter().zip(new).take_while(|(a, b)| a == b).count();
     let (old, new) = (&old[head..], &new[head..]);
     let tail = old
@@ -660,11 +624,9 @@ fn line_counts(old: &[u64], new: &[u64]) -> (u64, u64) {
     let (old, new) = (&old[..old.len() - tail], &new[..new.len() - tail]);
     let (n, m) = (old.len(), new.len());
     let count = |n: usize| n as u64;
-    let Some(edits) = edit_distance(old, new) else {
-        return (count(m), count(n));
-    };
+    let edits = edit_distance(old, new)?;
     let common = (n + m - edits) / 2;
-    (count(m - common), count(n - common))
+    Some((count(m - common), count(n - common)))
 }
 
 /// The length of the shortest edit script from `old` to `new` (Myers 1986,
@@ -698,49 +660,6 @@ fn edit_distance(old: &[u64], new: &[u64]) -> Option<usize> {
         }
     }
     None
-}
-
-/// The block a call's result ends with (#1149): `entries`, the files it
-/// changed, or that it changed none; then the files it changed or named whose
-/// text the context does not show, `not_shown`, when there are any. Past
-/// [`changed::MAX_NAMED`] names on a line, the rest are counted.
-#[must_use]
-pub fn block(entries: &[Entry], not_shown: &[String]) -> String {
-    let named = |items: Vec<String>| {
-        let mut text = items
-            .iter()
-            .take(changed::MAX_NAMED)
-            .cloned()
-            .collect::<Vec<_>>()
-            .join(", ");
-        if items.len() > changed::MAX_NAMED {
-            let _ = write!(text, ", and {} more", items.len() - changed::MAX_NAMED);
-        }
-        text
-    };
-    let mut out = if entries.is_empty() {
-        format!("{CHANGED} none.\n")
-    } else {
-        format!(
-            "{CHANGED} {}.\n",
-            named(entries.iter().map(Entry::text).collect())
-        )
-    };
-    if !not_shown.is_empty() {
-        let _ = writeln!(out, "{NOT_SHOWN} {}.", named(not_shown.to_vec()));
-    }
-    out
-}
-
-/// `shown`, a call's result after the output cap, with `block` after it, a
-/// blank line between.
-#[must_use]
-pub fn appended(shown: &str, block: &str) -> String {
-    if shown.is_empty() {
-        return block.to_owned();
-    }
-    let gap = if shown.ends_with('\n') { "\n" } else { "\n\n" };
-    format!("{shown}{gap}{block}")
 }
 
 /// A file as the shown rule and a call's changes name it (#1149, #1150):
@@ -780,6 +699,12 @@ impl Keys {
         }
     }
 
+    /// Whether `key` is under the worktree.
+    #[must_use]
+    pub fn inside(&self, key: &Path) -> bool {
+        key.starts_with(&self.worktree)
+    }
+
     /// `key` as the block names it: relative to the worktree under it,
     /// whole otherwise.
     #[must_use]
@@ -809,6 +734,17 @@ fn normalized(path: &Path) -> PathBuf {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::fmt::Write as _;
+    use std::process::{Command, Stdio};
+
+    /// `entries` rendered with nothing outside and the files `not_shown`.
+    fn block(entries: &[Entry], not_shown: &[String]) -> String {
+        self::block::render(&self::block::Block::Counted {
+            entries,
+            outside: &[],
+            not_shown,
+        })
+    }
 
     fn scratch(name: &str) -> PathBuf {
         let dir = std::env::temp_dir().join(format!(
@@ -835,7 +771,7 @@ mod tests {
 
     /// Lines added and removed from `old` to `new`, as a count compares them.
     fn counts(old: &[u8], new: &[u8]) -> (u64, u64) {
-        line_counts(&line_hashes(old), &line_hashes(new))
+        line_counts(&line_hashes(old), &line_hashes(new)).expect("within the edit bound")
     }
 
     /// A call that runs `call` in `tree`'s worktree, counted.
@@ -969,6 +905,9 @@ mod tests {
         std::fs::write(dir.join("kept.txt"), "kept\n").expect("written");
         std::fs::write(dir.join("old.log"), "old\n").expect("written");
         let mut tree = Tree::new(&dir);
+        // A clock as fine as this machine's: the files the rule change lists
+        // again were made a moment ago, within any coarse clock's grain.
+        tree.grain = Duration::ZERO;
         let entries = counted(&mut tree, || {
             std::fs::create_dir_all(dir.join("build")).expect("made");
             std::fs::write(dir.join("build/out.o"), "obj\n").expect("written");
@@ -1084,27 +1023,6 @@ mod tests {
         );
         let _ = std::fs::remove_dir_all(&dir);
         let _ = std::fs::remove_dir_all(&outside);
-    }
-
-    #[test]
-    fn the_block_names_none_and_counts_past_twenty() {
-        assert_eq!(block(&[], &[]), "Files this call changed: none.\n");
-        assert_eq!(
-            block(&[], &["app.py".to_owned()]),
-            "Files this call changed: none.\nNot shown in this context by read, write or edit: \
-             app.py.\n"
-        );
-        let many: Vec<Entry> = (0..22)
-            .map(|n| Entry::Modified(format!("f{n:02}"), Some((1, 0))))
-            .collect();
-        assert!(block(&many, &[]).ends_with("f19 (+1 -0), and 2 more.\n"));
-    }
-
-    #[test]
-    fn the_block_follows_the_result_after_a_blank_line() {
-        assert_eq!(appended("", "B\n"), "B\n");
-        assert_eq!(appended("out\n", "B\n"), "out\n\nB\n");
-        assert_eq!(appended("Updated.", "B\n"), "Updated.\n\nB\n");
     }
 
     #[test]

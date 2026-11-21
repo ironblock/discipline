@@ -123,6 +123,7 @@ pub mod services;
 pub mod session;
 pub mod shell_gate;
 pub mod shown;
+pub mod shown_files;
 pub mod standard;
 pub mod table;
 pub mod template_roles;
