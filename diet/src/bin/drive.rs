@@ -141,10 +141,16 @@ fn carry_usage(out: &mut String) {
     out.push_str("carried session sends this build's tools and wording, so its baseline is\n");
     out.push_str("a carry with no lever moved, never the recorded continuation.\n");
     out.push_str("--stop-after N: the session stops after its Nth trunk call, or at its\n");
-    out.push_str("next refill, whichever comes first: the next trunk request is never sent,\n");
-    out.push_str("the turn settles `stopped` (log v50), and the session ends; a turn that\n");
-    out.push_str("settles with the stop come ends it too (#1151).\n");
+    out.push_str("next refill that changes the request it produces (trunk and steps alike),\n");
+    out.push_str("whichever comes first: the next trunk request is never sent, the turn\n");
+    out.push_str("settles `stopped` (log v50), and the session ends; a turn that settles, a\n");
+    out.push_str("refill made while awaiting, or a fork that settles with the stop come ends\n");
+    out.push_str("it too (#1151).\n");
     out.push_str("--carried-root FROM=TO: with --carry, the carried text's worktree root\n");
+    out.push_str("FROM, and its `~` spelling under this machine's home, replaced with TO as\n");
+    out.push_str("this session shows it (a scenario's placeholder). A drive recorded under\n");
+    out.push_str("another home names `~/...` this machine does not: give that spelling as\n");
+    out.push_str("its own root, `--carried-root '~/...=TO'`.\n");
     out.push_str("FROM replaced with this session's TO, each whole occurrence; repeatable,\n");
     out.push_str("applied in order; the start line names how many and what was sent (v28).\n");
     out.push_str("--phase-tool-description FILE: the phase tool's description in place of\n");
@@ -543,8 +549,10 @@ fn serve_args(args: &[String]) -> Option<ServeArgs> {
             true
         } else if flag == "--carried-root" {
             match value.split_once('=') {
+                // FROM may be a `~/...` spelling, as a drive recorded under
+                // another home names its root (#1151's third review).
                 Some((from, to))
-                    if std::path::Path::new(from).is_absolute()
+                    if (std::path::Path::new(from).is_absolute() || from.starts_with("~/"))
                         && std::path::Path::new(to).is_absolute() =>
                 {
                     carried_roots.push((from.to_owned(), to.to_owned()));

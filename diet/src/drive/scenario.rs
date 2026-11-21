@@ -4233,7 +4233,10 @@ fn carried_script(log: &std::path::Path, text: &str) -> Result<(), Failure> {
     use crate::formats::log::Event;
     let written =
         std::fs::read_to_string(log).map_err(|why| Failure(format!("{}: {why}", log.display())))?;
-    let lines = crate::formats::log::parse(&written)
+    // Its start alone (#1151's third review): a line after what the carry
+    // uses is not read.
+    let first = written.split_inclusive('\n').next().unwrap_or_default();
+    let lines = crate::formats::log::parse(first)
         .map_err(|why| Failure(format!("{}: {why}", log.display())))?;
     let Some(Event::SessionStart { run: Some(run), .. }) = lines.first().map(|line| &line.event)
     else {

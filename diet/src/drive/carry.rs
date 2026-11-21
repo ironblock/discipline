@@ -157,44 +157,53 @@ pub fn read_at(log: &Path, sealed: &[String], at: Option<u64>) -> Result<Carry, 
 /// meditation is read whole, and refused as the whole is.
 pub fn lines_for(text: &str, at: Option<u64>) -> Result<Vec<log::Line>, String> {
     let raw: Vec<&str> = text.split_inclusive('\n').collect();
-    let peek: Vec<serde_json::Value> = raw
+    // A torn final line (#230) that would be the last meditation: which
+    // refill is the last is not known, so none is carried.
+    if at.is_none()
+        && raw
+            .last()
+            .is_some_and(|last| !last.ends_with('\n') && last.contains(r#""kind":"meditation""#))
+    {
+        return Err(
+            "the log's last line is torn, and it may be its last meditation: which refill is the \
+             last is not known"
+                .to_owned(),
+        );
+    }
+    // Each line read alone, by its place, to choose the lines the carry uses
+    // with the one rule `projection::riding` checks them by.
+    let read: Vec<(usize, log::Line)> = raw
         .iter()
-        .map(|line| serde_json::from_str(line).unwrap_or_default())
+        .enumerate()
+        .filter_map(|(i, line)| {
+            log::line(line.trim_end_matches('\n'))
+                .ok()
+                .map(|line| (i, line))
+        })
         .collect();
-    let kind = |i: usize| peek[i]["kind"].as_str().unwrap_or_default();
+    let lines: Vec<log::Line> = read.iter().map(|(_, line)| line.clone()).collect();
     let seam = match at {
-        Some(at) => (0..raw.len()).find(|&i| peek[i]["seq"].as_u64() == Some(at)),
-        None => (0..raw.len())
-            .rev()
-            .find(|&i| kind(i) == "meditation" && peek[i].get("trunk_sha256").is_some()),
+        Some(at) => lines.iter().position(|line| line.seq == at),
+        None => lines.iter().rposition(|line| {
+            matches!(
+                line.event,
+                Event::Meditation {
+                    trunk_sha256: Some(_),
+                    ..
+                }
+            )
+        }),
     };
     let Some(seam) = seam else {
         return log::parse(text).map_err(|why| why.to_string());
     };
-    let turn = peek[seam]["at_turn"].as_u64();
-    let trunk_request = |i: usize| kind(i) == "request" && peek[i]["lane"] == "trunk";
-    let mut end = seam;
-    let first = (seam + 1..raw.len())
-        .take_while(|&i| !(kind(i) == "turn.settled" && peek[i]["turn"].as_u64() == turn))
-        .find(|&i| trunk_request(i));
-    if let Some(first) = first {
-        end = first;
-        let request = peek[first]["seq"].as_u64();
-        if let Some(outcome) = (first + 1..raw.len()).find(|&i| {
-            peek[i]["to_request"].as_u64() == request
-                || (matches!(kind(i), "cancelled" | "request.failed")
-                    && peek[i]["request"].as_u64() == request)
-        }) {
-            end = end.max(outcome);
-        }
-        if let Some(next) = (first + 1..raw.len())
-            .take_while(|&i| !matches!(kind(i), "meditation" | "tangent.open" | "tangent.close"))
-            .find(|&i| trunk_request(i))
-        {
-            end = end.max(next);
-        }
-    }
-    log::parse(&raw[..=end].concat()).map_err(|why| why.to_string())
+    let (sent, outcome, next) = crate::drive::projection::ride_requests(&lines, seam);
+    let end = [Some(seam), sent, outcome, next]
+        .into_iter()
+        .flatten()
+        .max()
+        .map_or(seam, |end| end);
+    log::parse(&raw[..=read[end].0].concat()).map_err(|why| why.to_string())
 }
 
 /// The phase a carried session is in after the meditation at `seq` (#1071):

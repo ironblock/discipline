@@ -3604,7 +3604,8 @@ impl State {
     }
 
     /// Whether the session's stop has come (#1151): told to stop after N
-    /// trunk calls, it has made N, or it has refilled since it started.
+    /// trunk calls, it has made N, or it has made a refill since it started
+    /// that changed the request it produced ([`refill_counted`]).
     fn stop_due(&self) -> bool {
         self.stop_after.is_some_and(|calls| {
             self.changed_refills > 0
@@ -4387,19 +4388,20 @@ impl<S: Streaming + 'static> Session<S> {
         state.resuming = None;
         drop(state);
         self.shared.changed.notify_all();
-        let deferred = false;
         let steps = u32::try_from(taken).unwrap_or(u32::MAX).saturating_add(1);
         spawn_turn(
             &self.shared,
             (shape, riding, (turn, steps)),
-            (first, None, deferred),
+            (first, None, false),
         );
         Some(Admitted { seq, turn })
     }
 
     /// The session stops after its `calls`-th trunk call, or at its next
-    /// refill, whichever comes first (#1151): the trunk request after it is
-    /// never sent, the turn settles `stopped`, and the session ends.
+    /// refill that changes the request it produces, whichever comes first
+    /// (#1151): the trunk request after it is never sent, the turn settles
+    /// `stopped`, and the session ends -- as it does when a turn settles, a
+    /// refill is made while awaiting, or a fork settles, with the stop come.
     pub fn stop_after(&self, calls: u64) {
         self.shared.lock().stop_after = Some(calls);
     }
@@ -9252,9 +9254,13 @@ fn trunk_opening(
     Some((request, cancel))
 }
 
-/// Whether the refill that turned `before` into `after` is the stop's.
+/// The refill that turned the request `before` into `after` counted
+/// toward the stop (#1151's third review) unless the request is the one
+/// that would have gone without it: trunk and steps alike.
 fn refill_counted(state: &mut State, before: &[Message], after: &[Message]) {
-    let _ = (state, before, after);
+    if before != after {
+        state.changed_refills += 1;
+    }
 }
 
 /// The turn `turn` settled `stopped` (#1151): the session's stop came before
@@ -10299,9 +10305,10 @@ fn refilled(
     state.refills += 1;
     refilled.extend(kept);
     let prefix_hash_after = digest(&refilled);
-    if refilled != state.trunk {
-        state.changed_refills += 1;
-    }
+    // Between turns the request is the trunk and the next ask, the same ask
+    // either way; under one, `refill_mid_turn` counts the request instead.
+    let trunk_before = std::mem::take(&mut state.trunk);
+    refill_counted(state, &trunk_before, &refilled);
     state.trunk = refilled;
     // What a session carried from this refill starts from (#948): the
     // trunk exactly as sent and the working object's dump, kept in the
@@ -13299,6 +13306,8 @@ fn refill_mid_turn(
     ),
     summary: Option<&crate::meditation::native::Summary>,
 ) {
+    let before = shape.messages.clone();
+    let counted = state.changed_refills;
     let mut own = shape.messages.split_off(state.trunk.len());
     let kept = own.split_off(keep_from);
     let dropped = own.split_off(ask);
@@ -13325,6 +13334,10 @@ fn refill_mid_turn(
     shape.messages.clone_from(&state.trunk);
     shape.messages.extend(own);
     shape.messages.extend(kept);
+    // Under a turn the request is what the refill made: a trunk re-rendered
+    // as it was, with the turn's earlier steps dropped, changed it.
+    state.changed_refills = counted;
+    refill_counted(state, &before, &shape.messages);
 }
 
 /// The running turn's exchange after a window meditation refilled the trunk

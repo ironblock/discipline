@@ -696,6 +696,56 @@ fn walk_of<'a>(
     Ok(walk)
 }
 
+/// The requests a ride after the meditation at `at`, an index into `lines`,
+/// is checked against (#1151), each by its index in `lines`: the turn's next
+/// trunk request before it settled, the line that request ended on, and the
+/// next trunk request after it before another refill or tangent. The one
+/// source of the lines [`riding`] checks and `carry::lines_for` reads.
+#[must_use]
+pub fn ride_requests(
+    lines: &[log::Line],
+    at: usize,
+) -> (Option<usize>, Option<usize>, Option<usize>) {
+    let turn = match &lines[at].event {
+        Line::Meditation { at_turn, .. } => Some(*at_turn),
+        _ => None,
+    };
+    let trunk = |line: &log::Line| {
+        matches!(
+            &line.event,
+            Line::Request {
+                lane: Lane::Trunk,
+                ..
+            }
+        )
+    };
+    let Some(sent) = (at + 1..lines.len())
+        .take_while(|&i| {
+            !matches!(&lines[i].event, Line::TurnSettled { turn: settled, .. } if Some(*settled) == turn)
+        })
+        .find(|&i| trunk(&lines[i]))
+    else {
+        return (None, None, None);
+    };
+    let request = lines[sent].seq;
+    let outcome = (sent + 1..lines.len()).find(|&i| match &lines[i].event {
+        Line::Response { to_request, .. } => *to_request == request,
+        Line::Cancelled { request: ended, .. } | Line::RequestFailed { request: ended, .. } => {
+            *ended == request
+        }
+        _ => false,
+    });
+    let next = (sent + 1..lines.len())
+        .take_while(|&i| {
+            !matches!(
+                lines[i].event,
+                Line::Meditation { .. } | Line::TangentOpen { .. } | Line::TangentClose { .. }
+            )
+        })
+        .find(|&i| trunk(&lines[i]));
+    (Some(sent), outcome, next)
+}
+
 /// What rode after a refilled trunk (#1151): the running turn's ask with
 /// its notes, then the steps the split kept, and the ask's files with their
 /// bytes, read back from the recording.
@@ -833,19 +883,18 @@ pub fn riding(
     };
     // The request the recording sent after the refill: the turn's next on
     // the trunk, before the turn settled.
-    let sent = lines[at + 1..]
-        .iter()
-        .take_while(
-            |line| !matches!(&line.event, Line::TurnSettled { turn: settled, .. } if *settled == turn),
-        )
-        .find_map(|line| match &line.event {
-            Line::Request {
-                lane: Lane::Trunk,
-                head_sha256: Some(head),
-                ..
-            } => Some((line.seq, head.clone())),
-            _ => None,
-        });
+    let (sent_at, _, next_at) = ride_requests(lines, at);
+    let head_at = |i: usize| match &lines[i].event {
+        Line::Request {
+            head_sha256: Some(head),
+            turn: of_turn,
+            ..
+        } => Some((lines[i].seq, *of_turn, head.clone())),
+        _ => None,
+    };
+    let sent = sent_at
+        .and_then(head_at)
+        .map(|(request, _, head)| (request, head));
     let Some((request, logged)) = sent else {
         if carried {
             return Err(format!(
@@ -892,21 +941,8 @@ pub fn riding(
     // The ride's last message, which that head leaves out: the next trunk
     // request's head covers it, when one was sent before another refill or
     // tangent and still carries what rode as it rode.
-    let mut next = None;
-    for line in &lines[at + 1..] {
-        match &line.event {
-            Line::Meditation { .. } | Line::TangentOpen { .. } | Line::TangentClose { .. } => break,
-            Line::Request {
-                lane: Lane::Trunk,
-                head_sha256: Some(head),
-                turn: of_turn,
-                ..
-            } if line.seq > request => {
-                next = Some((line.seq, *of_turn, head.clone()));
-                break;
-            }
-            _ => {}
-        }
+    let next = next_at.and_then(head_at);
+    for line in &lines[at + 1..next_at.unwrap_or(at + 1)] {
         walk.line(line)?;
     }
     if let Some((request, of_turn, logged)) = next {

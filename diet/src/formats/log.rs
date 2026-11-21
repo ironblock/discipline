@@ -1639,7 +1639,8 @@ pub struct RecordedFile {
 
 /// Where a resumed turn came from (v50, #1151): the meditation of the
 /// carried log that cut it, by its `seq`, and how many of its steps rode
-/// after that refill -- steps this log does not hold.
+/// after that refill: no line of this log records them, and their messages
+/// are kept beside it by `steps_sha256`.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Resumed {
     /// The `seq` of the meditation in the log the session was carried from.
