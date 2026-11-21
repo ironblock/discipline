@@ -9096,10 +9096,10 @@ fn standard_ran(
         }
         // Its own failure (#894), shown as any result and marked for the
         // step warrants.
-        super::standard::Done::Failed(result) => {
+        super::standard::Done::Failed(failed) => {
             let mut line = ToolLine::of(request, turn, call, log::ToolOutcome::Ran);
             line.failed = true;
-            let shown = shown_capped(tools, &result, &mut line);
+            let shown = shown_capped(tools, &failed.text, &mut line);
             (line, Some(shown))
         }
         super::standard::Done::Image { media_type, bytes } => {

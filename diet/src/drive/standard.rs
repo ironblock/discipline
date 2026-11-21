@@ -34,6 +34,7 @@ use std::fmt::Write as _;
 use std::path::{Path, PathBuf};
 
 use crate::client::shape::ToolDefinition;
+use crate::client::vocabulary;
 use crate::formats::record::json::Value;
 
 /// A call's arguments: the model's output, a foreign format, read with
@@ -360,15 +361,84 @@ fn ripgrep() -> Option<&'static Path> {
         .as_deref()
 }
 
+vocabulary! {
+    /// Each way a standard tool reports a failure of its own (#894): every
+    /// [`Done::Failed`] names one, so the surface's reading of its own
+    /// results ([`shows_file`]) and that reading's test take each in turn
+    /// (#1149).
+    Failure {
+        /// The arguments are not a JSON object.
+        NotAnObject => "not-an-object",
+        /// A required argument is missing.
+        Missing => "missing",
+        /// An argument that names text is not text.
+        NotText => "not-text",
+        /// A count (`offset`, `limit`) is not a positive integer.
+        NotACount => "not-a-count",
+        /// `edit`'s `replace_all` is not a boolean.
+        NotABoolean => "not-a-boolean",
+        /// `edit`'s `file_path` and `path` name different files.
+        TwoFiles => "two-files",
+        /// A path begins with `~` (#734).
+        Tilde => "tilde",
+        /// `read`'s file could not be read.
+        Unreadable => "unreadable",
+        /// `read`'s image is past the attachment bound.
+        ImageTooLarge => "image-too-large",
+        /// `read`'s file is not text.
+        Binary => "binary",
+        /// `read`'s `offset` is past the file's end.
+        BeyondEnd => "beyond-end",
+        /// `write`'s file could not be written.
+        Unwritable => "unwritable",
+        /// `edit`'s `old_string` is empty.
+        EmptyOldString => "empty-old-string",
+        /// `edit`'s `old_string` is not in the file.
+        NotFound => "not-found",
+        /// `edit`'s `old_string` is in the file more than once, and
+        /// `replace_all` is off.
+        Ambiguous => "ambiguous",
+        /// `edit`'s `old_string` and `new_string` are the same.
+        Unchanged => "unchanged",
+        /// `edit`'s file could not be read.
+        EditUnreadable => "edit-unreadable",
+        /// `edit`'s file could not be written.
+        EditUnwritable => "edit-unwritable",
+        /// The tool named is no standard tool.
+        Unknown => "unknown",
+        /// A search could not run, or did not finish.
+        Search => "search",
+    }
+}
+
+impl Failure {
+    /// This failure, reported in `text`.
+    fn with(self, text: impl Into<String>) -> Failed {
+        Failed {
+            kind: self,
+            text: text.into(),
+        }
+    }
+}
+
+/// A standard tool's own failure (#894): its kind, and what it reports.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Failed {
+    /// Its kind.
+    pub kind: Failure,
+    /// What the model is shown.
+    pub text: String,
+}
+
 /// How a standard tool's call ended.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Done {
     /// It returned this result.
     Shown(String),
-    /// It failed, and returned this, the error it reports (#894): the
+    /// It failed, and reported this, the error and its kind (#894): the
     /// model is shown it as any result, and the step warrants read it as a
     /// failure, where content a result quotes never is one.
-    Failed(String),
+    Failed(Failed),
     /// `read` returned an image (#557): its bytes, delivered to the model as
     /// an image part of the tool's result, as Pi and `OpenCode` 2 deliver it.
     Image {
@@ -382,32 +452,36 @@ pub enum Done {
 }
 
 /// A call's arguments, as an object.
-fn arguments(raw: &str) -> Result<Args, String> {
+fn arguments(raw: &str) -> Result<Args, Failed> {
     match serde_json::from_str::<serde_json::Value>(raw.trim()) {
         Ok(serde_json::Value::Object(args)) => Ok(args),
-        Ok(_) => Err("the arguments are not a JSON object".to_owned()),
-        Err(why) => Err(format!("the arguments are not a JSON object: {why}")),
+        Ok(_) => Err(Failure::NotAnObject.with("the arguments are not a JSON object")),
+        Err(why) => {
+            Err(Failure::NotAnObject.with(format!("the arguments are not a JSON object: {why}")))
+        }
     }
 }
 
-fn required<'a>(args: &'a Args, key: &str) -> Result<&'a str, String> {
+fn required<'a>(args: &'a Args, key: &str) -> Result<&'a str, Failed> {
     match args.get(key) {
         Some(serde_json::Value::String(value)) => Ok(value),
         Some(serde_json::Value::Null) | None => {
-            Err(format!("params must have required property '{key}'"))
+            Err(Failure::Missing.with(format!("params must have required property '{key}'")))
         }
-        Some(_) => Err(format!("params/{key} must be string")),
+        Some(_) => Err(Failure::NotText.with(format!("params/{key} must be string"))),
     }
 }
 
-fn optional_count(args: &Args, key: &str) -> Result<Option<usize>, String> {
+fn optional_count(args: &Args, key: &str) -> Result<Option<usize>, Failed> {
     match args.get(key) {
         None | Some(serde_json::Value::Null) => Ok(None),
         Some(value) => value
             .as_u64()
             .filter(|n| *n >= 1)
             .map(|n| Some(usize::try_from(n).unwrap_or(usize::MAX)))
-            .ok_or_else(|| format!("params/{key} must be a positive integer")),
+            .ok_or_else(|| {
+                Failure::NotACount.with(format!("params/{key} must be a positive integer"))
+            }),
     }
 }
 
@@ -537,7 +611,7 @@ pub fn run(name: &str, raw: &str, tools: &Tools, stop: &dyn Fn() -> bool) -> Don
         EDIT => Ok(edit(&args, tools, stop)),
         GREP => Ok(grep(&args, tools, stop)),
         GLOB => Ok(glob(&args, tools, stop)),
-        _ => Err(format!("`{name}` is not a standard tool")),
+        _ => Err(Failure::Unknown.with(format!("`{name}` is not a standard tool"))),
     });
     match result {
         Ok(done) => done,
@@ -545,11 +619,11 @@ pub fn run(name: &str, raw: &str, tools: &Tools, stop: &dyn Fn() -> bool) -> Don
     }
 }
 
-/// A helper's failure as the call's result, or the cancel.
-fn failed(why: Option<String>, describe: impl FnOnce(String) -> String) -> Done {
+/// A helper's failure as the call's result, of `kind`, or the cancel.
+fn failed(why: Option<String>, kind: Failure, describe: impl FnOnce(String) -> String) -> Done {
     why.map_or_else(
         || Done::Cancelled(String::new()),
-        |why| Done::Failed(describe(why)),
+        |why| Done::Failed(kind.with(describe(why))),
     )
 }
 
@@ -563,26 +637,28 @@ fn read(args: &Args, tools: &Tools, stop: &dyn Fn() -> bool) -> Done {
         (Err(why), _, _) | (_, Err(why), _) | (_, _, Err(why)) => return Done::Failed(why),
     };
     if let Some(refused) = refused_tilde(path) {
-        return Done::Failed(refused);
+        return Done::Failed(Failure::Tilde.with(refused));
     }
     let bytes = match read_bytes(tools, &located(tools, path), stop) {
         Ok(bytes) => bytes,
-        Err(why) => return failed(why, |why| read_error(path, &why)),
+        Err(why) => return failed(why, Failure::Unreadable, |why| read_error(path, &why)),
     };
     if let Some(media_type) = image_type(&bytes) {
         if u64::try_from(bytes.len()).unwrap_or(u64::MAX) > super::attach::MAX_BYTES {
-            return Done::Failed(image_too_large(path));
+            return Done::Failed(Failure::ImageTooLarge.with(image_too_large(path)));
         }
         return Done::Image { media_type, bytes };
     }
     let Ok(content) = String::from_utf8(bytes) else {
-        return Done::Failed(binary_file(path));
+        return Done::Failed(Failure::Binary.with(binary_file(path)));
     };
     let lines: Vec<&str> = content.split_inclusive('\n').collect();
     let total = lines.len();
     let start = offset.unwrap_or(1) - 1;
     if start >= total && total > 0 {
-        return Done::Failed(format!("{}{total} lines total)", beyond_end(start + 1)));
+        return Done::Failed(
+            Failure::BeyondEnd.with(format!("{}{total} lines total)", beyond_end(start + 1))),
+        );
     }
     let wanted = limit.unwrap_or(READ_MAX_LINES).min(READ_MAX_LINES);
     let mut shown = String::new();
@@ -610,12 +686,14 @@ fn write(args: &Args, tools: &Tools, stop: &dyn Fn() -> bool) -> Done {
         (Err(why), _) | (_, Err(why)) => return Done::Failed(why),
     };
     let at = match refused_tilde(path) {
-        Some(refused) => return Done::Failed(refused),
+        Some(refused) => return Done::Failed(Failure::Tilde.with(refused)),
         None => located(tools, path),
     };
     match write_text(tools, &at, content.as_bytes(), stop) {
         Ok(existed) => Done::Shown(wrote(path, existed)),
-        Err(why) => failed(why, |why| format!("Error writing to file: {why}")),
+        Err(why) => failed(why, Failure::Unwritable, |why| {
+            format!("Error writing to file: {why}")
+        }),
     }
 }
 
@@ -711,18 +789,21 @@ pub fn shown_file(name: &str, raw: &str) -> Option<String> {
 /// `edit`'s file (N8): its `file_path`, or `path`, the name `read` and
 /// `write` take it under; both, when they name the same file. Two different
 /// files are refused, and neither is refused as a missing `file_path`.
-fn edit_path(args: &Args) -> Result<&str, String> {
+fn edit_path(args: &Args) -> Result<&str, Failed> {
     let given = |key: &str| match args.get(key) {
         None | Some(serde_json::Value::Null) => Ok(None),
         Some(serde_json::Value::String(value)) => Ok(Some(value.as_str())),
-        Some(_) => Err(format!("params/{key} must be string")),
+        Some(_) => Err(Failure::NotText.with(format!("params/{key} must be string"))),
     };
     match (given("file_path")?, given("path")?) {
-        (Some(file_path), Some(path)) if file_path != path => Err(format!(
-            "params/file_path and params/path name different files: '{file_path}' and '{path}'"
-        )),
+        (Some(file_path), Some(path)) if file_path != path => Err(Failure::TwoFiles.with(format!(
+            "params/file_path and params/path name different files: '{file_path}' and \
+                 '{path}'"
+        ))),
         (Some(file), _) | (None, Some(file)) => Ok(file),
-        (None, None) => Err("params must have required property 'file_path'".to_owned()),
+        (None, None) => {
+            Err(Failure::Missing.with("params must have required property 'file_path'"))
+        }
     }
 }
 
@@ -738,44 +819,51 @@ fn edit(args: &Args, tools: &Tools, stop: &dyn Fn() -> bool) -> Done {
     let replace_all = match args.get("replace_all") {
         None | Some(serde_json::Value::Null) => false,
         Some(serde_json::Value::Bool(all)) => *all,
-        Some(_) => return Done::Failed("params/replace_all must be boolean".to_owned()),
+        Some(_) => {
+            return Done::Failed(Failure::NotABoolean.with("params/replace_all must be boolean"));
+        }
     };
     // Pi and `OpenCode` 2 both refuse an empty `old_string` (Qwen Code would
     // create a file); the refusal's words are `OpenCode` 2's.
     if old.is_empty() {
         return Done::Failed(
-            "old_string must not be empty. Use write to create or overwrite a file.".to_owned(),
+            Failure::EmptyOldString
+                .with("old_string must not be empty. Use write to create or overwrite a file."),
         );
     }
     if let Some(refused) = refused_tilde(path) {
-        return Done::Failed(refused);
+        return Done::Failed(Failure::Tilde.with(refused));
     }
     let at = located(tools, path);
     // The file's bytes, edited as bytes (#734): nothing outside a match
     // changes, though the file is not UTF-8 everywhere.
     let current = match read_bytes(tools, &at, stop) {
         Ok(current) => current,
-        Err(why) => return failed(why, |why| format!("Error executing edit: {why}")),
+        Err(why) => {
+            return failed(why, Failure::EditUnreadable, |why| {
+                format!("Error executing edit: {why}")
+            });
+        }
     };
     let occurrences = found_at(&current, old.as_bytes()).len();
     if occurrences == 0 {
-        return Done::Failed(format!(
+        return Done::Failed(Failure::NotFound.with(format!(
             "Failed to edit, 0 occurrences found for old_string in {path}. No edits made. The \
              exact text in old_string was not found. Ensure you're not escaping content \
              incorrectly and check whitespace, indentation, and context. Use {READ} tool to \
              verify."
-        ));
+        )));
     }
     if !replace_all && occurrences > 1 {
-        return Done::Failed(format!(
+        return Done::Failed(Failure::Ambiguous.with(format!(
             "Failed to edit. Found {occurrences} occurrences for old_string in {path} but \
              replace_all was not enabled."
-        ));
+        )));
     }
     if old == new {
-        return Done::Failed(format!(
+        return Done::Failed(Failure::Unchanged.with(format!(
             "No changes to apply. The old_string and new_string are identical in file: {path}"
-        ));
+        )));
     }
     let updated = replaced(
         &current,
@@ -784,7 +872,9 @@ fn edit(args: &Args, tools: &Tools, stop: &dyn Fn() -> bool) -> Done {
         if replace_all { usize::MAX } else { 1 },
     );
     if let Err(why) = write_text(tools, &at, &updated, stop) {
-        return failed(why, |why| format!("Error executing edit: {why}"));
+        return failed(why, Failure::EditUnwritable, |why| {
+            format!("Error executing edit: {why}")
+        });
     }
     let mut message = edited(path);
     if let Some(snippet) = snippet(
@@ -901,11 +991,11 @@ fn searched_in(path: Option<&str>, word: &str) -> String {
     )
 }
 
-fn optional_text<'a>(args: &'a Args, key: &str) -> Result<Option<&'a str>, String> {
+fn optional_text<'a>(args: &'a Args, key: &str) -> Result<Option<&'a str>, Failed> {
     match args.get(key) {
         None | Some(serde_json::Value::Null) => Ok(None),
         Some(serde_json::Value::String(value)) => Ok(Some(value)),
-        Some(_) => Err(format!("params/{key} must be string")),
+        Some(_) => Err(Failure::NotText.with(format!("params/{key} must be string"))),
     }
 }
 
@@ -974,7 +1064,7 @@ fn grep(args: &Args, tools: &Tools, stop: &dyn Fn() -> bool) -> Done {
     let ran = match ran {
         Ok(ran) => ran,
         Err(why) => {
-            return failed(why, |why| {
+            return failed(why, Failure::Search, |why| {
                 format!("Error during grep search operation: {why}")
             });
         }
@@ -983,7 +1073,11 @@ fn grep(args: &Args, tools: &Tools, stop: &dyn Fn() -> bool) -> Done {
     let filtered = filter.map_or_else(String::new, |filter| format!(" (filter: \"{filter}\")"));
     let stdout = match whole_text(&ran) {
         Ok(stdout) => stdout,
-        Err(why) => return Done::Failed(format!("Error during grep search operation: {why}")),
+        Err(why) => {
+            return Done::Failed(
+                Failure::Search.with(format!("Error during grep search operation: {why}")),
+            );
+        }
     };
     // Exit 2 with matches is a search that could not finish -- an entry it
     // could not read (#734): Pi and `OpenCode` 2 differ, so Qwen Code's,
@@ -994,11 +1088,11 @@ fn grep(args: &Args, tools: &Tools, stop: &dyn Fn() -> bool) -> Done {
         Some(0) => {}
         Some(2) if !stdout.trim().is_empty() => {}
         Some(2) => {
-            return Done::Failed(format!(
+            return Done::Failed(Failure::Search.with(format!(
                 "Search did not complete for pattern \"{pattern}\" {location}{filtered}. No \
                  valid matches were returned; do not treat this as no matches. Error: {}",
                 said(&ran)
-            ));
+            )));
         }
         Some(1) => {
             return Done::Shown(format!(
@@ -1006,10 +1100,10 @@ fn grep(args: &Args, tools: &Tools, stop: &dyn Fn() -> bool) -> Done {
             ));
         }
         _ => {
-            return Done::Failed(format!(
+            return Done::Failed(Failure::Search.with(format!(
                 "Error during grep search operation: {}",
                 said(&ran)
-            ));
+            )));
         }
     }
     // `grep -r .` names files `./a`; ripgrep names them `a`.
@@ -1123,7 +1217,7 @@ fn glob(args: &Args, tools: &Tools, stop: &dyn Fn() -> bool) -> Done {
     let ran = match ran {
         Ok(ran) => ran,
         Err(why) => {
-            return failed(why, |why| {
+            return failed(why, Failure::Search, |why| {
                 format!("Error during glob search operation: {why}")
             });
         }
@@ -1134,15 +1228,19 @@ fn glob(args: &Args, tools: &Tools, stop: &dyn Fn() -> bool) -> Done {
     );
     let stdout = match whole_text(&ran) {
         Ok(stdout) => stdout,
-        Err(why) => return Done::Failed(format!("Error during glob search operation: {why}")),
+        Err(why) => {
+            return Done::Failed(
+                Failure::Search.with(format!("Error during glob search operation: {why}")),
+            );
+        }
     };
     // Exit 2 with files listed keeps them (#734), as `grep` keeps its
     // matches.
     if ran.exit.is_some_and(|code| code > 2) || (ran.exit == Some(2) && stdout.trim().is_empty()) {
-        return Done::Failed(format!(
+        return Done::Failed(Failure::Search.with(format!(
             "Error during glob search operation: {}",
             said(&ran)
-        ));
+        )));
     }
     let mut found: Vec<(PathBuf, Option<std::time::SystemTime>)> = stdout
         .lines()
@@ -1208,7 +1306,7 @@ mod tests {
 
     fn shown(done: Done) -> String {
         match done {
-            Done::Shown(text) | Done::Failed(text) => text,
+            Done::Shown(text) | Done::Failed(Failed { text, .. }) => text,
             Done::Cancelled(_) => panic!("cancelled"),
             Done::Image { media_type, .. } => panic!("an image: {media_type}"),
         }
@@ -1297,7 +1395,7 @@ mod tests {
             let (succeeded, text) = match run(name, &raw, &tools, &|| false) {
                 Done::Shown(text) => (true, text),
                 Done::Image { .. } => (true, String::new()),
-                Done::Failed(text) => (false, text),
+                Done::Failed(Failed { text, .. }) => (false, text),
                 Done::Cancelled(_) => panic!("cancelled"),
             };
             if succeeded {
