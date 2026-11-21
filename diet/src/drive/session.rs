@@ -2888,6 +2888,9 @@ struct State {
     /// The resumed turn whose first request is being opened (#1151's
     /// re-review): no refill is made before it.
     resuming: Option<u32>,
+    /// The carried calls whose results show a file (#1149, #1150), as the
+    /// carry brought them: what the shown rule pairs carried results with.
+    carried_calls: Vec<super::shown_files::Showing>,
     /// The latest prompt the operator decided, by its request and call id:
     /// what `serve`'s `answered` event names.
     answered: Option<(u64, String)>,
@@ -3193,6 +3196,7 @@ impl State {
             carried_json: None,
             changed_refills: 0,
             resuming: None,
+            carried_calls: Vec::new(),
             answered: None,
             interview,
             forking: None,
@@ -3883,6 +3887,10 @@ pub struct Carry {
     /// The working directory the carried log's commands ran in, as its
     /// last `tool_call` before the refill names it (#1151's re-review).
     pub recorded_cwd: Option<String>,
+    /// The first session's calls whose results the carry sends and that show
+    /// a file (#1149, #1150): what the carried session's shown rule pairs
+    /// those results with, since its own log holds none of their calls.
+    pub calls: Vec<super::shown_files::Showing>,
 }
 
 /// An interactive session on one trunk.
@@ -4210,6 +4218,7 @@ impl<S: Streaming + 'static> Session<S> {
             state.riding_prompt = carry.riding_prompt;
             state.riding_steps = carry.riding_steps;
             state.carried_json = Some(crate::client::shape::messages_json(&state.trunk));
+            state.carried_calls = carry.calls;
             // The phase the carried session was in (#1071), when the graph
             // has it: its rules ride in the carried refill, so no note is due
             // unless that refill has no system prompt to hold them. With none
@@ -9886,10 +9895,10 @@ fn shown_files(
     )
 }
 
-/// This session's calls whose results may show a file (#1149, #1150): each
-/// successful `read`, `write` or `edit` its log holds, by the standard
+/// The calls whose results may show a file (#1149, #1150): each successful
+/// `read`, `write` or `edit` this session's log holds, by the standard
 /// surface's reading of its result, with the user's wrap of it, when there
-/// is one.
+/// is one; then those a carry brought.
 fn showing_calls(state: &State) -> Vec<super::shown_files::Showing> {
     state
         .log
@@ -9916,6 +9925,7 @@ fn showing_calls(state: &State) -> Vec<super::shown_files::Showing> {
                 ..showing
             })
         })
+        .chain(state.carried_calls.iter().cloned())
         .collect()
 }
 
@@ -37432,6 +37442,7 @@ pub(in crate::drive) mod tests {
                 riding_prompt: None,
                 riding_steps: 0,
                 recorded_cwd: None,
+                calls: Vec::new(),
             })
             .expect("it carries");
         let state = session.shared.lock();
@@ -37491,6 +37502,7 @@ pub(in crate::drive) mod tests {
                     riding_prompt: None,
                     riding_steps: 0,
                     recorded_cwd: None,
+                    calls: Vec::new(),
                 })
                 .expect("it carries")
         };
@@ -38522,6 +38534,7 @@ pub(in crate::drive) mod tests {
             riding_prompt: None,
             riding_steps: 0,
             recorded_cwd: None,
+            calls: Vec::new(),
         })
         .expect("it carries");
         assert_eq!(
@@ -38694,6 +38707,7 @@ pub(in crate::drive) mod tests {
             riding_prompt: None,
             riding_steps: 0,
             recorded_cwd: None,
+            calls: Vec::new(),
         };
         let (interview, shape) = capturing_under(in_the_starter_library_at("orient"));
         let Err(refused) = Session::open_with(
@@ -38773,6 +38787,7 @@ pub(in crate::drive) mod tests {
             riding_prompt: None,
             riding_steps: 0,
             recorded_cwd: None,
+            calls: Vec::new(),
         })
         .expect("it carries");
         assert_eq!(
@@ -39067,6 +39082,7 @@ pub(in crate::drive) mod tests {
             riding_prompt: None,
             riding_steps: 0,
             recorded_cwd: None,
+            calls: Vec::new(),
         }
     }
 
