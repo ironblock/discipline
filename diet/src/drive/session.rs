@@ -38910,6 +38910,86 @@ pub(in crate::drive) mod tests {
         let _ = std::fs::remove_dir_all(&dir);
     }
 
+    /// #1149, the review's first defect: a carried session that resumes the
+    /// turn a refill cut counts what its resumed request sends. The read of
+    /// `a.py` that rode after the refill shows its file, though its call is in
+    /// the first session's log and not this one's.
+    #[test]
+    fn a_read_that_rides_into_a_resumed_turn_still_shows_its_file() {
+        let tree = scratch("call-changes-carried");
+        std::fs::write(tree.join("a.py"), "x = 1\n").expect("written");
+        let dir = scratch("call-changes-carried-recording");
+        // As `windowed` opens one, with tools: each step records a fact
+        // through self-capture, so the window's refills have an entry to
+        // carry.
+        let open = |acts: Vec<Vec<Step>>| {
+            let (mut shape, tools) = counting(&tree, tool_loop::ToolSurface::Standard, true);
+            shape.limits.context_window = Some(100_000);
+            let mut interview = interviewing(&[]);
+            interview.self_capture = Some(crate::capture::tools::Cadence::DEFAULT);
+            declare_self_capture(&mut shape, Some(&interview));
+            Session::open_with(
+                Canned::new(acts),
+                shape,
+                None,
+                Some(tools),
+                None,
+                Some(interview),
+            )
+        };
+        let mut reading: Vec<Vec<Step>> = (0..24)
+            .map(|step| {
+                let said = format!("Step {step} read a.py.");
+                vec![
+                    Step::Delta(format!("{said} {}", "filler ".repeat(3_400))),
+                    record(&format!("record-{step}"), "fact", &said),
+                    // The step's second call, streamed at its own index.
+                    Step::call(1, &format!("call-{step}"), "read", r#"{"path":"a.py"}"#),
+                ]
+            })
+            .collect();
+        reading.push(deltas(&["read enough"]));
+        let original = open(reading);
+        original.keep_recording_in(dir.clone());
+        original.ask("read it", None).expect("accepted");
+        let log = wait_until(&original, "the long turn", settled);
+        let at = *mid_turn_refills(&log)
+            .first()
+            .expect("a refill cut the turn");
+        let text: String = log.iter().map(|logged| render(logged) + "\n").collect();
+        std::fs::write(dir.join("session.log"), text).expect("the log");
+        let carry = crate::drive::carry::read_at(&dir.join("session.log"), &[], Some(log[at].seq))
+            .expect("it carries");
+        assert!(
+            carry
+                .riding
+                .iter()
+                .any(|message| message.role == Role::Tool && message.content == "x = 1\n"),
+            "a read of a.py rode after the refill"
+        );
+        let carried = open(vec![
+            vec![bash(
+                "call-patch",
+                &python_replace("a.py", "x = 1", "x = 2"),
+            )],
+            deltas(&["patched"]),
+        ])
+        .with_carry(carry)
+        .expect("it carries");
+        carried.resume().expect("the cut turn resumes");
+        let resumed = wait_until(&carried, "the resumed turn", settled);
+        assert_eq!(
+            lines(&resumed)
+                .into_iter()
+                .find(|line| line.id == "call-patch")
+                .and_then(|line| line.shown)
+                .as_deref(),
+            Some("Files this call changed: a.py (+1 -1).\n")
+        );
+        reads_whole(&carried);
+        tidy(&[&tree, &dir]);
+    }
+
     /// #1151: a session told to stop after N calls sends N trunk requests
     /// and no more: the turn they ran in settles `stopped` before the next
     /// would be sent, and the session ends. One that refills first stops
