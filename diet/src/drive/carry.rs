@@ -864,6 +864,24 @@ mod tests {
         let _ = std::fs::remove_dir_all(&dir);
     }
 
+    /// #1151's third review: a torn final line that would be the last
+    /// meditation is refused, never passed over for the refill before it.
+    #[test]
+    fn a_torn_final_meditation_is_refused_not_passed_over() {
+        let trunk = vec![Message::new(Role::System, "you are the trunk")];
+        let dir = kept_at("torn", &trunk, &[], log::VERSION, None);
+        let path = dir.join("session.log");
+        let written = std::fs::read_to_string(&path).expect("the log");
+        std::fs::write(
+            &path,
+            format!(r#"{written}{{"at_turn":2,"kind":"meditation","reason":"operator","se"#),
+        )
+        .expect("the log");
+        let refused = read(&path, &[]).expect_err("the last meditation may be the torn line");
+        assert!(refused.contains("torn"), "{refused}");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
     /// #948: a kept trunk that is not the bytes its name says is refused,
     /// and so is a log whose meditations kept none.
     #[test]

@@ -3850,6 +3850,35 @@ fn a_run_from_a_chosen_refill_of_a_live_log_carries_that_refills_trunk_and_workt
     );
     assert_ne!(code, Some(0), "{said}");
     assert!(said.contains("holds files"), "{said}");
+    // Without a seq, a carry reads its log only through what it uses too: a
+    // line after the meditation that does not read leaves it alone.
+    let copy = dir.join("out-repeat-copy");
+    std::fs::create_dir_all(copy.join("files")).expect("a recording");
+    for entry in std::fs::read_dir(repeated.with_file_name("files")).expect("the recording") {
+        let entry = entry.expect("an entry");
+        std::fs::copy(entry.path(), copy.join("files").join(entry.file_name())).expect("a copy");
+    }
+    let text = std::fs::read_to_string(&repeated).expect("the log");
+    let next_seq = text.lines().count();
+    std::fs::write(
+        copy.join("session.log"),
+        format!(
+            "{text}{}\n",
+            serde_json::json!({"kind": "turn.settled", "reason": "final", "seq": next_seq, "t": 1, "turn": 99})
+        ),
+    )
+    .expect("the log");
+    let (code, said, _) = drive(
+        "scenario",
+        &first,
+        &[
+            "--out".as_ref(),
+            dir.join("out-unread-after").as_os_str(),
+            "--from-carry".as_ref(),
+            copy.join("session.log").as_os_str(),
+        ],
+    );
+    assert_eq!(code, Some(0), "{said}");
     // `--carry-at` names a carry's meditation: with no `--carry`, refused.
     let head = dir.join("head.md");
     std::fs::write(&head, "you are the trunk\n").expect("a head");

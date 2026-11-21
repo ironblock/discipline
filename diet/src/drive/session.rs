@@ -9252,6 +9252,11 @@ fn trunk_opening(
     Some((request, cancel))
 }
 
+/// Whether the refill that turned `before` into `after` is the stop's.
+fn refill_counted(state: &mut State, before: &[Message], after: &[Message]) {
+    let _ = (state, before, after);
+}
+
 /// The turn `turn` settled `stopped` (#1151): the session's stop came before
 /// its next trunk request, which is never sent. The steps it ran stay on the
 /// trunk, as a request cap keeps them, and the session ends once the turn
@@ -38510,6 +38515,108 @@ pub(in crate::drive) mod tests {
         });
         assert_eq!(unrebuilt_heads(&log, &second), Vec::<u64>::new());
         tidy(&[&first, &second]);
+    }
+
+    /// #1151's third review: a refill is the stop's unless the request it
+    /// produces is the one that would have gone without it, trunk and steps
+    /// alike. One that changed nothing is none; one that kept the trunk byte
+    /// for byte but dropped the turn's earlier step is.
+    #[test]
+    fn a_refill_is_the_stop_unless_its_request_is_unchanged() {
+        let session = Session::open(Canned::new(vec![]), template());
+        session.stop_after(50);
+        let mut state = session.shared.lock();
+        let opened = vec![
+            Message::new(Role::System, HEAD),
+            Message::new(Role::User, "build it"),
+        ];
+        let [first_said, first_result] = ridden_step("call-1");
+        let [last_said, last_result] = ridden_step("call-2");
+        let mut before = opened.clone();
+        before.extend([
+            first_said,
+            first_result,
+            last_said.clone(),
+            last_result.clone(),
+        ]);
+        state.refills += 1;
+        refill_counted(&mut state, &before, &before);
+        assert!(
+            !state.stop_due(),
+            "a refill that changed nothing is not the stop"
+        );
+        let mut after = opened;
+        after.extend([last_said, last_result]);
+        state.refills += 1;
+        refill_counted(&mut state, &before, &after);
+        assert!(
+            state.stop_due(),
+            "the trunk as it was, the earlier step dropped"
+        );
+    }
+
+    /// #1151's third review: the resumed request is sized from the prompt
+    /// the recording measured of it: its output cap is clamped by that prompt
+    /// in the window, not by an estimate padded for what it misses.
+    #[test]
+    fn a_resumed_request_is_sized_from_the_prompt_the_recording_measured() {
+        let mut shape = template();
+        shape.limits.context_window = Some(100_000);
+        shape.limits.max_output_tokens = 32_000;
+        let mut riding = vec![Message::new(Role::User, "build it")];
+        riding.extend(ridden_step("call-0"));
+        let mut carry = carrying(vec![Message::new(Role::System, HEAD)], riding);
+        carry.riding_prompt = Some(90_000);
+        let session = Session::open(Canned::new(vec![deltas(&["done"])]), shape)
+            .with_carry(carry)
+            .expect("it carries");
+        session.resume().expect("the cut turn resumes");
+        let log = wait_until(&session, "the resumed turn", settled);
+        let sized = log
+            .iter()
+            .find_map(|logged| match &logged.event {
+                Event::Requested {
+                    lane: Lane::Trunk,
+                    max_tokens,
+                    ..
+                } => Some(*max_tokens),
+                _ => None,
+            })
+            .expect("the resumed request");
+        assert_eq!(sized, clamped(32_000, Some(100_000), 90_000));
+    }
+
+    /// #1151's third review: a log older than the refill's working-directory
+    /// line names where its commands ran on its `tool_call` lines; that
+    /// stands for the line, refused into another directory unless rerooted.
+    #[test]
+    fn an_older_logs_tool_call_cwd_stands_for_the_refills_line() {
+        let (there, here) = (scratch("carry-old-there"), scratch("carry-old-here"));
+        let (there_shown, here_shown) = (there.display().to_string(), here.display().to_string());
+        let open = || {
+            let mut running = tools(Confinement::Unconfined, &here, &[], None, Decider::Decline);
+            running.cwd.clone_from(&here_shown);
+            Session::open_looping(Canned::new(vec![]), looping(), None, running)
+        };
+        let mut carry = carrying(
+            vec![
+                Message::new(Role::System, HEAD),
+                Message::new(
+                    Role::User,
+                    format!("<summary>see {there_shown}/a.ts</summary>"),
+                ),
+            ],
+            Vec::new(),
+        );
+        carry.recorded_cwd = Some(there_shown.clone());
+        let Err(refused) = open().with_carry(carry.clone()) else {
+            panic!("a log whose commands ran elsewhere is refused");
+        };
+        assert!(refused.contains(&there_shown), "{refused}");
+        crate::drive::carry::reroot(&mut carry, &[(there_shown, here_shown.clone())]);
+        assert_eq!(carry.recorded_cwd.as_deref(), Some(here_shown.as_str()));
+        assert!(open().with_carry(carry).is_ok(), "rerooted, it carries");
+        tidy(&[&there, &here]);
     }
 
     /// An interview under the starter phase library (#787), opening in `plan`.
