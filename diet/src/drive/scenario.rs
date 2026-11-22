@@ -3771,8 +3771,7 @@ fn running(
             .filter(|_| options.carry.is_some())
         {
             let here = std::path::absolute(&dir).unwrap_or_else(|_| dir.clone());
-            let here_resolved = std::fs::canonicalize(&dir).unwrap_or_else(|_| here.clone());
-            for (from, to) in [(resolved, &here_resolved), (given, &here)] {
+            for (from, to) in carried_roots((given, resolved), &here) {
                 serve
                     .arg("--carried-root")
                     .arg(format!("{}={}", from.display(), to.display()));
@@ -4536,9 +4535,47 @@ fn probed(
     Ok(verdict)
 }
 
+/// The roots a carried session's text is rerooted by (#948): the first
+/// session's worktree, resolved form first, as the given form is the tail
+/// of it -- each into this worktree as serve was given it, the spelling its
+/// own working-directory line names (#1157).
+fn carried_roots(
+    (given, resolved): (&std::path::Path, &std::path::Path),
+    here: &std::path::Path,
+) -> Vec<(std::path::PathBuf, std::path::PathBuf)> {
+    vec![
+        (resolved.to_path_buf(), here.to_path_buf()),
+        (given.to_path_buf(), here.to_path_buf()),
+    ]
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// #1157: the carried text is rerooted into this session's worktree as
+    /// its own working-directory line names it -- the path serve was given,
+    /// not its resolved form -- whichever of the first worktree's forms the
+    /// text holds; here reached through a symlinked parent.
+    #[test]
+    fn a_carry_is_rerooted_into_the_worktree_as_its_session_names_it() {
+        let dir = std::env::temp_dir().join(format!("diet-reroot-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(dir.join("real").join("wt")).expect("a worktree");
+        #[cfg(unix)]
+        std::os::unix::fs::symlink(dir.join("real"), dir.join("link")).expect("a symlink");
+        let here = dir.join("link").join("wt");
+        let roots = carried_roots(
+            (
+                std::path::Path::new("/srv/first/wt"),
+                std::path::Path::new("/private/srv/first/wt"),
+            ),
+            &here,
+        );
+        assert_eq!(roots.len(), 2, "{roots:?}");
+        assert!(roots.iter().all(|(_, to)| *to == here), "{roots:?}");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
 
     const MINIMAL: &str = include_str!("../../scenarios/fixtures/minimal.jsonl");
 
