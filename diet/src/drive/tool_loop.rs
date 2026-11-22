@@ -1172,7 +1172,7 @@ pub type RepositoryReader = fn(&Path) -> Option<Repository>;
 
 /// git, read-only, in `worktree` with nothing but `PATH` and `HOME` and
 /// the free read's own overrides.
-fn git_reading(worktree: &Path, args: &[&str]) -> Option<std::process::Output> {
+pub(crate) fn git_reading(worktree: &Path, args: &[&str]) -> Option<std::process::Output> {
     let mut command = Command::new("git");
     command.env_clear();
     for key in ["PATH", "HOME"] {
@@ -1648,6 +1648,8 @@ pub fn cwd_label(worktree: &Path, home: Option<&Path>) -> String {
 }
 
 /// What a regimen declares for the loop.
+// Each flag is one of the regimen's own on-or-off switches, as it wrote it.
+#[allow(clippy::struct_excessive_bools)]
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Declared {
     /// The pre-seeded session allow set, as written.
@@ -1671,6 +1673,9 @@ pub struct Declared {
     /// The default timeout of a call, in milliseconds (#613); `None`,
     /// none.
     pub timeout_ms: Option<u64>,
+    /// `call_changes = "on"`: each `bash`, `edit` and `write` result says
+    /// what the call changed in the worktree (#1149).
+    pub call_changes: bool,
 }
 
 /// The tool surface lever (#557): the tools the model is offered.
@@ -1837,6 +1842,7 @@ pub fn declared(regimen: &Regimen) -> Result<Option<Declared>, String> {
             ));
         }
     };
+    let call_changes = super::call_changes::call_changes(regimen)?;
     let Some(value) = regimen.get(ALLOWED_COMMANDS) else {
         // Approvals off runs commands with no allow set to seed.
         return Ok(approvals_off.then(|| Declared {
@@ -1849,6 +1855,7 @@ pub fn declared(regimen: &Regimen) -> Result<Option<Declared>, String> {
             surface,
             background: background_commands(regimen),
             timeout_ms: bash_timeout_ms(regimen),
+            call_changes,
         }));
     };
     let regimen::Value::Array(items) = value else {
@@ -1875,6 +1882,7 @@ pub fn declared(regimen: &Regimen) -> Result<Option<Declared>, String> {
         surface,
         background: background_commands(regimen),
         timeout_ms: bash_timeout_ms(regimen),
+        call_changes,
     }))
 }
 
@@ -2430,6 +2438,9 @@ pub struct Tools {
     /// The roots the model is shown in place of where it ran: a scenario's
     /// on a canned substrate (`--shown-root`); none, otherwise.
     pub shown_roots: super::shown::ShownRoots,
+    /// The worktree as last counted, when each `bash`, `edit` and `write`
+    /// result says what the call changed (#1149); `None`, the default, off.
+    pub call_changes: Option<std::sync::Mutex<super::call_changes::Tree>>,
 }
 
 vocabulary! {
@@ -3643,6 +3654,7 @@ pub(in crate::drive) mod tests {
                 surface: ToolSurface::Bash,
                 background: true,
                 timeout_ms: Some(DEFAULT_TIMEOUT_MS),
+                call_changes: false,
             }))
         );
         // The approval lever's `none`: commands run with no allow set.
@@ -3658,6 +3670,7 @@ pub(in crate::drive) mod tests {
                 surface: ToolSurface::Bash,
                 background: true,
                 timeout_ms: Some(DEFAULT_TIMEOUT_MS),
+                call_changes: false,
             }))
         );
         assert!(read("approval = \"ask\"\n").is_err());
@@ -3667,6 +3680,14 @@ pub(in crate::drive) mod tests {
             .expect("runs commands");
         assert!(on.text_fallback);
         assert!(read("approval = \"none\"\ntool_call_text_fallback = \"yes\"\n").is_err());
+        // #1149: the per-call changes, `off` unless declared `on`, and
+        // refused at start for any other word, commands or none.
+        let on = read("approval = \"none\"\ncall_changes = \"on\"\n")
+            .expect("declared")
+            .expect("runs commands");
+        assert!(on.call_changes);
+        assert!(read("approval = \"none\"\ncall_changes = \"yes\"\n").is_err());
+        assert!(read("call_changes = \"yes\"\n").is_err());
         assert!(read("allowed_commands = \"ls\"\n").is_err());
         assert!(read("allowed_commands = [\"\"]\n").is_err());
         assert!(read("allowed_commands = []\n[limits]\nmax_steps = 0\n").is_err());

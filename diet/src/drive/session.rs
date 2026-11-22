@@ -2888,6 +2888,9 @@ struct State {
     /// The resumed turn whose first request is being opened (#1151's
     /// re-review): no refill is made before it.
     resuming: Option<u32>,
+    /// The carried calls whose results show a file (#1149, #1150), as the
+    /// carry brought them: what the shown rule pairs carried results with.
+    carried_calls: Vec<super::shown_files::Showing>,
     /// The latest prompt the operator decided, by its request and call id:
     /// what `serve`'s `answered` event names.
     answered: Option<(u64, String)>,
@@ -3193,6 +3196,7 @@ impl State {
             carried_json: None,
             changed_refills: 0,
             resuming: None,
+            carried_calls: Vec::new(),
             answered: None,
             interview,
             forking: None,
@@ -3883,6 +3887,10 @@ pub struct Carry {
     /// The working directory the carried log's commands ran in, as its
     /// last `tool_call` before the refill names it (#1151's re-review).
     pub recorded_cwd: Option<String>,
+    /// The first session's calls whose results the carry sends and that show
+    /// a file (#1149, #1150): what the carried session's shown rule pairs
+    /// those results with, since its own log holds none of their calls.
+    pub calls: Vec<super::shown_files::Showing>,
 }
 
 /// An interactive session on one trunk.
@@ -4210,6 +4218,7 @@ impl<S: Streaming + 'static> Session<S> {
             state.riding_prompt = carry.riding_prompt;
             state.riding_steps = carry.riding_steps;
             state.carried_json = Some(crate::client::shape::messages_json(&state.trunk));
+            state.carried_calls = carry.calls;
             // The phase the carried session was in (#1071), when the graph
             // has it: its rules ride in the carried refill, so no note is due
             // unless that refill has no system prompt to hold them. With none
@@ -8137,7 +8146,12 @@ fn run_calls<S: Streaming + 'static>(
         let (mut line, shown) = if stopped || cancel.is_asked() {
             (cancelled_line(shared, (turn, request), call), None)
         } else {
-            one_call(shared, cancel, (turn, request), call, last)
+            let sent = Sent {
+                request: &shape.messages,
+                said: Some(&said),
+                results: &results,
+            };
+            one_call(shared, cancel, (turn, request, sent), call, last)
         };
         // A call a cancel reached before it ran is still answered, as every
         // harness answers it (#575).
@@ -9040,10 +9054,11 @@ fn seen_by(log: &[Logged], turn: u32) -> crate::capture::tools::Seen {
     crate::capture::tools::Seen::from_parts(source, prefix, (observed, user_words))
 }
 
-fn standard_call(
+fn standard_call<S>(
+    shared: &Shared<S>,
     tools: &Tools,
     cancel: &Cancel,
-    (turn, request): (u32, u64),
+    (turn, request, sent): (u32, u64, Sent<'_>),
     call: &Call,
     last: bool,
 ) -> (ToolLine, Option<String>) {
@@ -9052,6 +9067,27 @@ fn standard_call(
         line.reason = Some(log::ToolRefusal::MaxSteps);
         return (line, None);
     }
+    // #1149: an `edit` or `write` says what it changed, counted from just
+    // before it runs; the file it names is marked when no text of it is in
+    // the context.
+    let writes = [super::standard::EDIT, super::standard::WRITE].contains(&call.name.as_str());
+    let counted = writes.then(|| count_before(tools)).flatten();
+    let (line, shown) = standard_ran(tools, cancel, (turn, request), call);
+    let named = super::standard::shown_file(&call.name, &call.arguments)
+        .filter(|_| writes)
+        .map(|file| (file, line.outcome == log::ToolOutcome::Ran && !line.failed));
+    let shown = shown.map(|shown| count_after(shared, tools, (counted, sent), named, shown));
+    (line, shown)
+}
+
+/// [`standard_call`]'s run: its line, and its result under the session's
+/// cap.
+fn standard_ran(
+    tools: &Tools,
+    cancel: &Cancel,
+    (turn, request): (u32, u64),
+    call: &Call,
+) -> (ToolLine, Option<String>) {
     match super::standard::run(&call.name, &call.arguments, tools, &|| cancel.is_asked()) {
         super::standard::Done::Shown(result) => {
             let mut line = ToolLine::of(request, turn, call, log::ToolOutcome::Ran);
@@ -9060,10 +9096,10 @@ fn standard_call(
         }
         // Its own failure (#894), shown as any result and marked for the
         // step warrants.
-        super::standard::Done::Failed(result) => {
+        super::standard::Done::Failed(failed) => {
             let mut line = ToolLine::of(request, turn, call, log::ToolOutcome::Ran);
             line.failed = true;
-            let shown = shown_capped(tools, &result, &mut line);
+            let shown = shown_capped(tools, &failed.text, &mut line);
             (line, Some(shown))
         }
         super::standard::Done::Image { media_type, bytes } => {
@@ -9372,7 +9408,7 @@ fn on_arrival<S: Streaming>(
 fn one_call<S: Streaming>(
     shared: &Shared<S>,
     cancel: &Cancel,
-    (turn, request): (u32, u64),
+    (turn, request, sent): (u32, u64, Sent<'_>),
     call: &Call,
     last: bool,
 ) -> (ToolLine, Option<String>) {
@@ -9421,7 +9457,7 @@ fn one_call<S: Streaming>(
         && super::standard::is_standard(&call.name)
         && let Some(tools) = shared.tools.as_ref()
     {
-        return standard_call(tools, cancel, (turn, request), call, last);
+        return standard_call(shared, tools, cancel, (turn, request, sent), call, last);
     }
     // `task_stop` (#614): no gate decides it; it stops a job the session
     // started.
@@ -9612,7 +9648,8 @@ fn one_call<S: Streaming>(
     line.approval = approval;
     let profiled = tools.confinement.isolation() != crate::isolation::Isolation::None;
     if background {
-        return background_call(shared, tools, line, (&run, &command));
+        let (line, shown) = background_call(shared, tools, line, (&run, &command));
+        return still_running(tools, line, shown);
     }
     // A running call the operator can move to the background (#614), when
     // background commands are on.
@@ -9632,6 +9669,9 @@ fn one_call<S: Streaming>(
             shared.changed.notify_all();
         }
     };
+    // #1149: the worktree counted just before the call runs, after any
+    // prompt to the user, so the call is charged with what it changes.
+    let counted = count_before(tools);
     // A stop reaches a running call: its whole process group is killed, and
     // the turn settles `cancelled` (#551). Its timeout ends it alone (#613).
     let finished = tools.confinement.run_promotable(
@@ -9663,12 +9703,13 @@ fn one_call<S: Streaming>(
         Ok(crate::isolation::Finished::Promoted(ran, child)) => {
             let job =
                 slot.and_then(|slot| slot.lock().unwrap_or_else(PoisonError::into_inner).take());
-            return promoted_call(shared, tools, line, (ran, child), (job, &command));
+            let (line, shown) = promoted_call(shared, tools, line, (ran, child), (job, &command));
+            return still_running(tools, line, shown);
         }
         Ok(crate::isolation::Finished::Ran(ran)) => Ok(ran),
         Err(not_run) => Err(not_run),
     };
-    match finished {
+    let (line, shown) = match finished {
         Ok(ran) if ran.timed_out && !ran.cancelled => {
             timed_out(tools, line, &ran, timeout.unwrap_or_default())
         }
@@ -9712,7 +9753,183 @@ fn one_call<S: Streaming>(
             (line, Some(shown))
         }
         Err(not_run) => never_ran(tools, line, &run, &not_run),
+    };
+    let shown = shown.map(|shown| count_after(shared, tools, (counted, sent), None, shown));
+    (line, shown)
+}
+
+/// The worktree counted just before a `bash`, `edit` or `write` call runs
+/// (#1149): `None` with the lever off; otherwise whether it was listed.
+fn count_before(tools: &Tools) -> Option<bool> {
+    let tree = tools.call_changes.as_ref()?;
+    Some(
+        tree.lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .before()
+            .is_ok(),
+    )
+}
+
+/// What the context sends as a step's calls run (#1149, #1150): the request
+/// whose response made them, that response, and the step's results so far,
+/// all of which the next request carries.
+#[derive(Debug, Clone, Copy)]
+struct Sent<'a> {
+    request: &'a [Message],
+    said: Option<&'a Message>,
+    results: &'a [Message],
+}
+
+impl<'a> Sent<'a> {
+    /// Nothing sent: a call run outside a step, as a test runs one.
+    #[cfg(test)]
+    const NONE: Sent<'static> = Sent {
+        request: &[],
+        said: None,
+        results: &[],
+    };
+
+    /// The messages, in the order sent.
+    fn messages(self) -> impl Iterator<Item = &'a Message> {
+        self.request.iter().chain(self.said).chain(self.results)
     }
+}
+
+/// `shown`, a call's result after the output cap, with the block of what it
+/// changed in the worktree since [`count_before`] (#1149): the files and
+/// their lines, or none; a file an `edit` or `write` wrote outside the
+/// working directory, as not counted. Then those of them, and the file an
+/// `edit` or `write` names (`named`, with whether it succeeded), whose text
+/// the context `sent` does not show ([`shown_files`]); the call's own
+/// successful `write` or `edit` shows its file. Unchanged with the lever off.
+fn count_after<S>(
+    shared: &Shared<S>,
+    tools: &Tools,
+    (counted, sent): (Option<bool>, Sent<'_>),
+    named: Option<(String, bool)>,
+    shown: String,
+) -> String {
+    use super::call_changes::block::{self, Block};
+    use super::call_changes::{Entry, Keys};
+    let (Some(counted), Some(tree)) = (counted, tools.call_changes.as_ref()) else {
+        return shown;
+    };
+    let entries = if counted {
+        tree.lock().unwrap_or_else(PoisonError::into_inner).after()
+    } else {
+        Err(String::new())
+    };
+    let Ok(entries) = entries else {
+        return block::appended(&shown, &Block::Unlisted);
+    };
+    let keys = Keys::of(&tools.worktree);
+    let state = shared.lock();
+    let mut seen: BTreeSet<std::path::PathBuf> =
+        shown_files(&state, &keys, sent).into_keys().collect();
+    drop(state);
+    let mut marked: Vec<std::path::PathBuf> = entries
+        .iter()
+        .filter_map(Entry::file)
+        .map(|file| keys.key(file))
+        .collect();
+    let mut outside = Vec::new();
+    if let Some((file, wrote)) = named {
+        let key = keys.key(&file);
+        // Outside the working directory, named as not counted when it was
+        // written; a failed one changed nothing.
+        if wrote {
+            seen.insert(key.clone());
+            if !keys.inside(&key) {
+                outside.push(keys.named(&key));
+            }
+        }
+        marked.push(key);
+    }
+    let mut not_shown: Vec<String> = Vec::new();
+    for key in marked.iter().filter(|key| !seen.contains(*key)) {
+        let name = keys.named(key);
+        if !not_shown.contains(&name) {
+            not_shown.push(name);
+        }
+    }
+    block::appended(
+        &shown,
+        &Block::Counted {
+            entries: &entries,
+            outside: &outside,
+            not_shown: &not_shown,
+        },
+    )
+}
+
+/// A call that returned while still running, in the background or moved
+/// there (#614): with the lever on, its result says its changes were not
+/// counted (#1149), never that it changed no file.
+fn still_running(
+    tools: &Tools,
+    line: ToolLine,
+    shown: Option<String>,
+) -> (ToolLine, Option<String>) {
+    use super::call_changes::block::{self, Block};
+    let shown = match shown {
+        Some(shown) if tools.call_changes.is_some() && line.background.is_some() => {
+            Some(block::appended(&shown, &Block::StillRunning))
+        }
+        shown => shown,
+    };
+    (line, shown)
+}
+
+/// The files whose text the context `sent` shows (#1149, #1150), by
+/// [`super::call_changes::Keys`], each at its latest showing: the one rule
+/// of [`super::shown_files`], over this session's successful `read`, `write`
+/// and `edit` calls and the user's wraps on them.
+fn shown_files(
+    state: &State,
+    keys: &super::call_changes::Keys,
+    sent: Sent<'_>,
+) -> BTreeMap<std::path::PathBuf, super::shown_files::Shown> {
+    super::shown_files::shown(
+        sent.messages(),
+        &showing_calls(state),
+        &|file| keys.key(file),
+        &|text| state.shown_roots.text(text),
+    )
+}
+
+/// The calls whose results may show a file (#1149, #1150): each successful
+/// `read`, `write` or `edit` this session's log holds, by the standard
+/// surface's reading of its result, with the user's wrap of it, when there
+/// is one; then those a carry brought.
+fn showing_calls(state: &State) -> Vec<super::shown_files::Showing> {
+    state
+        .log
+        .iter()
+        .filter_map(|logged| {
+            let Event::ToolCalled(line) = &logged.event else {
+                return None;
+            };
+            if line.outcome != log::ToolOutcome::Ran {
+                return None;
+            }
+            let showing = super::shown_files::Showing::of(
+                &line.id,
+                line.turn,
+                (&line.name, &line.arguments),
+                line.shown.as_deref()?,
+                &|text| state.shown_roots.text(text),
+            )?;
+            let wrap = state.wraps.get(&logged.seq);
+            Some(super::shown_files::Showing {
+                span: wrap
+                    .filter(|wrap| wrap.entry.is_some())
+                    .map(|wrap| wrap.text.clone()),
+                cleared: wrap.is_some_and(|wrap| wrap.entry.is_none()),
+                ..showing
+            })
+        })
+        .chain(state.carried_calls.iter().cloned())
+        .collect()
 }
 
 /// Where the session's background jobs write (#614): the recording's
@@ -19350,9 +19567,9 @@ pub(in crate::drive) mod tests {
             name: "edit".to_owned(),
             arguments: format!(r#"{{"file_path":"a.py","old_string":"{old}","new_string":"y"}}"#),
         };
-        let (missing, _) = standard_call(&tools, &Cancel::new(), (1, 1), &edit("nowhere"), false);
+        let (missing, _) = standard_ran(&tools, &Cancel::new(), (1, 1), &edit("nowhere"));
         assert!(missing.failed, "{:?}", missing.shown);
-        let (made, shown) = standard_call(&tools, &Cancel::new(), (1, 1), &edit("x"), false);
+        let (made, shown) = standard_ran(&tools, &Cancel::new(), (1, 1), &edit("x"));
         assert!(!made.failed, "{shown:?}");
         assert!(shown.is_some_and(|shown| shown.contains("error")));
         tidy(&[&tree]);
@@ -19391,7 +19608,7 @@ pub(in crate::drive) mod tests {
         let (line, shown) = one_call(
             &session.shared,
             &Cancel::new(),
-            (1, 4),
+            (1, 4, Sent::NONE),
             &refute(r#"{"refuted":[{"claim":"x","confidence":5,"because":"y","now":"z"}]}"#),
             false,
         );
@@ -19445,7 +19662,7 @@ pub(in crate::drive) mod tests {
             one_call(
                 &session.shared,
                 &Cancel::new(),
-                (1, 4),
+                (1, 4, Sent::NONE),
                 &answer(arguments),
                 last,
             )
@@ -19516,7 +19733,7 @@ pub(in crate::drive) mod tests {
             one_call(
                 &session.shared,
                 &Cancel::new(),
-                (1, 4),
+                (1, 4, Sent::NONE),
                 &Call {
                     index: 0,
                     id: "c".to_owned(),
@@ -22640,6 +22857,7 @@ pub(in crate::drive) mod tests {
             background: false,
             timeout_ms: None,
             shown_roots: crate::drive::shown::ShownRoots::none(),
+            call_changes: None,
         }
     }
 
@@ -24216,6 +24434,1023 @@ pub(in crate::drive) mod tests {
             ]
         );
         every_head_rebuilds(&log);
+        tidy(&[&tree]);
+    }
+
+    // -----------------------------------------------------------------------
+    // what a call changed (#1149)
+    // -----------------------------------------------------------------------
+
+    /// A python replace inside `bash`: its argument names no file the edit
+    /// tool could see, and it finds `from` in `file` or nothing.
+    fn python_replace(file: &str, from: &str, to: &str) -> String {
+        format!(
+            "python3 -c \"import pathlib; p = pathlib.Path('{file}'); \
+             p.write_text(p.read_text().replace('{from}', '{to}'))\""
+        )
+    }
+
+    /// The loop over `tree` on `surface`, approvals off, the per-call changes
+    /// on when `on` (#1149): the request shape, and the tools.
+    fn counting(tree: &Path, surface: tool_loop::ToolSurface, on: bool) -> (RequestShape, Tools) {
+        let mut tools = tools(Confinement::Unconfined, tree, &[], None, Decider::Decline);
+        tools.approvals_off = true;
+        tools.surface = surface;
+        tools.read_tool = surface.read_tool();
+        tools.call_changes = on.then(|| Mutex::new(crate::drive::call_changes::Tree::new(tree)));
+        let mut shape = looping();
+        shape.tools = surface.tools();
+        (shape, tools)
+    }
+
+    /// `calls`, one a step, then an answer, as one turn under [`counting`]:
+    /// the session, and its log once the turn settled.
+    fn counted_turn(
+        tree: &Path,
+        (surface, on): (tool_loop::ToolSurface, bool),
+        calls: Vec<Step>,
+    ) -> (Session<Canned>, Vec<Logged>) {
+        let (session, log) = counted_turn_with(counting(tree, surface, on), calls);
+        assert_eq!(settled_as(&log), Some(SettleReason::Final));
+        (session, log)
+    }
+
+    /// What the model was sent as each call's result: the last request's
+    /// tool messages, in order.
+    fn results_sent(session: &Session<Canned>) -> Vec<String> {
+        let sent = session.shared.transport.sent();
+        sent.last()
+            .expect("a request")
+            .messages
+            .iter()
+            .filter(|message| message.role == Role::Tool)
+            .map(|message| message.content.clone())
+            .collect()
+    }
+
+    /// #1149: a python replace inside `bash` that changes a file is reported
+    /// with its line counts, counted from the worktree, and the file is
+    /// marked: no read of it is in the context. The block is what the model
+    /// was sent, and the projection rebuilds it from the logged result.
+    #[test]
+    fn a_python_replace_inside_bash_is_reported_with_its_line_counts() {
+        let tree = scratch("call-changes-replace");
+        std::fs::write(tree.join("app.py"), "a = 1\nb = 2\nc = 3\n").expect("written");
+        let replace = python_replace("app.py", "b = 2", "b = 20");
+        let (session, log) = counted_turn(
+            &tree,
+            (tool_loop::ToolSurface::Bash, true),
+            vec![bash("call-1", &replace)],
+        );
+        assert_eq!(
+            std::fs::read_to_string(tree.join("app.py")).expect("the file"),
+            "a = 1\nb = 20\nc = 3\n"
+        );
+        let block = "Files this call changed: app.py (+1 -1).\nNot shown in this context by \
+                     read, write or edit: app.py.\n";
+        assert_eq!(lines(&log)[0].shown.as_deref(), Some(block));
+        assert_eq!(results_sent(&session), [block]);
+        every_head_rebuilds(&log);
+        tidy(&[&tree]);
+    }
+
+    /// #1149: a replace that finds nothing exits 0 and changes nothing, and
+    /// says so.
+    #[test]
+    fn a_replace_that_finds_nothing_reports_no_change() {
+        let tree = scratch("call-changes-nothing");
+        std::fs::write(tree.join("app.py"), "a = 1\n").expect("written");
+        let replace = python_replace("app.py", "b = 2", "b = 20");
+        let (_, log) = counted_turn(
+            &tree,
+            (tool_loop::ToolSurface::Bash, true),
+            vec![bash("call-1", &replace)],
+        );
+        let line = &lines(&log)[0];
+        assert_eq!(line.exit, Some(0));
+        assert_eq!(
+            line.shown.as_deref(),
+            Some("Files this call changed: none.\n")
+        );
+        tidy(&[&tree]);
+    }
+
+    /// #1149: in a git repository a file its rules ignore is left out of the
+    /// count; the file beside it is not.
+    #[test]
+    fn an_ignored_file_is_left_out_of_the_count() {
+        let tree = scratch("call-changes-ignored");
+        let git = std::process::Command::new("git")
+            .args(["init", "-q"])
+            .current_dir(&tree)
+            .status()
+            .expect("git runs");
+        assert!(git.success());
+        std::fs::write(tree.join(".gitignore"), "*.log\n").expect("written");
+        std::fs::write(tree.join("app.py"), "a = 1\n").expect("written");
+        let (_, log) = counted_turn(
+            &tree,
+            (tool_loop::ToolSurface::Bash, true),
+            vec![bash(
+                "call-1",
+                "echo built > build.log && echo 'a = 2' > app.py && echo ok",
+            )],
+        );
+        assert!(tree.join("build.log").exists());
+        assert_eq!(
+            lines(&log)[0].shown.as_deref(),
+            Some(
+                "ok\n\nFiles this call changed: app.py (+1 -1).\nNot shown in this context by \
+                 read, write or edit: app.py.\n"
+            )
+        );
+        tidy(&[&tree]);
+    }
+
+    /// #1149: the count before a call is taken just before it runs, after
+    /// the user answered its prompt: a file written while the prompt waited
+    /// is not the call's.
+    #[test]
+    fn the_count_before_a_call_is_taken_after_its_prompt() {
+        let tree = scratch("call-changes-prompt");
+        std::fs::write(tree.join("app.py"), "a = 1\n").expect("written");
+        let (shape, mut tools) = counting(&tree, tool_loop::ToolSurface::Bash, true);
+        tools.approvals_off = false;
+        tools.decider = Decider::Operator;
+        let session = Session::open_looping(
+            Canned::new([
+                vec![bash("call-1", "echo 'a = 2' > app.py")],
+                deltas(&["done"]),
+            ]),
+            shape,
+            None,
+            tools,
+        );
+        session.ask("patch it", None).expect("accepted");
+        assert_eq!(waiting_on(&session).id, "call-1");
+        std::fs::write(tree.join("while-asked.txt"), "the user's\n").expect("written");
+        assert_eq!(session.approve("call-1", Decision::Once), Ok(()));
+        let log = wait_until(&session, "the turn to settle", settled);
+        assert_eq!(
+            lines(&log)[0].shown.as_deref(),
+            Some(
+                "Files this call changed: app.py (+1 -1).\nNot shown in this context by read, \
+                 write or edit: app.py.\n"
+            )
+        );
+        tidy(&[&tree]);
+    }
+
+    /// #1149: a call that returns while still running, in the background,
+    /// says its changes were not counted, never that it changed no file.
+    #[test]
+    fn a_call_still_running_says_so() {
+        let tree = scratch("call-changes-background");
+        let (mut shape, mut tools) = counting(&tree, tool_loop::ToolSurface::Bash, true);
+        tools.background = true;
+        shape.tools = tool_loop::ToolSurface::Bash.tools_with(true);
+        let start = Step::call(
+            0,
+            "call-1",
+            "bash",
+            &serde_json::json!({"command": "sleep 0.3; echo built > out.txt", "is_background": true})
+                .to_string(),
+        );
+        let (_, log) = counted_turn_with((shape, tools), vec![start]);
+        let shown = lines(&log)[0].shown.clone().expect("a result");
+        assert!(
+            shown.ends_with(
+                "\n\nFiles this call changed: not counted, the command is still running.\n"
+            ),
+            "{shown}"
+        );
+        tidy(&[&tree]);
+    }
+
+    /// [`counted_turn`] under a shape and tools of the test's own.
+    fn counted_turn_with(
+        (shape, tools): (RequestShape, Tools),
+        calls: Vec<Step>,
+    ) -> (Session<Canned>, Vec<Logged>) {
+        let mut acts: Vec<Vec<Step>> = calls.into_iter().map(|call| vec![call]).collect();
+        acts.push(deltas(&["done"]));
+        let session = Session::open_looping(Canned::new(acts), shape, None, tools);
+        session.ask("patch it", None).expect("accepted");
+        let log = wait_until(&session, "the turn to settle", settled);
+        reads_whole(&session);
+        (session, log)
+    }
+
+    /// The standard surface's calls one turn makes, for the switch's two
+    /// states: a write of a new file, a read of it, an edit of it, a `bash`
+    /// call that changes nothing, and an edit of a file never read that
+    /// fails.
+    fn the_standard_calls() -> Vec<Step> {
+        vec![
+            Step::call(
+                0,
+                "call-1",
+                "write",
+                r#"{"path":"notes.txt","content":"alpha\nbeta\n"}"#,
+            ),
+            Step::call(0, "call-2", "read", r#"{"path":"notes.txt"}"#),
+            Step::call(
+                0,
+                "call-3",
+                "edit",
+                r#"{"file_path":"notes.txt","old_string":"beta","new_string":"gamma"}"#,
+            ),
+            bash("call-4", "echo hi"),
+            Step::call(
+                0,
+                "call-5",
+                "edit",
+                r#"{"file_path":"other.txt","old_string":"absent","new_string":"x"}"#,
+            ),
+        ]
+    }
+
+    /// #1149: with the switch off, every tool result is byte for byte as the
+    /// build before it had them; on, `bash`, `write` and `edit` results end
+    /// with the block, `read` is as it was, and a file the call's own
+    /// `write` or `edit` showed is not marked, while a failed edit of a
+    /// file never read is.
+    #[test]
+    fn with_the_switch_off_every_tool_result_is_as_before() {
+        let shown = |on: bool| -> Vec<String> {
+            let tree = scratch(if on {
+                "call-changes-on"
+            } else {
+                "call-changes-off"
+            });
+            std::fs::write(tree.join("other.txt"), "present\n").expect("written");
+            let (session, log) = counted_turn(
+                &tree,
+                (tool_loop::ToolSurface::Standard, on),
+                the_standard_calls(),
+            );
+            let shown: Vec<String> = lines(&log)
+                .into_iter()
+                .map(|line| line.shown.expect("a result"))
+                .collect();
+            assert_eq!(
+                results_sent(&session),
+                shown,
+                "what was sent is what was logged"
+            );
+            every_head_rebuilds(&log);
+            tidy(&[&tree]);
+            shown
+        };
+        let off = shown(false);
+        let edited = "The file: notes.txt has been updated. Showing lines 1-3 of 3 from the \
+                      edited file:\n\n---\n\nalpha\ngamma\n";
+        let failed = "Failed to edit, 0 occurrences found for old_string in other.txt. No edits \
+                      made. The exact text in old_string was not found. Ensure you're not \
+                      escaping content incorrectly and check whitespace, indentation, and \
+                      context. Use read tool to verify.";
+        assert_eq!(
+            off,
+            [
+                "Successfully created and wrote to new file: notes.txt.",
+                "alpha\nbeta\n",
+                edited,
+                "hi\n",
+                failed,
+            ]
+        );
+        let on = shown(true);
+        assert_eq!(
+            on,
+            [
+                format!(
+                    "{}\n\nFiles this call changed: notes.txt (new, +2).\n",
+                    off[0]
+                ),
+                off[1].clone(),
+                format!("{}\nFiles this call changed: notes.txt (+1 -1).\n", off[2]),
+                format!("{}\nFiles this call changed: none.\n", off[3]),
+                format!(
+                    "{}\n\nFiles this call changed: none.\nNot shown in this context by read, \
+                     write or edit: other.txt.\n",
+                    off[4]
+                ),
+            ]
+        );
+    }
+
+    /// The `bash` call a refill test patches `a.py` and `b.py` with: a python
+    /// replace, whose arguments name no file the edit tool could see.
+    const PATCH_BOTH: &str = "python3 -c \"import pathlib as P; \
+        [P.Path(f).write_text(P.Path(f).read_text().replace(a, b)) for f, a, b in \
+        [('a.py', 'x = 1', 'x = 2'), ('b.py', 'y = 1', 'y = 2')]]\"";
+
+    /// A `read` of `file`, as call `id`.
+    fn read_step(id: &str, file: &str) -> Step {
+        Step::call(
+            0,
+            id,
+            "read",
+            &serde_json::json!({"path": file}).to_string(),
+        )
+    }
+
+    /// How a refill test's session refills after every turn: what it carries
+    /// of the outputs it compacts, how many tokens of whole turns it keeps,
+    /// the excerpt a read fork quotes (a read warrant on), and the file whose
+    /// read turn 1 prunes (`prune_output` offered).
+    #[derive(Clone, Copy)]
+    struct Refilling {
+        outputs: log::MeditationToolOutputs,
+        tail_tokens: u64,
+        excerpt: Option<&'static str>,
+        prune: Option<&'static str>,
+    }
+
+    impl Refilling {
+        fn under(outputs: log::MeditationToolOutputs) -> Self {
+            Self {
+                outputs,
+                tail_tokens: 0,
+                excerpt: None,
+                prune: None,
+            }
+        }
+    }
+
+    /// The standard surface over `tree`, the per-call changes on, refilling
+    /// as `refilling` says with nothing else in working memory, playing
+    /// `acts` (#1149).
+    fn counting_across_a_refill(
+        tree: &Path,
+        refilling: Refilling,
+        acts: Vec<Vec<Step>>,
+    ) -> Session<Canned> {
+        let (mut shape, tools) = counting(tree, tool_loop::ToolSurface::Standard, true);
+        let rules: &[log::Warrant] = if refilling.excerpt.is_some() {
+            &[log::Warrant::Read]
+        } else {
+            &[]
+        };
+        let mut interview = Interview {
+            meditations: crate::meditation::policy::Served {
+                every_turns: Some(1),
+                tail_tokens: refilling.tail_tokens,
+                outputs: refilling.outputs,
+                refill_empty: true,
+                ..crate::meditation::policy::Served::default()
+            },
+            ..interviewing(rules)
+        };
+        if refilling.prune.is_some() {
+            interview.prune = Some(crate::drive::prune::PruneMeditation::Next);
+            shape.tools.push(crate::drive::prune::definition());
+        }
+        Session::open_with(
+            Canned::new(acts),
+            shape,
+            None,
+            Some(tools),
+            None,
+            Some(interview),
+        )
+    }
+
+    /// Turn 1 reads `a.py` and `b.py` (and prunes one, or draws a read fork,
+    /// as `refilling` says); the refill after it compacts the turn under
+    /// `refilling`; turn 2 reads `b.py` again, then one `bash` call patches
+    /// both. The log once turn 2 settled, and the patch's block.
+    fn patched_after_a_refill(tree: &Path, refilling: Refilling) -> (Vec<Logged>, String) {
+        std::fs::write(tree.join("a.py"), "x = 1\n").expect("written");
+        std::fs::write(tree.join("b.py"), "y = 1\n").expect("written");
+        let mut acts = vec![
+            vec![read_step("call-1", "a.py")],
+            vec![read_step("call-2", "b.py")],
+        ];
+        if let Some(file) = refilling.prune {
+            acts.push(vec![Step::call(
+                0,
+                "call-p",
+                crate::drive::prune::PRUNE_OUTPUT,
+                &serde_json::json!({"call": file}).to_string(),
+            )]);
+        }
+        acts.push(deltas(&["read both"]));
+        if let Some(excerpt) = refilling.excerpt {
+            acts.push(deltas(&[&format!("EXCERPT: {excerpt}\n")]));
+        }
+        acts.extend([
+            vec![read_step("call-3", "b.py")],
+            vec![bash("call-4", PATCH_BOTH)],
+            deltas(&["patched"]),
+        ]);
+        let session = counting_across_a_refill(tree, refilling, acts);
+        session.ask("read them", None).expect("accepted");
+        wait_until(&session, "the refill after turn 1", |log| {
+            !meditations_in(log).is_empty()
+        });
+        session.ask("patch both", None).expect("accepted");
+        let log = wait_until(&session, "turn 2 to settle", |log| turns_settled(log) == 2);
+        assert_eq!(
+            std::fs::read_to_string(tree.join("a.py")).expect("a.py"),
+            "x = 2\n"
+        );
+        reads_whole(&session);
+        every_head_rebuilds(&log);
+        let block = lines(&log)
+            .into_iter()
+            .find(|line| line.id == "call-4")
+            .and_then(|line| line.shown)
+            .expect("the patch's result");
+        (log, block)
+    }
+
+    /// Both files patched, `a.py` marked.
+    const A_MARKED: &str = "Files this call changed: a.py (+1 -1), b.py (+1 -1).\nNot shown in \
+                            this context by read, write or edit: a.py.\n";
+
+    /// Both files patched, neither marked.
+    const NONE_MARKED: &str = "Files this call changed: a.py (+1 -1), b.py (+1 -1).\n";
+
+    /// #1149: a file whose read the refill compacted away is marked, and one
+    /// read again since is not: shown is counted from what the context
+    /// sends, never from what the session once read.
+    #[test]
+    fn a_file_not_shown_since_the_refill_is_marked_and_one_shown_is_not() {
+        let tree = scratch("call-changes-refill");
+        let (_, block) =
+            patched_after_a_refill(&tree, Refilling::under(log::MeditationToolOutputs::Evict));
+        assert_eq!(block, A_MARKED);
+        tidy(&[&tree]);
+    }
+
+    /// #1149, #1150: text a refill keeps still counts. Under `keep` the
+    /// refill carries turn 1's reads in its outputs section, so neither file
+    /// is marked.
+    #[test]
+    fn a_read_the_refill_keeps_still_counts_as_shown() {
+        let tree = scratch("call-changes-refill-keep");
+        let (_, block) =
+            patched_after_a_refill(&tree, Refilling::under(log::MeditationToolOutputs::Keep));
+        assert_eq!(block, NONE_MARKED);
+        tidy(&[&tree]);
+    }
+
+    /// #1149: a read in the turns a refill keeps whole, its tail, still
+    /// counts: it is on the trunk as it sat.
+    #[test]
+    fn a_read_in_the_refills_kept_tail_still_counts_as_shown() {
+        let tree = scratch("call-changes-refill-tail");
+        let (log, block) = patched_after_a_refill(
+            &tree,
+            Refilling {
+                tail_tokens: 100_000,
+                ..Refilling::under(log::MeditationToolOutputs::Evict)
+            },
+        );
+        assert!(
+            log.iter().any(|logged| matches!(
+                &logged.event,
+                Event::Meditated { carried_turns, .. } if *carried_turns == 1
+            )),
+            "the refill kept turn 1"
+        );
+        assert_eq!(block, NONE_MARKED);
+        tidy(&[&tree]);
+    }
+
+    /// #1149, the maintainer's ruling of 2026-11-20: under `salient` the
+    /// excerpt a read fork quoted from a read counts, as a partial read does.
+    #[test]
+    fn a_read_the_refill_quotes_under_salient_still_counts_as_shown() {
+        let tree = scratch("call-changes-refill-salient");
+        let (log, block) = patched_after_a_refill(
+            &tree,
+            Refilling {
+                excerpt: Some("x = 1"),
+                ..Refilling::under(log::MeditationToolOutputs::Salient)
+            },
+        );
+        assert!(
+            log.iter().any(|logged| matches!(
+                &logged.event,
+                Event::Meditated { outputs: Some((section, _)), .. }
+                    if section.contains("[Tool result excerpt]: x = 1")
+            )),
+            "the refill quoted a.py"
+        );
+        assert_eq!(block, NONE_MARKED);
+        tidy(&[&tree]);
+    }
+
+    /// #1149: a read the model pruned is its reference line in the refill,
+    /// so it no longer shows its file, even under `keep`.
+    #[test]
+    fn a_read_the_model_pruned_no_longer_counts_after_the_refill() {
+        let tree = scratch("call-changes-refill-prune");
+        let (_, block) = patched_after_a_refill(
+            &tree,
+            Refilling {
+                prune: Some("a.py"),
+                ..Refilling::under(log::MeditationToolOutputs::Keep)
+            },
+        );
+        assert_eq!(block, A_MARKED);
+        tidy(&[&tree]);
+    }
+
+    /// The log seq of call `id`'s `tool_call` line.
+    fn call_seq(log: &[Logged], id: &str) -> u64 {
+        log.iter()
+            .find_map(|logged| match &logged.event {
+                Event::ToolCalled(line) if line.id == id => Some(logged.seq),
+                _ => None,
+            })
+            .expect("the call's line")
+    }
+
+    /// #1149, the maintainer's ruling of 2026-11-20: a wrap's kept span still
+    /// on the trunk shows its file, as a partial read does; a wrap with no
+    /// span clears the result, and its file goes with it.
+    #[test]
+    fn a_wraps_kept_span_still_shows_its_file_and_a_cleared_wrap_does_not() {
+        let tree = scratch("call-changes-wrap");
+        std::fs::write(tree.join("a.py"), "x = 1\n").expect("written");
+        std::fs::write(tree.join("b.py"), "y = 1\n").expect("written");
+        let (shape, tools) = counting(&tree, tool_loop::ToolSurface::Standard, true);
+        let session = Session::open_with(
+            Canned::new([
+                vec![read_step("call-1", "a.py")],
+                vec![read_step("call-2", "b.py")],
+                deltas(&["read both"]),
+                vec![bash("call-3", PATCH_BOTH)],
+                deltas(&["patched"]),
+            ]),
+            shape,
+            None,
+            Some(tools),
+            None,
+            Some(interviewing(&[])),
+        );
+        session.ask("read them", None).expect("accepted");
+        let log = wait_until(&session, "turn 1", settled);
+        let (a, b) = (call_seq(&log, "call-1"), call_seq(&log, "call-2"));
+        session.wrap(a, a, "x = 1").expect("wrapped with its span");
+        session.wrap_without_span(b).expect("wrapped with none");
+        session.ask("patch both", None).expect("accepted");
+        let log = wait_until(&session, "turn 2", |log| turns_settled(log) == 2);
+        assert_eq!(
+            log.iter()
+                .filter(|logged| matches!(logged.event, Event::Wrapped { .. }))
+                .count(),
+            2,
+            "both wraps applied before the patch"
+        );
+        assert_eq!(
+            lines(&log)[2].shown.as_deref(),
+            Some(
+                "Files this call changed: a.py (+1 -1), b.py (+1 -1).\nNot shown in this \
+                 context by read, write or edit: b.py.\n"
+            )
+        );
+        every_head_rebuilds(&log);
+        tidy(&[&tree]);
+    }
+
+    /// #1149: a file `bash` creates is marked, since `bash` output never
+    /// shows a file, and stays marked until a `read` shows it.
+    #[test]
+    fn a_file_bash_creates_stays_marked_until_it_is_read() {
+        let tree = scratch("call-changes-created");
+        let (_, log) = counted_turn(
+            &tree,
+            (tool_loop::ToolSurface::Standard, true),
+            vec![
+                bash("call-1", "echo 'x = 1' > new.py && cat new.py"),
+                bash("call-2", "echo 'x = 2' > new.py"),
+                read_step("call-3", "new.py"),
+                bash("call-4", "echo 'x = 3' > new.py"),
+            ],
+        );
+        let shown: Vec<String> = lines(&log)
+            .into_iter()
+            .map(|line| line.shown.expect("a result"))
+            .collect();
+        let marked = "Not shown in this context by read, write or edit: new.py.\n";
+        assert!(
+            shown[0].ends_with(&format!("new.py (new, +1).\n{marked}")),
+            "{}",
+            shown[0]
+        );
+        assert!(
+            shown[1].ends_with(&format!("new.py (+1 -1).\n{marked}")),
+            "{}",
+            shown[1]
+        );
+        assert_eq!(shown[3], "Files this call changed: new.py (+1 -1).\n");
+        tidy(&[&tree]);
+    }
+
+    /// #1149: a `write` outside the working directory is named as not
+    /// counted, never as no change.
+    #[test]
+    fn a_write_outside_the_working_directory_is_named_not_counted() {
+        let tree = scratch("call-changes-outside");
+        let outside = scratch("call-changes-outside-there");
+        let path = outside.join("out.txt").to_string_lossy().into_owned();
+        let (_, log) = counted_turn(
+            &tree,
+            (tool_loop::ToolSurface::Standard, true),
+            vec![Step::call(
+                0,
+                "call-1",
+                "write",
+                &serde_json::json!({"path": path, "content": "x\n"}).to_string(),
+            )],
+        );
+        assert_eq!(
+            lines(&log)[0].shown.as_deref(),
+            Some(
+                format!(
+                    "Successfully created and wrote to new file: {path}.\n\nFiles this call \
+                     changed: {path} (outside the working directory, not counted).\n"
+                )
+                .as_str()
+            )
+        );
+        tidy(&[&tree, &outside]);
+    }
+
+    /// #1149: a call the user moves to the background while it runs returns
+    /// still running, and says its changes were not counted.
+    #[test]
+    fn a_call_moved_to_the_background_says_it_is_still_running() {
+        let tree = scratch("call-changes-promoted");
+        let (mut shape, mut tools) = counting(&tree, tool_loop::ToolSurface::Bash, true);
+        tools.background = true;
+        shape.tools = tool_loop::ToolSurface::Bash.tools_with(true);
+        let session = Session::open_looping(
+            Canned::new([
+                vec![bash("call-1", "echo early; sleep 2; echo late > late.txt")],
+                deltas(&["moved on"]),
+            ]),
+            shape,
+            None,
+            tools,
+        );
+        session.ask("run it", None).expect("accepted");
+        let started = Instant::now();
+        while session.background().is_err() {
+            assert!(started.elapsed() < Duration::from_secs(5), "never running");
+            std::thread::sleep(Duration::from_millis(20));
+        }
+        let log = wait_until(&session, "the turn", |log| turns_settled(log) == 1);
+        let shown = lines(&log)[0].shown.clone().expect("a result");
+        assert!(
+            shown.starts_with("Foreground command")
+                && shown.ends_with(
+                    "\n\nFiles this call changed: not counted, the command is still running.\n"
+                ),
+            "{shown}"
+        );
+        wait_until(&session, "the job's end", |log| ended_jobs(log).len() == 1);
+        tidy(&[&tree]);
+    }
+
+    /// #1149: the block goes after the output cap, whole: a capped output's
+    /// notice, head and tail, then the block.
+    #[test]
+    fn the_block_follows_a_capped_output_whole() {
+        let tree = scratch("call-changes-capped");
+        let (shape, mut tools) = counting(&tree, tool_loop::ToolSurface::Bash, true);
+        tools.output_cap = crate::drive::output::OutputCap::Capped {
+            max_lines: 20,
+            max_bytes: 51_200,
+        };
+        let (_, log) = counted_turn_with((shape, tools), vec![bash("call-1", "seq 1 3000")]);
+        let shown = lines(&log)[0].shown.clone().expect("a result");
+        assert!(shown.contains("Tool output was too large"), "{shown}");
+        assert!(
+            shown.ends_with("2999\n3000\n\nFiles this call changed: none.\n"),
+            "{shown}"
+        );
+        tidy(&[&tree]);
+    }
+
+    /// #1149, the re-review's probe: a `write` shows its file, though its
+    /// result as logged ends with the block. A file written, one overwritten,
+    /// then a `bash` that changes both: neither is marked.
+    #[test]
+    fn a_file_the_model_wrote_stays_shown_when_bash_changes_it() {
+        let tree = scratch("call-changes-written");
+        std::fs::write(tree.join("old.py"), "x = 0\n").expect("written");
+        let write = |id: &str, file: &str, content: &str| {
+            Step::call(
+                0,
+                id,
+                "write",
+                &serde_json::json!({"path": file, "content": content}).to_string(),
+            )
+        };
+        let (_, log) = counted_turn(
+            &tree,
+            (tool_loop::ToolSurface::Standard, true),
+            vec![
+                write("call-1", "new.py", "y = 1\n"),
+                write("call-2", "old.py", "x = 1\n"),
+                bash(
+                    "call-3",
+                    "python3 -c \"import pathlib as P; [P.Path(f).write_text(P.Path(f).\
+                     read_text().replace(a, b)) for f, a, b in [('new.py', 'y = 1', 'y = 2'), \
+                     ('old.py', 'x = 1', 'x = 2')]]\"",
+                ),
+            ],
+        );
+        assert_eq!(
+            lines(&log)[2].shown.as_deref(),
+            Some("Files this call changed: new.py (+1 -1), old.py (+1 -1).\n")
+        );
+        tidy(&[&tree]);
+    }
+
+    /// #1149, the re-review's ruling: a `write` or `edit` outside the working
+    /// directory that failed changed nothing, so it is not listed as changed;
+    /// its file is still named as one the context does not show.
+    #[test]
+    fn a_failed_write_or_edit_outside_the_working_directory_is_not_listed() {
+        let tree = scratch("call-changes-outside-failed");
+        let outside = scratch("call-changes-outside-failed-there");
+        std::fs::write(outside.join("other.txt"), "present\n").expect("written");
+        std::fs::write(outside.join("file.txt"), "a file\n").expect("written");
+        let other = outside.join("other.txt").to_string_lossy().into_owned();
+        let under = outside
+            .join("file.txt/under.txt")
+            .to_string_lossy()
+            .into_owned();
+        let (_, log) = counted_turn(
+            &tree,
+            (tool_loop::ToolSurface::Standard, true),
+            vec![
+                Step::call(
+                    0,
+                    "call-1",
+                    "edit",
+                    &serde_json::json!({"file_path": other, "old_string": "absent", "new_string": "x"})
+                        .to_string(),
+                ),
+                Step::call(
+                    0,
+                    "call-2",
+                    "write",
+                    &serde_json::json!({"path": under, "content": "x\n"}).to_string(),
+                ),
+            ],
+        );
+        let shown: Vec<String> = lines(&log)
+            .into_iter()
+            .map(|line| line.shown.expect("a result"))
+            .collect();
+        for (shown, path) in shown.iter().zip([&other, &under]) {
+            assert!(
+                shown.ends_with(&format!(
+                    "\n\nFiles this call changed: none.\nNot shown in this context by read, \
+                     write or edit: {path}.\n"
+                )),
+                "{shown}"
+            );
+        }
+        tidy(&[&tree, &outside]);
+    }
+
+    /// The calls a standard tool fails on with `kind` (#1149), on the tree
+    /// [`the_standard_results_as_logged`] makes: one or more for each kind a
+    /// `read`, `write` or `edit` reports, none for the kinds they never do.
+    /// The match is exhaustive, so a new kind without its calls does not
+    /// build.
+    fn failing(kind: crate::drive::standard::Failure) -> Vec<(&'static str, String)> {
+        use crate::drive::standard::{EDIT, Failure, READ, WRITE};
+        let call = |name: &'static str, args: serde_json::Value| (name, args.to_string());
+        let edit = |path: &str, old: &str, new: &str| {
+            call(
+                EDIT,
+                serde_json::json!({"file_path": path, "old_string": old, "new_string": new}),
+            )
+        };
+        match kind {
+            Failure::NotAnObject => vec![(READ, "[\"a.txt\"]".to_owned())],
+            Failure::Missing => vec![
+                call(READ, serde_json::json!({})),
+                call(WRITE, serde_json::json!({"content": "x\n"})),
+                call(WRITE, serde_json::json!({"path": "w.txt"})),
+                call(
+                    EDIT,
+                    serde_json::json!({"old_string": "one", "new_string": "1"}),
+                ),
+                call(
+                    EDIT,
+                    serde_json::json!({"file_path": "a.txt", "new_string": "1"}),
+                ),
+                call(
+                    EDIT,
+                    serde_json::json!({"file_path": "a.txt", "old_string": "one"}),
+                ),
+            ],
+            Failure::NotText => vec![
+                call(READ, serde_json::json!({"path": 7})),
+                call(WRITE, serde_json::json!({"path": "w.txt", "content": 7})),
+                call(
+                    EDIT,
+                    serde_json::json!({"file_path": 7, "old_string": "one", "new_string": "1"}),
+                ),
+            ],
+            Failure::NotACount => vec![
+                call(READ, serde_json::json!({"path": "a.txt", "offset": 0})),
+                call(READ, serde_json::json!({"path": "a.txt", "limit": "all"})),
+            ],
+            Failure::NotABoolean => vec![call(
+                EDIT,
+                serde_json::json!({"file_path": "a.txt", "old_string": "one", "new_string": "1", "replace_all": "yes"}),
+            )],
+            Failure::TwoFiles => vec![call(
+                EDIT,
+                serde_json::json!({"file_path": "a.txt", "path": "b.txt", "old_string": "one", "new_string": "1"}),
+            )],
+            Failure::Tilde => vec![
+                call(READ, serde_json::json!({"path": "~/a.txt"})),
+                call(
+                    WRITE,
+                    serde_json::json!({"path": "~/w.txt", "content": "x"}),
+                ),
+                edit("~/a.txt", "one", "1"),
+            ],
+            Failure::Unreadable => vec![
+                call(READ, serde_json::json!({"path": "gone.txt"})),
+                call(READ, serde_json::json!({"path": "@TREE@/gone.txt"})),
+            ],
+            Failure::ImageTooLarge => vec![call(READ, serde_json::json!({"path": "huge.png"}))],
+            Failure::Binary => vec![call(READ, serde_json::json!({"path": "bin"}))],
+            Failure::BeyondEnd => {
+                vec![call(
+                    READ,
+                    serde_json::json!({"path": "a.txt", "offset": 99}),
+                )]
+            }
+            Failure::Unwritable => vec![call(
+                WRITE,
+                serde_json::json!({"path": "a.txt/under.txt", "content": "x\n"}),
+            )],
+            Failure::EmptyOldString => vec![edit("a.txt", "", "x")],
+            Failure::NotFound => vec![edit("a.txt", "absent", "x"), edit("quote.txt", "zzz", "y")],
+            Failure::Ambiguous => vec![edit("a.txt", "e", "E")],
+            Failure::Unchanged => vec![edit("a.txt", "one", "one")],
+            Failure::EditUnreadable => vec![edit("gone.txt", "a", "b")],
+            Failure::EditUnwritable => vec![edit("locked.txt", "lock", "x")],
+            // No `read`, `write` or `edit` reports these.
+            Failure::Unknown | Failure::Search => Vec::new(),
+        }
+    }
+
+    /// The calls a standard tool succeeds on, one for each way it does: a
+    /// whole read and a partial one, an image, a file quoting a failure's
+    /// words, a new file and an overwritten one, by a relative and an absolute
+    /// path, an edit and an edit whose result the cap cuts.
+    fn succeeding() -> Vec<(&'static str, String)> {
+        use crate::drive::standard::{EDIT, READ, WRITE};
+        let call = |name: &'static str, args: serde_json::Value| (name, args.to_string());
+        vec![
+            call(READ, serde_json::json!({"path": "a.txt"})),
+            call(
+                READ,
+                serde_json::json!({"path": "a.txt", "offset": 2, "limit": 1}),
+            ),
+            call(READ, serde_json::json!({"path": "shot.png"})),
+            call(READ, serde_json::json!({"path": "quote.txt"})),
+            call(
+                WRITE,
+                serde_json::json!({"path": "new.txt", "content": "x\n"}),
+            ),
+            call(
+                WRITE,
+                serde_json::json!({"path": "new.txt", "content": "y\n"}),
+            ),
+            call(
+                WRITE,
+                serde_json::json!({"path": "@TREE@/abs.txt", "content": "x\n"}),
+            ),
+            call(
+                EDIT,
+                serde_json::json!({"file_path": "a.txt", "old_string": "two", "new_string": "2"}),
+            ),
+            call(
+                EDIT,
+                serde_json::json!({"file_path": "big.txt", "old_string": "row", "new_string": "ROW", "replace_all": true}),
+            ),
+        ]
+    }
+
+    /// #1149, the re-review: the session reads each `read`, `write` and
+    /// `edit` result as logged -- under the output cap, with the block after
+    /// it, its roots rewritten -- as showing its file exactly when the call
+    /// succeeded. Each failure is checked to be the kind its case names, and
+    /// every kind those tools report has its case.
+    #[test]
+    fn the_standard_results_as_logged_show_their_files_exactly_when_their_calls_succeeded() {
+        use crate::drive::standard::{Done, Failure};
+        let tree = scratch("call-changes-as-logged");
+        let tree = std::fs::canonicalize(&tree).expect("canonical");
+        std::fs::write(tree.join("a.txt"), "one\ntwo\nthree\n").expect("written");
+        std::fs::write(tree.join("quote.txt"), "Cannot read binary file: a.txt\n")
+            .expect("written");
+        std::fs::write(tree.join("bin"), [0xff_u8, 0xfe, 0x00]).expect("written");
+        std::fs::write(tree.join("shot.png"), b"\x89PNG\r\n\x1a\n0000").expect("written");
+        let mut huge = b"\x89PNG\r\n\x1a\n".to_vec();
+        huge.resize(
+            usize::try_from(crate::drive::attach::MAX_BYTES).expect("a size") + 1,
+            0,
+        );
+        std::fs::write(tree.join("huge.png"), huge).expect("written");
+        let big: String = (0..40).fold(String::new(), |mut big, n| {
+            use std::fmt::Write as _;
+            // Long enough that the cap's notice makes it shorter.
+            let _ = writeln!(big, "row {n}: {}", "x".repeat(60));
+            big
+        });
+        std::fs::write(tree.join("big.txt"), big).expect("written");
+        std::fs::write(tree.join("locked.txt"), "lock\n").expect("written");
+        std::fs::set_permissions(
+            tree.join("locked.txt"),
+            std::os::unix::fs::PermissionsExt::from_mode(0o444),
+        )
+        .expect("read-only");
+        let rooted = |raw: &str| raw.replace("@TREE@", &tree.to_string_lossy());
+        let mut failures: Vec<(Failure, &'static str, String)> = Vec::new();
+        for kind in Failure::ALL {
+            let cases = failing(*kind);
+            assert!(
+                cases.is_empty() == matches!(kind, Failure::Unknown | Failure::Search),
+                "{kind:?} has its case"
+            );
+            failures.extend(
+                cases
+                    .into_iter()
+                    .map(|(name, raw)| (*kind, name, rooted(&raw))),
+            );
+        }
+        // Each failing case fails as its kind, before the session runs it.
+        let direct = tools(Confinement::Unconfined, &tree, &[], None, Decider::Decline);
+        for (kind, name, raw) in &failures {
+            match crate::drive::standard::run(name, raw, &direct, &|| false) {
+                Done::Failed(failed) => assert_eq!(failed.kind, *kind, "{name} {raw}"),
+                other => panic!("{name} {raw}: {other:?}"),
+            }
+        }
+        let (shape, mut tools) = counting(&tree, tool_loop::ToolSurface::Standard, true);
+        tools.output_cap = crate::drive::output::OutputCap::Capped {
+            max_lines: 20,
+            max_bytes: 51_200,
+        };
+        tools
+            .shown_roots
+            .add(&format!("{}=/scenario/worktree", tree.display()))
+            .expect("a root");
+        let calls: Vec<(&'static str, String, bool)> = failures
+            .iter()
+            .map(|(_, name, raw)| (*name, raw.clone(), false))
+            .chain(
+                succeeding()
+                    .into_iter()
+                    .map(|(name, raw)| (name, rooted(&raw), true)),
+            )
+            .collect();
+        let steps: Vec<Step> = calls
+            .iter()
+            .enumerate()
+            .map(|(n, (name, raw, _))| Step::call(0, &format!("call-{n}"), name, raw))
+            .collect();
+        let (session, log) = counted_turn_with((shape, tools), steps);
+        let showing: Vec<String> = showing_calls(&session.shared.lock())
+            .into_iter()
+            .map(|call| call.id)
+            .collect();
+        let logged = lines(&log);
+        assert_eq!(logged.len(), calls.len());
+        let mut capped = 0;
+        for (line, (name, raw, succeeded)) in logged.iter().zip(&calls) {
+            let shown = line.shown.as_deref().unwrap_or_default();
+            assert_eq!(!line.failed, *succeeded, "{name} {raw}: {shown}");
+            capped += usize::from(shown.starts_with("Tool output was too large"));
+            assert_eq!(
+                showing.contains(&line.id),
+                *succeeded,
+                "{name} {raw}, as logged: {shown}"
+            );
+        }
+        assert!(capped > 0, "an edit's result was capped");
+        std::fs::set_permissions(
+            tree.join("locked.txt"),
+            std::os::unix::fs::PermissionsExt::from_mode(0o644),
+        )
+        .expect("writable again");
         tidy(&[&tree]);
     }
 
@@ -36527,6 +37762,7 @@ pub(in crate::drive) mod tests {
                 riding_prompt: None,
                 riding_steps: 0,
                 recorded_cwd: None,
+                calls: Vec::new(),
             })
             .expect("it carries");
         let state = session.shared.lock();
@@ -36586,6 +37822,7 @@ pub(in crate::drive) mod tests {
                     riding_prompt: None,
                     riding_steps: 0,
                     recorded_cwd: None,
+                    calls: Vec::new(),
                 })
                 .expect("it carries")
         };
@@ -37617,6 +38854,7 @@ pub(in crate::drive) mod tests {
             riding_prompt: None,
             riding_steps: 0,
             recorded_cwd: None,
+            calls: Vec::new(),
         })
         .expect("it carries");
         assert_eq!(
@@ -37789,6 +39027,7 @@ pub(in crate::drive) mod tests {
             riding_prompt: None,
             riding_steps: 0,
             recorded_cwd: None,
+            calls: Vec::new(),
         };
         let (interview, shape) = capturing_under(in_the_starter_library_at("orient"));
         let Err(refused) = Session::open_with(
@@ -37868,6 +39107,7 @@ pub(in crate::drive) mod tests {
             riding_prompt: None,
             riding_steps: 0,
             recorded_cwd: None,
+            calls: Vec::new(),
         })
         .expect("it carries");
         assert_eq!(
@@ -38005,6 +39245,86 @@ pub(in crate::drive) mod tests {
         let _ = std::fs::remove_dir_all(&dir);
     }
 
+    /// #1149, the review's first defect: a carried session that resumes the
+    /// turn a refill cut counts what its resumed request sends. The read of
+    /// `a.py` that rode after the refill shows its file, though its call is in
+    /// the first session's log and not this one's.
+    #[test]
+    fn a_read_that_rides_into_a_resumed_turn_still_shows_its_file() {
+        let tree = scratch("call-changes-carried");
+        std::fs::write(tree.join("a.py"), "x = 1\n").expect("written");
+        let dir = scratch("call-changes-carried-recording");
+        // As `windowed` opens one, with tools: each step records a fact
+        // through self-capture, so the window's refills have an entry to
+        // carry.
+        let open = |acts: Vec<Vec<Step>>| {
+            let (mut shape, tools) = counting(&tree, tool_loop::ToolSurface::Standard, true);
+            shape.limits.context_window = Some(100_000);
+            let mut interview = interviewing(&[]);
+            interview.self_capture = Some(crate::capture::tools::Cadence::DEFAULT);
+            declare_self_capture(&mut shape, Some(&interview));
+            Session::open_with(
+                Canned::new(acts),
+                shape,
+                None,
+                Some(tools),
+                None,
+                Some(interview),
+            )
+        };
+        let mut reading: Vec<Vec<Step>> = (0..24)
+            .map(|step| {
+                let said = format!("Step {step} read a.py.");
+                vec![
+                    Step::Delta(format!("{said} {}", "filler ".repeat(3_400))),
+                    record(&format!("record-{step}"), "fact", &said),
+                    // The step's second call, streamed at its own index.
+                    Step::call(1, &format!("call-{step}"), "read", r#"{"path":"a.py"}"#),
+                ]
+            })
+            .collect();
+        reading.push(deltas(&["read enough"]));
+        let original = open(reading);
+        original.keep_recording_in(dir.clone());
+        original.ask("read it", None).expect("accepted");
+        let log = wait_until(&original, "the long turn", settled);
+        let at = *mid_turn_refills(&log)
+            .first()
+            .expect("a refill cut the turn");
+        let text: String = log.iter().map(|logged| render(logged) + "\n").collect();
+        std::fs::write(dir.join("session.log"), text).expect("the log");
+        let carry = crate::drive::carry::read_at(&dir.join("session.log"), &[], Some(log[at].seq))
+            .expect("it carries");
+        assert!(
+            carry
+                .riding
+                .iter()
+                .any(|message| message.role == Role::Tool && message.content == "x = 1\n"),
+            "a read of a.py rode after the refill"
+        );
+        let carried = open(vec![
+            vec![bash(
+                "call-patch",
+                &python_replace("a.py", "x = 1", "x = 2"),
+            )],
+            deltas(&["patched"]),
+        ])
+        .with_carry(carry)
+        .expect("it carries");
+        carried.resume().expect("the cut turn resumes");
+        let resumed = wait_until(&carried, "the resumed turn", settled);
+        assert_eq!(
+            lines(&resumed)
+                .into_iter()
+                .find(|line| line.id == "call-patch")
+                .and_then(|line| line.shown)
+                .as_deref(),
+            Some("Files this call changed: a.py (+1 -1).\n")
+        );
+        reads_whole(&carried);
+        tidy(&[&tree, &dir]);
+    }
+
     /// #1151: a session told to stop after N calls sends N trunk requests
     /// and no more: the turn they ran in settles `stopped` before the next
     /// would be sent, and the session ends. One that refills first stops
@@ -38082,6 +39402,7 @@ pub(in crate::drive) mod tests {
             riding_prompt: None,
             riding_steps: 0,
             recorded_cwd: None,
+            calls: Vec::new(),
         }
     }
 

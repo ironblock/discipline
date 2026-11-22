@@ -1,6 +1,6 @@
 {
   "example": "exercise/src/drive/examples/kitchen-sink.json",
-  "example_sha256": "77276bacefa4c7c0ad2a6b23abbdf34ee5b6d879590bc6de08a775b074d5cbd0",
+  "example_sha256": "4c894959b74a0d585a8e56947ff204effebaad480dc3deedaf831472bd6dafaa",
   "table": {
     "id": "620d3f1ad0b5",
     "patterns": {

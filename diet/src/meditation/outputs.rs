@@ -95,15 +95,47 @@ pub fn section(state: MeditationToolOutputs, outputs: &[Output]) -> Option<(Stri
 /// The section's heading, in the render's own register.
 pub const HEADER: &str = "# tool outputs\n";
 
+/// What labels a call's result in the section: its whole, under `keep`.
+pub const RESULT: &str = "[Tool result]: ";
+
+/// What labels an excerpt of a call's result in the section, under
+/// `salient`.
+pub const EXCERPT: &str = "[Tool result excerpt]: ";
+
 /// `- turn N: <tool> args=<json>`, Qwen Code's line for a call, its
 /// arguments kept to one line.
 fn call_line(output: &Output) -> String {
+    call_line_of(output.turn, &output.name, &output.arguments)
+}
+
+/// [`call_line`] of the call `name` made with `arguments` in `turn`.
+fn call_line_of(turn: u32, name: &str, arguments: &str) -> String {
     format!(
-        "- turn {}: {} args={}",
-        output.turn,
-        output.name,
-        super::render::one_line(&output.arguments)
+        "- turn {turn}: {name} args={}",
+        super::render::one_line(arguments)
     )
+}
+
+/// Whether `text`, a message the context sends, holds this module's section
+/// with the text of a call's result (#1149, #1150): the call's line followed
+/// by its result, or by an excerpt of it -- what [`section`] writes under
+/// `keep` and `salient`. A reference line, or a prune's, carries none. The call is the one
+/// `name` made with `arguments` in `turn`; `rewrite` is what the section's
+/// paths went through ([`crate::drive::shown::ShownRoots::text`]).
+#[must_use]
+pub fn carries_text_of(
+    text: &str,
+    (turn, name, arguments): (u32, &str, &str),
+    rewrite: &dyn Fn(&str) -> String,
+) -> bool {
+    let Some(at) = text.find(HEADER) else {
+        return false;
+    };
+    let line = rewrite(&call_line_of(turn, name, arguments));
+    let section = &text[at..];
+    [RESULT, EXCERPT]
+        .iter()
+        .any(|label| section.contains(&format!("{line}\n{label}")))
 }
 
 /// `keep`: the call, then its result as the trunk had it; an image as
@@ -121,7 +153,7 @@ fn kept(output: &Output) -> String {
     if !result.ends_with('\n') {
         result.push('\n');
     }
-    format!("{}\n[Tool result]: {result}", call_line(output))
+    format!("{}\n{RESULT}{result}", call_line(output))
 }
 
 /// The most characters of a call's arguments a reference line carries
@@ -201,7 +233,7 @@ fn salient(output: &Output) -> Option<String> {
     }
     let mut entry = format!("{}\n", call_line(output));
     for excerpt in &output.excerpts {
-        entry.push_str("[Tool result excerpt]: ");
+        entry.push_str(EXCERPT);
         entry.push_str(excerpt);
         if !excerpt.ends_with('\n') {
             entry.push('\n');
@@ -225,6 +257,55 @@ mod tests {
             excerpts: Vec::new(),
             pruned: None,
         }
+    }
+
+    /// #1149: a section carries a call's text where it prints the call's
+    /// result or an excerpt of it, under each state, and never a reference
+    /// line or a prune's.
+    #[test]
+    fn a_section_carries_a_calls_text_where_it_prints_its_result_or_an_excerpt() {
+        let quoted = Output {
+            excerpts: vec!["a".to_owned()],
+            ..output(1, "a\nb\n")
+        };
+        let pruned = Output {
+            pruned: Some("- turn 2: bash args={\"command\":\"ls\"}: 1 bytes\n".to_owned()),
+            ..output(2, "c\n")
+        };
+        let outputs = [quoted, output(3, "d\n"), pruned];
+        let same = |text: &str| text.to_owned();
+        for state in [
+            MeditationToolOutputs::Evict,
+            MeditationToolOutputs::Keep,
+            MeditationToolOutputs::Reference,
+            MeditationToolOutputs::Salient,
+        ] {
+            let text = section(state, &outputs)
+                .map(|(text, _)| format!("<summary>\n{text}\n</summary>"))
+                .unwrap_or_default();
+            for output in &outputs {
+                let printed = output.pruned.is_none()
+                    && match state {
+                        MeditationToolOutputs::Keep => true,
+                        MeditationToolOutputs::Salient => !output.excerpts.is_empty(),
+                        _ => false,
+                    };
+                let call = (output.turn, output.name.as_str(), output.arguments.as_str());
+                assert_eq!(
+                    carries_text_of(&text, call, &same),
+                    printed,
+                    "{state:?} {output:?}"
+                );
+            }
+        }
+        assert!(
+            !carries_text_of(
+                "- turn 3: bash args={\"command\":\"ls\"}\n[Tool result]: d\n",
+                (3, "bash", "{\"command\":\"ls\"}"),
+                &same
+            ),
+            "outside a section, nothing"
+        );
     }
 
     /// #814: a reference line names its call by the arguments that identify
