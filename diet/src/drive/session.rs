@@ -22881,6 +22881,7 @@ pub(in crate::drive) mod tests {
             timeout_ms: None,
             shown_roots: crate::drive::shown::ShownRoots::none(),
             call_changes: None,
+            edit_requires_shown: false,
         }
     }
 
@@ -25474,6 +25475,213 @@ pub(in crate::drive) mod tests {
             std::os::unix::fs::PermissionsExt::from_mode(0o644),
         )
         .expect("writable again");
+        tidy(&[&tree]);
+    }
+
+    // -----------------------------------------------------------------------
+    // an edit of a file the context does not show (#1150)
+    // -----------------------------------------------------------------------
+
+    /// What an `edit` of `path` is refused with when the context shows none
+    /// of the file's text (#1150): Qwen Code's words, its session the
+    /// context and its read tool `read`. Proposed for the maintainer.
+    fn unshown(path: &str) -> String {
+        format!(
+            "File {path} has not been read in this context. Use the read tool first to load the \
+             current content (a partial read with offset / limit is fine \u{2014} you only need \
+             to have seen the bytes you intend to edit) before editing it."
+        )
+    }
+
+    /// An `edit` of `file`, `old` to `new`, as call `id`.
+    fn edit_step(id: &str, file: &str, (old, new): (&str, &str)) -> Step {
+        Step::call(
+            0,
+            id,
+            "edit",
+            &serde_json::json!({"file_path": file, "old_string": old, "new_string": new})
+                .to_string(),
+        )
+    }
+
+    /// The standard surface over `tree`, approvals off, the edit lever `on`
+    /// and the per-call changes off (#1150), refilling after every turn
+    /// under `(outputs, tail_tokens)` with nothing else in working memory,
+    /// playing `acts`.
+    fn editing(
+        tree: &Path,
+        on: bool,
+        (outputs, tail_tokens): (log::MeditationToolOutputs, u64),
+        acts: Vec<Vec<Step>>,
+    ) -> Session<Canned> {
+        let (shape, mut tools) = counting(tree, tool_loop::ToolSurface::Standard, false);
+        tools.edit_requires_shown = on;
+        Session::open_with(
+            Canned::new(acts),
+            shape,
+            None,
+            Some(tools),
+            None,
+            Some(Interview {
+                meditations: crate::meditation::policy::Served {
+                    every_turns: Some(1),
+                    tail_tokens,
+                    outputs,
+                    refill_empty: true,
+                    ..crate::meditation::policy::Served::default()
+                },
+                ..interviewing(&[])
+            }),
+        )
+    }
+
+    /// Turn 1 reads `a.py`; the refill after it, under `refilling`; turn 2
+    /// edits `a.py`, the edit lever `on`. The edit's line, once turn 2
+    /// settled.
+    fn edited_after_a_refill(
+        tree: &Path,
+        on: bool,
+        refilling: (log::MeditationToolOutputs, u64),
+    ) -> ToolLine {
+        std::fs::write(tree.join("a.py"), "x = 1\n").expect("written");
+        let session = editing(
+            tree,
+            on,
+            refilling,
+            vec![
+                vec![read_step("call-1", "a.py")],
+                deltas(&["read it"]),
+                vec![edit_step("call-2", "a.py", ("x = 1", "x = 2"))],
+                deltas(&["edited"]),
+            ],
+        );
+        session.ask("read it", None).expect("accepted");
+        wait_until(&session, "the refill after turn 1", |log| {
+            !meditations_in(log).is_empty()
+        });
+        session.ask("edit it", None).expect("accepted");
+        let log = wait_until(&session, "turn 2 to settle", |log| turns_settled(log) == 2);
+        reads_whole(&session);
+        every_head_rebuilds(&log);
+        lines(&log)
+            .into_iter()
+            .find(|line| line.id == "call-2")
+            .expect("the edit")
+    }
+
+    /// #1150: an edit of a file whose read the refill compacted away is
+    /// refused, before it runs, as the edit's own failure, with the reason.
+    #[test]
+    fn an_edit_of_a_file_not_shown_since_the_refill_is_refused_with_the_reason() {
+        let tree = scratch("edit-unshown");
+        let line = edited_after_a_refill(&tree, true, (log::MeditationToolOutputs::Evict, 0));
+        assert_eq!(line.shown.as_deref(), Some(unshown("a.py").as_str()));
+        assert_eq!(line.outcome, log::ToolOutcome::Ran);
+        assert!(line.failed, "a failed call, the edit's own failure");
+        assert_eq!(
+            std::fs::read_to_string(tree.join("a.py")).expect("a.py"),
+            "x = 1\n",
+            "nothing edited"
+        );
+        tidy(&[&tree]);
+    }
+
+    /// #1150: an edit after a read of the file succeeds, and so does one
+    /// after the model's own `write` of it; an edit of a file neither shows
+    /// is refused.
+    #[test]
+    fn an_edit_after_a_read_of_the_file_succeeds() {
+        let tree = scratch("edit-after-read");
+        std::fs::write(tree.join("a.py"), "x = 1\n").expect("written");
+        std::fs::write(tree.join("b.py"), "y = 1\n").expect("written");
+        let session = editing(
+            &tree,
+            true,
+            (log::MeditationToolOutputs::Evict, 0),
+            vec![
+                vec![edit_step("call-1", "b.py", ("y = 1", "y = 2"))],
+                vec![read_step("call-2", "a.py")],
+                vec![edit_step("call-3", "a.py", ("x = 1", "x = 2"))],
+                vec![Step::call(
+                    0,
+                    "call-4",
+                    "write",
+                    r#"{"path":"c.py","content":"z = 1\n"}"#,
+                )],
+                vec![edit_step("call-5", "c.py", ("z = 1", "z = 2"))],
+                deltas(&["done"]),
+            ],
+        );
+        session.ask("edit them", None).expect("accepted");
+        let log = wait_until(&session, "the turn", |log| turns_settled(log) == 1);
+        let shown: Vec<String> = lines(&log)
+            .into_iter()
+            .map(|line| line.shown.expect("a result"))
+            .collect();
+        assert_eq!(shown[0], unshown("b.py"));
+        assert!(
+            shown[2].starts_with("The file: a.py has been updated."),
+            "{}",
+            shown[2]
+        );
+        assert!(
+            shown[4].starts_with("The file: c.py has been updated."),
+            "{}",
+            shown[4]
+        );
+        assert_eq!(
+            std::fs::read_to_string(tree.join("b.py")).expect("b.py"),
+            "y = 1\n"
+        );
+        assert_eq!(
+            std::fs::read_to_string(tree.join("a.py")).expect("a.py"),
+            "x = 2\n"
+        );
+        reads_whole(&session);
+        tidy(&[&tree]);
+    }
+
+    /// #1150: a refill clears the shown set -- under `evict` with no tail, the
+    /// read it compacted away no longer counts -- but text it keeps still
+    /// counts: the read in its outputs section under `keep`, and the read in
+    /// the turns it keeps whole, its tail.
+    #[test]
+    fn a_refill_clears_the_set_but_text_it_keeps_still_counts() {
+        for (name, refilling, kept) in [
+            ("evict", (log::MeditationToolOutputs::Evict, 0), false),
+            ("keep", (log::MeditationToolOutputs::Keep, 0), true),
+            ("tail", (log::MeditationToolOutputs::Evict, 100_000), true),
+        ] {
+            let tree = scratch(&format!("edit-kept-{name}"));
+            let line = edited_after_a_refill(&tree, true, refilling);
+            let shown = line.shown.unwrap_or_default();
+            if kept {
+                assert!(
+                    shown.starts_with("The file: a.py has been updated."),
+                    "{name}: {shown}"
+                );
+            } else {
+                assert_eq!(shown, unshown("a.py"), "{name}");
+            }
+            tidy(&[&tree]);
+        }
+    }
+
+    /// #1150: with the switch off, `edit` is byte for byte as before: an
+    /// edit of a file the refill compacted away runs, its result the one the
+    /// build before this lever gave.
+    #[test]
+    fn with_the_switch_off_edit_is_as_before() {
+        let tree = scratch("edit-off");
+        let line = edited_after_a_refill(&tree, false, (log::MeditationToolOutputs::Evict, 0));
+        assert_eq!(
+            line.shown.as_deref(),
+            Some(
+                "The file: a.py has been updated. Showing lines 1-2 of 2 from the edited \
+                 file:\n\n---\n\nx = 2\n"
+            )
+        );
+        assert!(!line.failed);
         tidy(&[&tree]);
     }
 
@@ -39345,6 +39553,92 @@ pub(in crate::drive) mod tests {
             Some("Files this call changed: a.py (+1 -1).\n")
         );
         reads_whole(&carried);
+        tidy(&[&tree, &dir]);
+    }
+
+    /// #1149, the last review's first finding: a carried call is read under
+    /// the roots its first session showed its model. A `write` by an absolute
+    /// path, its words rewritten to the placeholder, rides into a resumed
+    /// turn and still shows its file.
+    #[test]
+    fn a_carried_write_is_read_under_the_first_sessions_roots() {
+        let tree = scratch("call-changes-carried-roots");
+        let dir = scratch("call-changes-carried-roots-recording");
+        let path = tree.join("a.py").to_string_lossy().into_owned();
+        let open = |acts: Vec<Vec<Step>>, counting_on: bool| {
+            let (mut shape, mut tools) =
+                counting(&tree, tool_loop::ToolSurface::Standard, counting_on);
+            tools
+                .shown_roots
+                .add(&format!("{}=/scenario/worktree", tree.display()))
+                .expect("a root");
+            shape.limits.context_window = Some(100_000);
+            let mut interview = interviewing(&[]);
+            interview.self_capture = Some(crate::capture::tools::Cadence::DEFAULT);
+            declare_self_capture(&mut shape, Some(&interview));
+            Session::open_with(
+                Canned::new(acts),
+                shape,
+                None,
+                Some(tools),
+                None,
+                Some(interview),
+            )
+        };
+        let mut writing: Vec<Vec<Step>> = (0..24)
+            .map(|step| {
+                let said = format!("Step {step} wrote a.py.");
+                vec![
+                    Step::Delta(format!("{said} {}", "filler ".repeat(3_400))),
+                    record(&format!("record-{step}"), "fact", &said),
+                    Step::call(
+                        1,
+                        &format!("call-{step}"),
+                        "write",
+                        &serde_json::json!({"path": path, "content": "x = 1\n"}).to_string(),
+                    ),
+                ]
+            })
+            .collect();
+        writing.push(deltas(&["written"]));
+        let original = open(writing, false);
+        original.keep_recording_in(dir.clone());
+        original.ask("write it", None).expect("accepted");
+        let log = wait_until(&original, "the long turn", settled);
+        let at = *mid_turn_refills(&log)
+            .first()
+            .expect("a refill cut the turn");
+        let text: String = log.iter().map(|logged| render(logged) + "\n").collect();
+        std::fs::write(dir.join("session.log"), text).expect("the log");
+        let carry = crate::drive::carry::read_at(&dir.join("session.log"), &[], Some(log[at].seq))
+            .expect("it carries");
+        assert!(
+            carry.riding.iter().any(|message| message.role == Role::Tool
+                && message.content == "Successfully overwrote file: /scenario/worktree/a.py."),
+            "a write of a.py, its root rewritten, rode after the refill"
+        );
+        let carried = open(
+            vec![
+                vec![bash(
+                    "call-patch",
+                    &python_replace("a.py", "x = 1", "x = 2"),
+                )],
+                deltas(&["patched"]),
+            ],
+            true,
+        )
+        .with_carry(carry)
+        .expect("it carries");
+        carried.resume().expect("the cut turn resumes");
+        let resumed = wait_until(&carried, "the resumed turn", settled);
+        assert_eq!(
+            lines(&resumed)
+                .into_iter()
+                .find(|line| line.id == "call-patch")
+                .and_then(|line| line.shown)
+                .as_deref(),
+            Some("Files this call changed: a.py (+1 -1).\n")
+        );
         tidy(&[&tree, &dir]);
     }
 

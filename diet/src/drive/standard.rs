@@ -45,6 +45,19 @@ use super::tool_loop::Tools;
 
 /// The read tool's name.
 pub const READ: &str = "read";
+
+/// The regimen key of the edit lever (#1150).
+pub const EDIT_REQUIRES_SHOWN: &str = "edit_requires_shown";
+
+/// Whether `edit` refuses a file whose text the context does not show
+/// (#1150): not read yet.
+///
+/// # Errors
+///
+/// None yet.
+pub fn edit_requires_shown(_regimen: &crate::formats::regimen::Regimen) -> Result<bool, String> {
+    Ok(false)
+}
 /// The write tool's name.
 pub const WRITE: &str = "write";
 /// The edit tool's name.

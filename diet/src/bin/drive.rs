@@ -2391,6 +2391,8 @@ fn serving_tools(
         // Set once the substrate is known to be canned (`--shown-root`).
         shown_roots: diet::drive::shown::ShownRoots::none(),
         call_changes,
+        // #1150: off unless the regimen turns it on.
+        edit_requires_shown: declared.edit_requires_shown,
     }))
 }
 
