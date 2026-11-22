@@ -14,8 +14,12 @@
 //!   `grep`'s too: `pattern`, `glob`, `path`, `limit`. `glob` takes
 //!   `pattern`, `path` and `limit`, as both do.
 //! * **rules** -- neither requires a read before an edit or an absolute
-//!   path, so neither does this; a relative path resolves against the
-//!   worktree. Both cap a read at 2000 lines or 50 KiB. Where they differ,
+//!   path, so neither does this by default; a relative path resolves
+//!   against the worktree. A read before an edit is a lever, off by default
+//!   (`edit_requires_shown`, #1150): on, `edit` refuses a file whose text
+//!   the context does not show, as Qwen Code's prior-read check refuses one
+//!   unread (`qc:packages/core/src/tools/priorReadEnforcement.ts`, 296-316
+//!   at `c0c697c8`). Both cap a read at 2000 lines or 50 KiB. Where they differ,
 //!   Qwen Code's: a search always case-insensitive, capped at 1000 lines or
 //!   25,000 characters; file names newest first, at most 100.
 //! * **descriptions and results** -- they differ, so Qwen Code's
@@ -50,13 +54,21 @@ pub const READ: &str = "read";
 pub const EDIT_REQUIRES_SHOWN: &str = "edit_requires_shown";
 
 /// Whether `edit` refuses a file whose text the context does not show
-/// (#1150): not read yet.
+/// (#1150): `on`, or `off`, the default.
 ///
 /// # Errors
 ///
-/// None yet.
-pub fn edit_requires_shown(_regimen: &crate::formats::regimen::Regimen) -> Result<bool, String> {
-    Ok(false)
+/// When the key holds anything else: serve refuses it at start.
+pub fn edit_requires_shown(regimen: &crate::formats::regimen::Regimen) -> Result<bool, String> {
+    use crate::formats::regimen::Value;
+    match regimen.get(EDIT_REQUIRES_SHOWN) {
+        None => Ok(false),
+        Some(Value::String(word)) if word == "off" => Ok(false),
+        Some(Value::String(word)) if word == "on" => Ok(true),
+        Some(other) => Err(format!(
+            "`{EDIT_REQUIRES_SHOWN}` is {other:?}: it is `on`, or `off`"
+        )),
+    }
 }
 /// The write tool's name.
 pub const WRITE: &str = "write";
@@ -417,6 +429,9 @@ vocabulary! {
         EditUnreadable => "edit-unreadable",
         /// `edit`'s file could not be written.
         EditUnwritable => "edit-unwritable",
+        /// `edit`'s file is one whose text the context does not show, under
+        /// `edit_requires_shown` (#1150): refused before it runs.
+        NotShown => "not-shown",
         /// The tool named is no standard tool.
         Unknown => "unknown",
         /// A search could not run, or did not finish.
@@ -741,6 +756,20 @@ fn wrote(path: &str, existed: bool) -> String {
     } else {
         format!("Successfully created and wrote to new file: {path}.")
     }
+}
+
+/// An `edit` of `path` refused before it runs, under `edit_requires_shown`
+/// (#1150): the context shows none of the file's text. Qwen Code's words for
+/// a file never read (`qc:packages/core/src/tools/priorReadEnforcement.ts`,
+/// 305-310 at `c0c697c8`), its session the context and its read tool this
+/// surface's. The wording is the maintainer's to approve.
+#[must_use]
+pub fn unshown(path: &str) -> Done {
+    Done::Failed(Failure::NotShown.with(format!(
+        "File {path} has not been read in this context. Use the {READ} tool first to load the \
+         current content (a partial read with offset / limit is fine \u{2014} you only need to \
+         have seen the bytes you intend to edit) before editing it."
+    )))
 }
 
 /// How an edit's success begins; its snippet may follow.
@@ -1335,6 +1364,22 @@ mod tests {
 
     fn call(name: &str, args: &serde_json::Value, tools: &Tools) -> String {
         shown(run(name, &args.to_string(), tools, &|| false))
+    }
+
+    /// #1150: the refusal of an unshown edit, as the model reads it, its kind
+    /// the edit lever's own.
+    #[test]
+    fn an_unshown_edit_is_refused_in_qwen_codes_words() {
+        let Done::Failed(failed) = unshown("src/app.py") else {
+            panic!("a refusal");
+        };
+        assert_eq!(failed.kind, Failure::NotShown);
+        assert_eq!(
+            failed.text,
+            "File src/app.py has not been read in this context. Use the read tool first to load \
+             the current content (a partial read with offset / limit is fine \u{2014} you only \
+             need to have seen the bytes you intend to edit) before editing it."
+        );
     }
 
     /// #894: a tool's own failure is `Failed`; what it returns on success

@@ -66,7 +66,6 @@ pub enum Kept<'a> {
     Nowhere,
 }
 
-/// The notice that goes before a capped output.
 /// How the cap's notice opens.
 const NOTICE_OPENS: &str = "Tool output was too large and has been truncated.\n";
 
@@ -85,6 +84,7 @@ pub fn from_the_head(shown: &str) -> &str {
         .map_or(shown, |at| &shown[at + NOTICE_ENDS.len()..])
 }
 
+/// The notice that goes before a capped output.
 fn notice(kept: Kept<'_>) -> String {
     let (saved, reading) = match kept {
         Kept::At {

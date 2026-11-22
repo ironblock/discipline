@@ -9072,12 +9072,42 @@ fn standard_call<S>(
     // the context.
     let writes = [super::standard::EDIT, super::standard::WRITE].contains(&call.name.as_str());
     let counted = writes.then(|| count_before(tools)).flatten();
-    let (line, shown) = standard_ran(tools, cancel, (turn, request), call);
+    // #1150: an `edit` of a file whose text the context does not show is
+    // refused before it runs, as the edit's own failure.
+    let (line, shown) = match unshown_edit(shared, tools, sent, call) {
+        Some(refused) => standard_line(tools, (turn, request), call, refused),
+        None => standard_ran(tools, cancel, (turn, request), call),
+    };
     let named = super::standard::shown_file(&call.name, &call.arguments)
         .filter(|_| writes)
         .map(|file| (file, line.outcome == log::ToolOutcome::Ran && !line.failed));
     let shown = shown.map(|shown| count_after(shared, tools, (counted, sent), named, shown));
     (line, shown)
+}
+
+/// The refusal of an `edit` of a file whose text the context `sent` does not
+/// show (#1150), with `edit_requires_shown` on: the one rule of
+/// [`shown_files`], #1149's. `None` with the lever off, for any other call,
+/// for arguments that name no file, and for a file that is not there: the
+/// edit reports those itself, as Qwen Code's check lets a missing file
+/// through to the edit.
+fn unshown_edit<S>(
+    shared: &Shared<S>,
+    tools: &Tools,
+    sent: Sent<'_>,
+    call: &Call,
+) -> Option<super::standard::Done> {
+    if !tools.edit_requires_shown || call.name != super::standard::EDIT {
+        return None;
+    }
+    let file = super::standard::shown_file(&call.name, &call.arguments)?;
+    let keys = super::call_changes::Keys::of(&tools.worktree);
+    let key = keys.key(&file);
+    std::fs::symlink_metadata(&key).ok()?;
+    let state = shared.lock();
+    let shown = shown_files(&state, &keys, sent).contains_key(&key);
+    drop(state);
+    (!shown).then(|| super::standard::unshown(&file))
 }
 
 /// [`standard_call`]'s run: its line, and its result under the session's
@@ -9088,7 +9118,19 @@ fn standard_ran(
     (turn, request): (u32, u64),
     call: &Call,
 ) -> (ToolLine, Option<String>) {
-    match super::standard::run(&call.name, &call.arguments, tools, &|| cancel.is_asked()) {
+    let done = super::standard::run(&call.name, &call.arguments, tools, &|| cancel.is_asked());
+    standard_line(tools, (turn, request), call, done)
+}
+
+/// A standard tool's call as it ended, `done`: its line, and its result
+/// under the session's cap.
+fn standard_line(
+    tools: &Tools,
+    (turn, request): (u32, u64),
+    call: &Call,
+    done: super::standard::Done,
+) -> (ToolLine, Option<String>) {
+    match done {
         super::standard::Done::Shown(result) => {
             let mut line = ToolLine::of(request, turn, call, log::ToolOutcome::Ran);
             let shown = shown_capped(tools, &result, &mut line);
@@ -25247,7 +25289,8 @@ pub(in crate::drive) mod tests {
     }
 
     /// The calls a standard tool fails on with `kind` (#1149), on the tree
-    /// [`the_standard_results_as_logged`] makes: one or more for each kind a
+    /// [`the_standard_results_as_logged_show_their_files_exactly_when_their_calls_succeeded`]
+    /// makes: one or more for each kind a
     /// `read`, `write` or `edit` reports, none for the kinds they never do.
     /// The match is exhaustive, so a new kind without its calls does not
     /// build.
@@ -25329,8 +25372,10 @@ pub(in crate::drive) mod tests {
             Failure::Unchanged => vec![edit("a.txt", "one", "one")],
             Failure::EditUnreadable => vec![edit("gone.txt", "a", "b")],
             Failure::EditUnwritable => vec![edit("locked.txt", "lock", "x")],
-            // No `read`, `write` or `edit` reports these.
-            Failure::Unknown | Failure::Search => Vec::new(),
+            // No `read`, `write` or `edit` reports these; the session
+            // refuses an unshown edit under its own lever, tested apart
+            // (#1150).
+            Failure::Unknown | Failure::Search | Failure::NotShown => Vec::new(),
         }
     }
 
@@ -25411,7 +25456,8 @@ pub(in crate::drive) mod tests {
         for kind in Failure::ALL {
             let cases = failing(*kind);
             assert!(
-                cases.is_empty() == matches!(kind, Failure::Unknown | Failure::Search),
+                cases.is_empty()
+                    == matches!(kind, Failure::Unknown | Failure::Search | Failure::NotShown),
                 "{kind:?} has its case"
             );
             failures.extend(
@@ -25483,14 +25529,12 @@ pub(in crate::drive) mod tests {
     // -----------------------------------------------------------------------
 
     /// What an `edit` of `path` is refused with when the context shows none
-    /// of the file's text (#1150): Qwen Code's words, its session the
-    /// context and its read tool `read`. Proposed for the maintainer.
+    /// of the file's text (#1150): the constructor's words.
     fn unshown(path: &str) -> String {
-        format!(
-            "File {path} has not been read in this context. Use the read tool first to load the \
-             current content (a partial read with offset / limit is fine \u{2014} you only need \
-             to have seen the bytes you intend to edit) before editing it."
-        )
+        match crate::drive::standard::unshown(path) {
+            crate::drive::standard::Done::Failed(failed) => failed.text,
+            other => panic!("not a refusal: {other:?}"),
+        }
     }
 
     /// An `edit` of `file`, `old` to `new`, as call `id`.
