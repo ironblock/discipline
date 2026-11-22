@@ -25711,6 +25711,31 @@ pub(in crate::drive) mod tests {
         }
     }
 
+    /// #1150: with the lever on, an edit of a path that does not exist is not
+    /// refused: it gets the edit's own error, as Qwen Code lets a missing
+    /// file through to the edit.
+    #[test]
+    fn an_edit_of_a_missing_file_gets_the_edits_own_error() {
+        let tree = scratch("edit-missing");
+        let session = editing(
+            &tree,
+            true,
+            (log::MeditationToolOutputs::Evict, 0),
+            vec![
+                vec![edit_step("call-1", "gone.py", ("x = 1", "x = 2"))],
+                deltas(&["no such file"]),
+            ],
+        );
+        session.ask("edit it", None).expect("accepted");
+        let log = wait_until(&session, "the turn", |log| turns_settled(log) == 1);
+        let line = lines(&log).remove(0);
+        let shown = line.shown.unwrap_or_default();
+        assert!(shown.starts_with("Error executing edit: "), "{shown}");
+        assert_ne!(shown, unshown("gone.py"));
+        assert!(line.failed);
+        tidy(&[&tree]);
+    }
+
     /// #1150: with the switch off, `edit` is byte for byte as before: an
     /// edit of a file the refill compacted away runs, its result the one the
     /// build before this lever gave.
@@ -39683,6 +39708,87 @@ pub(in crate::drive) mod tests {
                 .as_deref(),
             Some("Files this call changed: a.py (+1 -1).\n")
         );
+        tidy(&[&tree, &dir]);
+    }
+
+    /// #1150, the pilot's main case: a first session reads `a.py` until the
+    /// window refill cuts its turn; carried from that refill and resumed with
+    /// the edit lever on, the resumed edit of `a.py`, whose read rode after
+    /// the refill, runs, and an edit of `b.py`, never read, is refused.
+    #[test]
+    fn a_resumed_turn_edits_the_file_its_read_rode_with_and_no_other() {
+        let tree = scratch("edit-carried");
+        std::fs::write(tree.join("a.py"), "x = 1\n").expect("written");
+        std::fs::write(tree.join("b.py"), "y = 1\n").expect("written");
+        let dir = scratch("edit-carried-recording");
+        let open = |acts: Vec<Vec<Step>>, on: bool| {
+            let (mut shape, mut tools) = counting(&tree, tool_loop::ToolSurface::Standard, false);
+            tools.edit_requires_shown = on;
+            shape.limits.context_window = Some(100_000);
+            let mut interview = interviewing(&[]);
+            interview.self_capture = Some(crate::capture::tools::Cadence::DEFAULT);
+            declare_self_capture(&mut shape, Some(&interview));
+            Session::open_with(
+                Canned::new(acts),
+                shape,
+                None,
+                Some(tools),
+                None,
+                Some(interview),
+            )
+        };
+        let mut reading: Vec<Vec<Step>> = (0..24)
+            .map(|step| {
+                let said = format!("Step {step} read a.py.");
+                vec![
+                    Step::Delta(format!("{said} {}", "filler ".repeat(3_400))),
+                    record(&format!("record-{step}"), "fact", &said),
+                    Step::call(1, &format!("call-{step}"), "read", r#"{"path":"a.py"}"#),
+                ]
+            })
+            .collect();
+        reading.push(deltas(&["read enough"]));
+        let original = open(reading, false);
+        original.keep_recording_in(dir.clone());
+        original.ask("read it", None).expect("accepted");
+        let log = wait_until(&original, "the long turn", settled);
+        let at = *mid_turn_refills(&log)
+            .first()
+            .expect("a refill cut the turn");
+        let text: String = log.iter().map(|logged| render(logged) + "\n").collect();
+        std::fs::write(dir.join("session.log"), text).expect("the log");
+        let carry = crate::drive::carry::read_at(&dir.join("session.log"), &[], Some(log[at].seq))
+            .expect("it carries");
+        let carried = open(
+            vec![
+                vec![edit_step("edit-a", "a.py", ("x = 1", "x = 2"))],
+                vec![edit_step("edit-b", "b.py", ("y = 1", "y = 2"))],
+                deltas(&["edited"]),
+            ],
+            true,
+        )
+        .with_carry(carry)
+        .expect("it carries");
+        carried.resume().expect("the cut turn resumes");
+        let resumed = wait_until(&carried, "the resumed turn", settled);
+        let shown = |id: &str| {
+            lines(&resumed)
+                .into_iter()
+                .find(|line| line.id == id)
+                .and_then(|line| line.shown)
+                .unwrap_or_default()
+        };
+        assert!(
+            shown("edit-a").starts_with("The file: a.py has been updated."),
+            "{}",
+            shown("edit-a")
+        );
+        assert_eq!(shown("edit-b"), unshown("b.py"));
+        assert_eq!(
+            std::fs::read_to_string(tree.join("b.py")).expect("b.py"),
+            "y = 1\n"
+        );
+        reads_whole(&carried);
         tidy(&[&tree, &dir]);
     }
 

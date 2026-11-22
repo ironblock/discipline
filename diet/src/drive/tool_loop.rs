@@ -3701,11 +3701,19 @@ pub(in crate::drive) mod tests {
         assert!(on.call_changes);
         assert!(read("approval = \"none\"\ncall_changes = \"yes\"\n").is_err());
         assert!(read("call_changes = \"yes\"\n").is_err());
-        // #1150: the edit lever likewise.
-        let on = read("approval = \"none\"\nedit_requires_shown = \"on\"\n")
-            .expect("declared")
-            .expect("runs commands");
+        // #1150: the edit lever likewise, and only where the surface offers
+        // `edit`: `bash` alone has none to refuse.
+        let on = read(
+            "approval = \"none\"\ntool_surface = \"standard\"\nedit_requires_shown = \"on\"\n",
+        )
+        .expect("declared")
+        .expect("runs commands");
         assert!(on.edit_requires_shown);
+        assert!(read("approval = \"none\"\nedit_requires_shown = \"on\"\n").is_err());
+        assert!(
+            read("approval = \"none\"\nedit_requires_shown = \"off\"\n").is_ok(),
+            "off asks nothing of the surface"
+        );
         assert!(read("approval = \"none\"\nedit_requires_shown = \"yes\"\n").is_err());
         assert!(read("edit_requires_shown = \"yes\"\n").is_err());
         assert!(read("allowed_commands = \"ls\"\n").is_err());

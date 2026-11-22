@@ -1505,8 +1505,9 @@ mod tests {
     }
 
     /// #1150: the start row names the edit lever: `off` by default, `on` when
-    /// the regimen says so; undeclared where it runs no commands, or for any
-    /// other word, which serve refuses at start.
+    /// the regimen says so on a surface with `edit`; undeclared where it runs
+    /// no commands, for `on` with no `edit` to refuse, or for any other word,
+    /// which serve refuses at start.
     #[test]
     fn the_start_row_names_the_edit_lever() {
         use crate::formats::regimen;
@@ -1517,8 +1518,15 @@ mod tests {
         };
         assert_eq!(lever("approval = \"none\"\n"), "off");
         assert_eq!(
-            lever("approval = \"none\"\nedit_requires_shown = \"on\"\n"),
+            lever(
+                "approval = \"none\"\ntool_surface = \"standard\"\nedit_requires_shown = \"on\"\n"
+            ),
             "on"
+        );
+        assert_eq!(
+            lever("approval = \"none\"\nedit_requires_shown = \"on\"\n"),
+            UNDECLARED,
+            "no `edit` on a `bash`-only surface: refused at start"
         );
         assert_eq!(
             lever("approval = \"none\"\nedit_requires_shown = \"yes\"\n"),
