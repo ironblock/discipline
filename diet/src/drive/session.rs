@@ -4191,14 +4191,14 @@ impl<S: Streaming + 'static> Session<S> {
                     .rerooted
                     .as_ref()
                     .is_some_and(|rerooted| rerooted.replaced == 0)
-                    && named.as_deref() != Some(here)
+                    && !named.as_deref().is_some_and(|named| same_cwd(named, here))
                 {
                     return Err(format!(
                         "the carried root replaced nothing: the carry names no path under it, \
                          and no directory this session runs in; {reroot} from the root it ran in"
                     ));
                 }
-                if let Some(there) = named.as_ref().filter(|there| *there != here) {
+                if let Some(there) = named.as_ref().filter(|there| !same_cwd(there, here)) {
                     return Err(format!(
                         "the carried trunk says `{there}`, and this session's commands run \
                          where it says `{here}`: {reroot}"
@@ -14410,6 +14410,29 @@ pub fn start_cwd_note(cwd: &str) -> String {
     crate::dogma::Template::StartCwd
         .fill(&[(crate::dogma::Hole::Cwd, cwd)])
         .expect("START_CWD's one hole is `cwd`")
+}
+
+/// Whether two lines naming a working directory, as [`start_cwd_note`]
+/// words them, name one directory (#1157): word for word, or, where both
+/// resolve -- a `~` path under this machine's home, a symlinked parent --
+/// to one path. A placeholder that resolves nowhere compares as written.
+fn same_cwd(a: &str, b: &str) -> bool {
+    if a == b {
+        return true;
+    }
+    let marked = start_cwd_note("\u{1}");
+    let Some((before, after)) = marked.split_once('\u{1}') else {
+        return false;
+    };
+    let resolved = |line: &str| {
+        let cwd = line.strip_prefix(before)?.strip_suffix(after)?;
+        let cwd = match cwd.strip_prefix("~/") {
+            Some(rest) => std::path::PathBuf::from(std::env::var_os("HOME")?).join(rest),
+            None => std::path::PathBuf::from(cwd),
+        };
+        std::fs::canonicalize(cwd).ok()
+    };
+    resolved(a).zip(resolved(b)).is_some_and(|(a, b)| a == b)
 }
 
 /// The line that names a working directory in `trunk`'s user and system

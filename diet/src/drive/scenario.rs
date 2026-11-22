@@ -4535,16 +4535,16 @@ fn probed(
     Ok(verdict)
 }
 
-/// The roots a carried session's text is rerooted by (#948, #1157): the
-/// first session's worktree, resolved form first, as the given form is the
-/// tail of it.
+/// The roots a carried session's text is rerooted by (#948): the first
+/// session's worktree, resolved form first, as the given form is the tail
+/// of it -- each into this worktree as serve was given it, the spelling its
+/// own working-directory line names (#1157).
 fn carried_roots(
     (given, resolved): (&std::path::Path, &std::path::Path),
     here: &std::path::Path,
 ) -> Vec<(std::path::PathBuf, std::path::PathBuf)> {
-    let here_resolved = std::fs::canonicalize(here).unwrap_or_else(|_| here.to_path_buf());
     vec![
-        (resolved.to_path_buf(), here_resolved),
+        (resolved.to_path_buf(), here.to_path_buf()),
         (given.to_path_buf(), here.to_path_buf()),
     ]
 }
