@@ -39953,6 +39953,51 @@ pub(in crate::drive) mod tests {
         tidy(&[&there, &here]);
     }
 
+    /// #1157: two spellings of one directory -- the worktree reached through
+    /// a symlinked parent, and its resolved path -- are one working
+    /// directory, so a carry naming the one is taken by a session running in
+    /// the other; a different directory is still refused.
+    #[test]
+    fn a_carry_naming_its_worktree_by_another_spelling_is_taken_and_another_is_not() {
+        let dir = scratch("carry-spelling");
+        std::fs::create_dir_all(dir.join("real").join("wt")).expect("a worktree");
+        std::fs::create_dir_all(dir.join("other")).expect("another");
+        #[cfg(unix)]
+        std::os::unix::fs::symlink(dir.join("real"), dir.join("link")).expect("a symlink");
+        let here = dir.join("link").join("wt");
+        let open = || {
+            let mut running = tools(Confinement::Unconfined, &here, &[], None, Decider::Decline);
+            running.cwd = here.display().to_string();
+            Session::open_looping(Canned::new(vec![]), looping(), None, running)
+        };
+        let naming = |cwd: &Path| {
+            carrying(
+                vec![
+                    Message::new(Role::System, HEAD),
+                    Message::new(
+                        Role::User,
+                        format!(
+                            "<summary>notes</summary>\n\n{}",
+                            start_cwd_note(&cwd.display().to_string())
+                        ),
+                    ),
+                ],
+                Vec::new(),
+            )
+        };
+        let resolved = std::fs::canonicalize(&here).expect("it resolves");
+        assert_ne!(resolved, here, "the symlinked parent spells it another way");
+        assert!(
+            open().with_carry(naming(&resolved)).is_ok(),
+            "one directory"
+        );
+        assert!(
+            open().with_carry(naming(&dir.join("other"))).is_err(),
+            "another"
+        );
+        tidy(&[&dir]);
+    }
+
     /// An interview under the starter phase library (#787), opening in `plan`.
     fn in_the_starter_library() -> Interview {
         Interview {
