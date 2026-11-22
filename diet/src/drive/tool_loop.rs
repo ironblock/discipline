@@ -1847,6 +1847,14 @@ pub fn declared(regimen: &Regimen) -> Result<Option<Declared>, String> {
     };
     let call_changes = super::call_changes::call_changes(regimen)?;
     let edit_requires_shown = super::standard::edit_requires_shown(regimen)?;
+    // Only a surface with `edit` has an edit to refuse (#1150).
+    if edit_requires_shown && surface != ToolSurface::Standard {
+        return Err(format!(
+            "`{} = \"on\"` refuses `edit` calls, and this surface offers no `edit` tool: give \
+             it `{TOOL_SURFACE} = \"standard\"`, or leave the lever off",
+            super::standard::EDIT_REQUIRES_SHOWN
+        ));
+    }
     let Some(value) = regimen.get(ALLOWED_COMMANDS) else {
         // Approvals off runs commands with no allow set to seed.
         return Ok(approvals_off.then(|| Declared {

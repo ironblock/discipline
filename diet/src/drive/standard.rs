@@ -19,7 +19,12 @@
 //!   (`edit_requires_shown`, #1150): on, `edit` refuses a file whose text
 //!   the context does not show, as Qwen Code's prior-read check refuses one
 //!   unread (`qc:packages/core/src/tools/priorReadEnforcement.ts`, 296-316
-//!   at `c0c697c8`). Both cap a read at 2000 lines or 50 KiB. Where they differ,
+//!   at `c0c697c8`). Its scope is narrower than Qwen Code's: `write` over an
+//!   existing file is not checked, though Qwen Code checks it
+//!   (`write-file.ts`, "overwriting"); a directory or a special file gets
+//!   the same refusal, where Qwen Code gives each its own words; and a file
+//!   read by a symlinked path and edited by its real one is refused, since a
+//!   file's key resolves the worktree's own symlink alone. Both cap a read at 2000 lines or 50 KiB. Where they differ,
 //!   Qwen Code's: a search always case-insensitive, capped at 1000 lines or
 //!   25,000 characters; file names newest first, at most 100.
 //! * **descriptions and results** -- they differ, so Qwen Code's
@@ -49,6 +54,14 @@ use super::tool_loop::Tools;
 
 /// The read tool's name.
 pub const READ: &str = "read";
+/// The write tool's name.
+pub const WRITE: &str = "write";
+/// The edit tool's name.
+pub const EDIT: &str = "edit";
+/// The content search tool's name.
+pub const GREP: &str = "grep";
+/// The file-name search tool's name.
+pub const GLOB: &str = "glob";
 
 /// The regimen key of the edit lever (#1150).
 pub const EDIT_REQUIRES_SHOWN: &str = "edit_requires_shown";
@@ -70,14 +83,6 @@ pub fn edit_requires_shown(regimen: &crate::formats::regimen::Regimen) -> Result
         )),
     }
 }
-/// The write tool's name.
-pub const WRITE: &str = "write";
-/// The edit tool's name.
-pub const EDIT: &str = "edit";
-/// The content search tool's name.
-pub const GREP: &str = "grep";
-/// The file-name search tool's name.
-pub const GLOB: &str = "glob";
 
 /// The most lines a read shows (Pi and `OpenCode` 2).
 const READ_MAX_LINES: usize = 2000;
@@ -762,7 +767,7 @@ fn wrote(path: &str, existed: bool) -> String {
 /// (#1150): the context shows none of the file's text. Qwen Code's words for
 /// a file never read (`qc:packages/core/src/tools/priorReadEnforcement.ts`,
 /// 305-310 at `c0c697c8`), its session the context and its read tool this
-/// surface's. The wording is the maintainer's to approve.
+/// surface's: the maintainer's wording, approved on 2026-11-22.
 #[must_use]
 pub fn unshown(path: &str) -> Done {
     Done::Failed(Failure::NotShown.with(format!(
