@@ -21,6 +21,10 @@ mechanical_capture = "on"
 # (#1149): the PNG's `bash` names `shot.png` new and not shown, the edit
 # `notes.md` by its lines, and the background build says it was not counted.
 call_changes = "on"
+# `edit` refuses a file whose text the context does not show (#1150): the
+# edit after the model's own write of notes.md runs, and turn 6's edit of it,
+# its reads compacted away by then, is refused.
+edit_requires_shown = "on"
 
 # Four warrants fork on their own; `open` shadows, offered as a chip the operator accepts (#1031). It fired once as a
 # live warrant, so the example still shows every other one firing by itself (the app audit's page walk, F20).

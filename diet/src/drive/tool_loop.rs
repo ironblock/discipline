@@ -1676,6 +1676,9 @@ pub struct Declared {
     /// `call_changes = "on"`: each `bash`, `edit` and `write` result says
     /// what the call changed in the worktree (#1149).
     pub call_changes: bool,
+    /// `edit_requires_shown = "on"`: `edit` refuses a file whose text the
+    /// context does not show (#1150).
+    pub edit_requires_shown: bool,
 }
 
 /// The tool surface lever (#557): the tools the model is offered.
@@ -1843,6 +1846,15 @@ pub fn declared(regimen: &Regimen) -> Result<Option<Declared>, String> {
         }
     };
     let call_changes = super::call_changes::call_changes(regimen)?;
+    let edit_requires_shown = super::standard::edit_requires_shown(regimen)?;
+    // Only a surface with `edit` has an edit to refuse (#1150).
+    if edit_requires_shown && surface != ToolSurface::Standard {
+        return Err(format!(
+            "`{} = \"on\"` refuses `edit` calls, and this surface offers no `edit` tool: give \
+             it `{TOOL_SURFACE} = \"standard\"`, or leave the lever off",
+            super::standard::EDIT_REQUIRES_SHOWN
+        ));
+    }
     let Some(value) = regimen.get(ALLOWED_COMMANDS) else {
         // Approvals off runs commands with no allow set to seed.
         return Ok(approvals_off.then(|| Declared {
@@ -1856,6 +1868,7 @@ pub fn declared(regimen: &Regimen) -> Result<Option<Declared>, String> {
             background: background_commands(regimen),
             timeout_ms: bash_timeout_ms(regimen),
             call_changes,
+            edit_requires_shown,
         }));
     };
     let regimen::Value::Array(items) = value else {
@@ -1883,6 +1896,7 @@ pub fn declared(regimen: &Regimen) -> Result<Option<Declared>, String> {
         background: background_commands(regimen),
         timeout_ms: bash_timeout_ms(regimen),
         call_changes,
+        edit_requires_shown,
     }))
 }
 
@@ -2389,6 +2403,8 @@ pub fn receipt(
 }
 
 /// What the loop runs a call under, held by the session for its length.
+// Each flag is one of the regimen's own on-or-off switches, as it wrote it.
+#[allow(clippy::struct_excessive_bools)]
 #[derive(Debug)]
 pub struct Tools {
     /// The confinement, opened at start.
@@ -2441,6 +2457,9 @@ pub struct Tools {
     /// The worktree as last counted, when each `bash`, `edit` and `write`
     /// result says what the call changed (#1149); `None`, the default, off.
     pub call_changes: Option<std::sync::Mutex<super::call_changes::Tree>>,
+    /// Whether `edit` refuses a file whose text the context does not show
+    /// (#1150); off, the default.
+    pub edit_requires_shown: bool,
 }
 
 vocabulary! {
@@ -3655,6 +3674,7 @@ pub(in crate::drive) mod tests {
                 background: true,
                 timeout_ms: Some(DEFAULT_TIMEOUT_MS),
                 call_changes: false,
+                edit_requires_shown: false,
             }))
         );
         // The approval lever's `none`: commands run with no allow set.
@@ -3671,6 +3691,7 @@ pub(in crate::drive) mod tests {
                 background: true,
                 timeout_ms: Some(DEFAULT_TIMEOUT_MS),
                 call_changes: false,
+                edit_requires_shown: false,
             }))
         );
         assert!(read("approval = \"ask\"\n").is_err());
@@ -3688,6 +3709,21 @@ pub(in crate::drive) mod tests {
         assert!(on.call_changes);
         assert!(read("approval = \"none\"\ncall_changes = \"yes\"\n").is_err());
         assert!(read("call_changes = \"yes\"\n").is_err());
+        // #1150: the edit lever likewise, and only where the surface offers
+        // `edit`: `bash` alone has none to refuse.
+        let on = read(
+            "approval = \"none\"\ntool_surface = \"standard\"\nedit_requires_shown = \"on\"\n",
+        )
+        .expect("declared")
+        .expect("runs commands");
+        assert!(on.edit_requires_shown);
+        assert!(read("approval = \"none\"\nedit_requires_shown = \"on\"\n").is_err());
+        assert!(
+            read("approval = \"none\"\nedit_requires_shown = \"off\"\n").is_ok(),
+            "off asks nothing of the surface"
+        );
+        assert!(read("approval = \"none\"\nedit_requires_shown = \"yes\"\n").is_err());
+        assert!(read("edit_requires_shown = \"yes\"\n").is_err());
         assert!(read("allowed_commands = \"ls\"\n").is_err());
         assert!(read("allowed_commands = [\"\"]\n").is_err());
         assert!(read("allowed_commands = []\n[limits]\nmax_steps = 0\n").is_err());

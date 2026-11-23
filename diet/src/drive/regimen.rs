@@ -913,6 +913,11 @@ pub fn serve_levers(regimen: &Regimen, output_cap: (u32, &str)) -> BTreeMap<Stri
         ("background_commands".to_owned(), background_lever(regimen)),
         // #1149: each `bash`, `edit` and `write` result says what it changed.
         ("call_changes".to_owned(), call_changes_lever(regimen)),
+        // #1150: `edit` refuses a file whose text the context does not show.
+        (
+            "edit_requires_shown".to_owned(),
+            edit_requires_shown_lever(regimen),
+        ),
         ("bash_timeout".to_owned(), timeout_lever(regimen)),
         ("stream_deadline".to_owned(), stream_deadline_lever(regimen)),
         ("tool_call_text_fallback".to_owned(), text_fallback),
@@ -1170,6 +1175,20 @@ fn background_lever(regimen: &Regimen) -> String {
 fn call_changes_lever(regimen: &Regimen) -> String {
     match crate::drive::tool_loop::declared(regimen) {
         Ok(Some(declared)) => if declared.call_changes { "on" } else { "off" }.to_owned(),
+        _ => UNDECLARED.to_owned(),
+    }
+}
+
+/// The edit lever's word (#1150): `on` or `off`; undeclared where the
+/// regimen runs no commands, or for a value serve refuses.
+fn edit_requires_shown_lever(regimen: &Regimen) -> String {
+    match crate::drive::tool_loop::declared(regimen) {
+        Ok(Some(declared)) => if declared.edit_requires_shown {
+            "on"
+        } else {
+            "off"
+        }
+        .to_owned(),
         _ => UNDECLARED.to_owned(),
     }
 }
@@ -1483,6 +1502,37 @@ mod tests {
                 && refused.contains(&crate::dogma::VERSION.to_string()),
             "{refused}"
         );
+    }
+
+    /// #1150: the start row names the edit lever: `off` by default, `on` when
+    /// the regimen says so on a surface with `edit`; undeclared where it runs
+    /// no commands, for `on` with no `edit` to refuse, or for any other word,
+    /// which serve refuses at start.
+    #[test]
+    fn the_start_row_names_the_edit_lever() {
+        use crate::formats::regimen;
+        let lever = |text: &str| {
+            serve_levers(&regimen::parse(text).expect("a regimen"), (8192, "default"))
+                ["edit_requires_shown"]
+                .clone()
+        };
+        assert_eq!(lever("approval = \"none\"\n"), "off");
+        assert_eq!(
+            lever(
+                "approval = \"none\"\ntool_surface = \"standard\"\nedit_requires_shown = \"on\"\n"
+            ),
+            "on"
+        );
+        assert_eq!(
+            lever("approval = \"none\"\nedit_requires_shown = \"on\"\n"),
+            UNDECLARED,
+            "no `edit` on a `bash`-only surface: refused at start"
+        );
+        assert_eq!(
+            lever("approval = \"none\"\nedit_requires_shown = \"yes\"\n"),
+            UNDECLARED
+        );
+        assert_eq!(lever("edit_requires_shown = \"on\"\n"), UNDECLARED);
     }
 
     /// #1149: the start row names the per-call changes: `off` by default,

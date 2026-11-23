@@ -149,7 +149,8 @@ pub fn read_at(log: &Path, sealed: &[String], at: Option<u64>) -> Result<Carry, 
 /// The first session's calls whose results the carry sends and that show a
 /// file (#1149, #1150): each `read`, `write` or `edit` its log holds before
 /// the meditation at `seq` that ran and shows one, by the standard surface's
-/// reading of its result ([`Showing::of`]), with the user's wrap of it, kept
+/// reading of its result ([`Showing::of`]) under the roots that session
+/// showed its model, with the user's wrap of it, kept
 /// when a message of `sent` -- the trunk, and what rides after it -- shows
 /// it. What the carried session's shown rule pairs those messages with.
 fn carried_calls(
@@ -169,7 +170,19 @@ fn carried_calls(
             _ => None,
         })
         .collect();
-    let same = |text: &str| text.to_owned();
+    // The roots the first session showed its model in place of where it
+    // ran (v8): its results' words, and its refills' sections, went through
+    // them, so its calls are read under them.
+    let mut roots = super::shown::ShownRoots::none();
+    if let Some(declared) = lines.iter().find_map(|line| match &line.event {
+        Event::SessionStart { shown_roots, .. } => shown_roots.as_ref(),
+        _ => None,
+    }) {
+        for (shown, real) in declared {
+            let _ = roots.add(&format!("{real}={shown}"));
+        }
+    }
+    let rewrite = |text: &str| roots.text(text);
     before()
         .filter_map(|line| {
             let Event::ToolCall {
@@ -184,7 +197,7 @@ fn carried_calls(
             else {
                 return None;
             };
-            let mut showing = Showing::of(id, *turn, (name, arguments), shown, &same)?;
+            let mut showing = Showing::of(id, *turn, (name, arguments), shown, &rewrite)?;
             match wraps.get(&line.seq) {
                 Some((true, span)) => showing.span = Some(span.clone()),
                 Some((false, _)) => showing.cleared = true,
@@ -193,7 +206,7 @@ fn carried_calls(
             trunk
                 .iter()
                 .chain(riding)
-                .any(|message| showing.shown_in(message, &same))
+                .any(|message| showing.shown_in(message, &rewrite))
                 .then_some(showing)
         })
         .collect()
